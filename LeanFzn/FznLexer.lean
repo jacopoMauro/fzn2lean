@@ -2,7 +2,8 @@
 # FlatZinc Lexer (integer/Boolean fragment)
 
 A total tokenizer for the non-float fragment of FlatZinc source text,
-following the lexical rules of `specification/flatzinc_specification.rst`:
+following the lexical rules of the vendored FlatZinc specification
+(`specification/minizinc-2.10.0/fzn-spec.md`):
 
 - Comments start with `%` and extend to the end of the line; they can appear
   anywhere.
@@ -373,7 +374,7 @@ theorem lexString_ge (s : Input) (pos : Nat) (acc : String) (w : String) (p : Na
     simp only [h, dif_pos] at hr
     change (if (c == '"') = true then Except.ok (acc, pos + 1) else _) = Except.ok (w, p) at hr
     rw [if_pos hq] at hr
-    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at hr
+    simp only [Except.ok.injEq, Prod.mk.injEq] at hr
     obtain ⟨_, rfl⟩ := hr
     exact Nat.le_succ _
   | case2 pos acc h c hq hbs ih1 =>
@@ -495,8 +496,12 @@ def tokenizeAux (s : Input) (pos : Nat) (acc : Array Token) :
     return acc
 termination_by s.size - pos
 
-/-- Tokenize a FlatZinc source string. -/
+/-- Tokenize a FlatZinc source string.  The string is converted with
+    the native UTF-8 decoder (`String.Internal.toArray`, the same
+    function `String.toList` is compiled from) instead of the
+    intermediate list round-trip; the two agree by definition of
+    `String.toList`. -/
 def tokenize (src : String) : Except String (Array Token) :=
-  tokenizeAux src.toList.toArray 0 #[]
+  tokenizeAux (String.Internal.toArray src) 0 #[]
 
 end LeanFzn.Lexer

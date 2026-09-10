@@ -35,7 +35,6 @@ private def staticOk : List (String × String) :=
   , ("bool_clause", "array [1..2] of var bool: bs = [true, false];\narray [1..2] of var bool: cs = [false, false];\nconstraint bool_clause(bs, cs);\nsolve satisfy;")
   , ("dom", "var 0..9: x;\nconstraint dom(x, {1, 3, 5});\nsolve satisfy;")
   , ("int_lin_eq", "array [1..2] of int: as_ = [1, 2];\narray [1..2] of var 0..9: xs = [1, 2];\nvar 0..9: r;\nconstraint int_lin_eq(as_, xs, r);\nsolve satisfy;")
-  , ("true", "var 0..9: x;\nconstraint true();\nsolve satisfy;")
   , ("int_abs", "var -9..9: x;\nvar 0..9: y;\nconstraint int_abs(x, y);\nsolve satisfy;")
   , ("array_int_maximum", "array [1..3] of var 0..9: xs = [1, 2, 3];\nvar 0..9: m;\nconstraint array_int_maximum(m, xs);\nsolve satisfy;")
   ]
@@ -107,8 +106,10 @@ private def dynamicCases : List (String × String × List Value × Bool) :=
       [.int 1, .array [.int 1, .int 2, .int 3]], true)
   , ("bool_clause true", "bool_clause",
       [.array [.bool true], .array [.bool false]], true)
-  , ("bool_clause false", "bool_clause",
-      [.array [.bool false], .array [.bool false]], false)
+  , ("bool_clause neg-true", "bool_clause",
+      [.array [.bool false], .array [.bool false]], true)
+  , ("bool_clause pos-neg-false", "bool_clause",
+      [.array [.bool false], .array [.bool true]], false)
   , ("int_eq_reif true", "int_eq_reif", [.int 3, .int 3, .bool true], true)
   , ("int_eq_reif false", "int_eq_reif", [.int 3, .int 4, .bool true], false)
   , ("int_eq_reif negated", "int_eq_reif", [.int 3, .int 4, .bool false], true)

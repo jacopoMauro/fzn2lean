@@ -1,0 +1,50 @@
+name = "fzn2lean"
+version = "0.1.0"
+
+[[lean_lib]]
+name = "LeanFzn"
+
+[[lean_exe]]
+name = "tests_smoke"
+root = "Tests.Smoke"
+
+[[lean_exe]]
+name = "tests_stdlib"
+root = "Tests.StdLib"
+
+[[lean_exe]]
+name = "leanfzn"
+root = "Main"
+
+[[lean_exe]]
+name = "tests_solution"
+root = "Tests.Solution"
+
+[[lean_exe]]
+name = "tests_gecode"
+root = "Tests.Gecode"
+
+[[lean_exe]]
+name = "tests_globals"
+root = "Tests.Globals"
+
+[[lean_exe]]
+name = "tests_bench"
+root = "Tests.Bench"
+
+
+[[lean_exe]]
+name = "tests_coverage"
+root = "Tests.Coverage"
+
+[[lean_exe]]
+name = "tests_wellformed"
+root = "Tests.WellFormed"
+
+[[lean_exe]]
+name = "tests_pretty"
+root = "Tests.Pretty"
+
+[[lean_exe]]
+name = "tests_prof"
+root = "Tests.Prof"

@@ -579,11 +579,19 @@ theorem parseModel_complete {s : String} {m : Model}
   obtain ⟨st', haux, hrem⟩ := parseModelAux_complete (fuel := parseFuel toks)
     (st := ⟨toks, 0⟩) (m := m) (rest := []) (by rw [hinit]; exact hgr)
     (by rw [hinit]; exact hfuel)
-  have hempty : st'.remaining.isEmpty = true := by simp [hrem]
+  have hempty : st'.remaining = [] := hrem
+  -- translate to the O(1) end check used by `parseModelTokens`
+  have hend : ¬ (st'.pos < st'.toks.size) := by
+    have hlen : st'.toks.toList.length = st'.toks.size :=
+      (Array.size_eq_length_toList (xs := st'.toks)).symm
+    have hle : st'.toks.toList.length ≤ st'.pos := by
+      unfold State.remaining at hempty
+      exact (List.drop_eq_nil_iff (l := st'.toks.toList) (i := st'.pos)).mp hempty
+    omega
   unfold parseModel
   simp only [htok]
   unfold parseModelTokens
-  simp only [haux, hempty, ↓reduceIte]
+  simp only [haux, hend, ↓reduceIte]
 
 /-- **Recognition theorem**: the parser succeeds on exactly the valid
     FlatZinc strings. -/
