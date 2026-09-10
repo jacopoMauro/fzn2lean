@@ -67,7 +67,95 @@ def expect (pred : Token → Bool) (what : String) (st : State) : Except String 
   else
     .error s!"unexpected end of input, expected {what}"
 
+/-! ## BEq/decEq bridge for `Token`
+
+The lexer's `Token` has both a derived `BEq` and a derived `DecidableEq`;
+they agree (both are structural).  `token_beq_eq_decide` is the reusable
+bridge, needed to relate the parser's decidable-equality checks with
+Boolean equality tests. -/
+
+private theorem boolPair (x y : Bool) :
+    (Token.boolLit x == Token.boolLit y) = decide (Token.boolLit x = Token.boolLit y) := by
+  cases x <;> cases y <;> rfl
+
+private theorem intPair (x y : Int) :
+    (Token.intLit x == Token.intLit y) = decide (Token.intLit x = Token.intLit y) := by
+  rw [show (Token.intLit x == Token.intLit y) = (x == y) from rfl,
+      show decide (Token.intLit x = Token.intLit y) = decide (x = y) from by
+        simp only [Token.intLit.injEq]]
+  cases x <;> cases y <;> rfl
+
+private theorem strPair (x y : String) :
+    (Token.stringLit x == Token.stringLit y) =
+      decide (Token.stringLit x = Token.stringLit y) := by
+  rw [show (Token.stringLit x == Token.stringLit y) = (x == y) from rfl,
+      show decide (Token.stringLit x = Token.stringLit y) = decide (x = y) from by
+        simp only [Token.stringLit.injEq]]
+  cases x <;> cases y <;> rfl
+
+private theorem identPair (x y : String) :
+    (Token.ident x == Token.ident y) = decide (Token.ident x = Token.ident y) := by
+  rw [show (Token.ident x == Token.ident y) = (x == y) from rfl,
+      show decide (Token.ident x = Token.ident y) = decide (x = y) from by
+        simp only [Token.ident.injEq]]
+  cases x <;> cases y <;> rfl
+
+/-- The derived `BEq` and `DecidableEq` on `Token` agree. -/
+theorem token_beq_eq_decide (a b : Token) : (a == b) = decide (a = b) := by
+  cases a <;> cases b <;> first
+    | rfl
+    | (rename_i x y; exact boolPair x y)
+    | (rename_i x y; exact intPair x y)
+    | (rename_i x y; exact strPair x y)
+    | (rename_i x y; exact identPair x y)
+
+/-! ### Compilation safeguard for `expectTok`
+
+`expectTok` is the workhorse of the parser: several calls per item,
+each on the hot path.  Its body decides equality through
+`DecidableEq Token`, whose derived implementation dispatches on
+constructor indices; the fast twin below decides the same through the
+derived `BEq` (also structural).  `expectTokFast_eq` proves the two
+bodies equal, and `@[implemented_by]` swaps the compiled code — the
+kernel and every proof keep seeing the original definition.  (Same
+trust model as the `StoreBox`/`completedBox` fix in
+`FznSolution.lean`.) -/
+
+/-- Fast twin of `expectTok` (BEq-decided). -/
+private def expectTokFast (t : Token) (what : String) (st : State) : Except String State :=
+  if h : st.pos < st.toks.size then
+    if st.toks[st.pos] == t then
+      .ok { st with pos := st.pos + 1 }
+    else
+      .error s!"expected {what} at token {st.pos}"
+  else
+    .error s!"unexpected end of input, expected {what}"
+
+/-- The fast twin computes the same function as the `expectTok` body
+    (restated here; the real `expectTok` is defined below). -/
+private theorem expectTokFast_eq (t : Token) (what : String) (st : State) :
+    expectTokFast t what st =
+      (if h : st.pos < st.toks.size then
+        if st.toks[st.pos] = t then
+          .ok st.advance
+        else
+          .error s!"expected {what} at token {st.pos}"
+      else
+        .error s!"unexpected end of input, expected {what}") := by
+  unfold expectTokFast
+  split
+  · next hlt =>
+      have hb := token_beq_eq_decide st.toks[st.pos] t
+      rw [hb]
+      cases hdec : decide (st.toks[st.pos] = t)
+      · rw [if_neg (decide_eq_false_iff_not.mp hdec)]
+        simp
+      · rw [if_pos (decide_eq_true_iff.mp hdec)]
+        simp [State.advance]
+  · simp
+
 /-- Consume a specific token, matching by decidable equality. -/
+@[implemented_by expectTokFast]
 def expectTok (t : Token) (what : String) (st : State) : Except String State :=
   if h : st.pos < st.toks.size then
     if st.toks[st.pos] = t then
@@ -76,6 +164,11 @@ def expectTok (t : Token) (what : String) (st : State) : Except String State :=
       .error s!"expected {what} at token {st.pos}"
   else
     .error s!"unexpected end of input, expected {what}"
+
+theorem expectTok_eq_fast (t : Token) (what : String) (st : State) :
+    expectTok t what st = expectTokFast t what st := by
+  unfold expectTok
+  exact (expectTokFast_eq t what st).symm
 
 /-- Parse an identifier token (any `[A-Za-z_][A-Za-z0-9_]*`). -/
 def parseIdent (st : State) : Except String (Ident × State) :=
@@ -783,15 +876,29 @@ def parseModelAux (fuel : Nat) (st : State) : Except String (Model × State) := 
     sufficient to parse any valid model (see `FznCorrectness.lean`). -/
 def parseFuel (toks : Array Token) : Nat := 8 * (toks.size + 1)
 
+/-- The remaining tokens are empty iff the position reached (or passed)
+    the end of the array.  (Used by `parseModelTokens` as an O(1) end
+    check; `remaining` itself would convert the whole array to a list
+    first, an O(n) allocation per parse.) -/
+theorem State.remaining_isEmpty_iff (st : State) :
+    st.remaining.isEmpty = true ↔ ¬ (st.pos < st.toks.size) := by
+  have hlen : st.toks.toList.length = st.toks.size :=
+    (Array.size_eq_length_toList (xs := st.toks)).symm
+  unfold State.remaining
+  simp only [List.isEmpty_iff, List.drop_eq_nil_iff, hlen]
+  omega
+
 /-- Parse a whole FlatZinc model from a token array.  Succeeds only if the
     entire token stream is consumed. -/
 def parseModelTokens (toks : Array Token) : Except String Model :=
   match parseModelAux (parseFuel toks) ⟨toks, 0⟩ with
   | .ok (m, st) =>
-    if st.remaining.isEmpty then
-      .ok m
-    else
+    -- O(1) end check (see `State.remaining_isEmpty_iff`): converting the
+    -- array to a list just to test emptiness is O(n)
+    if st.pos < st.toks.size then
       .error s!"trailing tokens after solve item at token {st.pos}"
+    else
+      .ok m
   | .error e => .error e
 
 /-- Parse a whole FlatZinc model from a source string. -/

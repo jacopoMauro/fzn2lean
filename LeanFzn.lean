@@ -9,3 +9,5 @@ import LeanFzn.FznCompleteness
 import LeanFzn.FznAssembled
 import LeanFzn.FznPretty
 import LeanFzn.FznStdLib
+import LeanFzn.FznSolution
+import LeanFzn.FznGlobals

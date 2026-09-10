@@ -2579,19 +2579,30 @@ theorem parseModel_sound {s : String} {m : Model}
     split at h
     · rename_i m' st haux
       split at h
+      · -- pos < size: the trailing-token error branch
+        contradiction
       · rename_i hfull
         simp only [Except.ok.injEq] at h
         subst h
         have hgr := parseModelAux_sound haux
         have hrem : st.remaining = [] := by
-          simpa only [List.isEmpty_iff] using hfull
+          -- the O(1) end check: pos is not below the array size
+          have hiff := State.remaining_isEmpty_iff st
+          simp only [hfull, Bool.not_eq_true', decide_eq_false_iff_not] at hiff
+          rw [List.isEmpty_iff] at hiff
+          exact List.drop_eq_nil_of_le (as := st.toks.toList)
+            (i := st.pos)
+            (by
+              have hlen : st.toks.toList.length = st.toks.size :=
+                (Array.size_eq_length_toList (xs := st.toks)).symm
+              rw [hlen]
+              omega)
         rw [hrem] at hgr
         have hinit : (⟨toks, 0⟩ : State).remaining = toks.toList := by
           unfold State.remaining
           simp
         rw [hinit] at hgr
         exact ⟨toks, htok, hgr⟩
-      · contradiction
     · contradiction
 
 /-- The proved direction of the recognition theorem: parser success implies
