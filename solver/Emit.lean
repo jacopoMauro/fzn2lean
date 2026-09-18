@@ -1377,6 +1377,208 @@ theorem arrGetElem_bang_eq {a : Array Char} {i : Nat} (h : i < a.size) :
     a[i]! = a[i]'h := by
   rw [Array.getElem!_eq_getD, Array.getElem_eq_getD]
 
+/-! ### The integer half of the lexer round-trip (IDEAS item 2)
+
+`emitInt`'s nonnegative form is `Nat.repr n` = the digit string
+`Nat.toDigits 10 n`.  The master assembly below tokenizes that text:
+every guard of `lexUnsigned`/`lexInt` must be known to fail, so the
+decimal arm is taken and its value is `parseDecNat` of the scanned
+digits — which `toDigitsCore_val` reconstructs as `n`.  The char
+exclusions are proved by transposition through the value bounds
+exactly as in `isDigit_not_ws`/`isDigit_not_pct` above.
+-/
+
+/-- A digit char equals neither `'x'` nor `'o'`. -/
+theorem digit_not_xo {c : Char} (hd : isDigit c = true) :
+    (c == 'x') = false ∧ (c == 'o') = false := by
+  unfold isDigit at hd
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at hd
+  obtain ⟨hge, hle⟩ := hd
+  refine ⟨?_, ?_⟩
+  · by_cases hc : c = 'x'
+    · subst hc
+      -- hle : 'x' ≤ '9' is decidable-false ('x' = 120 > '9' = 57):
+      have hle' : ¬ (('x' : Char) ≤ '9') := by decide
+      exact absurd hle hle'
+    · show (c == 'x') = false
+      by_cases hbeq : (c == 'x') = true
+      · exact absurd (by simpa using hbeq) hc
+      · exact Bool.not_eq_true _ |>.mp (by simpa using hbeq)
+  · by_cases hc : c = 'o'
+    · subst hc
+      have hle' : ¬ (('o' : Char) ≤ '9') := by decide
+      exact absurd hle hle'
+    · show (c == 'o') = false
+      by_cases hbeq : (c == 'o') = true
+      · exact absurd (by simpa using hbeq) hc
+      · exact Bool.not_eq_true _ |>.mp (by simpa using hbeq)
+
+/-- A digit char is not `'-'`. -/
+theorem digit_not_minus {c : Char} (hd : isDigit c = true) : (c == '-') = false := by
+  unfold isDigit at hd
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at hd
+  obtain ⟨hge, _hle⟩ := hd
+  -- digits start at '0', which is after '-': c = '-' gives '0' ≤ '-'
+  by_cases hcc : (c == '-') = true
+  · have hceq : c = '-' := by
+      simpa using hcc
+    subst hceq
+    have hcontra : (('0' : Char)) ≤ '-' := hge
+    exact absurd hcontra (by decide)
+  · exact Bool.not_eq_true _ |>.mp hcc
+
+/-- On a digit-headed array whose every char is a digit, `lexUnsigned`
+    takes the decimal arm: both prefix guards fail (the second char,
+    when present, is a digit — never `'x'`/`'o'`), and the decimal
+    scan is nonempty because it consumed the head digit. -/
+theorem lexUnsigned_decimal {s : Array Char} {pos : Nat}
+    (hpos : pos < s.size)
+    (hhead : isDigit s[pos]! = true)
+    (hdigits : ∀ k : Nat, k < s.size → isDigit s[k]! = true) :
+    lexUnsigned s pos =
+      .ok ((parseDecNat (takeWhile isDigit s pos "").1 : Int),
+           (takeWhile isDigit s pos "").2) := by
+  rw [lexUnsigned]
+  -- the hex/oct guard conjunctions are false (the char at pos+1 is a
+  -- digit, never 'x'/'o'):
+  have hsecondigit : pos + 1 < s.size → isDigit s[pos + 1]! = true := by
+    intro h1
+    exact hdigits (pos + 1) h1
+  have hx : ¬ ((decide (pos + 1 < s.size) && s[pos]! == '0'
+        && s[pos + 1]! == 'x') = true) := by
+    intro hh
+    rw [Bool.and_eq_true, Bool.and_eq_true] at hh
+    obtain ⟨⟨h1, _⟩, hxneg⟩ := hh
+    have h1n : pos + 1 < s.size := by simpa using h1
+    have hstep := (digit_not_xo (hsecondigit h1n)).1
+    rw [hstep] at hxneg
+    exact Bool.noConfusion hxneg
+  have ho : ¬ ((decide (pos + 1 < s.size) && s[pos]! == '0'
+        && s[pos + 1]! == 'o') = true) := by
+    intro hh
+    rw [Bool.and_eq_true, Bool.and_eq_true] at hh
+    obtain ⟨⟨h1, _⟩, honeg⟩ := hh
+    have h1n : pos + 1 < s.size := by simpa using h1
+    have hstep := (digit_not_xo (hsecondigit h1n)).2
+    rw [hstep] at honeg
+    exact Bool.noConfusion honeg
+  rw [if_neg hx, if_neg ho]
+  -- the decimal arm: the scan consumed at least the head digit, so
+  -- its result cannot be empty.  Route: if the scan were empty, the
+  -- one-step unfold's taken branch contradicts the head-digit fact.
+  have hnonempty : ¬ ((takeWhile isDigit s pos "").1.isEmpty = true) := by
+    intro hempty
+    rw [takeWhile.eq_def (s := s) (pos := pos) (acc := "")] at hempty
+    simp only [dif_pos hpos] at hempty
+    -- the if test is on the no-bang read; transport hhead to it:
+    have hposnb : s[pos]! = s[pos] := by
+      have h1 : s[pos]! = s[pos]'hpos := by
+        rw [Array.getElem!_eq_getD, Array.getElem_eq_getD]
+      -- h1 : s[pos]! = s[pos]'hpos; the proof-carrying read is
+      -- definitionally the plain read:
+      have h2 : s[pos]'hpos = s[pos] := rfl
+      rw [h2] at h1
+      exact h1
+    rw [hposnb] at hhead
+    by_cases hdig : isDigit s[pos] = true
+    · rw [if_pos hdig] at hempty
+      -- hempty : (takeWhile isDigit s (pos+1) ("" push s[pos])).fst =
+      -- "".  But the pushed accumulator keeps s[pos] as its first
+      -- char (a takeWhile result is acc ++ scanned, and the acc is
+      -- returned verbatim in the stop case).  Simplest sound route:
+      -- the takeWhile result string at least contains the pushed
+      -- char (acc prefix); derive the contradiction generically:
+      exfalso
+      -- If the scan stopped immediately (or not), the acc-prefix
+      -- remains: use the length law takeWhile_length from the lexer
+      -- module (it is public there):
+      have hlen := takeWhile_length isDigit s (pos + 1)
+        (String.singleton s[pos])
+      -- hlen : result.len = 1 + (result.end - (pos+1)) ≥ 1 (the acc
+      -- prefix).hempty says that very .1 is "" (length 0):
+      rw [show ("".push s[pos]) = String.singleton s[pos] from rfl,
+        String.isEmpty_iff] at hempty
+      rw [hempty] at hlen
+      simp at hlen
+      -- hlen : 0 = 1 + (end - (pos+1)); a Nat difference is ≥ 0:
+      omega
+    · rw [if_neg hdig] at hempty
+      -- the false branch is ("", pos): hdig contradicts hhead:
+      exact absurd hhead hdig
+  rw [if_neg hnonempty]
+
+/-- Over an all-digit array, the digit scan from 0 runs to the end:
+    the pair is the whole text and the array size.  Structural route:
+    the walk consumes one digit per step; an induction over the
+    remaining length with the definitional step closes it. -/
+theorem takeWhile_digits_end {s : Array Char}
+    (hall : ∀ k : Nat, k < s.size → isDigit s[k]! = true) :
+    takeWhile isDigit s 0 "" = (String.ofList (s.toList), s.size) := by
+  -- the general form: from any pos with an all-digit tail:
+  have key : ∀ (m : Nat), m ≤ s.size → ∀ (pos : Nat) (_hp : pos + m = s.size)
+      (acc : String),
+      takeWhile isDigit s pos acc
+        = (acc ++ String.ofList (((s.toList).drop pos)), s.size) := by
+    intro m
+    induction m with
+    | zero =>
+        intro _hle pos hp acc
+        -- pos = s.size: the scan is past the end:
+        have hs : pos = s.size := by omega
+        subst hs
+        rw [takeWhile.eq_def (s := s) (pos := s.size) (acc := acc)]
+        rw [dif_neg (Nat.lt_irrefl _)]
+        rw [List.drop_eq_nil_of_le (show s.toList.length ≤ s.size by simp)]
+        simp
+    | succ m' ih =>
+        intro _hle pos hp acc
+        have hpos : pos < s.size := by omega
+        rw [takeWhile.eq_def (s := s) (pos := pos) (acc := acc)]
+        rw [dif_pos hpos]
+        -- the head char is a digit (all-digit array):
+        have hh : isDigit s[pos] = true := by
+          have hb : s[pos]! = s[pos] := by
+            simp [hpos]
+          rw [← hb]
+          exact hall pos hpos
+        rw [if_pos hh, String.push_eq_append]
+        -- the recursion at pos + 1 with the extended accumulator;
+        -- the drop shifts by one (the head is consumed):
+        have hrec := ih (by omega) (pos + 1) (by omega)
+          (acc ++ String.singleton s[pos])
+        rw [hrec]
+        -- the singleton prefix and the shifted drop compose to the
+        -- unshifted drop (cons shape of the dropped list):
+        have hlen : (s.toList).length = s.size := by simp
+        have hpos2 : pos < (s.toList).length := by rw [hlen]; exact hpos
+        have h1 : (s.toList).drop pos
+            = s[pos] :: (s.toList).drop (pos + 1) :=
+          List.drop_eq_getElem_cons hpos2
+        rw [h1, String.ofList_cons, ← String.append_assoc]
+  exact key s.size (Nat.le_refl _) 0 (Nat.zero_add _) ""
+/-- `lexInt` on a digit-headed array: the `-` guard fails (the head
+    is a digit), so the result is the `.intLit` mapping of `lexUnsigned`
+    at `pos`. -/
+theorem lexInt_nonneg_head {s : Array Char} {pos : Nat}
+    (_hpos : pos < s.size)
+    (hhead : isDigit s[pos]! = true) :
+    lexInt s pos =
+      (lexUnsigned s pos).map (fun p => (.intLit p.1, p.2)) := by
+  rw [lexInt]
+  -- the `-` guard is false: the decide fires only when both hold,
+  -- and the head is a digit (never '-'):
+  have hm : ¬ ((decide (pos < s.size) && (s[pos]! == '-')) = true) := by
+    intro hh
+    rw [Bool.and_eq_true] at hh
+    obtain ⟨_h1, hneg⟩ := hh
+    rw [digit_not_minus hhead] at hneg
+    exact Bool.noConfusion hneg
+  rw [if_neg hm]
+  -- both forms case on lexUnsigned's outcome; `map` is that match:
+  cases hlu : lexUnsigned s pos with
+  | ok p => rfl
+  | error e => rfl
+
 /-- `lexUnsigned` agrees on the appended array when every digit scan
     the literal shape could take stops inside the first array (the
     stop bounds force all lookahead positions into `s` in the taken
@@ -3889,6 +4091,185 @@ theorem lexToken_ident {c : Char} {cs : List Char}
           exact hval
         rw [hsub]
 
+/-- A digit char is neither alpha nor `_` (the digit/`-` lexer
+    dispatch exclusions). -/
+theorem isDigit_not_underscore {c : Char} (h : isDigit c = true) :
+    (c == '_') = false := by
+  unfold isDigit at h
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+  obtain ⟨hge, hle⟩ := h
+  by_cases hc : c = '_'
+  · subst hc
+    exact absurd (hle : ('_' : Char) ≤ '9') (by decide)
+  · show (c == '_') = false
+    by_cases hbeq : (c == '_') = true
+    · exact absurd (by simpa using hbeq) hc
+    · exact Bool.not_eq_true _ |>.mp (by simpa using hbeq)
+
+theorem isDigit_not_alpha {c : Char} (h : isDigit c = true) :
+    isAlpha c = false := by
+  have hbounds : ('0' : Char).toNat ≤ c.toNat ∧ c.toNat ≤ ('9' : Char).toNat := by
+    unfold isDigit at h
+    simp only [decide_eq_true_eq, Bool.and_eq_true] at h
+    exact h
+  -- isAlpha unfolds to Bool ||; its two disjuncts are false by
+  -- the bounds. Drive by cases on each comparison:
+  unfold isAlpha
+  -- the val comparisons with the bridge:
+  have h48 : ('0' : Char).toNat = 48 := rfl
+  have h57 : ('9' : Char).toNat = 57 := rfl
+  have h65 : ('A' : Char).toNat = 65 := rfl
+  have h97 : ('a' : Char).toNat = 97 := rfl
+  have hAn : ¬ ('A' : Char).val ≤ c.val := by
+    rw [UInt32.le_iff_toNat_le,
+      show ('A' : Char).val.toNat = ('A' : Char).toNat from rfl,
+      show c.val.toNat = c.toNat from rfl]
+    omega
+  have han : ¬ ('a' : Char).val ≤ c.val := by
+    rw [UInt32.le_iff_toNat_le,
+      show ('a' : Char).val.toNat = ('a' : Char).toNat from rfl,
+      show c.val.toNat = c.toNat from rfl]
+    omega
+  -- the first disjunct: decide ('A' ≤ c) && decide (c ≤ 'Z'):
+  have hd1 : (decide ('A' ≤ c) && decide (c ≤ 'Z')) = false := by
+    by_cases hle : ('A' : Char).val ≤ c.val
+    · exact absurd hle hAn
+    · rw [show decide ('A' ≤ c) = false from by
+        rw [show decide ('A' ≤ c) = decide ('A'.val ≤ c.val) from rfl]
+        rw [decide_eq_false hle]]
+      simp
+  have hd2 : (decide ('a' ≤ c) && decide (c ≤ 'z')) = false := by
+    by_cases hle : ('a' : Char).val ≤ c.val
+    · exact absurd hle han
+    · rw [show decide ('a' ≤ c) = false from by
+        rw [show decide ('a' ≤ c) = decide ('a'.val ≤ c.val) from rfl]
+        rw [decide_eq_false hle]]
+      simp
+  rw [hd1, hd2]
+  rfl
+
+/-- The `lexToken` result at a digit head of an all-digit array: the
+    digit/`-` dispatch fires, `lexInt` takes the decimal arm (no
+    `-`, `0x`, `0o`), and the scan runs to the end of the array. -/
+theorem lexToken_digits {s : Array Char}
+    (hall : ∀ k : Nat, k < s.size → isDigit s[k]! = true)
+    (h0 : 0 < s.size) :
+    lexToken s 0 h0
+      = .ok (.intLit ((parseDecNat (takeWhile isDigit s 0 "").1 : Int)),
+          ⟨s.size, h0⟩) := by
+  rw [lexToken]
+  -- the proof-carrying read agrees with the bang read:
+  have hlt0 : 0 < s.size := h0
+  have hread : s[0]'hlt0 = s[0]! := by
+    rw [Array.getElem_eq_getD, Array.getElem!_eq_getD]
+  simp only [hread]
+  -- case the match on s[0]!: it is a digit (not a punct, not a
+  -- string quote), so the catch-all arm fires; the alpha/underscore
+  -- dispatch fails and the digit/`-` dispatch succeeds:
+  split
+  · rename_i h1
+    -- h1 : s[0]! = '(': contradicts isDigit:
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    -- ':'-arm
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    -- '.'-arm
+    exact absurd this (by decide)
+  · rename_i h1
+    exfalso
+    have := hall 0 h0
+    rw [h1] at this
+    -- '"'-arm
+    exact absurd this (by decide)
+  -- the catch-all arm: digit/`-` dispatch
+  case h_13 =>
+    -- the alpha/underscore dispatch fails (a digit is neither):
+    have halpha : (isAlpha s[0]! || s[0]! == '_') = false := by
+      rw [Bool.or_eq_false_iff]
+      exact ⟨isDigit_not_alpha (hall 0 h0),
+        isDigit_not_underscore (hall 0 h0)⟩
+    have halpha' : ¬ ((isAlpha s[0]! || s[0]! == '_') = true) := by
+      rw [halpha]; exact fun hc => Bool.noConfusion hc
+    rw [if_neg halpha']
+    -- the digit/`-` dispatch is true by hall:
+    rw [if_pos (show (isDigit s[0]! || s[0]! == '-') = true from by
+      simp [hall 0 h0])]
+    -- lexInt at 0: the leading-'-' guard fails (digit head), then
+    -- lexUnsigned takes the decimal arm:
+    have hli : lexInt s 0
+        = .ok ((.intLit ((parseDecNat (takeWhile isDigit s 0 "").1 : Int)),
+            s.size) : Token × Nat) := by
+      rw [lexInt_nonneg_head (s := s) (pos := 0) h0 (hall 0 h0),
+        lexUnsigned_decimal (s := s) (pos := 0) h0 (hall 0 h0) hall,
+        takeWhile_digits_end hall]
+      rfl
+    -- the equation-bearing match on the (now concrete) lexInt value:
+    -- only the ok case is possible (hli); its bound token/pos are
+    -- the concrete pair, by injection on the two equations:
+    split
+    · rename_i t p hi
+      have hboth : (Except.ok (t, p) :
+          Except String (Token × Nat))
+          = Except.ok ((.intLit ((parseDecNat (takeWhile isDigit s 0 "").1 : Int)),
+              s.size) : Token × Nat) := by
+        rw [← hi]; exact hli
+      obtain ⟨ht, hp⟩ := Prod.mk.inj (Except.ok.inj hboth)
+      subst ht; subst hp
+      rfl
+    · rename_i e hi
+      rw [hli] at hi
+      exact absurd hi (by simp)
+
 /-- `skipTrivia` on an identifier head returns the position (the
     head is neither whitespace nor `%`). -/
 theorem skipTrivia_ident_head {c : Char} {cs : List Char}
@@ -4144,47 +4525,6 @@ theorem isDigit_not_pct {c : Char} (h : isDigit c = true) :
       exact absurd h.1 (by decide)
   | false => rfl
 
-theorem isDigit_not_alpha {c : Char} (h : isDigit c = true) :
-    isAlpha c = false := by
-  have hbounds : ('0' : Char).toNat ≤ c.toNat ∧ c.toNat ≤ ('9' : Char).toNat := by
-    unfold isDigit at h
-    simp only [decide_eq_true_eq, Bool.and_eq_true] at h
-    exact h
-  -- isAlpha unfolds to Bool ||; its two disjuncts are false by
-  -- the bounds. Drive by cases on each comparison:
-  unfold isAlpha
-  -- the val comparisons with the bridge:
-  have h48 : ('0' : Char).toNat = 48 := rfl
-  have h57 : ('9' : Char).toNat = 57 := rfl
-  have h65 : ('A' : Char).toNat = 65 := rfl
-  have h97 : ('a' : Char).toNat = 97 := rfl
-  have hAn : ¬ ('A' : Char).val ≤ c.val := by
-    rw [UInt32.le_iff_toNat_le,
-      show ('A' : Char).val.toNat = ('A' : Char).toNat from rfl,
-      show c.val.toNat = c.toNat from rfl]
-    omega
-  have han : ¬ ('a' : Char).val ≤ c.val := by
-    rw [UInt32.le_iff_toNat_le,
-      show ('a' : Char).val.toNat = ('a' : Char).toNat from rfl,
-      show c.val.toNat = c.toNat from rfl]
-    omega
-  -- the first disjunct: decide ('A' ≤ c) && decide (c ≤ 'Z'):
-  have hd1 : (decide ('A' ≤ c) && decide (c ≤ 'Z')) = false := by
-    by_cases hle : ('A' : Char).val ≤ c.val
-    · exact absurd hle hAn
-    · rw [show decide ('A' ≤ c) = false from by
-        rw [show decide ('A' ≤ c) = decide ('A'.val ≤ c.val) from rfl]
-        rw [decide_eq_false hle]]
-      simp
-  have hd2 : (decide ('a' ≤ c) && decide (c ≤ 'z')) = false := by
-    by_cases hle : ('a' : Char).val ≤ c.val
-    · exact absurd hle han
-    · rw [show decide ('a' ≤ c) = false from by
-        rw [show decide ('a' ≤ c) = decide ('a'.val ≤ c.val) from rfl]
-        rw [decide_eq_false hle]]
-      simp
-  rw [hd1, hd2]
-  rfl
 
 theorem parseDecNat_ofDigits (n : Nat) :
     parseDecNat (String.ofList (Nat.toDigits 10 n)) = n := by
@@ -4385,7 +4725,134 @@ theorem tokenize_bool (b : Bool) :
         (hne := by simp)
         (hfirst := by decide) (hchars := by decide) hkw
 
+/-- The walk past the end of the array stops with the accumulator
+    (the skip is the position itself and the branch is not taken). -/
+theorem tokenizeAux_stop {s : Array Char} {acc : Array Token} :
+    tokenizeAux s s.size acc = Except.ok acc := by
+  rw [tokenizeAux.eq_def (s := s) (pos := s.size) (acc := acc)]
+  have hskip : skipTrivia s s.size = s.size := by
+    rw [skipTrivia.eq_def]
+    rw [dif_neg (Nat.lt_irrefl _)]
+  simp only [hskip]
+  rw [dif_neg (Nat.lt_irrefl _)]
+  rfl
 
+/-! ### The master assembly: the integer half of the round-trip
+
+`emitInt`'s nonnegative form is `Nat.repr n` = the digit string
+`Nat.toDigits 10 n`.  `tokenize_int_nonneg` pins the lexing of that
+text: one `intLit n` token, spanning exactly the text.  The walk is
+the `tokenize_ident` pattern with the digit branch in place of the
+identifier branch; the value comes from `toDigitsCore_val` through
+the `parseDecNat`-delta coincidence. -/
+
+/-- **The integer half of the lexer round-trip** (nonnegative):
+    tokenizing the printed form of a natural `n` — `Nat.repr n`, the
+    digit string `Nat.toDigits 10 n` — yields exactly one `intLit n`
+    token spanning the whole text. -/
+theorem tokenize_int_nonneg (n : Nat) :
+    tokenize (String.ofList (Nat.toDigits 10 n)) = .ok #[.intLit n] := by
+  -- the digit-list facts:
+  have hdigits : ∀ (c : Char), c ∈ Nat.toDigits 10 n → isDigit c = true :=
+    toDigits_isDigit n
+  have hne : Nat.toDigits 10 n ≠ [] := toDigits_nonempty n
+  -- name the digit list:
+  generalize hl : Nat.toDigits 10 n = l at hdigits hne ⊢
+  -- the cons shape (the digits are nonempty):
+  obtain ⟨c0, rest, rfl⟩ : ∃ c0 rest, l = c0 :: rest := by
+    cases l with
+    | nil => exact absurd rfl hne
+    | cons c cs => exact ⟨c, cs, rfl⟩
+  have hdigits' : ∀ x ∈ (c0 :: rest : List Char), isDigit x = true :=
+    fun x hx => by
+      have := hdigits x (hl ▸ hx)
+      exact this
+  -- the array facts:
+  have hsize : ((c0 :: rest : List Char).toArray).size
+      = (c0 :: rest).length := rfl
+  have h0 : 0 < ((c0 :: rest : List Char).toArray).size := by
+    rw [hsize]; simp
+  have hall : ∀ k : Nat, k < ((c0 :: rest : List Char).toArray).size →
+      isDigit ((c0 :: rest : List Char).toArray)[k]! = true := by
+    intro k hk
+    rw [list_toArray_size] at hk
+    have hread : ((c0 :: rest : List Char).toArray)[k]!
+        = (c0 :: rest)[k] := by
+      have hget : ((c0 :: rest : List Char))[k]? = some ((c0 :: rest)[k]) := by
+        simp [hk]
+      simp [hk, List.getElem_toArray, hget]
+    rw [hread]
+    exact hdigits' _ (List.getElem_mem hk)
+  -- the value fact: the text parses back to n:
+  have hval : parseDecNat (String.ofList (c0 :: rest : List Char)) = n := by
+    show (String.ofList (c0 :: rest : List Char)).foldl
+      (fun acc c => acc * 10 + (c.toNat - '0'.toNat)) 0 = n
+    rw [String.foldl_eq_foldl_toList, String.toList_ofList]
+    have h0' : (Nat.toDigits 10 n).foldl
+        (fun acc c => acc * 10 + toDigit c) 0 = n :=
+      toDigitsCore_val n (n + 1) (Nat.lt_succ_self n)
+    rw [hl] at h0'
+    exact h0'
+  -- the token fact (lexToken_digits, with the scan's .1 the whole
+  -- text and the value rewritten to n):
+  have htok := lexToken_digits (s := ((c0 :: rest : List Char).toArray))
+    hall h0
+  rw [takeWhile_digits_end hall] at htok
+  rw [show ((c0 :: rest : List Char).toArray).toList
+      = (c0 :: rest : List Char) from rfl] at htok
+  rw [hval] at htok
+  -- the walk, exactly as tokenize_ident: unfold tokenize, the skip
+  -- at 0 is 0 (a digit head is neither whitespace nor `%`), the
+  -- lexToken result steps the walk to the size, and past the end
+  -- the walk stops with the single token:
+  have hws : isWhitespace ((c0 :: rest : List Char).toArray)[0]! = false :=
+    isDigit_not_ws (hall 0 h0)
+  have hpct : (((c0 :: rest : List Char).toArray)[0]! == '%') = false :=
+    isDigit_not_pct (hall 0 h0)
+  have hskip : skipTrivia ((c0 :: rest : List Char).toArray) 0 = 0 := by
+    rw [skipTrivia.eq_def, dif_pos h0]
+    -- the goal's `have c := s[0]` binds the (no-bang) read; both
+    -- class facts hold for it as for the bang read (defeq):
+    show (if isWhitespace ((c0 :: rest : List Char).toArray)[0] = true
+        then skipTrivia ((c0 :: rest : List Char).toArray) (0 + 1)
+        else if (((c0 :: rest : List Char).toArray)[0] == '%') = true
+          then skipTrivia ((c0 :: rest : List Char).toArray)
+              (skipToNewline ((c0 :: rest : List Char).toArray) (0 + 1))
+          else 0) = 0
+    rw [if_neg (by
+        intro hcon
+        rw [show ((c0 :: rest : List Char).toArray)[0]
+            = ((c0 :: rest : List Char).toArray)[0]! from rfl] at hcon
+        rw [hws] at hcon
+        exact Bool.noConfusion hcon)]
+    rw [if_neg (by
+        intro hcon
+        rw [show ((c0 :: rest : List Char).toArray)[0]
+            = ((c0 :: rest : List Char).toArray)[0]! from rfl] at hcon
+        rw [hpct] at hcon
+        exact Bool.noConfusion hcon)]
+  unfold tokenize
+  rw [hl, internal_toArray_ofList (c0 :: rest)] at *
+  rw [tokenizeAux.eq_def (s := ((c0 :: rest : List Char).toArray))
+    (pos := 0) (acc := #[])]
+  simp only []
+  conv =>
+    lhs
+    rw [hskip]
+  rw [dif_pos h0, htok]
+  -- the bind on the ok result reduces to the walk with the pushed
+  -- token; then the walk from the token end = size stops (past
+  -- end) with the single token:
+  have hbind : ∀ (x : Token × {q : Nat // 0 < q}),
+      (Except.ok x : Except String (Token × {q : Nat // 0 < q})).bind
+        (fun __x => tokenizeAux ((c0 :: rest : List Char).toArray) __x.2.1
+          (#[].push __x.1))
+      = tokenizeAux ((c0 :: rest : List Char).toArray) x.2.1
+          #[x.1] := fun x => rfl
+  -- the value: parseDecNat (the text) = n:
+  rw [hval] at *
+  -- past the end: the walk stops with the accumulator:
+  exact tokenizeAux_stop
 
 end LexerCons
 
