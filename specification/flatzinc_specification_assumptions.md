@@ -23,7 +23,7 @@ repeat. This project formalizes the integer/Boolean fragment (no floats).
   partial, or omit corner cases).  Every G-entry names the predicate
   family, the decision, its normative justification, and where the
   decision is implemented and tested.
-* **Module docstrings** — each of `LeanFzn/FznStdLib.lean` and the six
+* **Module docstrings** — each of `LeanFzn/FznStdLib.lean` and the ten
   `LeanFzn/FznGlobals/*` family modules opens with the per-predicate
   handbook quotations and decomposition citations backing its
   interpretations; the G-series below records only the decisions that
@@ -206,11 +206,13 @@ library decompositions.
 **Assumption:** the semantics of each supported `fzn_*` global constraint
 follow the MiniZinc 2.10.0 stdlib (the vendored `lib-globals-*.html`
 handbook pages, cross-checked against the pinned
-`share/minizinc/std/fzn_*.mzn` decompositions). 94 names of the non-float
-fragment are formalized with mathematical interpretations and verified
-executable twins; the semantics of the others (46 names: float/opt/2D-array
-variants and graph/MDD/regexp decompositions requiring opt or dtree
-reasoning) are deliberately **not guessed** — they are listed in
+`share/minizinc/std/fzn_*.mzn` decompositions). 138 names of the non-float,
+non-opt, non-reified fragment are formalized with mathematical
+interpretations and verified executable twins; the semantics of the others
+(float/opt/`_reif` variants) are deliberately **not guessed** — the
+five out-of-fragment core names (`fzn_alternative`, `fzn_span`,
+`fzn_neural_net`, `fzn_piecewise_linear`,
+`fzn_piecewise_linear_non_continuous`) are listed in
 `globalsUnsupported` and reported rather than silently mis-checked.
 
 The individual interpretive decisions that went beyond a literal
@@ -227,7 +229,14 @@ the form `x = <literal>;` or `xs = array1d(1..n, [...]);`, with the
 standard separator lines (`----------`, `==========`, `%%%mzn-stat`)
 stripped before parsing; `array1d` index sets must be 1-based. A solution
 string assigns decision variables only; parameters keep their model-given
-values.
+values. This is now *enforced* by the front door (`entriesOkB` in
+`LeanFzn/FznCheck.lean`): an entry assigning a parameter name, an
+undeclared name, or the same name twice is a malformed solution (the
+dynamic checker `checkSolutionFull` alone accepted parameter
+reassignments — fixed by classifying them out before the dynamic
+phase). A string that tokenizes to something but contains no
+`;`-terminated assignment line is likewise malformed
+(`parseSolution` rejects it).
 
 ### A8. Truncated integer division and modulo
 
@@ -267,7 +276,12 @@ solution string takes its value from its declaration's initializer
 (`array [1..3] of var 1..9: a = [x, y, z];`) when derivable. Explicit
 solution entries are never overridden; a variable neither assigned nor
 derivable still fails `allAssignedB`, preserving the checker's
-completeness contract.
+completeness contract. The front door (`entriesOkB`) additionally
+enforces that entries assign declared *variables* only and at most one
+entry per name, per A7: the entry layer of the dynamic checker alone
+let a parameter assignment override the parameter's model-given
+value, so `entriesOkB` rejects such strings before the dynamic
+phase.
 
 ## Predicate-semantics assumptions (G-series)
 
@@ -291,11 +305,14 @@ values) and, where a reference solver was consulted, by
 `fzn_*` solver predicates; several handbook glosses are loose about
 shapes, partiality, and corner cases.
 
-**Assumption:** each of the 94 supported `fzn_*` names and every
+**Assumption:** each of the 138 supported `fzn_*` names and every
 checkable builtin has a mathematical interpretation
 (`PredicateInterpretation`, a Prop) and an executable Boolean twin,
-related by a per-name agreement theorem `<name>_iff`. 46 out-of-fragment
-names (float/opt/2D-array/graph/MDD/regexp) are listed in
+related by a per-name agreement theorem `<name>_iff`. The five
+out-of-fragment core names (`fzn_alternative`/`fzn_span` — opt;
+`fzn_neural_net`/`fzn_piecewise_linear`/
+`fzn_piecewise_linear_non_continuous` — float; plus every `_reif`,
+float, and opt variant of other names) are listed in
 `globalsUnsupported` and *reported*, never guessed. A wrong argument
 shape makes every interpretation `False` and every twin `false`
 (static checking is the separate `wellFormedB` layer, R8).
@@ -534,3 +551,192 @@ index sets must be 1-based (A7), and the `setElems` enumeration of
 interval sets is ascending (reversed intervals empty, R1). These are
 the conventions the executable twins rely on when deciding extensional
 set predicates by enumeration.
+
+### G24. Reverse lex and 2D lex-family representations
+
+**Under-specified:** upstream 2.10.0 has no `fzn_lex_greater_int`,
+`fzn_lex_greatereq_int`, or chain-greater `fzn_` files; the 2D lex
+predicates are declared over `array [int,int]` but FlatZinc syntax has
+only 1D arrays.
+
+**Assumption:** `fzn_lex_greater_int(xs, ys) ≡
+fzn_lex_less_int(ys, xs)` and `fzn_lex_greatereq_int(xs, ys) ≡
+fzn_lex_lesseq_int(ys, xs)` (argument swap, per the user-level
+`lex_greater.mzn` decomposition). The chain/2D predicates
+(`fzn_lex_chain_less_int`, `fzn_lex_chain_lesseq_int`, `fzn_lex2`,
+`fzn_strict_lex2`, `fzn_lex_chain_lesseq_orbitope`) take a matrix
+modelled as a *nested* array (a `List (List Int)`, one inner list per
+column in FlatZinc order — a flat row-major array whose column count
+must divide the outer length); adjacent columns are compared with
+`lexLess`/`lexLesseq`; `lex2` additionally compares the transpose;
+`strict_lex2` uses the strict variants; the orbitope's `_kind` is
+0 = no extra constraint, 1 = every row sums to 1, 2 = every row sums
+to ≤ 1. Chains over ≤ 1 column are vacuously true. Because
+`array-literal` grammar cannot nest, real `.fzn` files cannot carry
+these 2D arguments; the nested-array shape is a documented
+extension of the fragment for completeness of the name inventory.
+
+### G24a. Greater-direction chain/2D lex predicates
+
+**Under-specified:** upstream 2.10.0 has no `fzn_` files for the
+greater-direction chain/2D predicates (the compiler never emits them
+without library rewrites), but the user-level definitions are
+normative for their meaning.
+
+**Assumption (per `lex_chain_greater.mzn`,
+`lex_chain_greatereq.mzn`, `lex_chain_greatereq_orbitope.mzn`):**
+each reverses the *column* index set (`index_set_2of2`) and delegates
+to the less/lesseq version, so with the nested-array representation
+of G24:
+
+* `fzn_lex_chain_greater_int(cols) ≡ lexChainLess(cols.reverse)`;
+* `fzn_lex_chain_greatereq_int(cols) ≡ lexChainLesseq(cols.reverse)`;
+* `fzn_lex_chain_greatereq_orbitope(cols, kind) ≡
+  orbitopeProp kind (cols.reverse)` with the same `_kind` codes
+  (0 = none, 1 = every row sums to 1, 2 = every row sums to ≤ 1).
+
+Reversal is column-only (row order is preserved); the arguments use
+the same nested-array value-model extension as G24 (real `.fzn`
+files cannot carry them).
+
+### G25. `circuit` / `subcircuit`
+
+**Under-specified:** self-loops and the empty array.
+
+**Assumption:** `fzn_circuit(xs)` (per `fzn_circuit.mzn`): empty ⇒
+true; otherwise `xs` is a permutation of `1..n` with no fixed point
+(`xs[i] ≠ i`) forming one cycle (equivalently: iterating the
+successor function from any index visits all n indices). 1-based
+positions. `fzn_subcircuit(xs)`: `xs[i] = i` marks i out of the
+circuit; the non-fixed positions must form one single cycle (the
+all-fixed-points case, the empty subcircuit, is allowed); every
+value is still in `1..n` and positions are 1-based.
+
+### G26. `cumulatives` event-point semantics and machine indexing
+
+**Under-specified:** the handbook's user-level overloads differ from
+the `fzn_` layer's signature; loads are checked "over time".
+
+**Assumption:** the FlatZinc signature is
+`fzn_cumulatives(start, duration, resource, machine, bound :
+array[int] of var int, is_upper_bound : bool, min_machine : int)`
+(7 args; `fzn_cumulatives_decomp` has 6 — no `min_machine`), per the
+pinned `fzn_cumulatives.mzn`. The resource sum of tasks on machine
+`machine[i]` is checked only at event points (each task's start and
+end), only when some task runs on that machine at that point (the
+`cov` guards of Carlsson's decomposition): `is_upper_bound` ⇒ load ≤
+`bound[machine[j]]`, else load ≥ `bound[machine[j]]`. Zero-duration
+tasks execute at no instant (empty half-open interval) and trigger
+no check. Machine values index `bound` 1-based (the `min_machine`
+offset of the fzn layer is normalized away: machines are `1..m`).
+
+### G27. `regular` family representations
+
+**Assumption (per `fzn_regular.mzn`, `fzn_regular_nfa.mzn`,
+`fzn_cost_regular.mzn`):** `fzn_regular(xs, Q, S, d, q0, F)` with `d`
+the Q×S transition matrix flattened row-major (Q, S are the sibling
+par ints): `xs` values must lie in `1..S`, states in `1..Q`, state 0
+is the reserved sink (a `d[q,s] = 0` transition makes the run fail);
+empty `xs` ⇒ `q0 ∈ F`. `fzn_regular_nfa` differs only in `d` being a
+Q×S matrix of *sets* (nested-array columns of sets), `a[i+1] ∈
+d[a[i], xs[i]]`. `fzn_cost_regular` adds the Q×S par cost matrix
+(row-major) and `total_cost` = sum of the traversed transition costs
+(0 for the empty run).
+
+### G28. `mdd` family edge-list representation
+
+**Assumption (per `fzn_mdd.mzn` etc.):** the signature is
+`fzn_mdd(xs, N, level, E, from, label, to)`: `N` nodes (root 1,
+true node 0), `level[n]` the level of node n, `E` edges with
+`from[e] ∈ 1..N`, par-set `label[e]`, `to[e] ∈ 0..N` (0 = T). The
+declarative reading: there is a root-to-T path whose edge labels
+cover the variables level-by-level; concretely the *satisfying walks*
+predicate — there exists a path `1 → … → 0` in the edge list such
+that every `xs[i]` is in the label of the edge taken at level `i+1`
+and the path's level sequence is strictly increasing. `fzn_mdd_nondet`
+coincides (the P1/P4 determinism axioms only restrict the MDD, not
+the satisfying-assignment relation). `fzn_cost_mdd(xs, N, level, E,
+from, label, cost, to, total_cost)` (cost between label and to):
+the satisfying-walks condition plus `total_cost` = the cost of *some*
+satisfying walk (existential; the decomposition's longest-path
+variables make total_cost the maximum, but any satisfying walk's
+cost is accepted here — recorded as a deliberate relaxation, see
+`Regular.lean` for the exact equivalence proof strategy).
+
+### G29. Graph-family signatures and readings
+
+**Assumption (per the pinned `fzn_*_int.mzn` decompositions):** all
+graph predicates take par `from`/`to` edge arrays (1-based, nodes
+`1..N`) plus `ns`/`es` var bool arrays; the *int* form's leading
+`N`,`E` are not separate FlatZinc parameters here (they are recovered
+from the array lengths, since the enum form has no such parameters;
+both forms are accepted with the same tail shape). Readings:
+`subgraph`: every selected edge has both endpoints selected;
+`dag`: the selected subgraph is acyclic; `reachable`/`dreachable`:
+the selected nodes are exactly those reachable from a var root
+(undirected: each edge usable both ways, both directions selected
+together); `tree`/`dtree`: the selected edges form an
+arborescence rooted at a var root spanning exactly the selected
+nodes (`dtree`: edges directed away from the root; `tree`:
+undirected); `path`/`dpath`: the selected nodes form a simple path
+from source to sink (both var); `bounded path` variants add
+`weight_bound = Σ es[e]·w[e]`; `steiner`/`dsteiner` = tree +
+weight bound (steiner with existential root); `wst`/`dwst` = tree
+over *all* nodes + weight bound (wst without an explicit root);
+`connected`/`dconnected` = reachable/dreachable with existential
+root. Declared but unprovable-in-fragment corner cases (edges
+outside `1..N`) make the predicate false.
+
+### G30. `geost` family and `diffn_k` representation
+
+**Assumption (per `fzn_geost.mzn`):** `fzn_geost(k, rect_size,
+rect_offset, shape, xs, kind)`: `rect_size`/`rect_offset` are R×k
+matrices flattened row-major (R rectangles, k given as the first par
+int), `shape` an array of par sets of rectangle indices, `xs` the
+O×k matrix of object origins (flat), `kind` the object shape
+selector. Two objects overlap iff some shape-pair of their kinds has
+two rectangles not separated on any axis (open-interval overlap:
+touching is allowed, per `fzn_geost_nonoverlap_k`). `geost_bb`
+adds per-dimension bounds over every possibly-used shape's
+rectangles; `geost_smallest_bb` additionally requires each of the
+2k boundaries to be touched. `fzn_diffn_k(box_posn, box_size)` /
+`fzn_diffn_nonstrict_k(...)`: matrices as *nested* arrays (rows =
+boxes; same G24 caveat: real `.fzn` cannot carry them), pairwise
+non-overlap resp. non-overlap with zero-size boxes free.
+`fzn_diffn_nonoverlap_k(x1, w1, x2, w2)`: 1D per-axis lists,
+separated on at least one axis.
+
+### G31. `writes_seq` last-write-wins; `span`/`alternative` stay unsupported
+
+**Assumption (per `fzn_writes_seq.mzn`):** `fzn_writes_seq(I, P, V,
+O)`: for every position i, `O[i] = V[j]` for the *largest* j with
+`P[j] = i`, or `O[i] = I[i]` if no such j (the initial array
+provides defaults; `I`, `O` are the same length). `fzn_span` and
+`fzn_alternative` remain in `globalsUnsupported`: their signatures
+(per `fzn_span.mzn`, `fzn_alternative.mzn`) require `var opt int`
+starts (`occurs`/`absent` on `span_start` and every `start[i]`),
+which the fragment's value model does not carry — implementing them
+would require optional-variable semantics (PLAN item for opt
+support). (The G20 entry's report of
+`fzn_if_then_else_partiality` as unsupported is superseded: it is
+now supported — see G32.)
+
+### G32. `if_then_else_partiality` definedness
+
+**Assumption (per `fzn_if_then_else_partiality.mzn`):**
+`fzn_if_then_else_partiality(c, def, b)`: with `d[i]` marking that
+case i is the first whose condition holds, `b ↔ def[first true i]`
+(and `b = false` when no condition holds — the d-chain then forces
+all `d[i]`... every `c[i] ∧ d[i]` is false, so the b-implications
+are vacuous and `b = false` is derivable from the second family:
+`d[i] ∧ c[i] ∧ def[i] → b` never fires. We read the predicate as:
+the selected branch is the first true condition; b is the
+definedness of the result; `b` must equal the definedness of the
+selected branch; with no true condition, `b` is forced false).
+
+### G33. `fzn_neural_net` and `fzn_piecewise_linear*` stay unsupported
+
+These require `var float` arrays (neural_net inputs/outputs) or
+`var float` scalars (piecewise_linear's x, y) — outside the
+integer/Boolean/set fragment until step 3 (float support) decides the
+numerical model. They remain in `globalsUnsupported`.
