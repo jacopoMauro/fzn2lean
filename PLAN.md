@@ -74,12 +74,24 @@ In recommended order; each entry cites the section that owns it:
    place of the sound `propIdSlot` placeholder, and `Extract.lean`
    must learn the `int_lin_eq`/`int_lin_le` shapes.
 3. **Emit/parse round-trip theorem, remaining layers** (IDEAS item 2,
-   §worklog): the string-splitting and lexer-composition layers are proven;
-   remaining are the value/identifier halves of the entry round-trip, the master
-   theorem `parseSolution (stripSeparators (emitSolution ps)) = …`,
-   and the string-free leaf wiring (the runtime win).
-4. **Engineering and assurance** (§5): CI, remaining linter warnings,
-   malformed-input/adversarial-size tests, generated name inventory.
+   §worklog): the string-splitting and lexer-composition layers are
+   proven; the identifier half (`tokenize_ident`), the Boolean half
+   (`tokenize_bool`), and the nonnegative-integer half
+   (`tokenize_int_nonneg`, added 2026-09-18 — see the worklog)
+   are proven; the value/identifier halves of the entry round-trip,
+   the master theorem
+   `parseSolution (stripSeparators (emitSolution ps)) = …`,
+   and the string-free leaf wiring (the runtime win) remain.
+4. **Engineering and assurance** (§5): CI, malformed-input/adversarial-size
+   tests, generated name inventory.  Completed 2026-09-18: all linter
+   warnings removed (609 → 0; the two split-heavy parser modules carry
+   a documented `linter.unusedSimpArgs` suppression) and the stale
+   `bench_ab`/`test_enum_tmp` Lake targets were dropped after their
+   scratch roots were archived.  Completed 2026-09-18: all linter
+   warnings removed (609 → 0; the two split-heavy parser modules carry a
+   documented `linter.unusedSimpArgs` suppression) and the stale
+   `bench_ab`/`test_enum_tmp` Lake targets were dropped after their
+   scratch roots were archived.
 5. **Performance** (§4 + IDEAS): dispatcher decision tree, precompiled
    constraint closures, lexer/parser allocation, sorted-set
    operations, streaming `optPairs`, RevState search wiring,
@@ -618,11 +630,17 @@ In the doc's own order of attack, with current status:
    `isDigit_not_alpha`, `takeWhile_digits_all`); the integer
    half's master assembly (`tokenize_int_nonneg`: wiring the
    scan facts through `lexInt`'s decimal branch and `repr_val`)
-   remains.  Then state and prove
-   `parseSolution (stripSeparators (emitSolution ps))
-   = .ok (entriesOf ps)`; then the string-free leaf
-   (`solveLeafE`-style) wired into `solveModel` with the
-   leaf-soundness rewrite through the new theorem.
+   is now PROVEN — see `solver/Emit.lean` (2026-09-18): the
+   supporting stack is `digit_not_xo`/`digit_not_minus`/
+   `isDigit_not_underscore` (the char-class exclusions),
+   `lexUnsigned_decimal` and `lexInt_nonneg_head` (the decimal
+   arm on all-digit input), `takeWhile_digits_end` (the scan
+   runs to the end), `lexToken_digits` (the digit-head token
+   pair), and `tokenizeAux_stop` (the past-end walk stop).
+   Remaining in item 2: the negative-`Int` half (`lexInt` on
+   the `-`-prefixed form), the master theorem
+   `parseSolution (stripSeparators (emitSolution ps)) = …`,
+   and the string-free leaf wiring.
 2. **Item 5, more propagators** — **the linear family is
    COMPLETE** this pass: `propLinEq_preserves` and
    `propLinLe_preserves` are fully proven (all three
