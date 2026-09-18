@@ -6,9 +6,8 @@ Dependencies flow downward; roots are at the top, leaves at the bottom.
 ## Legend
 
 - `★` marks shared/high-fan-out modules.
-- Untracked development artifacts (`probe*.lean`, `BenchAB.lean`, `TestEnumTmp.lean`,
-  `axcheck_tmp.lean`, `mini.lean`, `testBX.lean`) are excluded from the graph
-  unless they are explicitly registered as Lake targets.
+- Untracked development artifacts are now **archived** under `archive/`
+  (see below); none of them is part of any build target.
 - Test executables are listed separately at the end.
 
 ---
@@ -178,10 +177,15 @@ solver/TestsRestart.lean  → solver/Restarts
 | `solver/Domain` | 4 (Emit→Solve, Extract, Solve, Domain itself) |
 | `solver/Propagators` | 3 (Fixpoint, Extract, Learning) |
 
-## Untracked Development Artifacts (not part of any build target)
+## Archived Development Artifacts (not part of any build target)
+
+All former root-level scratch files live under `archive/` since the
+2026-09-18 cleanup (PLAN item 1); the `bench_ab`/`test_enum_tmp` Lake
+targets were removed with them:
 
 ```
+probeC.lean, probeF.lean, probeG.lean, probeH.lean,
 probeL.lean, probeL2–6.lean, probeR4–5.lean, probeS.lean, probeS2–4.lean
 BenchAB.lean, TestEnumTmp.lean, axcheck_tmp.lean, mini.lean, testBX.lean
-solver.lean (root re-export)
+FznGlobals.lean.orig, probeTmp.lean, probeTmp2.lean
 ```

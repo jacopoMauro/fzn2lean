@@ -238,15 +238,25 @@ directions and fails the build if a name is untested.
 Requires Lean 4.33.1 (see `lean-toolchain`; `elan` installs it automatically).
 
 ```sh
-# Build the library and all executables (the lakefile has no default
-# target, so name them; `lake build LeanFzn` builds only the library)
-lake build leanfzn tests_smoke tests_stdlib tests_solution tests_globals \
+# The one documented clean-build command (the lakefile has no default
+# target, so every target is named; `lake build LeanFzn` builds only
+# the library, `lake build solver` only the solver library):
+lake build leanfzn solver tests_smoke tests_stdlib tests_solution tests_globals \
       tests_gecode tests_coverage tests_check tests_bench tests_wellformed \
-      tests_pretty tests_prof tests_fast solver tests_solver tests_prop \
+      tests_pretty tests_prof tests_fast tests_solver tests_prop \
       tests_heur tests_fix tests_enum tests_sbench tests_opt tests_rev \
       tests_learn tests_restart
 
-# Run the test suites
+# The one documented functional-test command (runs every suite and
+# fails on the first failure):
+for t in tests_smoke tests_stdlib tests_solution tests_globals tests_gecode \
+         tests_coverage tests_check tests_bench tests_wellformed tests_pretty \
+         tests_prof tests_fast tests_solver tests_prop tests_heur tests_fix \
+         tests_enum tests_sbench tests_opt tests_rev tests_learn tests_restart; do
+  lake env $t || exit 1
+done
+
+# Per-suite reference (each also runs standalone through `lake env`)
 lake env tests_smoke      # 30 parser smoke tests
 lake env tests_stdlib     # 64 standard-library tests (static + dynamic)
 lake env tests_solution   # solution-checker end-to-end tests
@@ -260,9 +270,9 @@ lake env tests_pretty     # 39 pretty-printer round-trip tests
 lake env tests_prof      # profiling driver (parser timing analysis)
 lake env tests_fast      # 7 fast-path differential tests
 
-# Run the solver test suites
-lake env tests_solver    # 198 solver tests (unit + e2e + config-matrix integration)
-lake env tests_prop      # 38 propagator tests
+# Solver suites
+lake env tests_solver    # 197 solver tests (unit + e2e + config-matrix integration)
+lake env tests_prop      # 109 propagator tests
 lake env tests_heur      # 93 heuristic tests
 lake env tests_fix       # 21 fixpoint tests
 lake env tests_enum     # 31 enumeration tests
@@ -324,9 +334,10 @@ Exit codes of `leanfzn`:
 
 `Tests/WellFormed.lean` and `Tests/Pretty.lean` can also be run directly
 with `lake env lean`; their `#eval`-based checks are compiled by the
-corresponding executable targets above. The current Lean build succeeds but
-still reports non-fatal linter warnings, primarily unused `simp` arguments in
-proof scripts.
+corresponding executable targets above. The clean build completes with
+**zero linter warnings** (the two split-heavy parser modules carry an explicit
+`linter.unusedSimpArgs` suppression documented in their headers; scratch
+and probe files live under `archive/` and are not part of any Lake target).
 
 ### The verified solver (`solver/`)
 

@@ -38,7 +38,9 @@ def genParseModel (n : Nat) : String := Id.run do
 def main : IO UInt32 := do
   let k := 80000
   let src := genParseModel k
-  let toks := match tokenize src with | .ok t => t | .error _ => #[]
+  -- (the tokenization result of the profiling driver is threaded
+  -- through the timing runs below, not used directly here)
+  let _toks := match tokenize src with | .ok t => t | .error _ => #[]
   -- Which is it: recursion depth (acc version no better) or allocation?
   -- parseVarDeclItem loop = 16ms; parseMany = 32ms; acc = 30ms; mono = 37ms.
   -- All ~30ms vs 16ms bare loop → the extra ~15ms IS the item-list consing
