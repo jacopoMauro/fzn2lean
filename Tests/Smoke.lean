@@ -1,3 +1,22 @@
+/-
+File: Tests/Smoke.lean
+
+Purpose:
+  Parser smoke tests: valid FlatZinc snippets that must parse, and
+  invalid snippets that must be rejected.
+
+Dependencies:
+  LeanFzn.FznParser (parseModel).
+
+Why:
+  Guards the parser contract that `parsePosition`/`parseModel` accepts
+  exactly the non-float fragment; cheap, fast, and run by the CI smoke
+  target `tests_smoke`.
+
+DAG:
+  FznParser -> Tests/Smoke.lean -> tests_smoke executable
+-/
+
 import LeanFzn.FznParser
 
 open LeanFzn

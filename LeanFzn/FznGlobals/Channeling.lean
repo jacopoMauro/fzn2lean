@@ -755,7 +755,17 @@ def channelingInterpB : LeanFzn.Ident → List Value → Bool := fun x =>
 theorem fzn_inverse_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_inverse") args = true ↔
       channelingInterp (Ident.mk "fzn_inverse") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_inverse") args
+      = match twoIntArrays args with
+      | some (a, b) => inverseB a b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_inverse") args
+      = match twoIntArrays args with
+      | some (a, b) => inverseProp a b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoIntArrays args with
   | none => simp
   | some p =>
@@ -766,7 +776,17 @@ theorem fzn_inverse_iff (args : List Value) :
 theorem fzn_inverse_in_range_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_inverse_in_range") args = true ↔
       channelingInterp (Ident.mk "fzn_inverse_in_range") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_inverse_in_range") args
+      = match twoIntArrays args with
+      | some (a, b) => inverseInRangeB a b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_inverse_in_range") args
+      = match twoIntArrays args with
+      | some (a, b) => inverseInRangeProp a b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoIntArrays args with
   | none => simp
   | some p =>
@@ -777,7 +797,17 @@ theorem fzn_inverse_in_range_iff (args : List Value) :
 theorem fzn_int_set_channel_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_int_set_channel") args = true ↔
       channelingInterp (Ident.mk "fzn_int_set_channel") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_int_set_channel") args
+      = match intAndSetArrays args with
+      | some (a, b) => intSetChannelB a b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_int_set_channel") args
+      = match intAndSetArrays args with
+      | some (a, b) => intSetChannelProp a b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intAndSetArrays args with
   | none => simp
   | some p =>
@@ -788,7 +818,17 @@ theorem fzn_int_set_channel_iff (args : List Value) :
 theorem fzn_link_set_to_booleans_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_link_set_to_booleans") args = true ↔
       channelingInterp (Ident.mk "fzn_link_set_to_booleans") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_link_set_to_booleans") args
+      = match setAndBoolArray args with
+      | some (s, b) => linkSetBoolsB s b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_link_set_to_booleans") args
+      = match setAndBoolArray args with
+      | some (s, b) => linkSetBoolsProp s b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setAndBoolArray args with
   | none => simp
   | some p =>
@@ -799,7 +839,17 @@ theorem fzn_link_set_to_booleans_iff (args : List Value) :
 theorem fzn_member_int_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_member_int") args = true ↔
       channelingInterp (Ident.mk "fzn_member_int") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_member_int") args
+      = match arrayAndInt args with
+      | some (a, e) => memberIntB a e
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_member_int") args
+      = match arrayAndInt args with
+      | some (a, e) => memberIntProp a e
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrayAndInt args with
   | none => simp
   | some p =>
@@ -810,7 +860,17 @@ theorem fzn_member_int_iff (args : List Value) :
 theorem fzn_member_bool_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_member_bool") args = true ↔
       channelingInterp (Ident.mk "fzn_member_bool") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_member_bool") args
+      = match arrayAndBool args with
+      | some (a, e) => memberBoolB a e
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_member_bool") args
+      = match arrayAndBool args with
+      | some (a, e) => memberBoolProp a e
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrayAndBool args with
   | none => simp
   | some p =>
@@ -821,7 +881,17 @@ theorem fzn_member_bool_iff (args : List Value) :
 theorem fzn_member_set_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_member_set") args = true ↔
       channelingInterp (Ident.mk "fzn_member_set") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_member_set") args
+      = match arrayAndSet args with
+      | some (a, e) => memberSetB a e
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_member_set") args
+      = match arrayAndSet args with
+      | some (a, e) => memberSetProp a e
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrayAndSet args with
   | none => simp
   | some p =>
@@ -832,7 +902,17 @@ theorem fzn_member_set_iff (args : List Value) :
 theorem fzn_arg_val_int_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_arg_val_int") args = true ↔
       channelingInterp (Ident.mk "fzn_arg_val_int") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_arg_val_int") args
+      = match arrayIntInt args with
+      | some (a, e, i) => argValIntB a e i
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_arg_val_int") args
+      = match arrayIntInt args with
+      | some (a, e, i) => argValIntProp a e i
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrayIntInt args with
   | none => simp
   | some p =>
@@ -843,7 +923,17 @@ theorem fzn_arg_val_int_iff (args : List Value) :
 theorem fzn_arg_val_bool_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_arg_val_bool") args = true ↔
       channelingInterp (Ident.mk "fzn_arg_val_bool") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_arg_val_bool") args
+      = match arrayBoolInt args with
+      | some (a, e, i) => argValBoolB a e i
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_arg_val_bool") args
+      = match arrayBoolInt args with
+      | some (a, e, i) => argValBoolProp a e i
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrayBoolInt args with
   | none => simp
   | some p =>
@@ -854,7 +944,17 @@ theorem fzn_arg_val_bool_iff (args : List Value) :
 theorem fzn_write_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_write") args = true ↔
       channelingInterp (Ident.mk "fzn_write") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_write") args
+      = match writeArgs args with
+      | some (a, i, v, b) => writeB a i v b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_write") args
+      = match writeArgs args with
+      | some (a, i, v, b) => writeProp a i v b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : writeArgs args with
   | none => simp
   | some p =>
@@ -865,7 +965,17 @@ theorem fzn_write_iff (args : List Value) :
 theorem fzn_writes_iff (args : List Value) :
     channelingInterpB (Ident.mk "fzn_writes") args = true ↔
       channelingInterp (Ident.mk "fzn_writes") args := by
-  simp only [channelingInterp, channelingInterpB]
+  have hB : ∀ args, channelingInterpB (Ident.mk "fzn_writes") args
+      = match writesArgs args with
+      | some (a, p, v, b) => writesB a p v b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, channelingInterp (Ident.mk "fzn_writes") args
+      = match writesArgs args with
+      | some (a, p, v, b) => writesProp a p v b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : writesArgs args with
   | none => simp
   | some p =>

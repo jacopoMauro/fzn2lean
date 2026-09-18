@@ -7,7 +7,7 @@ import LeanFzn.FznStdLib
 
 This suite exercises **every** predicate with an executable verified
 interpretation: the standard builtins (`stdNames` + `setNames`), and
-all 94 `fzn_*` global-constraint names (`globalsNames`), plus the
+all 138 `fzn_*` global-constraint names (`globalsNames`), plus the
 deprecated builtins kept in the fragment.  It guarantees:
 
 * **dynamic coverage** — every checkable name is evaluated by
@@ -309,7 +309,7 @@ private def setDynamic : List (String × String × List Value × Bool) :=
         .setOfInt (.enumeration [2])], true)
   ]
 
-/-! ## Dynamic cases: all 94 globals (via `fullInterpB`) -/
+/-! ## Dynamic cases: all 138 globals (via `fullInterpB`) -/
 
 private def globDynamic : List (String × String × List Value × Bool) :=
   -- ===== all-different family (8) =====
@@ -760,6 +760,385 @@ private def globDynamic : List (String × String × List Value × Bool) :=
   , ("fzn_sliding_among_bool f", "fzn_sliding_among_bool",
       [.int 2, .int 2, .int 2, .array [.bool true, .bool false, .bool true],
         .bool true], false)
+  -- new families: lex-chain (G24)
+  , ("fzn_lex_greater_int t", "fzn_lex_greater_int",
+      [.array [.int 2, .int 1], .array [.int 1, .int 9]], true)
+  , ("fzn_lex_greater_int f", "fzn_lex_greater_int",
+      [.array [.int 1, .int 2], .array [.int 1, .int 9]], false)
+  , ("fzn_lex_greatereq_int t", "fzn_lex_greatereq_int",
+      [.array [.int 1, .int 2], .array [.int 1, .int 2]], true)
+  , ("fzn_lex_greatereq_int f", "fzn_lex_greatereq_int",
+      [.array [.int 1, .int 2], .array [.int 1, .int 9]], false)
+  , ("fzn_lex_chain_less_int t", "fzn_lex_chain_less_int",
+      [.array [.array [.int 1, .int 5], .array [.int 2, .int 1]]], true)
+  , ("fzn_lex_chain_less_int f", "fzn_lex_chain_less_int",
+      [.array [.array [.int 2, .int 1], .array [.int 1, .int 5]]], false)
+  , ("fzn_lex_chain_lesseq_int t", "fzn_lex_chain_lesseq_int",
+      [.array [.array [.int 1, .int 5], .array [.int 1, .int 5]]], true)
+  , ("fzn_lex_chain_lesseq_int f", "fzn_lex_chain_lesseq_int",
+      [.array [.array [.int 2, .int 1], .array [.int 1, .int 5]]], false)
+  , ("fzn_lex2 t", "fzn_lex2",
+      [.array [.array [.int 1, .int 2], .array [.int 1, .int 2]]], true)
+  , ("fzn_lex2 f", "fzn_lex2",
+      [.array [.array [.int 2, .int 1], .array [.int 1, .int 2]]], false)
+  , ("fzn_strict_lex2 t", "fzn_strict_lex2",
+      [.array [.array [.int 1, .int 2], .array [.int 1, .int 3]]], true)
+  , ("fzn_strict_lex2 f", "fzn_strict_lex2",
+      [.array [.array [.int 1, .int 2], .array [.int 1, .int 2]]], false)
+  , ("fzn_lex_chain_lesseq_orbitope t", "fzn_lex_chain_lesseq_orbitope",
+      [.array [.array [.int 0, .int 1],
+        .array [.int 1, .int 0]], .int 1], true)
+  , ("fzn_lex_chain_lesseq_orbitope f", "fzn_lex_chain_lesseq_orbitope",
+       [.array [.array [.int 1, .int 0],
+         .array [.int 0, .int 1]], .int 2], false)
+  , ("fzn_lex_chain_greater_int t", "fzn_lex_chain_greater_int",
+       [.array [.array [.int 2, .int 1], .array [.int 1, .int 5]]], true)
+  , ("fzn_lex_chain_greater_int f", "fzn_lex_chain_greater_int",
+       [.array [.array [.int 1, .int 5], .array [.int 2, .int 1]]], false)
+  , ("fzn_lex_chain_greatereq_int t", "fzn_lex_chain_greatereq_int",
+       [.array [.array [.int 1, .int 5], .array [.int 1, .int 5]]], true)
+  , ("fzn_lex_chain_greatereq_int f", "fzn_lex_chain_greatereq_int",
+       [.array [.array [.int 1, .int 5], .array [.int 2, .int 1]]], false)
+  , ("fzn_lex_chain_greatereq_orbitope t", "fzn_lex_chain_greatereq_orbitope",
+       [.array [.array [.int 1, .int 0],
+         .array [.int 0, .int 1]], .int 1], true)
+  , ("fzn_lex_chain_greatereq_orbitope f", "fzn_lex_chain_greatereq_orbitope",
+       [.array [.array [.int 0, .int 1],
+         .array [.int 1, .int 0]], .int 2], false)
+  -- circuit / subcircuit (G25)
+  , ("fzn_circuit t", "fzn_circuit",
+      [.array [.int 2, .int 3, .int 1]], true)
+  , ("fzn_circuit f", "fzn_circuit",
+      [.array [.int 1, .int 2, .int 3]], false)
+  , ("fzn_subcircuit t", "fzn_subcircuit",
+      [.array [.int 2, .int 1, .int 3]], true)
+  , ("fzn_subcircuit f", "fzn_subcircuit",
+      [.array [.int 2, .int 1, .int 1]], false)
+  -- graph family (G29)
+  , ("fzn_subgraph t", "fzn_subgraph",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true]], true)
+  , ("fzn_subgraph f", "fzn_subgraph",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true], .array [.bool true, .bool true]], false)
+  , ("fzn_dag t", "fzn_dag",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true], .array [.bool true, .bool true]], true)
+  , ("fzn_dag f", "fzn_dag",
+      [.array [.int 1, .int 2], .array [.int 2, .int 1],
+        .array [.bool true, .bool true], .array [.bool true, .bool true]], false)
+  , ("fzn_connected t", "fzn_connected",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true]], true)
+  , ("fzn_connected f", "fzn_connected",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool false, .bool true],
+        .array [.bool true, .bool false]], false)
+  , ("fzn_dconnected t", "fzn_dconnected",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true]], true)
+  , ("fzn_dconnected f", "fzn_dconnected",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool false]], false)
+  , ("fzn_reachable t", "fzn_reachable",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], true)
+  , ("fzn_reachable f", "fzn_reachable",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool false],
+        .array [.bool true, .bool true], .int 1], false)
+  , ("fzn_dreachable t", "fzn_dreachable",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], true)
+  , ("fzn_dreachable f", "fzn_dreachable",
+      [.array [.int 1, .int 2], .array [.int 3, .int 2],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], false)
+  , ("fzn_tree t", "fzn_tree",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], true)
+  , ("fzn_tree f", "fzn_tree",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool false],
+        .array [.bool true, .bool true], .int 1], false)
+  , ("fzn_dtree t", "fzn_dtree",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], true)
+  , ("fzn_dtree f", "fzn_dtree",
+      [.array [.int 1, .int 2], .array [.int 2, .int 1],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], false)
+  , ("fzn_path t", "fzn_path",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 3], true)
+  , ("fzn_path f", "fzn_path",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool false, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 3], false)
+  , ("fzn_dpath t", "fzn_dpath",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 3], true)
+  , ("fzn_dpath f", "fzn_dpath",
+      [.array [.int 1, .int 1], .array [.int 3, .int 2],
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 3], false)
+  , ("fzn_bounded_path t", "fzn_bounded_path",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 3, .int 2], true)
+  , ("fzn_bounded_path f", "fzn_bounded_path",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 3, .int 1], false)
+  , ("fzn_bounded_dpath t", "fzn_bounded_dpath",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 3, .int 2], true)
+  , ("fzn_bounded_dpath f", "fzn_bounded_dpath",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 3, .int 1], false)
+  , ("fzn_steiner t", "fzn_steiner",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 2], true)
+  , ("fzn_steiner f", "fzn_steiner",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 1], false)
+  , ("fzn_dsteiner t", "fzn_dsteiner",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 2], true)
+  , ("fzn_dsteiner f", "fzn_dsteiner",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1, .int 1], false)
+  , ("fzn_wst t", "fzn_wst",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true], .int 2], true)
+  , ("fzn_wst f", "fzn_wst",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool false], .int 2], false)
+  , ("fzn_dwst t", "fzn_dwst",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true], .int 1, .int 2], true)
+  , ("fzn_dwst f", "fzn_dwst",
+      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .array [.bool true, .bool true], .int 1, .int 1], false)
+  -- regular family (G27/G28)
+  , ("fzn_regular t", "fzn_regular",
+      [.array [.int 1, .int 1], .int 2, .int 2,
+        .array [.int 2, .int 2, .int 2, .int 0], .int 1,
+        .array [.int 0, .int 1]], true)
+  , ("fzn_regular f", "fzn_regular",
+      [.array [.int 1, .int 1], .int 2, .int 2,
+        .array [.int 2, .int 2, .int 2, .int 0], .int 1,
+        .array [.int 1, .int 0]], false)
+  , ("fzn_regular_nfa t", "fzn_regular_nfa",
+      [.array [.int 1, .int 1], .int 2, .int 2,
+        .array [.setOfInt (.enumeration [1]), .setOfInt (.enumeration []),
+          .setOfInt (.enumeration []), .setOfInt (.enumeration [])], .int 1,
+        .array [.int 1, .int 0]], true)
+  , ("fzn_regular_nfa f", "fzn_regular_nfa",
+      [.array [.int 2, .int 2], .int 2, .int 2,
+        .array [.setOfInt (.enumeration [1]), .setOfInt (.enumeration []),
+          .setOfInt (.enumeration []), .setOfInt (.enumeration [])], .int 1,
+        .array [.int 1, .int 0]], false)
+  , ("fzn_cost_regular t", "fzn_cost_regular",
+      [.array [.int 1, .int 1], .int 2, .int 2,
+        .array [.int 2, .int 2, .int 2, .int 0], .int 1,
+        .array [.int 0, .int 1], .array [.int 3, .int 5, .int 0, .int 0], .int 3], true)
+  , ("fzn_cost_regular f", "fzn_cost_regular",
+      [.array [.int 1, .int 1], .int 2, .int 2,
+        .array [.int 2, .int 2, .int 2, .int 0], .int 1,
+        .array [.int 0, .int 1], .array [.int 3, .int 5, .int 0, .int 0], .int 4], false)
+  , ("fzn_mdd t", "fzn_mdd",
+      [.array [.int 1, .int 2], .int 3, .array [.int 1, .int 2, .int 3],
+        .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
+        .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])],
+        .array [.int 2, .int 0, .int 0]], true)
+  , ("fzn_mdd f", "fzn_mdd",
+      [.array [.int 1, .int 1], .int 3, .array [.int 1, .int 2, .int 3],
+        .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
+        .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])],
+        .array [.int 2, .int 0, .int 0]], false)
+  , ("fzn_mdd_nondet t", "fzn_mdd_nondet",
+      [.array [.int 1, .int 2], .int 3, .array [.int 1, .int 2, .int 3],
+        .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
+        .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])],
+        .array [.int 2, .int 0, .int 0]], true)
+  , ("fzn_mdd_nondet f", "fzn_mdd_nondet",
+      [.array [.int 1, .int 1], .int 3, .array [.int 1, .int 2, .int 3],
+        .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
+        .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])],
+        .array [.int 2, .int 0, .int 0]], false)
+  , ("fzn_cost_mdd t", "fzn_cost_mdd",
+      [.array [.int 1, .int 2], .int 3, .array [.int 1, .int 2, .int 3],
+        .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
+        .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])], .array [.int 4, .int 6, .int 7],
+        .array [.int 2, .int 0, .int 0], .int 11], true)
+  , ("fzn_cost_mdd f", "fzn_cost_mdd",
+      [.array [.int 1, .int 2], .int 3, .array [.int 1, .int 2, .int 3],
+        .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
+        .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])], .array [.int 4, .int 6, .int 7],
+        .array [.int 2, .int 0, .int 0], .int 10], false)
+  -- sched2 family (G26/G30/G31/G32)
+  , ("fzn_cumulatives t", "fzn_cumulatives",
+      [.array [.int 0, .int 2], .array [.int 2, .int 2],
+        .array [.int 1, .int 1], .array [.int 1, .int 1],
+        .array [.int 1, .int 1], .bool true, .int 1], true)
+  , ("fzn_cumulatives f", "fzn_cumulatives",
+      [.array [.int 0, .int 1], .array [.int 2, .int 2],
+        .array [.int 1, .int 1], .array [.int 1, .int 1],
+        .array [.int 1, .int 1], .bool true, .int 1], false)
+  , ("fzn_cumulatives_decomp t", "fzn_cumulatives_decomp",
+      [.array [.int 0, .int 2], .array [.int 2, .int 2],
+        .array [.int 1, .int 1], .array [.int 1, .int 1],
+        .array [.int 1, .int 1], .bool true], true)
+  , ("fzn_cumulatives_decomp f", "fzn_cumulatives_decomp",
+      [.array [.int 0, .int 1], .array [.int 2, .int 2],
+        .array [.int 1, .int 1], .array [.int 1, .int 1],
+        .array [.int 1, .int 1], .bool true], false)
+  , ("fzn_geost t", "fzn_geost",
+      [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
+        .array [.int 0, .int 0, .int 0, .int 0],
+        .array [.setOfInt (.enumeration [1])],
+        .array [.int 0, .int 5], .array [.int 1, .int 1]], true)
+  , ("fzn_geost f", "fzn_geost",
+      [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
+        .array [.int 0, .int 0, .int 0, .int 0],
+        .array [.setOfInt (.enumeration [1])],
+        .array [.int 0, .int 0], .array [.int 1, .int 1]], false)
+  , ("fzn_geost_bb t", "fzn_geost_bb",
+      [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
+        .array [.int 0, .int 0, .int 0, .int 0],
+        .array [.setOfInt (.enumeration [1])],
+        .array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 0], .array [.int 1, .int 6]], true)
+  , ("fzn_geost_bb f", "fzn_geost_bb",
+      [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
+        .array [.int 0, .int 0, .int 0, .int 0],
+        .array [.setOfInt (.enumeration [1])],
+        .array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 0], .array [.int 1, .int 5]], false)
+  , ("fzn_geost_smallest_bb t", "fzn_geost_smallest_bb",
+      [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
+        .array [.int 0, .int 0, .int 0, .int 0],
+        .array [.setOfInt (.enumeration [1])],
+        .array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 0], .array [.int 1, .int 6]], true)
+  , ("fzn_geost_smallest_bb f", "fzn_geost_smallest_bb",
+      [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
+        .array [.int 0, .int 0, .int 0, .int 0],
+        .array [.setOfInt (.enumeration [1])],
+        .array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 0], .array [.int 1, .int 9]], false)
+  , ("fzn_diffn_nonoverlap_k t", "fzn_diffn_nonoverlap_k",
+      [.array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 0], .array [.int 1, .int 1]], true)
+  , ("fzn_diffn_nonoverlap_k f", "fzn_diffn_nonoverlap_k",
+      [.array [.int 0, .int 0], .array [.int 1, .int 1],
+        .array [.int 0, .int 0], .array [.int 1, .int 1]], false)
+  , ("fzn_diffn_k t", "fzn_diffn_k",
+      [.array [.array [.int 0, .int 0], .array [.int 5, .int 0]],
+        .array [.array [.int 1, .int 1], .array [.int 1, .int 1]]], true)
+  , ("fzn_diffn_k f", "fzn_diffn_k",
+      [.array [.array [.int 0, .int 0], .array [.int 0, .int 0]],
+        .array [.array [.int 1, .int 1], .array [.int 1, .int 1]]], false)
+  , ("fzn_diffn_nonstrict_k t", "fzn_diffn_nonstrict_k",
+      [.array [.array [.int 0, .int 0], .array [.int 5, .int 0]],
+        .array [.array [.int 1, .int 0], .array [.int 1, .int 1]]], true)
+  , ("fzn_diffn_nonstrict_k f", "fzn_diffn_nonstrict_k",
+      [.array [.array [.int 0, .int 0], .array [.int 0, .int 0]],
+        .array [.array [.int 1, .int 1], .array [.int 1, .int 1]]], false)
+  , ("fzn_writes_seq t", "fzn_writes_seq",
+      [.array [.int 9, .int 8], .array [.int 2, .int 1],
+        .array [.int 5, .int 6], .array [.int 6, .int 5]], true)
+  , ("fzn_writes_seq f", "fzn_writes_seq",
+      [.array [.int 9, .int 8], .array [.int 2, .int 1],
+        .array [.int 5, .int 6], .array [.int 9, .int 8]], false)
+  , ("fzn_if_then_else_partiality t", "fzn_if_then_else_partiality",
+      [.array [.bool false, .bool true], .array [.bool false, .bool true],
+        .bool true], true)
+  , ("fzn_if_then_else_partiality f", "fzn_if_then_else_partiality",
+      [.array [.bool false, .bool true], .array [.bool false, .bool true],
+        .bool false], false)
+  ]
+
+/-! ## End-to-end checks (checkSolutionFull) -/
+
+private def endToEnd : List (String × String × String × Bool) :=
+  [ ("counting accept",
+      "var 0..3: n;\narray [1..3] of var 0..3: xs = [1, 2, 1];\nconstraint fzn_nvalue(n, xs);\nconstraint fzn_count_eq(xs, 1, 2);\nsolve satisfy;",
+      "n = 2;\nxs = array1d(1..3, [1, 2, 1]);\n----------", true)
+  , ("counting reject",
+      "var 0..3: n;\narray [1..3] of var 0..3: xs = [1, 2, 1];\nconstraint fzn_nvalue(n, xs);\nconstraint fzn_count_eq(xs, 1, 2);\nsolve satisfy;",
+      "n = 2;\nxs = array1d(1..3, [1, 1, 1]);\n----------", false)
+  , ("sort accept",
+      "var 0..9: y1;\nvar 0..9: y2;\nvar 0..9: y3;\narray [1..3] of var 0..9: xs = [3, 1, 2];\narray [1..3] of var 0..9: ys = [y1, y2, y3];\nconstraint fzn_sort(xs, ys);\nsolve satisfy;",
+      "xs = array1d(1..3, [3, 1, 2]);\ny1 = 1;\ny2 = 2;\ny3 = 3;\nys = array1d(1..3, [1, 2, 3]);\n----------", true)
+  , ("sort reject",
+      "var 0..9: y1;\nvar 0..9: y2;\nvar 0..9: y3;\narray [1..3] of var 0..9: xs = [3, 1, 2];\narray [1..3] of var 0..9: ys = [y1, y2, y3];\nconstraint fzn_sort(xs, ys);\nsolve satisfy;",
+      "xs = array1d(1..3, [3, 1, 2]);\ny1 = 3;\ny2 = 2;\ny3 = 1;\nys = array1d(1..3, [3, 2, 1]);\n----------", false)
+  , ("inverse accept",
+      "var 1..3: a1;\nvar 1..3: a2;\nvar 1..3: a3;\nvar 1..3: b1;\nvar 1..3: b2;\nvar 1..3: b3;\narray [1..3] of var 1..3: xs = [a1, a2, a3];\narray [1..3] of var 1..3: ys = [b1, b2, b3];\nconstraint fzn_inverse(xs, ys);\nsolve satisfy;",
+      "a1 = 3;\na2 = 1;\na3 = 2;\nb1 = 2;\nb2 = 3;\nb3 = 1;\nxs = array1d(1..3, [3, 1, 2]);\nys = array1d(1..3, [2, 3, 1]);\n----------", true)
+  , ("inverse reject",
+      "var 1..3: a1;\nvar 1..3: a2;\nvar 1..3: a3;\nvar 1..3: b1;\nvar 1..3: b2;\nvar 1..3: b3;\narray [1..3] of var 1..3: xs = [a1, a2, a3];\narray [1..3] of var 1..3: ys = [b1, b2, b3];\nconstraint fzn_inverse(xs, ys);\nsolve satisfy;",
+      "a1 = 1;\na2 = 1;\na3 = 2;\nb1 = 1;\nb2 = 2;\nb3 = 3;\nxs = array1d(1..3, [1, 1, 2]);\nys = array1d(1..3, [1, 2, 3]);\n----------", false)
+  , ("sliding accept",
+      "array [1..3] of var 0..9: xs = [1, 2, 3];\nconstraint fzn_sliding_sum(3, 5, 2, xs);\nsolve satisfy;",
+      "xs = array1d(1..3, [1, 2, 3]);\n----------", true)
+  , ("disjunctive accept",
+      "array [1..2] of int: d = [2, 2];\narray [1..2] of var 0..9: s = [0, 5];\nconstraint fzn_disjunctive(s, d);\nsolve satisfy;",
+      "s = array1d(1..2, [0, 5]);\n----------", true)
+  , ("disjunctive reject",
+      "array [1..2] of int: d = [2, 2];\narray [1..2] of var 0..9: s = [0, 5];\nconstraint fzn_disjunctive(s, d);\nsolve satisfy;",
+      "s = array1d(1..2, [0, 1]);\n----------", false)
+  , ("bin packing accept",
+      "array [1..2] of int: w = [3, 2];\narray [1..2] of var 1..2: b = [1, 2];\nconstraint fzn_bin_packing(3, b, w);\nsolve satisfy;",
+      "b = array1d(1..2, [1, 2]);\n----------", true)
+  , ("bin packing reject",
+      "array [1..2] of int: w = [3, 2];\narray [1..2] of var 1..2: b = [1, 2];\nconstraint fzn_bin_packing(2, b, w);\nsolve satisfy;",
+      "b = array1d(1..2, [1, 2]);\n----------", false)
+  , ("set member accept",
+      "var set of 1..5: a;\nconstraint fzn_set_member(a, 2);\nsolve satisfy;",
+      "a = {2, 5};\n----------", true)
+  , ("set member reject",
+      "var set of 1..5: a;\nconstraint fzn_set_member(a, 2);\nsolve satisfy;",
+      "a = {5};\n----------", false)
+  , ("table accept",
+      "array [1..4] of int: t = [1, 2, 3, 4];\nvar 0..9: u1;\nvar 0..9: u2;\narray [1..2] of var 0..9: xs = [u1, u2];\nconstraint fzn_table_int(xs, t);\nsolve satisfy;",
+      "u1 = 3;\nu2 = 4;\nxs = array1d(1..2, [3, 4]);\n----------", true)
+  , ("table reject",
+      "array [1..4] of int: t = [1, 2, 3, 4];\nvar 0..9: u1;\nvar 0..9: u2;\narray [1..2] of var 0..9: xs = [u1, u2];\nconstraint fzn_table_int(xs, t);\nsolve satisfy;",
+      "u1 = 4;\nu2 = 3;\nxs = array1d(1..2, [4, 3]);\n----------", false)
+  , ("builtin if_then_else accept",
+      "array [1..2] of var bool: cs = [false, true];\nvar 0..9: y;\nconstraint fzn_if_then_else_int(cs, [4, 7], y);\nsolve satisfy;",
+      "cs = array1d(1..2, [false, true]);\ny = 7;\n----------", true)
+  , ("link_set accept",
+      "var bool: c1;\nvar bool: c2;\nvar bool: c3;\nvar set of 1..3: s;\narray [1..3] of var bool: bs = [c1, c2, c3];\nconstraint fzn_link_set_to_booleans(s, bs);\nsolve satisfy;",
+      "c1 = true;\nc2 = false;\nc3 = true;\ns = {1, 3};\nbs = array1d(1..3, [true, false, true]);\n----------", true)
+  , ("link_set reject",
+      "var bool: c1;\nvar bool: c2;\nvar bool: c3;\nvar set of 1..3: s;\narray [1..3] of var bool: bs = [c1, c2, c3];\nconstraint fzn_link_set_to_booleans(s, bs);\nsolve satisfy;",
+      "c1 = true;\nc2 = true;\nc3 = true;\ns = {1, 3};\nbs = array1d(1..3, [true, true, true]);\n----------", false)
+  , ("lex-chain greater vacuous accept",
+      "constraint fzn_lex_chain_greater_int([]);\nsolve satisfy;",
+      "----------", true)
+  , ("lex-chain greatereq orbitope accept",
+      "constraint fzn_lex_chain_greatereq_orbitope([], 1);\nsolve satisfy;",
+      "----------", true)
   ]
 
 /-! ## Static coverage: every global used in a well-formed model -/
@@ -923,65 +1302,112 @@ private def staticModels : List (String × String) :=
        constraint fzn_sliding_among_int(1, 2, 2, xs, {1});\n\
        constraint fzn_sliding_among_bool(1, 2, 2, bs, true);\n\
        solve satisfy;")
-  ]
-
-/-! ## End-to-end checks (checkSolutionFull) -/
-
-private def endToEnd : List (String × String × String × Bool) :=
-  [ ("counting accept",
-      "var 0..3: n;\narray [1..3] of var 0..3: xs = [1, 2, 1];\nconstraint fzn_nvalue(n, xs);\nconstraint fzn_count_eq(xs, 1, 2);\nsolve satisfy;",
-      "n = 2;\nxs = array1d(1..3, [1, 2, 1]);\n----------", true)
-  , ("counting reject",
-      "var 0..3: n;\narray [1..3] of var 0..3: xs = [1, 2, 1];\nconstraint fzn_nvalue(n, xs);\nconstraint fzn_count_eq(xs, 1, 2);\nsolve satisfy;",
-      "n = 2;\nxs = array1d(1..3, [1, 1, 1]);\n----------", false)
-  , ("sort accept",
-      "var 0..9: y1;\nvar 0..9: y2;\nvar 0..9: y3;\narray [1..3] of var 0..9: xs = [3, 1, 2];\narray [1..3] of var 0..9: ys = [y1, y2, y3];\nconstraint fzn_sort(xs, ys);\nsolve satisfy;",
-      "xs = array1d(1..3, [3, 1, 2]);\ny1 = 1;\ny2 = 2;\ny3 = 3;\nys = array1d(1..3, [1, 2, 3]);\n----------", true)
-  , ("sort reject",
-      "var 0..9: y1;\nvar 0..9: y2;\nvar 0..9: y3;\narray [1..3] of var 0..9: xs = [3, 1, 2];\narray [1..3] of var 0..9: ys = [y1, y2, y3];\nconstraint fzn_sort(xs, ys);\nsolve satisfy;",
-      "xs = array1d(1..3, [3, 1, 2]);\ny1 = 3;\ny2 = 2;\ny3 = 1;\nys = array1d(1..3, [3, 2, 1]);\n----------", false)
-  , ("inverse accept",
-      "var 1..3: a1;\nvar 1..3: a2;\nvar 1..3: a3;\nvar 1..3: b1;\nvar 1..3: b2;\nvar 1..3: b3;\narray [1..3] of var 1..3: xs = [a1, a2, a3];\narray [1..3] of var 1..3: ys = [b1, b2, b3];\nconstraint fzn_inverse(xs, ys);\nsolve satisfy;",
-      "a1 = 3;\na2 = 1;\na3 = 2;\nb1 = 2;\nb2 = 3;\nb3 = 1;\nxs = array1d(1..3, [3, 1, 2]);\nys = array1d(1..3, [2, 3, 1]);\n----------", true)
-  , ("inverse reject",
-      "var 1..3: a1;\nvar 1..3: a2;\nvar 1..3: a3;\nvar 1..3: b1;\nvar 1..3: b2;\nvar 1..3: b3;\narray [1..3] of var 1..3: xs = [a1, a2, a3];\narray [1..3] of var 1..3: ys = [b1, b2, b3];\nconstraint fzn_inverse(xs, ys);\nsolve satisfy;",
-      "a1 = 1;\na2 = 1;\na3 = 2;\nb1 = 1;\nb2 = 2;\nb3 = 3;\nxs = array1d(1..3, [1, 1, 2]);\nys = array1d(1..3, [1, 2, 3]);\n----------", false)
-  , ("sliding accept",
-      "array [1..3] of var 0..9: xs = [1, 2, 3];\nconstraint fzn_sliding_sum(3, 5, 2, xs);\nsolve satisfy;",
-      "xs = array1d(1..3, [1, 2, 3]);\n----------", true)
-  , ("disjunctive accept",
-      "array [1..2] of int: d = [2, 2];\narray [1..2] of var 0..9: s = [0, 5];\nconstraint fzn_disjunctive(s, d);\nsolve satisfy;",
-      "s = array1d(1..2, [0, 5]);\n----------", true)
-  , ("disjunctive reject",
-      "array [1..2] of int: d = [2, 2];\narray [1..2] of var 0..9: s = [0, 5];\nconstraint fzn_disjunctive(s, d);\nsolve satisfy;",
-      "s = array1d(1..2, [0, 1]);\n----------", false)
-  , ("bin packing accept",
-      "array [1..2] of int: w = [3, 2];\narray [1..2] of var 1..2: b = [1, 2];\nconstraint fzn_bin_packing(3, b, w);\nsolve satisfy;",
-      "b = array1d(1..2, [1, 2]);\n----------", true)
-  , ("bin packing reject",
-      "array [1..2] of int: w = [3, 2];\narray [1..2] of var 1..2: b = [1, 2];\nconstraint fzn_bin_packing(2, b, w);\nsolve satisfy;",
-      "b = array1d(1..2, [1, 2]);\n----------", false)
-  , ("set member accept",
-      "var set of 1..5: a;\nconstraint fzn_set_member(a, 2);\nsolve satisfy;",
-      "a = {2, 5};\n----------", true)
-  , ("set member reject",
-      "var set of 1..5: a;\nconstraint fzn_set_member(a, 2);\nsolve satisfy;",
-      "a = {5};\n----------", false)
-  , ("table accept",
-      "array [1..4] of int: t = [1, 2, 3, 4];\nvar 0..9: u1;\nvar 0..9: u2;\narray [1..2] of var 0..9: xs = [u1, u2];\nconstraint fzn_table_int(xs, t);\nsolve satisfy;",
-      "u1 = 3;\nu2 = 4;\nxs = array1d(1..2, [3, 4]);\n----------", true)
-  , ("table reject",
-      "array [1..4] of int: t = [1, 2, 3, 4];\nvar 0..9: u1;\nvar 0..9: u2;\narray [1..2] of var 0..9: xs = [u1, u2];\nconstraint fzn_table_int(xs, t);\nsolve satisfy;",
-      "u1 = 4;\nu2 = 3;\nxs = array1d(1..2, [4, 3]);\n----------", false)
-  , ("builtin if_then_else accept",
-      "array [1..2] of var bool: cs = [false, true];\nvar 0..9: y;\nconstraint fzn_if_then_else_int(cs, [4, 7], y);\nsolve satisfy;",
-      "cs = array1d(1..2, [false, true]);\ny = 7;\n----------", true)
-  , ("link_set accept",
-      "var bool: c1;\nvar bool: c2;\nvar bool: c3;\nvar set of 1..3: s;\narray [1..3] of var bool: bs = [c1, c2, c3];\nconstraint fzn_link_set_to_booleans(s, bs);\nsolve satisfy;",
-      "c1 = true;\nc2 = false;\nc3 = true;\ns = {1, 3};\nbs = array1d(1..3, [true, false, true]);\n----------", true)
-  , ("link_set reject",
-      "var bool: c1;\nvar bool: c2;\nvar bool: c3;\nvar set of 1..3: s;\narray [1..3] of var bool: bs = [c1, c2, c3];\nconstraint fzn_link_set_to_booleans(s, bs);\nsolve satisfy;",
-      "c1 = true;\nc2 = true;\nc3 = true;\ns = {1, 3};\nbs = array1d(1..3, [true, true, true]);\n----------", false)
+  , ("lex-chain family", "var 1..9: a;
+var 1..9: b;
+\
+       array [1..2] of var 1..9: xs = [a, b];
+\
+       array [1..2] of var 1..9: ys = [b, a];
+\
+       constraint fzn_lex_greater_int(xs, ys);
+\
+       constraint fzn_lex_greatereq_int(xs, ys);
+\
+       constraint fzn_lex_chain_less_int([a, b, b, a]);
+\
+       constraint fzn_lex_chain_lesseq_int([a, b, b, a]);
+\
+       constraint fzn_lex2([a, b, b, a]);
+\
+       constraint fzn_strict_lex2([a, b, b, a]);
+\
+       constraint fzn_lex_chain_lesseq_orbitope([a, b, b, a], 1);
+\
+       constraint fzn_lex_chain_greater_int([a, b, b, a]);
+\
+       constraint fzn_lex_chain_greatereq_int([a, b, b, a]);
+\
+       constraint fzn_lex_chain_greatereq_orbitope([a, b, b, a], 1);
+\
+       solve satisfy;")
+  , ("graph family", "array [1..2] of int: from = [1, 2];\n\
+       array [1..2] of int: to = [2, 3];\n\
+       array [1..2] of int: w = [1, 1];\n\
+       var 1..3: n1;\n\
+       var 1..3: n2;\n\
+       var 1..3: n3;\n\
+       array [1..3] of var bool: ns = [true, true, true];\n\
+       array [1..2] of var bool: es = [true, true];\n\
+       constraint fzn_subgraph(from, to, ns, es);\n\
+       constraint fzn_dag(from, to, ns, es);\n\
+       constraint fzn_connected(from, to, ns, es);\n\
+       constraint fzn_dconnected(from, to, ns, es);\n\
+       constraint fzn_reachable(from, to, ns, es, 1);\n\
+       constraint fzn_dreachable(from, to, ns, es, 1);\n\
+       constraint fzn_tree(from, to, ns, es, 1);\n\
+       constraint fzn_dtree(from, to, ns, es, 1);\n\
+       constraint fzn_path(from, to, ns, es, 1, 3);\n\
+       constraint fzn_dpath(from, to, ns, es, 1, 3);\n\
+       constraint fzn_bounded_path(from, to, w, ns, es, 1, 3, 2);\n\
+       constraint fzn_bounded_dpath(from, to, w, ns, es, 1, 3, 2);\n\
+       constraint fzn_steiner(from, to, w, ns, es, 1, 2);\n\
+       constraint fzn_dsteiner(from, to, w, ns, es, 1, 2);\n\
+       constraint fzn_wst(from, to, w, es, 2);\n\
+       constraint fzn_dwst(from, to, w, es, 1, 2);\n\
+       constraint fzn_circuit([n1, n2, n3]);\n\
+       constraint fzn_subcircuit([n1, n2, n3]);\n\
+       solve satisfy;")
+  , ("regular family", "array [1..4] of int: d = [0, 2, 0, 0];\n\
+       array [1..4] of int: c = [3, 5, 0, 0];\n\
+       array [1..4] of set of int: nd = [{1}, {2}, {2}, {2}];\n\
+       array [1..3] of int: level = [1, 2, 3];\n\
+       array [1..2] of int: efrom = [1, 1];\n\
+       array [1..2] of set of int: elabel = [{1}, {2}];\n\
+       array [1..2] of int: ecost = [4, 6];\n\
+       array [1..2] of int: eto = [2, 0];\n\
+       array [1..2] of var 1..2: xs = [1, 1];\n\
+       var int: total;\n\
+       constraint fzn_regular(xs, 2, 2, d, 1, [1]);\n\
+       constraint fzn_regular_nfa(xs, 2, 2, nd, 1, [1]);\n\
+       constraint fzn_cost_regular(xs, 2, 2, d, 1, [1], c, total);\n\
+       constraint fzn_mdd(xs, 3, level, 2, efrom, elabel, eto);\n\
+       constraint fzn_mdd_nondet(xs, 3, level, 2, efrom, elabel, eto);\n\
+       constraint fzn_cost_mdd(xs, 3, level, 2, efrom, elabel, ecost, eto, total);\n\
+       solve satisfy;")
+  , ("sched2 family", "array [1..4] of int: rs = [1, 1, 1, 1];\n\
+       array [1..4] of int: ro = [0, 0, 0, 0];\n\
+       array [1..1] of set of int: sh = [{1}];\n\
+       array [1..2] of var int: s = [0, 2];\n\
+       array [1..2] of var int: dur = [2, 2];\n\
+       array [1..2] of var int: res = [1, 1];\n\
+       array [1..2] of var int: mach = [1, 1];\n\
+       array [1..2] of var int: bnd = [1, 1];\n\
+       array [1..2] of var int: ox = [0, 5];\n\
+       array [1..2] of var int: kd = [1, 1];\n\
+       array [1..2] of var int: lo = [0, 0];\n\
+       array [1..2] of var int: up = [6, 6];\n\
+       array [1..2] of var int: bp1 = [0, 5];\n\
+       array [1..2] of var int: bs1 = [1, 1];\n\
+       array [1..2] of var int: bp2 = [0, 0];\n\
+       array [1..2] of var int: bs2 = [1, 1];\n\
+       array [1..2] of var int: wi = [9, 8];\n\
+       array [1..2] of var int: wp = [2, 1];\n\
+       array [1..2] of var int: wv = [5, 6];\n\
+       array [1..2] of var int: wo = [9, 6];\n\
+       array [1..2] of var bool: itc = [false, true];\n\
+       array [1..2] of var bool: itd = [false, true];\n\
+       var bool: itb;\n\
+       constraint fzn_cumulatives(s, dur, res, mach, bnd, true, 1);\n\
+       constraint fzn_cumulatives_decomp(s, dur, res, mach, bnd, true);\n\
+       constraint fzn_geost(2, rs, ro, sh, ox, kd);\n\
+       constraint fzn_geost_bb(2, rs, ro, sh, ox, kd, lo, up);\n\
+       constraint fzn_geost_smallest_bb(2, rs, ro, sh, ox, kd, lo, up);\n\
+       constraint fzn_diffn_nonoverlap_k(bp1, bs1, bp2, bs2);\n\
+       constraint fzn_diffn_k([0, 5, 0, 0], [1, 1, 1, 1]);\n\
+       constraint fzn_diffn_nonstrict_k([0, 5, 0, 0], [1, 1, 1, 1]);\n\
+       constraint fzn_writes_seq(wi, wp, wv, wo);\n\
+       constraint fzn_if_then_else_partiality(itc, itd, itb);\n\
+       solve satisfy;")
   ]
 
 /-! ## Coverage accounting -/

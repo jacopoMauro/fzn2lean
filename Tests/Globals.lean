@@ -47,7 +47,7 @@ private def staticBad : List (String × String) :=
   [ ("wrong arity", "array [1..3] of var 0..9: xs = [1, 2, 3];\nconstraint fzn_all_different_int(xs, xs);\nsolve satisfy;")
   , ("wrong argument type", "var 0..9: x;\nconstraint fzn_all_different_int(x);\nsolve satisfy;")
   , ("set in int-array position", "var set of 1..5: a;\nconstraint fzn_all_different_int(a);\nsolve satisfy;")
-  , ("unsupported global", "array [1..3] of var 0..9: xs = [1, 2, 3];\nconstraint fzn_circuit(xs);\nsolve satisfy;")
+  , ("unsupported global", "array [1..3] of var 0..9: xs = [1, 2, 3];\nconstraint fzn_span(xs);\nsolve satisfy;")
   , ("unknown predicate", "var 0..9: x;\nconstraint fzn_no_such_global(x);\nsolve satisfy;")
   ]
 

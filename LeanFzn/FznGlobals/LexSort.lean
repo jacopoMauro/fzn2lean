@@ -615,13 +615,16 @@ theorem argSortB_iff (xs perm : List Int) :
 /-! ## Argument decoders -/
 
 /-- Decode two integer-array arguments. -/
-private def twoIntArrays (args : List Value) : Option (List Int × List Int) :=
+def twoIntArrays' (args : List Value) : Option (List Int × List Int) :=
   match args with
   | [.array xs, .array ys] =>
     match valueInts xs, valueInts ys with
     | some a, some b => some (a, b)
     | _, _ => none
   | _ => none
+
+private def twoIntArrays (args : List Value) : Option (List Int × List Int) :=
+  twoIntArrays' args
 
 /-- Decode a single integer-array argument. -/
 private def oneIntArray (args : List Value) : Option (List Int) :=
@@ -776,7 +779,17 @@ def lexSortInterpB : LeanFzn.Ident → List Value → Bool := fun x =>
 theorem fzn_lex_less_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_lex_less_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_lex_less_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_lex_less_int") args
+      = match twoIntArrays args with
+      | some (a, b) => lexLessB a b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_lex_less_int") args
+      = match twoIntArrays args with
+      | some (a, b) => lexLess a b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoIntArrays args with
   | none => simp
   | some p =>
@@ -787,7 +800,17 @@ theorem fzn_lex_less_int_iff (args : List Value) :
 theorem fzn_lex_lesseq_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_lex_lesseq_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_lex_lesseq_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_lex_lesseq_int") args
+      = match twoIntArrays args with
+      | some (a, b) => lexLesseqB a b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_lex_lesseq_int") args
+      = match twoIntArrays args with
+      | some (a, b) => lexLesseq a b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoIntArrays args with
   | none => simp
   | some p =>
@@ -798,7 +821,17 @@ theorem fzn_lex_lesseq_int_iff (args : List Value) :
 theorem fzn_increasing_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_increasing_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_increasing_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_increasing_int") args
+      = match oneIntArray args with
+      | some a => increasingB a
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_increasing_int") args
+      = match oneIntArray args with
+      | some a => increasing a
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : oneIntArray args with
   | none => simp
   | some a =>
@@ -808,7 +841,17 @@ theorem fzn_increasing_int_iff (args : List Value) :
 theorem fzn_increasing_bool_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_increasing_bool") args = true ↔
       lexSortInterp (Ident.mk "fzn_increasing_bool") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_increasing_bool") args
+      = match oneBoolArray args with
+      | some a => increasingBoolB a
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_increasing_bool") args
+      = match oneBoolArray args with
+      | some a => increasingBool a
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : oneBoolArray args with
   | none => simp
   | some a =>
@@ -818,7 +861,17 @@ theorem fzn_increasing_bool_iff (args : List Value) :
 theorem fzn_strictly_increasing_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_strictly_increasing_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_strictly_increasing_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_strictly_increasing_int") args
+      = match oneIntArray args with
+      | some a => strictlyIncreasingB a
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_strictly_increasing_int") args
+      = match oneIntArray args with
+      | some a => strictlyIncreasing a
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : oneIntArray args with
   | none => simp
   | some a =>
@@ -829,7 +882,17 @@ set_option maxHeartbeats 1000000 in
 theorem fzn_sort_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_sort") args = true ↔
       lexSortInterp (Ident.mk "fzn_sort") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_sort") args
+      = match twoIntArrays args with
+      | some (a, b) => decide (List.mergeSort a (fun x y => decide (x ≤ y)) = b)
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_sort") args
+      = match twoIntArrays args with
+      | some (a, b) => a.Perm b ∧ increasing b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoIntArrays args with
   | none => simp
   | some p =>
@@ -854,7 +917,17 @@ theorem fzn_sort_iff (args : List Value) :
 theorem fzn_arg_sort_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_arg_sort_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_arg_sort_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_arg_sort_int") args
+      = match twoIntArrays args with
+      | some (a, b) => argSortB a b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_arg_sort_int") args
+      = match twoIntArrays args with
+      | some (a, b) => argSortProp a b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoIntArrays args with
   | none => simp
   | some p =>
@@ -866,7 +939,23 @@ set_option maxHeartbeats 1000000 in
 theorem fzn_maximum_arg_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_maximum_arg_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_maximum_arg_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_maximum_arg_int") args
+      = match arrayAndInt args with
+      | some (a, i) =>
+        match maximumArg a with
+        | none => false
+        | some k => decide (i = (k : Int) + 1)
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_maximum_arg_int") args
+      = match arrayAndInt args with
+      | some (a, i) =>
+        match maximumArg a with
+        | none => False
+        | some k => i = (k : Int) + 1
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrayAndInt args with
   | none => simp
   | some p =>
@@ -885,7 +974,23 @@ set_option maxHeartbeats 1000000 in
 theorem fzn_minimum_arg_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_minimum_arg_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_minimum_arg_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_minimum_arg_int") args
+      = match arrayAndInt args with
+      | some (a, i) =>
+        match minimumArg a with
+        | none => false
+        | some k => decide (i = (k : Int) + 1)
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_minimum_arg_int") args
+      = match arrayAndInt args with
+      | some (a, i) =>
+        match minimumArg a with
+        | none => False
+        | some k => i = (k : Int) + 1
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrayAndInt args with
   | none => simp
   | some p =>
@@ -903,7 +1008,17 @@ theorem fzn_minimum_arg_int_iff (args : List Value) :
 theorem fzn_value_precede_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_value_precede_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_value_precede_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_value_precede_int") args
+      = match twoIntsAndArray args with
+      | some (b, a, xs) => valuePrecedeB b a xs
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_value_precede_int") args
+      = match twoIntsAndArray args with
+      | some (b, a, xs) => valuePrecedeProp b a xs
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoIntsAndArray args with
   | none => simp
   | some p =>
@@ -914,7 +1029,17 @@ theorem fzn_value_precede_int_iff (args : List Value) :
 theorem fzn_value_precede_chain_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_value_precede_chain_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_value_precede_chain_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_value_precede_chain_int") args
+      = match twoIntArrays args with
+      | some (o, a) => valuePrecedeChainB o a
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_value_precede_chain_int") args
+      = match twoIntArrays args with
+      | some (o, a) => valuePrecedeChainProp o a
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoIntArrays args with
   | none => simp
   | some p =>
@@ -925,7 +1050,17 @@ theorem fzn_value_precede_chain_int_iff (args : List Value) :
 theorem fzn_seq_precede_chain_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_seq_precede_chain_int") args = true ↔
       lexSortInterp (Ident.mk "fzn_seq_precede_chain_int") args := by
-  simp only [lexSortInterp, lexSortInterpB]
+  have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_seq_precede_chain_int") args
+      = match oneIntArray args with
+      | some a => seqPrecedeChainB a
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, lexSortInterp (Ident.mk "fzn_seq_precede_chain_int") args
+      = match oneIntArray args with
+      | some a => seqPrecedeChainProp a
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : oneIntArray args with
   | none => simp
   | some a =>

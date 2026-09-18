@@ -1,3 +1,22 @@
+/-
+File: Tests/Prof.lean
+
+Purpose:
+  Parser performance profiling: generates a large model, measures
+  tokenization and parsing time, and prints timings for regression
+  awareness. Informational only; no correctness assertions.
+
+Dependencies:
+  LeanFzn (FznLexer.tokenize, FznParser.parseModel).
+
+Why:
+  Provides the hand-measured baselines that `Tests/Bench.lean` and the
+  PLAN item 4 worklog reference; kept out of the CI assertion suites.
+
+DAG:
+  LeanFzn -> Tests/Prof.lean -> leanfzn prof replay
+-/
+
 import LeanFzn
 open LeanFzn LeanFzn.Lexer LeanFzn.Parser
 

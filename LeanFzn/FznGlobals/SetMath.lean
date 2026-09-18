@@ -1030,7 +1030,17 @@ def setMathInterpB : LeanFzn.Ident → List Value → Bool := fun x =>
 theorem fzn_disjoint_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_disjoint") args = true ↔
       setMathInterp (Ident.mk "fzn_disjoint") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_disjoint") args
+      = match twoSets args with
+      | some (s, t) => disjointB s t
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_disjoint") args
+      = match twoSets args with
+      | some (s, t) => disjointProp s t
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : twoSets args with
   | none => simp
   | some p =>
@@ -1041,7 +1051,17 @@ theorem fzn_disjoint_iff (args : List Value) :
 theorem fzn_set_member_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_set_member") args = true ↔
       setMathInterp (Ident.mk "fzn_set_member") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_set_member") args
+      = match setAndInt args with
+      | some (s, i) => setMemberB s i
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_set_member") args
+      = match setAndInt args with
+      | some (s, i) => setMemberProp s i
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setAndInt args with
   | none => simp
   | some p =>
@@ -1052,7 +1072,17 @@ theorem fzn_set_member_iff (args : List Value) :
 theorem fzn_partition_set_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_partition_set") args = true ↔
       setMathInterp (Ident.mk "fzn_partition_set") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_partition_set") args
+      = match setArrAndSet args with
+      | some (xs, u) => partitionSetB xs u
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_partition_set") args
+      = match setArrAndSet args with
+      | some (xs, u) => partitionSetProp xs u
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setArrAndSet args with
   | none => simp
   | some p =>
@@ -1063,7 +1093,17 @@ theorem fzn_partition_set_iff (args : List Value) :
 theorem fzn_at_most1_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_at_most1") args = true ↔
       setMathInterp (Ident.mk "fzn_at_most1") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_at_most1") args
+      = match oneSetArr args with
+      | some xs => atMost1B xs
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_at_most1") args
+      = match oneSetArr args with
+      | some xs => atMost1Prop xs
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : oneSetArr args with
   | none => simp
   | some xs =>
@@ -1073,7 +1113,17 @@ theorem fzn_at_most1_iff (args : List Value) :
 theorem fzn_sum_set_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_sum_set") args = true ↔
       setMathInterp (Ident.mk "fzn_sum_set") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_sum_set") args
+      = match sumSetArgs args with
+      | some (vs, ws, sel, tot) => sumSetB vs ws sel tot
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_sum_set") args
+      = match sumSetArgs args with
+      | some (vs, ws, sel, tot) => sumSetProp vs ws sel tot
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : sumSetArgs args with
   | none => simp
   | some p =>
@@ -1084,7 +1134,17 @@ theorem fzn_sum_set_iff (args : List Value) :
 theorem fzn_sum_pred_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_sum_pred") args = true ↔
       setMathInterp (Ident.mk "fzn_sum_pred") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_sum_pred") args
+      = match sumPredArgs args with
+      | some (idx, ss, cs, tot) => sumPredB idx ss cs tot
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_sum_pred") args
+      = match sumPredArgs args with
+      | some (idx, ss, cs, tot) => sumPredProp idx ss cs tot
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : sumPredArgs args with
   | none => simp
   | some p =>
@@ -1095,7 +1155,17 @@ theorem fzn_sum_pred_iff (args : List Value) :
 theorem fzn_range_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_range") args = true ↔
       setMathInterp (Ident.mk "fzn_range") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_range") args
+      = match intArrSetSet args with
+      | some (xs, dom, img) => rangeB xs dom img
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_range") args
+      = match intArrSetSet args with
+      | some (xs, dom, img) => rangeProp xs dom img
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intArrSetSet args with
   | none => simp
   | some p =>
@@ -1106,7 +1176,17 @@ theorem fzn_range_iff (args : List Value) :
 theorem fzn_roots_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_roots") args = true ↔
       setMathInterp (Ident.mk "fzn_roots") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_roots") args
+      = match intArrSetSet args with
+      | some (xs, pre, img) => rootsB xs pre img
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_roots") args
+      = match intArrSetSet args with
+      | some (xs, pre, img) => rootsProp xs pre img
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intArrSetSet args with
   | none => simp
   | some p =>
@@ -1117,7 +1197,17 @@ theorem fzn_roots_iff (args : List Value) :
 theorem fzn_array_int_union_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_array_int_union") args = true ↔
       setMathInterp (Ident.mk "fzn_array_int_union") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_array_int_union") args
+      = match intArrAndSet args with
+      | some (xs, y) => arrayIntUnionB xs y
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_array_int_union") args
+      = match intArrAndSet args with
+      | some (xs, y) => arrayIntUnionProp xs y
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intArrAndSet args with
   | none => simp
   | some p =>
@@ -1128,7 +1218,17 @@ theorem fzn_array_int_union_iff (args : List Value) :
 theorem fzn_array_set_union_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_array_set_union") args = true ↔
       setMathInterp (Ident.mk "fzn_array_set_union") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_array_set_union") args
+      = match setArrAndOneSet args with
+      | some (xs, z) => arraySetUnionB xs z
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_array_set_union") args
+      = match setArrAndOneSet args with
+      | some (xs, z) => arraySetUnionProp xs z
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setArrAndOneSet args with
   | none => simp
   | some p =>
@@ -1139,7 +1239,17 @@ theorem fzn_array_set_union_iff (args : List Value) :
 theorem fzn_array_set_intersect_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_array_set_intersect") args = true ↔
       setMathInterp (Ident.mk "fzn_array_set_intersect") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_array_set_intersect") args
+      = match setArrAndOneSet args with
+      | some (xs, z) => arraySetIntersectB xs z
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_array_set_intersect") args
+      = match setArrAndOneSet args with
+      | some (xs, z) => arraySetIntersectProp xs z
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setArrAndOneSet args with
   | none => simp
   | some p =>
@@ -1150,7 +1260,17 @@ theorem fzn_array_set_intersect_iff (args : List Value) :
 theorem fzn_sliding_sum_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_sliding_sum") args = true ↔
       setMathInterp (Ident.mk "fzn_sliding_sum") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_sliding_sum") args
+      = match slidingSumArgs args with
+      | some (l, u, w, xs) => slidingSumB l u w xs
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_sliding_sum") args
+      = match slidingSumArgs args with
+      | some (l, u, w, xs) => slidingSumProp l u w xs
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : slidingSumArgs args with
   | none => simp
   | some p =>
@@ -1161,7 +1281,17 @@ theorem fzn_sliding_sum_iff (args : List Value) :
 theorem fzn_sliding_among_int_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_sliding_among_int") args = true ↔
       setMathInterp (Ident.mk "fzn_sliding_among_int") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_sliding_among_int") args
+      = match slidingAmongIntArgs args with
+      | some (l, u, w, xs, S) => slidingAmongIntB l u w xs S
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_sliding_among_int") args
+      = match slidingAmongIntArgs args with
+      | some (l, u, w, xs, S) => slidingAmongIntProp l u w xs S
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : slidingAmongIntArgs args with
   | none => simp
   | some p =>
@@ -1172,7 +1302,17 @@ theorem fzn_sliding_among_int_iff (args : List Value) :
 theorem fzn_sliding_among_bool_iff (args : List Value) :
     setMathInterpB (Ident.mk "fzn_sliding_among_bool") args = true ↔
       setMathInterp (Ident.mk "fzn_sliding_among_bool") args := by
-  simp only [setMathInterp, setMathInterpB]
+  have hB : ∀ args, setMathInterpB (Ident.mk "fzn_sliding_among_bool") args
+      = match slidingAmongBoolArgs args with
+      | some (l, u, w, xs, b) => slidingAmongBoolB l u w xs b
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, setMathInterp (Ident.mk "fzn_sliding_among_bool") args
+      = match slidingAmongBoolArgs args with
+      | some (l, u, w, xs, b) => slidingAmongBoolProp l u w xs b
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : slidingAmongBoolArgs args with
   | none => simp
   | some p =>
