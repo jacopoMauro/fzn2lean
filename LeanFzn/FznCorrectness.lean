@@ -2,6 +2,12 @@ import LeanFzn.FznParser
 import LeanFzn.FznGrammar
 import LeanFzn.FznSemantics
 
+-- The parser-soundness proofs case-analyze deeply nested match scrutinees
+-- through `split`/`rcases`; after each split, the split hypotheses are
+-- load-bearing in the *other* branches, so the simp linter flags them as
+-- unused.  (The same suppression lives in `solver/Emit.lean`.)
+set_option linter.unusedSimpArgs false
+
 /-
 # Parser Correctness (integer/Boolean fragment)
 

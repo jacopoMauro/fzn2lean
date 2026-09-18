@@ -512,7 +512,7 @@ private theorem cumul_eq_zero_of_all_gt (t : Int) : ∀ (S D R : List Int),
       | cons r R' =>
         simp only [cumul]
         have h0 : ¬ (s ≤ t ∧ t < s + d) := fun hc => h 0 (by simp) hc.1
-        simp only [cumul, if_neg h0]
+        simp only [if_neg h0]
         rw [Int.zero_add]
         exact ih D' R' (fun i hi hle => h (i + 1) (lt_succ_cons hi) hle)
 
@@ -642,7 +642,7 @@ private theorem cumulativeB_iff (start dur res : List Int) (capacity : Int) :
         obtain ⟨i, _, heq⟩ := List.mem_map.mp he
         rw [← heq]
         exact decide_eq_true (hall _))
-    simp only [Bool.and_eq_true, decide_eq_true_iff, hs, he, hlen1,
+    simp only [hs, he, hlen1,
       and_true, true_and]
     exact ⟨hlen1 ▸ hlen2, hcap⟩
 
@@ -668,14 +668,12 @@ private theorem tableIntB_iff (xs tuples : List Int) :
   unfold tableIntB tableIntProp
   cases hn : xs.length with
   | zero =>
-    simp only [hn]
     constructor
     · intro _
       exact ⟨0, by omega, fun j hj => absurd hj (Nat.not_lt_zero j)⟩
     · intro _
       trivial
   | succ w =>
-    simp only [hn]
     constructor
     · intro h
       rw [List.any_eq_true] at h
@@ -814,7 +812,7 @@ private theorem iteGenB_iff {α : Type} (fallback : α) (eqv : α → α → Pro
   unfold iteGenB iteGenProp
   cases hf : firstTrue c with
   | none =>
-    simp only [decide_eq_true_iff, hf, Option.map_none,
+    simp only [decide_eq_true_iff, Option.map_none,
       Option.getD_none, Bool.and_true]
     constructor
     · intro hl
@@ -826,7 +824,7 @@ private theorem iteGenB_iff {α : Type} (fallback : α) (eqv : α → α → Pro
       exact h.1
   | some i =>
     obtain ⟨hilt, hitrue, hbefore⟩ := firstTrue_sound c hf
-    simp only [Bool.and_eq_true, decide_eq_true_iff, hf, Option.map_some,
+    simp only [Bool.and_eq_true, decide_eq_true_iff, Option.map_some,
       Option.getD_some]
     constructor
     · rintro ⟨hlen, hb⟩

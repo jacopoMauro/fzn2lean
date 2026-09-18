@@ -180,7 +180,7 @@ def orbitopeB (kind : Int) (cols : List (List Int)) : Bool :=
 theorem orbitopeB_iff (kind : Int) (cols : List (List Int)) :
     orbitopeB kind cols = true ↔ orbitopeProp kind cols := by
   simp only [orbitopeB, orbitopeProp, Bool.and_eq_true, lexChainLesseqB_iff,
-    Bool.or_eq_true, Bool.not_eq_true', beq_iff_eq, List.all_eq_true,
+    Bool.or_eq_true, Bool.not_eq_true', List.all_eq_true,
     decide_eq_true_iff]
   cases hkind1 : (kind == 1) with
   | true =>
