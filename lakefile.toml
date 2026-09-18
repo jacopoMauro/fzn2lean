@@ -48,3 +48,62 @@ root = "Tests.Pretty"
 [[lean_exe]]
 name = "tests_prof"
 root = "Tests.Prof"
+
+[[lean_exe]]
+name = "tests_check"
+root = "Tests.Check"
+
+[[lean_lib]]
+name = "solver"
+
+[[lean_exe]]
+name = "tests_solver"
+root = "solver.Tests"
+
+[[lean_exe]]
+name = "tests_prop"
+root = "solver.TestsProp"
+
+[[lean_exe]]
+name = "tests_heur"
+root = "solver.TestsHeur"
+
+[[lean_exe]]
+name = "tests_fast"
+root = "Tests.Fast"
+
+[[lean_exe]]
+name = "tests_fix"
+root = "solver.TestsFix"
+
+[[lean_exe]]
+name = "tests_enum"
+root = "solver.TestsEnum"
+
+[[lean_exe]]
+name = "tests_sbench"
+root = "solver.TestsBench"
+
+[[lean_exe]]
+name = "tests_opt"
+root = "solver.TestsOpt"
+
+[[lean_exe]]
+name = "tests_rev"
+root = "solver.TestsRev"
+
+[[lean_exe]]
+name = "tests_learn"
+root = "solver.TestsLearn"
+
+[[lean_exe]]
+name = "tests_restart"
+root = "solver.TestsRestart"
+
+[[lean_exe]]
+name = "bench_ab"
+root = "BenchAB"
+
+[[lean_exe]]
+name = "test_enum_tmp"
+root = "TestEnumTmp"

@@ -52,11 +52,11 @@ paired with verified executable implementations.
 
 `checkSolutionFull` has a machine-checked correctness theorem for the
 predicates in `fullCheckableNames`. That closed list currently contains
-**174 names**:
+**218 names**:
 
 - 61 non-extensional standard FlatZinc predicates;
 - 19 extensional set predicates; and
-- 94 supported `fzn_*` global constraints.
+- 138 supported `fzn_*` global constraints.
 
 For each of those names, the executable Boolean interpretation is proved
 equivalent to the corresponding declarative `Prop` interpretation. Subject
@@ -73,26 +73,47 @@ material are recorded in
 provide useful cross-validation but are not part of the proof.
 
 The checker does **not** support every predicate shipped with MiniZinc 2.10.0.
-`Globals.globalsUnsupported` lists the intentionally unsupported globals,
-including graph, automaton, optional-value, multidimensional, and
-float-dependent families. Unknown or unsupported constraints evaluate to
-`false`, so they are rejected rather than assigned guessed semantics. Float
-syntax and semantics are outside the project fragment entirely.
+`Globals.globalsUnsupported` lists the intentionally unsupported globals —
+currently the optional-variable pair `fzn_alternative`/`fzn_span` and the
+float-dependent `fzn_neural_net`/`fzn_piecewise_linear*` (the `_reif`,
+float, and opt variants of other names are outside the fragment too).
+Unknown or unsupported constraints evaluate to `false`, so they are rejected
+rather than assigned guessed semantics. Float syntax and semantics are
+outside the project fragment entirely.
 
-Finally, `checkSolutionFull` decides the dynamic part of satisfaction only.
-Its correctness theorem does not claim that the input model is statically
-well formed, and the current CLI `check` command does not call `wellFormedB`
-before checking a solution. Callers that require full `Satisfies fullSig
-fullInterp` should first establish `WellFormed fullSig m` (or run its
-executable checker) and ensure that every constraint name belongs to
-`fullCheckableNames`.
+### The verified front door (`FznCheck.lean`)
+
+`checkSolutionFull` itself decides the dynamic part of satisfaction only;
+its correctness theorem takes static well-formedness and predicate
+checkability as explicit preconditions. The CLI therefore does not call
+it directly: `LeanFzn/FznCheck.lean` provides `checkModelSolution`, a
+verified wrapper that establishes both preconditions itself and
+classifies every failure mode. Its correctness theorem
+`checkModelSolution_correct` is unconditional: acceptance is equivalent
+to full `Satisfies fullSig fullInterp` (with the completed store of the
+parsed entries), `WellFormed fullSig m`, and all-checkable constraint
+names. The wrapper consists of:
+
+* `wellFormedFastB` — a hash-based fast twin of `wellFormedB`,
+  proved equivalent by `wellFormedFastB_iff`. The naive checker is
+  Θ(n²) (about 37 s at the benchmark's 32,000 variables); the fast
+  twin is linear (~50 ms for the whole front door there).
+* `firstUnsupported` — the predicate-name precondition, with
+  `firstUnsupported_none_iff`.
+* `entriesOkB` — entry well-formedness: a solution string assigns
+  declared variables only, each at most once (A7/A10). This closed a
+  hole where a cheating string could reassign a *parameter* (e.g.
+  override `int: k = 3;` with `k = 5;`) and satisfy constraints its
+  model-given values violate; the old checker accepted such strings.
+  `Tests/Check.lean` pins the rejection.
 
 ## Project layout
 
 ```
 leanfzn/
 ├── LeanFzn.lean              # Umbrella module — imports the whole library
-├── Main.lean                  # CLI: parse a file/stdin, or check a solution
+├── Main.lean                  # CLI: parse a file/stdin, check a solution,
+│                              #   or solve / enumerate / optimize
 ├── PLAN.md                    # Current status and prioritized future work
 ├── lakefile.toml              # Lake build configuration
 ├── lean-toolchain             # Lean 4.33.1
@@ -111,6 +132,8 @@ leanfzn/
 │   ├── FznStdLib.lean          #   Standard predicate signatures + interpretations
 │   ├── FznSolution.lean        #   Solution-string parser + verified checker
 │   ├── FznGlobals.lean         #   Global constraints: signatures, twins, master theorem
+│   ├── FznCheck.lean          #   Verified CLI front door: fast static twin,
+│   │                          #     outcome classification, wrapper theorem
 │   └── FznGlobals/             #   Global-constraint families (frozen, verified)
 │       ├── Common.lean         #     Shared list/set helpers
 │       ├── AllDiffCounting.lean #   all-different family (8 fzn_* names)
@@ -118,7 +141,11 @@ leanfzn/
 │       ├── PackSched.lean      #     packing/scheduling family (17 names)
 │       ├── Counting.lean       #     counting family (32 names)
 │       ├── Channeling.lean     #     channeling family (11 names)
-│       └── SetMath.lean        #     set/mathematical family (14 names)
+│       ├── SetMath.lean        #     set/mathematical family (14 names)
+│       ├── LexChain.lean       #     reverse/2D lex family (10 names)
+│       ├── Graph.lean          #     circuit/graph family (18 names)
+│       ├── Regular.lean        #     regular/mdd family (6 names)
+│       └── Sched2.lean         #     scheduling/remaining family (10 names)
 │
 ├── Tests/
 │   ├── Smoke.lean              # 30 parser smoke tests (valid + malformed input)
@@ -128,8 +155,27 @@ leanfzn/
 │   ├── Solution.lean           # solution-checker end-to-end tests
 │   ├── Globals.lean            # 52 global-constraint tests (static + dynamic + e2e)
 │   ├── Gecode.lean             # 64 Gecode-ported regression tests (15 models)
-│   ├── Coverage.lean           # 371 tests covering ALL checkable predicates
-│   └── Bench.lean              # compiled perf regression suite (checker + parser)
+│   ├── Coverage.lean           # 465 tests covering ALL checkable predicates
+│   ├── Check.lean             # 12 front-door tests: every outcome class + exit codes
+│   └── Bench.lean              # compiled perf regression suite (front door + checker + parser)
+│
+├── solver/                    # The verified constraint solver (PLAN item 6)
+│   ├── Search.lean            #   exhaustive reference search + master theorems
+│   ├── Domain.lean            #   finite-domain extraction from a model
+│   ├── Emit.lean              #   solution-text emission
+│   ├── Solve.lean             #   entry points: solveModel / solveModelProp / solveModelHeur
+│   ├── Propagators.lean       #   propagation contract + first propagators
+│   ├── Fixpoint.lean          #   propagation fixpoint + pruning search
+│   ├── Heuristic.lean         #   MRV branch ordering (permutation composition)
+│   ├── Enum.lean              #   all-solutions enumeration
+│   ├── Extract.lean           #   constraint extraction for propagation
+│   ├── Optimize.lean          #   optimization (reference + branch and bound)
+│   ├── RevState.lean          #   sparse-set reversible state + trail
+│   ├── Learning.lean          #   decision-trail NoGood learning
+│   ├── Restarts.lean          #   budgeted restarts with the `unknown` verdict
+│   ├── Config.lean            #   composed front door: SolveConfig / solveModelWith
+│   ├── Solver.lean            #   umbrella module (whole-stack overview)
+│   └── Tests*.lean            #   test executables (unit + integration + bench)
 │
 └── specification/
     ├── minizinc-2.10.0/        # The pinned normative reference
@@ -164,8 +210,8 @@ The modules form a deliberate chain, each layer building on the last:
 10. **`FznSolution`** checks solution strings against a model; every check
     step is mirrored by a per-name `iff` theorem, capped by the master
     correctness theorem for the standard fragment.
-11. **`FznGlobals/*`** (six family modules, frozen) supply the same
-    Prop/twin/agreement triple for the 94 `fzn_*` globals; **`FznGlobals`**
+11. **`FznGlobals/*`** (ten family modules, frozen) supply the same
+    Prop/twin/agreement triple for the 138 `fzn_*` globals; **`FznGlobals`**
     assembles them into the combined interpretation, the master agreement
     `globalsInterpB_iff`, and the full-checker correctness theorem
     `checkSolutionFull_correct`.
@@ -184,7 +230,7 @@ citations in the module docstrings (`FznStdLib.lean` and
 `LeanFzn/FznGlobals/*.lean`). Reference-solver behavior (Gecode) pins
 the two cases where the handbook was genuinely wrong-footing
 (truncated division, clause negation). Every decision is executable:
-`Tests/Coverage.lean` exercises all 174 checkable names in both truth
+`Tests/Coverage.lean` exercises all 218 checkable names in both truth
 directions and fails the build if a name is untested.
 
 ## Building and running
@@ -195,7 +241,10 @@ Requires Lean 4.33.1 (see `lean-toolchain`; `elan` installs it automatically).
 # Build the library and all executables (the lakefile has no default
 # target, so name them; `lake build LeanFzn` builds only the library)
 lake build leanfzn tests_smoke tests_stdlib tests_solution tests_globals \
-      tests_gecode tests_coverage tests_bench
+      tests_gecode tests_coverage tests_check tests_bench tests_wellformed \
+      tests_pretty tests_prof tests_fast solver tests_solver tests_prop \
+      tests_heur tests_fix tests_enum tests_sbench tests_opt tests_rev \
+      tests_learn tests_restart
 
 # Run the test suites
 lake env tests_smoke      # 30 parser smoke tests
@@ -203,27 +252,115 @@ lake env tests_stdlib     # 64 standard-library tests (static + dynamic)
 lake env tests_solution   # solution-checker end-to-end tests
 lake env tests_globals    # 52 global-constraint tests (static + dynamic + e2e)
 lake env tests_gecode     # 64 Gecode-derived solution-checker regression tests (15 models)
-lake env tests_coverage   # 371 tests covering every checkable predicate and global
-lake env tests_bench      # compiled perf regression suite (checker + parser timings)
+lake env tests_coverage   # 465 tests covering every checkable predicate and global
+lake env tests_check     # 12 front-door tests (outcome classes + exit codes)
+lake env tests_bench     # compiled perf regression suite (front door + checker + parser timings)
+lake env tests_wellformed # 49 static well-formedness tests
+lake env tests_pretty     # 39 pretty-printer round-trip tests
+lake env tests_prof      # profiling driver (parser timing analysis)
+lake env tests_fast      # 7 fast-path differential tests
+
+# Run the solver test suites
+lake env tests_solver    # 198 solver tests (unit + e2e + config-matrix integration)
+lake env tests_prop      # 38 propagator tests
+lake env tests_heur      # 93 heuristic tests
+lake env tests_fix       # 21 fixpoint tests
+lake env tests_enum     # 31 enumeration tests
+lake env tests_sbench    # 4 solver benchmark checks
+lake env tests_opt       # 73 optimization tests
+lake env tests_rev       # 26 reversible-state tests
+lake env tests_learn     # 37 learning tests
+lake env tests_restart   # 23 restart tests
 
 # Parse a FlatZinc file (prints the AST), or pipe via stdin
 lake env leanfzn model.fzn
 echo 'solve satisfy;' | lake env leanfzn -
 
-# Check a solution string against a model (verified global-constraint checker)
+# Check a solution string against a model (verified front door:
+# static validation + predicate checkability + dynamic checking)
 lake env leanfzn check model.fzn solution.txt
-# exit 0 = accepted, 1 = rejected, 2 = usage/IO/parse error
+
+# Solve a model (verified solver, reference search by default).
+# Flags: --prop (fixpoint propagation), --mrv (MRV branch ordering),
+# --budget N (budgeted restarts, may report `unknown`),
+# --nogoods (NoGood learning); supported combos are each switch
+# alone and --prop with --mrv together. `-` or omitted file reads
+# stdin.
+lake env leanfzn solve model.fzn
+lake env leanfzn solve --prop --mrv model.fzn
+
+# Enumerate all solutions (FlatZinc output convention: each solution
+# text, then a final ========== separator)
+lake env leanfzn enum model.fzn
+
+# Optimize (branch and bound): prints the optimal solution text and
+# the ========== separator, with the objective value on stderr
+lake env leanfzn optimize model.fzn
 ```
 
-Exit codes of `leanfzn` (parse mode): 0 = success, 1 = parse error,
-2 = usage/IO error. The `check` subcommand: 0 = solution accepted,
-1 = solution rejected, 2 = usage/IO/model-parse error.
+Exit codes of `leanfzn`:
+
+* parse mode: 0 = success, 1 = parse error, 2 = usage/IO error;
+* `check`: 0 = solution accepted; 1 = rejected (a domain, initializer,
+  or constraint condition is unsatisfied); 2 = malformed model (static
+  well-formedness or model-parse failure); 3 = unsupported predicate
+  (unknown name, model declaration, or an intentionally unsupported
+  global — see `Globals.globalsUnsupported`); 4 = malformed solution
+  string (parse failure, parameter/unknown reassignment, duplicate
+  assignment);
+* `solve`: 0 = solution found (printed as-is, ending with the
+  `----------` separator); 1 = unsatisfiable
+  (`=====UNSATISFIABLE=====` on stdout); 2 = `unknown` — no verdict
+  (budget exhausted or statically refused; reason on stderr), also
+  usage/IO/parse errors; 3 = unsupported model or configuration
+  (reason on stderr);
+* `enum`: 0 = all solutions enumerated (each text, then `==========`);
+  1 = unsatisfiable (`=====UNSATISFIABLE=====` on stdout); 3 =
+  unsupported model (reason on stderr); usage/IO/parse errors exit 2;
+* `optimize`: 0 = optimal solution found (text + `==========` on
+  stdout, `objective = VALUE` on stderr); 1 = unsatisfiable
+  (`=====UNSATISFIABLE=====` on stdout); 3 = unsupported model or
+  objective (reason on stderr); usage/IO/parse errors exit 2.
 
 `Tests/WellFormed.lean` and `Tests/Pretty.lean` can also be run directly
 with `lake env lean`; their `#eval`-based checks are compiled by the
 corresponding executable targets above. The current Lean build succeeds but
 still reports non-fatal linter warnings, primarily unused `simp` arguments in
 proof scripts.
+
+### The verified solver (`solver/`)
+
+On top of the checker, the repository includes a verified
+finite-domain satisfaction solver for the same fragment (PLAN.md item
+6, phases 6.1–6.7), exposed through the `leanfzn solve`, `enum`, and
+`optimize` subcommands (the composed front door `solveModelWith`;
+see below). The stack: exhaustive reference search
+(`solveModel`), fixpoint propagation with branch pruning
+(`solveModelProp`), minimum-remaining-values branch ordering
+(`solveModelHeur`), all-solutions enumeration (`enumModel`),
+optimization in a reference and a branch-and-bound form
+(`optimizeModel`, `optimizeModelBb`), a sparse-set reversible state
+with a trail refining the propagation pass, decision-trail NoGood
+learning, and budgeted restarts with an explicit `unknown` verdict
+(`solveModelBounded`). All entry points share one architecture — every
+candidate leaf is validated by the verified checker itself — and each
+carries a Lean theorem: a returned solution text is always
+checker-accepted (so it satisfies the full declarative semantics via
+`checkModelSolution_correct`), and an `unsat` verdict excludes every
+assignment of the declared finite domains — for the propagating
+entry points under one documented hypothesis (the emitter round-trip
+licence; see `solver/Solve.lean`).
+
+The composed front door is `solveModelWith` (`solver/Config.lean`):
+a `SolveConfig` (`useProp`, `useMrv`, `budget`, `nogoods`) selects the
+features, and each supported combination — every switch alone, plus
+propagation with MRV together — routes through the corresponding
+proven entry point (the prop+MRV combination is composed by
+permutation, with its own master theorems). `solveModelWith_sat_sound`
+proves SAT soundness for the full supported configuration space;
+budgeted runs report an interrupted search as `unknown`, never as
+`unsat` (`solveModelWith_budget_never_falseUnsat`). Other feature
+combinations are refused with an explicit reason.
 
 ## Project status and roadmap
 

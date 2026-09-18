@@ -1,0 +1,34 @@
+{
+    "name": "Research - Lean + LaTeX + Python",
+
+    "image": "mydevcontainer:latest",
+
+    "remoteUser": "vscode",
+
+    "workspaceFolder": "/workspace",
+
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+
+    "containerEnv": {
+        "CODEX_HOME": "/codex"
+    },
+
+    "mounts": [
+        "source=/home/mauro/onedrive/sync/software/utilities/agent-skills,target=/home/vscode/.agents/skills,type=bind",
+        "source=/home/mauro/Desktop/software/utilities/devcontainer/codex-credentials-for-devcontainer,target=/codex,type=bind",
+        "source=/home/mauro/onedrive/sync/software/utilities/devcontainer/copilot-instructions,target=/workspace/.github/instructions,type=bind"
+    ],
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "leanprover.lean4",
+                "James-Yu.latex-workshop",
+                "ms-python.python",
+                "charliermarsh.ruff",
+                "streetsidesoftware.code-spell-checker",
+                "openai.chatgpt"
+            ]
+        }
+    }
+}
