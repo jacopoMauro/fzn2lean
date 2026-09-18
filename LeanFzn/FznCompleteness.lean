@@ -1,6 +1,10 @@
 import LeanFzn.FznCorrectness
 import LeanFzn.FznSuffix
 
+-- See `FznCorrectness.lean`: split-driven proofs carry per-branch load-bearing
+-- hypotheses that the simp linter flags as unused.
+set_option linter.unusedSimpArgs false
+
 /-
 # Parser Completeness (integer/Boolean fragment)
 

@@ -61,7 +61,7 @@ theorem nameIndex_some : ∀ (names : List String) (s : String) (i : Nat),
 /-- From an in-bounds successful option lookup, the bang read
     returns the same value (the bridge `hvals`-style premises need). -/
 private theorem getElem_of_getElem? {α : Type} [Inhabited α] {l : List α}
-    {i : Nat} {x : α} (hlt : i < l.length) (hget : l[i]? = some x) :
+    {i : Nat} {x : α} (_hlt : i < l.length) (hget : l[i]? = some x) :
     l[i]! = x := by
   rw [List.getElem!_eq_getElem?_getD, hget]
   rfl
@@ -1023,7 +1023,7 @@ private theorem linCoeffs_eval {store : Store} :
                   rw [hrest] at hcoeffs
                   have hcons : k :: rest = coeffs := Option.some.inj hcoeffs
                   subst hcons
-                  simp only [List.mapM_cons, BasicExpr.eval, hl,
+                  simp only [List.mapM_cons, BasicExpr.eval,
                     BasicLiteral.denote]
                   rw [ih rest hrest]
                   rfl
@@ -1470,7 +1470,7 @@ private theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
         exact absurd hdc (by simp)
       case some i =>
         rw [hxi] at hdc
-        simp only [Option.map, hxi] at hdc
+        simp only [Option.map] at hdc
         exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨x, k, i, heqname, heqargs, hxi, by simp at hdc; exact hdc.symm⟩))))))))))))))))
     case h_3 k y heqargs =>
       cases hyi : nameIndex names y.name
@@ -1480,7 +1480,7 @@ private theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
         exact absurd hdc (by simp)
       case some i =>
         rw [hyi] at hdc
-        simp only [Option.map, hyi] at hdc
+        simp only [Option.map] at hdc
         exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨k, y, i, heqname, heqargs, hyi, by simp at hdc; exact hdc.symm⟩)))))))))))))))))
     case h_4 => exact absurd hdc (by simp)
   case h_13 heqname =>

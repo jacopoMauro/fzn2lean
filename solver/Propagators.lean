@@ -7564,15 +7564,15 @@ theorem propBoolNotSlot_preserves (i j : Nat) :
     have hymem : .bool q ∈ boolVals (getSlot doms j) := mem_boolVals_of ha hy
     cases hs : singleBool? (getSlot doms i) with
     | none =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         cases hs2 : singleBool? (getSlot doms j) with
         | none =>
-            simp only [hs2, propBoolNotSlot] at h
+            simp only [hs2] at h
             have hd : doms' = doms := (PropResult.narrowed.inj h).symm
             subst hd
             exact ha
         | some q' =>
-            simp only [hs2, propBoolNotSlot] at h
+            simp only [hs2] at h
             have hqq' : q = q' := eq_of_singleBool? ha hy hs2
             -- the pin forces x = !q', so narrow slot i to the opposite
             have htarget : .bool p ∈ (if q' then falseVals (getSlot doms i)
@@ -7604,7 +7604,7 @@ theorem propBoolNotSlot_preserves (i j : Nat) :
                 · rw [getSlot_setSlot_of_ne doms _ i m hmi]
                   exact hget m v hv
     | some p' =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         have hpp' : p = p' := eq_of_singleBool? ha hx hs
         have htarget : .bool q ∈ (if p' then falseVals (getSlot doms j)
           else trueVals (getSlot doms j)) :=
@@ -7638,15 +7638,15 @@ theorem propBoolNotSlot_preserves (i j : Nat) :
     simp only [propBoolNotSlot] at h
     cases hs : singleBool? (getSlot doms i) with
     | none =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         cases hs2 : singleBool? (getSlot doms j) with
         | none =>
-            simp only [hs2, propBoolNotSlot] at h
+            simp only [hs2] at h
             have hd : doms' = doms := (PropResult.narrowed.inj h).symm
             subst hd
             exact DomPointwiseSub.refl _
         | some q' =>
-            simp only [hs2, propBoolNotSlot] at h
+            simp only [hs2] at h
             by_cases hc : (if q' then falseVals (getSlot doms i)
                 else trueVals (getSlot doms i)).isEmpty = true
             · rw [if_pos hc] at h
@@ -7663,7 +7663,7 @@ theorem propBoolNotSlot_preserves (i j : Nat) :
               | true => exact (mem_falseVals.mp hv).1
               | false => exact (mem_trueVals.mp hv).1
     | some p' =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         by_cases hc : (if p' then falseVals (getSlot doms j)
             else trueVals (getSlot doms j)).isEmpty = true
         · rw [if_pos hc] at h
@@ -7686,11 +7686,11 @@ theorem propBoolNotSlot_preserves (i j : Nat) :
     have hymem : .bool q ∈ boolVals (getSlot doms j) := mem_boolVals_of ha hy
     cases hs : singleBool? (getSlot doms i) with
     | none =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         cases hs2 : singleBool? (getSlot doms j) with
         | none => rw [hs2] at h; exact absurd h (by simp)
         | some q' =>
-            simp only [hs2, propBoolNotSlot] at h
+            simp only [hs2] at h
             have hqq' : q = q' := eq_of_singleBool? ha hy hs2
             have htarget : .bool p ∈ (if q' then falseVals (getSlot doms i)
               else trueVals (getSlot doms i)) :=
@@ -7703,7 +7703,7 @@ theorem propBoolNotSlot_preserves (i j : Nat) :
             · rw [if_neg hc] at h
               exact absurd h (by simp)
     | some p' =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         have hpp' : p = p' := eq_of_singleBool? ha hx hs
         have htarget : .bool q ∈ (if p' then falseVals (getSlot doms j)
           else trueVals (getSlot doms j)) :=
@@ -7761,11 +7761,11 @@ theorem propBoolAndSlot_preserves (i j k : Nat) :
     have hzmem : .bool r ∈ boolVals (getSlot doms k) := mem_boolVals_of ha hz
     cases hs : singleBool? (getSlot doms i) with
     | some p' =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         have hpp' : p = p' := eq_of_singleBool? ha hx hs
         cases hs2 : singleBool? (getSlot doms j) with
         | some q' =>
-            simp only [hs2, propBoolAndSlot] at h
+            simp only [hs2] at h
             have hqq' : q = q' := eq_of_singleBool? ha hy hs2
             have hand' : (p' && q') = r := by rw [← hpp', ← hqq']; exact hand
             have htarget : .bool r ∈
@@ -7799,12 +7799,12 @@ theorem propBoolAndSlot_preserves (i j k : Nat) :
                 · rw [getSlot_setSlot_of_ne doms _ k m hmk]
                   exact hget m v hv
         | none =>
-            simp only [hs2, propBoolAndSlot] at h
+            simp only [hs2] at h
             have hd : doms' = doms := (PropResult.narrowed.inj h).symm
             subst hd
             exact ha
     | none =>
-        simp only [hs, propBoolAndSlot] at h
+        simp only [hs] at h
         have hd : doms' = doms := (PropResult.narrowed.inj h).symm
         subst hd
         exact ha
@@ -7812,11 +7812,11 @@ theorem propBoolAndSlot_preserves (i j k : Nat) :
     simp only [propBoolAndSlot] at h
     cases hs : singleBool? (getSlot doms i) with
     | some p' =>
-        simp only [hs, propBoolAndSlot] at h
+        simp only [hs] at h
         cases hs2 : singleBool? (getSlot doms j) with
         | some q' =>
             rw [hs2] at h
-            simp only [propBoolAndSlot] at h
+            simp only [] at h
             by_cases hc : (if (p' && q') then trueVals (getSlot doms k)
                 else falseVals (getSlot doms k)).isEmpty = true
             · rw [if_pos hc] at h
@@ -7834,12 +7834,12 @@ theorem propBoolAndSlot_preserves (i j k : Nat) :
                   | exact (mem_trueVals.mp hv).1
                   | exact (mem_falseVals.mp hv).1
         | none =>
-            simp only [hs2, propBoolAndSlot] at h
+            simp only [hs2] at h
             have hd : doms' = doms := (PropResult.narrowed.inj h).symm
             subst hd
             exact DomPointwiseSub.refl _
     | none =>
-        simp only [hs, propBoolAndSlot] at h
+        simp only [hs] at h
         have hd : doms' = doms := (PropResult.narrowed.inj h).symm
         subst hd
         exact DomPointwiseSub.refl _
@@ -7851,11 +7851,11 @@ theorem propBoolAndSlot_preserves (i j k : Nat) :
     have hzmem : .bool r ∈ boolVals (getSlot doms k) := mem_boolVals_of ha hz
     cases hs : singleBool? (getSlot doms i) with
     | some p' =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         have hpp' : p = p' := eq_of_singleBool? ha hx hs
         cases hs2 : singleBool? (getSlot doms j) with
         | some q' =>
-            simp only [hs2, propBoolAndSlot] at h
+            simp only [hs2] at h
             have hqq' : q = q' := eq_of_singleBool? ha hy hs2
             have hand' : (p' && q') = r := by rw [← hpp', ← hqq']; exact hand
             have htarget : .bool r ∈
@@ -7917,11 +7917,11 @@ theorem propBoolOrSlot_preserves (i j k : Nat) :
     have hzmem : .bool r ∈ boolVals (getSlot doms k) := mem_boolVals_of ha hz
     cases hs : singleBool? (getSlot doms i) with
     | some p' =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         have hpp' : p = p' := eq_of_singleBool? ha hx hs
         cases hs2 : singleBool? (getSlot doms j) with
         | some q' =>
-            simp only [hs2, propBoolOrSlot] at h
+            simp only [hs2] at h
             have hqq' : q = q' := eq_of_singleBool? ha hy hs2
             have hor' : (p' || q') = r := by rw [← hpp', ← hqq']; exact hor
             have htarget : .bool r ∈
@@ -7955,12 +7955,12 @@ theorem propBoolOrSlot_preserves (i j k : Nat) :
                 · rw [getSlot_setSlot_of_ne doms _ k m hmk]
                   exact hget m v hv
         | none =>
-            simp only [hs2, propBoolAndSlot] at h
+            simp only [hs2] at h
             have hd : doms' = doms := (PropResult.narrowed.inj h).symm
             subst hd
             exact ha
     | none =>
-        simp only [hs, propBoolAndSlot] at h
+        simp only [hs] at h
         have hd : doms' = doms := (PropResult.narrowed.inj h).symm
         subst hd
         exact ha
@@ -7968,11 +7968,11 @@ theorem propBoolOrSlot_preserves (i j k : Nat) :
     simp only [propBoolOrSlot] at h
     cases hs : singleBool? (getSlot doms i) with
     | some p' =>
-        simp only [hs, propBoolAndSlot] at h
+        simp only [hs] at h
         cases hs2 : singleBool? (getSlot doms j) with
         | some q' =>
             rw [hs2] at h
-            simp only [propBoolAndSlot] at h
+            simp only [] at h
             by_cases hc : (if (p' || q') then trueVals (getSlot doms k)
                 else falseVals (getSlot doms k)).isEmpty = true
             · rw [if_pos hc] at h
@@ -7990,12 +7990,12 @@ theorem propBoolOrSlot_preserves (i j k : Nat) :
                   | exact (mem_trueVals.mp hv).1
                   | exact (mem_falseVals.mp hv).1
         | none =>
-            simp only [hs2, propBoolAndSlot] at h
+            simp only [hs2] at h
             have hd : doms' = doms := (PropResult.narrowed.inj h).symm
             subst hd
             exact DomPointwiseSub.refl _
     | none =>
-        simp only [hs, propBoolAndSlot] at h
+        simp only [hs] at h
         have hd : doms' = doms := (PropResult.narrowed.inj h).symm
         subst hd
         exact DomPointwiseSub.refl _
@@ -8007,11 +8007,11 @@ theorem propBoolOrSlot_preserves (i j k : Nat) :
     have hzmem : .bool r ∈ boolVals (getSlot doms k) := mem_boolVals_of ha hz
     cases hs : singleBool? (getSlot doms i) with
     | some p' =>
-        simp only [hs, propBoolNotSlot] at h
+        simp only [hs] at h
         have hpp' : p = p' := eq_of_singleBool? ha hx hs
         cases hs2 : singleBool? (getSlot doms j) with
         | some q' =>
-            simp only [hs2, propBoolOrSlot] at h
+            simp only [hs2] at h
             have hqq' : q = q' := eq_of_singleBool? ha hy hs2
             have hor' : (p' || q') = r := by rw [← hpp', ← hqq']; exact hor
             have htarget : .bool r ∈

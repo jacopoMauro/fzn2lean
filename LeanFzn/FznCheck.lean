@@ -911,12 +911,12 @@ private theorem find?_eq_of_forall {α : Type} (p q : α → Bool) (l : List α)
       cases hp : p a with
       | true =>
           have hq : q a = true := by rw [← h a List.mem_cons_self]; exact hp
-          simp only [hp, hq]
+          simp only [hq]
       | false =>
           have hq : q a = false := by
               rw [h a List.mem_cons_self] at hp
               exact hp
-          simp only [hp, hq]
+          simp only [hq]
           exact ih (fun x hx => h x (List.mem_cons_of_mem _ hx))
 
 /-- The fast name gate returns exactly the slow gate's answer. -/

@@ -2717,9 +2717,9 @@ theorem takeWhile_stop_acc (p : Char → Bool) (s : Array Char) :
     token-start satisfy this). -/
 theorem lexToken_append_left' {s t : Array Char} {pos : Nat}
     (hpos : pos < s.size)
-    (hlook : ∀ (hn : s.size ≤ pos + 1) (h2 : pos + 1 < s.size + t.size),
-      (s ++ t)[pos + 1]'(by rw [Array.size_append]; exact h2) ≠ ':'
-      ∧ (s ++ t)[pos + 1]'(by rw [Array.size_append]; exact h2) ≠ '.')
+    (hlook : ∀ (_hn : s.size ≤ pos + 1) (_h2 : pos + 1 < s.size + t.size),
+      (s ++ t)[pos + 1]'(by rw [Array.size_append]; omega) ≠ ':'
+      ∧ (s ++ t)[pos + 1]'(by rw [Array.size_append]; omega) ≠ '.')
     (hnostr : ∀ (q : Nat), pos ≤ q → q < s.size → s[q]! ≠ '"')
     (htw : ∀ (p : Char → Bool) (q : Nat) (acc : String), pos ≤ q →
       (takeWhile p s q acc).2 < s.size) :
@@ -3011,7 +3011,7 @@ theorem skipTrivia_ws_agree' (arr : Array Char)
     (k k' : Nat) (hkk : k ≤ k') (hk'le : k' ≤ arr.size)
     (hws : ∀ (m : Nat), k ≤ m → m < k' →
       (hm : m < arr.size) → isWhitespace ((arr[m]'hm)) = true)
-    (hnopct : ∀ (q : Nat) (hq : q < arr.size), k ≤ q → q < k' →
+    (_hnopct : ∀ (q : Nat) (hq : q < arr.size), k ≤ q → q < k' →
       ((arr[q]'hq)) ≠ '%') :
     skipTrivia arr k = skipTrivia arr k' := by
   have key : ∀ (j : Nat), k ≤ j → j < k' →
@@ -3298,7 +3298,7 @@ theorem split_helper {s u : Array Char}
       rw [Array.size_append]
       omega) = '\n')
     (hnopct : ∀ (q : Nat) (h : q < s.size), s[q]'h ≠ '%')
-    (hunif : ∀ (k : Nat) (h : k < s.size) (h2 : s.size ≤ k + 1)
+    (hunif : ∀ (k : Nat) (_h : k < s.size) (_h2 : s.size ≤ k + 1)
         (h3 : k + 1 < (s ++ u).size),
       (s ++ u)[k + 1]'h3 ≠ ':' ∧ (s ++ u)[k + 1]'h3 ≠ '.')
     (htw : ∀ (p : Char → Bool) (q : Nat) (acc : String),

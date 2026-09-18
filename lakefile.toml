@@ -99,11 +99,3 @@ root = "solver.TestsLearn"
 [[lean_exe]]
 name = "tests_restart"
 root = "solver.TestsRestart"
-
-[[lean_exe]]
-name = "bench_ab"
-root = "BenchAB"
-
-[[lean_exe]]
-name = "test_enum_tmp"
-root = "TestEnumTmp"

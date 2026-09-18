@@ -276,7 +276,7 @@ private theorem nodup_take_inj {L : List Value} {k : Nat} (hk : k ≤ L.length)
 /-- The tail of a list, by position: dropping to an in-bounds
 position exposes that position's value as the head. -/
 private theorem drop_eq_getD_cons {L : List Value} :
-    ∀ (p : Nat) (h : p < L.length), L.drop p = (L.getD p default) :: L.drop (p + 1) := by
+    ∀ (p : Nat) (_h : p < L.length), L.drop p = (L.getD p default) :: L.drop (p + 1) := by
   induction L with
   | nil => intro p h; exact absurd h (by simp)
   | cons a as ih =>
@@ -290,7 +290,7 @@ private theorem drop_eq_getD_cons {L : List Value} :
 
 /-- One more prefix entry is the value at the prefix boundary. -/
 private theorem take_succ_getD {L : List Value} :
-    ∀ (k : Nat) (h : k < L.length), L.take (k + 1) = L.take k ++ [L.getD k default] := by
+    ∀ (k : Nat) (_h : k < L.length), L.take (k + 1) = L.take k ++ [L.getD k default] := by
   induction L with
   | nil => intro k h; exact absurd h (by simp)
   | cons a as ih =>
@@ -305,7 +305,7 @@ private theorem take_succ_getD {L : List Value} :
 /-- Setting a position at or beyond a prefix leaves the prefix
 alone. -/
 private theorem take_set_ge {L : List Value} :
-    ∀ (m p : Nat) (y : Value) (h : m ≤ p), (L.set p y).take m = L.take m := by
+    ∀ (m p : Nat) (y : Value) (_h : m ≤ p), (L.set p y).take m = L.take m := by
   intro m p
   induction L generalizing m p with
   | nil => intro y h; cases m <;> rfl
@@ -324,7 +324,7 @@ private theorem take_set_ge {L : List Value} :
 /-- Setting a position below the boundary extends the prefix with
 the new value. -/
 private theorem take_set_succ {L : List Value} :
-    ∀ (w : Nat) (x : Value) (hw : w < L.length), (L.set w x).take (w + 1) = L.take w ++ [x] := by
+    ∀ (w : Nat) (x : Value) (_hw : w < L.length), (L.set w x).take (w + 1) = L.take w ++ [x] := by
   induction L with
   | nil => intro w x hw; exact absurd hw (by simp)
   | cons a as ih =>
@@ -338,7 +338,7 @@ private theorem take_set_succ {L : List Value} :
 
 /-- Setting a position below the drop point leaves the tail alone. -/
 private theorem drop_set_of_lt {L : List Value} :
-    ∀ (k i : Nat) (a : Value) (h : i < k), (L.set i a).drop k = L.drop k := by
+    ∀ (k i : Nat) (a : Value) (_h : i < k), (L.set i a).drop k = L.drop k := by
   intro k i
   induction L generalizing k i with
   | nil => intro a h; cases k <;> rfl
@@ -537,7 +537,7 @@ def sparseRemove (d : SparseDom) (i : Nat) : SparseDom :=
 theorem sparseRemove_size {d : SparseDom} {i : Nat} (hi : i < d.size) :
     (sparseRemove d i).size + 1 = d.size ∧ (sparseRemove d i).vals.size = d.vals.size := by
   rw [sparseRemove, if_pos hi]
-  simp only [SparseDom.size, SparseDom.vals]
+  simp only []
   rw [Array.size_setIfInBounds, Array.size_setIfInBounds]
   omega
 
@@ -566,7 +566,7 @@ theorem sparseRemove_prefix {d : SparseDom} (hd : d.Valid) (i : Nat) {k : Nat}
         (d.vals.toList.set i (d.vals.toList.getD (d.size - 1) default)).set
           (d.size - 1) (d.vals.toList.getD i default) := by
       rw [sparseRemove, if_pos hi]
-      simp only [SparseDom.vals, Array.toList_setIfInBounds, Array.toList_setIfInBounds,
+      simp only [Array.toList_setIfInBounds, Array.toList_setIfInBounds,
         ← arrayToList_getD, ← arrayToList_getD]
     by_cases hieq : i = d.size - 1
     · -- degenerate swap: both writes hit the same position, final value
@@ -1013,7 +1013,7 @@ every prefix of at least the window length is preserved — the fact
 the state-level trail proof needs. -/
 private theorem narrowPass_prefix (keep : Value → Bool) (n k : Nat) (hkn : n ≤ k)
     (v : Value) :
-    ∀ (A : Array Value) (p w : Nat) (hnle : n ≤ A.size),
+    ∀ (A : Array Value) (p w : Nat) (_hnle : n ≤ A.size),
       v ∈ (narrowPass keep A p w n).vals.toList.take k ↔ v ∈ A.toList.take k := by
   intro A p w
   induction A, p, w using narrowPass.induct (keep := keep) (n := n) with
@@ -1457,7 +1457,7 @@ private theorem revRestore1_valid (s : RevState) (e : RevTrailEntry) (hs : s.Val
 window to the oldest recorded size for `j` (clamped to the
 array), or leaves it alone if `j` was never narrowed. -/
 private theorem revBacktrack_slot (tl : revTrail) :
-    ∀ (s : RevState) (j : Nat) (hs : RevState.Valid s),
+    ∀ (s : RevState) (j : Nat) (_hs : RevState.Valid s),
       (revBacktrack s tl).doms.getD j default =
         sparseRestore (s.doms.getD j default)
           ((trailPrevSize j tl).getD (s.doms.getD j default).size) := by
@@ -1806,11 +1806,11 @@ family of narrowed domains onto the state through `revNarrowFrom`
 yields exactly those domains at the logical view (per-slot
 membership). -/
 theorem revNarrowFrom_refines (doms' : List (List Value)) (n : Nat) :
-    ∀ (s : RevState) (hs : RevState.Valid s)
-      (hsub : DomPointwiseSub doms' (revDoms s)),
-      (∀ i (v : Value) (hi : i < n), v ∈ revGet (revNarrowFrom s doms' n) i ↔
+    ∀ (s : RevState) (_hs : RevState.Valid s)
+      (_hsub : DomPointwiseSub doms' (revDoms s)),
+      (∀ i (v : Value) (_hi : i < n), v ∈ revGet (revNarrowFrom s doms' n) i ↔
         v ∈ getSlot doms' i) ∧
-      (∀ i (v : Value) (hle : n ≤ i), v ∈ revGet (revNarrowFrom s doms' n) i ↔
+      (∀ i (v : Value) (_hle : n ≤ i), v ∈ revGet (revNarrowFrom s doms' n) i ↔
         v ∈ revGet s i) := by
   induction n with
   | zero =>
@@ -1932,7 +1932,7 @@ theorem revPropPass_refines {s : RevState} (hsv : RevState.Valid s)
     {s' : RevState} (h : revPropPass s props = .narrowed s') :
     ∃ doms', propPass props (revDoms s) = .narrowed doms' ∧
       s' = revNarrowFrom s doms' doms'.length ∧
-      (∀ (i : Nat) (v : Value) (hi : i < doms'.length),
+      (∀ (i : Nat) (v : Value) (_hi : i < doms'.length),
           v ∈ revGet s' i ↔ v ∈ getSlot doms' i) := by
   simp only [revPropPass] at h
   cases hp : propPass props (revDoms s) with
