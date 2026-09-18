@@ -793,7 +793,7 @@ theorem SparseRemovalsFrom.valid {d1 d2 : SparseDom} (h : SparseRemovalsFrom d1 
     (hd1 : d1.Valid) : d2.Valid := by
   induction h with
   | refl => exact hd1
-  | @step d2' d3' i' h' hsize heq' ih => subst heq'; exact sparseRemove_valid ih i' 
+  | @step d2' d3' i' h' hsize heq' ih => subst heq'; exact sparseRemove_valid ih i'
 
 /-- Removals preserve the array size. -/
 theorem SparseRemovalsFrom.vals_size {d1 d2 : SparseDom} (h : SparseRemovalsFrom d1 d2) :
