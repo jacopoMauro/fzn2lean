@@ -1009,7 +1009,17 @@ set_option maxHeartbeats 1000000 in
 theorem bin_packing_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_bin_packing") args = true ↔
       packSchedInterp (Ident.mk "fzn_bin_packing") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_bin_packing") args
+      = match intInts2 args with
+      | some (c, bin, wt) => binPackingB c bin wt
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_bin_packing") args
+      = match intInts2 args with
+      | some (c, bin, wt) => binPackingProp c bin wt
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intInts2 args with
   | none => simp
   | some p =>
@@ -1021,7 +1031,17 @@ set_option maxHeartbeats 1000000 in
 theorem bin_packing_capa_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_bin_packing_capa") args = true ↔
       packSchedInterp (Ident.mk "fzn_bin_packing_capa") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_bin_packing_capa") args
+      = match ints3 args with
+      | some (capa, bin, wt) => binPackingCapaB capa bin wt
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_bin_packing_capa") args
+      = match ints3 args with
+      | some (capa, bin, wt) => binPackingCapaProp capa bin wt
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints3 args with
   | none => simp
   | some p =>
@@ -1033,7 +1053,17 @@ set_option maxHeartbeats 1000000 in
 theorem bin_packing_load_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_bin_packing_load") args = true ↔
       packSchedInterp (Ident.mk "fzn_bin_packing_load") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_bin_packing_load") args
+      = match ints3 args with
+      | some (load, bin, wt) => binPackingLoadB load bin wt
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_bin_packing_load") args
+      = match ints3 args with
+      | some (load, bin, wt) => binPackingLoadProp load bin wt
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints3 args with
   | none => simp
   | some p =>
@@ -1045,7 +1075,17 @@ set_option maxHeartbeats 1000000 in
 theorem knapsack_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_knapsack") args = true ↔
       packSchedInterp (Ident.mk "fzn_knapsack") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_knapsack") args
+      = match ints3IntInt args with
+      | some (w, p, xs, tw, tp) => knapsackB w p xs tw tp
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_knapsack") args
+      = match ints3IntInt args with
+      | some (w, p, xs, tw, tp) => knapsackProp w p xs tw tp
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints3IntInt args with
   | none => simp
   | some p =>
@@ -1057,7 +1097,17 @@ set_option maxHeartbeats 1000000 in
 theorem diffn_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_diffn") args = true ↔
       packSchedInterp (Ident.mk "fzn_diffn") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_diffn") args
+      = match ints4 args with
+      | some (x, y, dx, dy) => diffnB x y dx dy
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_diffn") args
+      = match ints4 args with
+      | some (x, y, dx, dy) => diffnProp x y dx dy
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints4 args with
   | none => simp
   | some p =>
@@ -1069,7 +1119,17 @@ set_option maxHeartbeats 1000000 in
 theorem diffn_nonstrict_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_diffn_nonstrict") args = true ↔
       packSchedInterp (Ident.mk "fzn_diffn_nonstrict") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_diffn_nonstrict") args
+      = match ints4 args with
+      | some (x, y, dx, dy) => diffnNonstrictB x y dx dy
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_diffn_nonstrict") args
+      = match ints4 args with
+      | some (x, y, dx, dy) => diffnNonstrictProp x y dx dy
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints4 args with
   | none => simp
   | some p =>
@@ -1081,7 +1141,17 @@ set_option maxHeartbeats 1000000 in
 theorem geost_nonoverlap_k_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_geost_nonoverlap_k") args = true ↔
       packSchedInterp (Ident.mk "fzn_geost_nonoverlap_k") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_geost_nonoverlap_k") args
+      = match ints4 args with
+      | some (x1, w1, x2, w2) => geostNonoverlapKB x1 w1 x2 w2
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_geost_nonoverlap_k") args
+      = match ints4 args with
+      | some (x1, w1, x2, w2) => geostNonoverlapKProp x1 w1 x2 w2
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints4 args with
   | none => simp
   | some p =>
@@ -1093,7 +1163,17 @@ set_option maxHeartbeats 1000000 in
 theorem disjunctive_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_disjunctive") args = true ↔
       packSchedInterp (Ident.mk "fzn_disjunctive") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_disjunctive") args
+      = match ints2 args with
+      | some (s, d) => disjunctiveB s d
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_disjunctive") args
+      = match ints2 args with
+      | some (s, d) => disjunctiveProp s d
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints2 args with
   | none => simp
   | some p =>
@@ -1105,7 +1185,17 @@ set_option maxHeartbeats 1000000 in
 theorem disjunctive_strict_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_disjunctive_strict") args = true ↔
       packSchedInterp (Ident.mk "fzn_disjunctive_strict") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_disjunctive_strict") args
+      = match ints2 args with
+      | some (s, d) => disjunctiveStrictB s d
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_disjunctive_strict") args
+      = match ints2 args with
+      | some (s, d) => disjunctiveStrictProp s d
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints2 args with
   | none => simp
   | some p =>
@@ -1117,7 +1207,17 @@ set_option maxHeartbeats 1000000 in
 theorem cumulative_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_cumulative") args = true ↔
       packSchedInterp (Ident.mk "fzn_cumulative") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_cumulative") args
+      = match ints3Int args with
+      | some (s, d, r, cap) => cumulativeB s d r cap
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_cumulative") args
+      = match ints3Int args with
+      | some (s, d, r, cap) => cumulativeProp s d r cap
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints3Int args with
   | none => simp
   | some p =>
@@ -1129,7 +1229,17 @@ set_option maxHeartbeats 1000000 in
 theorem table_int_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_table_int") args = true ↔
       packSchedInterp (Ident.mk "fzn_table_int") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_table_int") args
+      = match ints2 args with
+      | some (xs, ts) => tableIntB xs ts
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_table_int") args
+      = match ints2 args with
+      | some (xs, ts) => tableIntProp xs ts
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : ints2 args with
   | none => simp
   | some p =>
@@ -1141,7 +1251,17 @@ set_option maxHeartbeats 1000000 in
 theorem if_then_else_int_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_if_then_else_int") args = true ↔
       packSchedInterp (Ident.mk "fzn_if_then_else_int") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_if_then_else_int") args
+      = match boolsIntsInt args with
+      | some (c, x, y) => iteIntB c x y
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_if_then_else_int") args
+      = match boolsIntsInt args with
+      | some (c, x, y) => iteIntProp c x y
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : boolsIntsInt args with
   | none => simp
   | some p =>
@@ -1153,7 +1273,17 @@ set_option maxHeartbeats 1000000 in
 theorem if_then_else_bool_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_if_then_else_bool") args = true ↔
       packSchedInterp (Ident.mk "fzn_if_then_else_bool") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_if_then_else_bool") args
+      = match boolsBoolsBool args with
+      | some (c, x, y) => iteBoolB c x y
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_if_then_else_bool") args
+      = match boolsBoolsBool args with
+      | some (c, x, y) => iteBoolProp c x y
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : boolsBoolsBool args with
   | none => simp
   | some p =>
@@ -1165,7 +1295,17 @@ set_option maxHeartbeats 1000000 in
 theorem if_then_else_set_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_if_then_else_set") args = true ↔
       packSchedInterp (Ident.mk "fzn_if_then_else_set") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_if_then_else_set") args
+      = match boolsSetsSet args with
+      | some (c, x, y) => iteSetB c x y
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_if_then_else_set") args
+      = match boolsSetsSet args with
+      | some (c, x, y) => iteSetProp c x y
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : boolsSetsSet args with
   | none => simp
   | some p =>
@@ -1177,7 +1317,17 @@ set_option maxHeartbeats 1000000 in
 theorem if_then_else_var_int_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_if_then_else_var_int") args = true ↔
       packSchedInterp (Ident.mk "fzn_if_then_else_var_int") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_if_then_else_var_int") args
+      = match boolsIntsInt args with
+      | some (c, x, y) => iteIntB c x y
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_if_then_else_var_int") args
+      = match boolsIntsInt args with
+      | some (c, x, y) => iteIntProp c x y
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : boolsIntsInt args with
   | none => simp
   | some p =>
@@ -1189,7 +1339,17 @@ set_option maxHeartbeats 1000000 in
 theorem if_then_else_var_bool_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_if_then_else_var_bool") args = true ↔
       packSchedInterp (Ident.mk "fzn_if_then_else_var_bool") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_if_then_else_var_bool") args
+      = match boolsBoolsBool args with
+      | some (c, x, y) => iteBoolB c x y
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_if_then_else_var_bool") args
+      = match boolsBoolsBool args with
+      | some (c, x, y) => iteBoolProp c x y
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : boolsBoolsBool args with
   | none => simp
   | some p =>
@@ -1201,7 +1361,17 @@ set_option maxHeartbeats 1000000 in
 theorem if_then_else_var_set_iff (args : List Value) :
     packSchedInterpB (Ident.mk "fzn_if_then_else_var_set") args = true ↔
       packSchedInterp (Ident.mk "fzn_if_then_else_var_set") args := by
-  simp only [packSchedInterp, packSchedInterpB]
+  have hB : ∀ args, packSchedInterpB (Ident.mk "fzn_if_then_else_var_set") args
+      = match boolsSetsSet args with
+      | some (c, x, y) => iteSetB c x y
+      | none => false
+      := fun _ => rfl
+  have hI : ∀ args, packSchedInterp (Ident.mk "fzn_if_then_else_var_set") args
+      = match boolsSetsSet args with
+      | some (c, x, y) => iteSetProp c x y
+      | none => False
+      := fun _ => rfl
+  rw [hB args, hI args]
   cases h : boolsSetsSet args with
   | none => simp
   | some p =>

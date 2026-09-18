@@ -365,13 +365,19 @@ private def parseEntries : List (List Token) → Except String (List Entry)
 
 /-- Parse a whole solution string: `x = v;` lines, with FlatZinc
     comments and whitespace allowed anywhere (the model lexer is
-    reused).  Fails if the string is not a sequence of solution lines. -/
+    reused).  Fails if the string is not a sequence of solution lines.
+    A string that tokenizes to nothing but whitespace and comments
+    parses as the empty entry list (all output variables omitted);
+    a string with tokens but no `;`-terminated line is rejected
+    (it cannot be a suffix of a well-formed solution). -/
 def parseSolution (src : String) : Except String (List Entry) := do
   let toks ← tokenize src
   if toks.toList.isEmpty then
     .ok []
   else
-    parseEntries (splitLines toks.toList [])
+    match splitLines toks.toList [] with
+    | [] => .error "no solution assignment found"
+    | lines => parseEntries lines
 
 /-! ## Building the store
 
@@ -771,7 +777,11 @@ private theorem interpB_set_eq_iff (a b : IntSetValue) :
 private theorem interpB_set_ne_iff (a b : IntSetValue) :
     interpB (Ident.mk "set_ne") [.setOfInt a, .setOfInt b] = true ↔
       stdInterp (Ident.mk "set_ne") [.setOfInt a, .setOfInt b] := by
-  simp only [interpB, stdInterp]
+  have hB : interpB (Ident.mk "set_ne") [.setOfInt a, .setOfInt b]
+      = !setEqB a b := rfl
+  have hI : stdInterp (Ident.mk "set_ne") [.setOfInt a, .setOfInt b]
+      = ¬ ∀ i, a.Contains i ↔ b.Contains i := rfl
+  rw [hB, hI]
   have hnot : (!setEqB a b) = true ↔ setEqB a b = false := by
     cases setEqB a b <;> simp
   rw [hnot]
@@ -815,7 +825,13 @@ private theorem interpB_set_superset_iff (a b : IntSetValue) :
 private theorem interpB_set_union_iff (a b c : IntSetValue) :
     interpB (Ident.mk "set_union") [.setOfInt a, .setOfInt b, .setOfInt c] = true ↔
       stdInterp (Ident.mk "set_union") [.setOfInt a, .setOfInt b, .setOfInt c] := by
-  simp only [interpB, stdInterp, Bool.and_eq_true, setSubB_iff,
+  have hB : interpB (Ident.mk "set_union") [.setOfInt a, .setOfInt b, .setOfInt c]
+      = (setSubB a c && setSubB b c &&
+          (setElems c).all (fun x => decide (a.Contains x ∨ b.Contains x))) := rfl
+  have hI : stdInterp (Ident.mk "set_union") [.setOfInt a, .setOfInt b, .setOfInt c]
+      = (∀ i, c.Contains i ↔ a.Contains i ∨ b.Contains i) := rfl
+  rw [hB, hI]
+  simp only [Bool.and_eq_true, setSubB_iff,
     List.all_eq_true, setElems_mem_iff, decide_eq_true_eq]
   constructor
   · rintro ⟨⟨hac, hbc⟩, hcc⟩ i
@@ -839,7 +855,13 @@ private theorem interpB_set_union_iff (a b c : IntSetValue) :
 private theorem interpB_set_intersect_iff (a b c : IntSetValue) :
     interpB (Ident.mk "set_intersect") [.setOfInt a, .setOfInt b, .setOfInt c] = true ↔
       stdInterp (Ident.mk "set_intersect") [.setOfInt a, .setOfInt b, .setOfInt c] := by
-  simp only [interpB, stdInterp, Bool.and_eq_true, List.all_eq_true,
+  have hB : interpB (Ident.mk "set_intersect") [.setOfInt a, .setOfInt b, .setOfInt c]
+      = ((setElems c).all (fun x => decide (a.Contains x ∧ b.Contains x)) &&
+         (setElems a).all (fun x => decide (x ∈ setElems b → c.Contains x))) := rfl
+  have hI : stdInterp (Ident.mk "set_intersect") [.setOfInt a, .setOfInt b, .setOfInt c]
+      = (∀ i, c.Contains i ↔ a.Contains i ∧ b.Contains i) := rfl
+  rw [hB, hI]
+  simp only [Bool.and_eq_true, List.all_eq_true,
     setElems_mem_iff, decide_eq_true_eq]
   constructor
   · rintro ⟨h1, h2⟩ i
@@ -859,7 +881,13 @@ private theorem interpB_set_intersect_iff (a b c : IntSetValue) :
 private theorem interpB_set_diff_iff (a b c : IntSetValue) :
     interpB (Ident.mk "set_diff") [.setOfInt a, .setOfInt b, .setOfInt c] = true ↔
       stdInterp (Ident.mk "set_diff") [.setOfInt a, .setOfInt b, .setOfInt c] := by
-  simp only [interpB, stdInterp, Bool.and_eq_true, List.all_eq_true,
+  have hB : interpB (Ident.mk "set_diff") [.setOfInt a, .setOfInt b, .setOfInt c]
+      = ((setElems c).all (fun x => decide (a.Contains x ∧ ¬ b.Contains x)) &&
+         (setElems a).all (fun x => decide (¬ b.Contains x → c.Contains x))) := rfl
+  have hI : stdInterp (Ident.mk "set_diff") [.setOfInt a, .setOfInt b, .setOfInt c]
+      = (∀ i, c.Contains i ↔ a.Contains i ∧ ¬ b.Contains i) := rfl
+  rw [hB, hI]
+  simp only [Bool.and_eq_true, List.all_eq_true,
     setElems_mem_iff, decide_eq_true_eq]
   constructor
   · rintro ⟨h1, h2⟩ i
@@ -907,7 +935,16 @@ private theorem interpB_set_symdiff_iff (a b c : IntSetValue) :
       refine List.all_eq_true.mpr ?_
       intro x hx
       exact decide_eq_true (h x (setElems_mem_iff.mpr hx))
-  simp only [interpB, stdInterp, Bool.and_eq_true]
+  have hB : interpB (Ident.mk "set_symdiff") [.setOfInt a, .setOfInt b, .setOfInt c]
+      = ((setElems c).all (fun x =>
+           decide (¬ (a.Contains x ↔ b.Contains x))) &&
+         (setElems a).all (fun x =>
+           decide (¬ (a.Contains x ↔ b.Contains x) → c.Contains x)) &&
+         (setElems b).all (fun x =>
+           decide (¬ (a.Contains x ↔ b.Contains x) → c.Contains x))) := rfl
+  have hI : stdInterp (Ident.mk "set_symdiff") [.setOfInt a, .setOfInt b, .setOfInt c]
+      = (∀ i, c.Contains i ↔ ¬ (a.Contains i ↔ b.Contains i)) := rfl
+  rw [hB, hI, Bool.and_eq_true, Bool.and_eq_true]
   rw [h1, h2 a, h2 b]
   constructor
   · rintro ⟨⟨hc, ha⟩, hb⟩ i
@@ -970,42 +1007,74 @@ private theorem reifNB_iff {p : Bool} {P : Prop} (h : p = true ↔ P) (r : Bool)
 private theorem interpB_set_eq_reif_iff (a b : IntSetValue) (r : Bool) :
     interpB (Ident.mk "set_eq_reif") [.setOfInt a, .setOfInt b, .bool r] = true ↔
       stdInterp (Ident.mk "set_eq_reif") [.setOfInt a, .setOfInt b, .bool r] := by
-  simp only [interpB, stdInterp]
+  have hB : interpB (Ident.mk "set_eq_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r && setEqB a b) || (!r && !setEqB a b)) := rfl
+  have hI : stdInterp (Ident.mk "set_eq_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r = true ∧ ∀ i, a.Contains i ↔ b.Contains i) ∨
+          (r = false ∧ ¬ ∀ i, a.Contains i ↔ b.Contains i)) := rfl
+  rw [hB, hI]
   exact reifB_iff setEqB_iff r
 
 /-- `set_ne_reif` agreement. -/
 private theorem interpB_set_ne_reif_iff (a b : IntSetValue) (r : Bool) :
     interpB (Ident.mk "set_ne_reif") [.setOfInt a, .setOfInt b, .bool r] = true ↔
       stdInterp (Ident.mk "set_ne_reif") [.setOfInt a, .setOfInt b, .bool r] := by
-  simp only [interpB, stdInterp]
+  have hB : interpB (Ident.mk "set_ne_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r && !setEqB a b) || (!r && setEqB a b)) := rfl
+  have hI : stdInterp (Ident.mk "set_ne_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r = true ∧ ¬ ∀ i, a.Contains i ↔ b.Contains i) ∨
+          (r = false ∧ ∀ i, a.Contains i ↔ b.Contains i)) := rfl
+  rw [hB, hI]
   exact reifNB_iff setEqB_iff r
 
 /-- `set_le_reif` agreement. -/
 private theorem interpB_set_le_reif_iff (a b : IntSetValue) (r : Bool) :
     interpB (Ident.mk "set_le_reif") [.setOfInt a, .setOfInt b, .bool r] = true ↔
       stdInterp (Ident.mk "set_le_reif") [.setOfInt a, .setOfInt b, .bool r] := by
-  simp only [interpB, stdInterp]
+  have hB : interpB (Ident.mk "set_le_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r && lexLeB a.sortElems b.sortElems) ||
+          (!r && !lexLeB a.sortElems b.sortElems)) := rfl
+  have hI : stdInterp (Ident.mk "set_le_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r = true ∧ listLexLe a.sortElems b.sortElems) ∨
+          (r = false ∧ ¬ listLexLe a.sortElems b.sortElems)) := rfl
+  rw [hB, hI]
   exact reifB_iff (lexLeB_iff (xs := a.sortElems) (ys := b.sortElems)) r
 
 /-- `set_lt_reif` agreement. -/
 private theorem interpB_set_lt_reif_iff (a b : IntSetValue) (r : Bool) :
     interpB (Ident.mk "set_lt_reif") [.setOfInt a, .setOfInt b, .bool r] = true ↔
       stdInterp (Ident.mk "set_lt_reif") [.setOfInt a, .setOfInt b, .bool r] := by
-  simp only [interpB, stdInterp]
+  have hB : interpB (Ident.mk "set_lt_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r && lexLtB a.sortElems b.sortElems) ||
+          (!r && !lexLtB a.sortElems b.sortElems)) := rfl
+  have hI : stdInterp (Ident.mk "set_lt_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r = true ∧ listLexLt a.sortElems b.sortElems) ∨
+          (r = false ∧ ¬ listLexLt a.sortElems b.sortElems)) := rfl
+  rw [hB, hI]
   exact reifB_iff (lexLtB_iff _ _) r
 
 /-- `set_subset_reif` agreement. -/
 private theorem interpB_set_subset_reif_iff (a b : IntSetValue) (r : Bool) :
     interpB (Ident.mk "set_subset_reif") [.setOfInt a, .setOfInt b, .bool r] = true ↔
       stdInterp (Ident.mk "set_subset_reif") [.setOfInt a, .setOfInt b, .bool r] := by
-  simp only [interpB, stdInterp]
+  have hB : interpB (Ident.mk "set_subset_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r && setSubB a b) || (!r && !setSubB a b)) := rfl
+  have hI : stdInterp (Ident.mk "set_subset_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r = true ∧ ∀ i, a.Contains i → b.Contains i) ∨
+          (r = false ∧ ¬ ∀ i, a.Contains i → b.Contains i)) := rfl
+  rw [hB, hI]
   exact reifB_iff setSubB_iff r
 
 /-- `set_superset_reif` agreement. -/
 private theorem interpB_set_superset_reif_iff (a b : IntSetValue) (r : Bool) :
     interpB (Ident.mk "set_superset_reif") [.setOfInt a, .setOfInt b, .bool r] = true ↔
       stdInterp (Ident.mk "set_superset_reif") [.setOfInt a, .setOfInt b, .bool r] := by
-  simp only [interpB, stdInterp]
+  have hB : interpB (Ident.mk "set_superset_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r && setSubB b a) || (!r && !setSubB b a)) := rfl
+  have hI : stdInterp (Ident.mk "set_superset_reif") [.setOfInt a, .setOfInt b, .bool r]
+      = ((r = true ∧ ∀ i, b.Contains i → a.Contains i) ∨
+          (r = false ∧ ¬ ∀ i, b.Contains i → a.Contains i)) := rfl
+  rw [hB, hI]
   exact reifB_iff (setSubB_iff (a := b) (b := a)) r
 
 /-- Agreement of the twin with the mathematical interpretation on the
@@ -1360,14 +1429,11 @@ theorem value_eqB_refl : ∀ (v : Value), v.eqB v = true := by
             induction xs with
             | nil => rfl
             | cons x xt ih =>
-                simp only [List.zip_cons_cons, List.all_cons, beq_iff_eq,
-                  decide_eq_true_eq]
                 show ((decide (x = x)) &&
                   ((xt.zip xt).all (fun x => x.1 == x.2))) = true
                 rw [decide_eq_true rfl, ih]
                 rfl
-          simp only [Value.eqB, IntSetValue.eqB, Bool.and_eq_true,
-            beq_iff_eq, decide_eq_true_eq]
+          simp only [Value.eqB, IntSetValue.eqB, Bool.and_eq_true, beq_iff_eq]
           exact ⟨trivial, hzip⟩
       | interval lo hi => simp [Value.eqB, IntSetValue.eqB]
   | array vs =>
@@ -1491,11 +1557,11 @@ private def valueDepth : Value → Nat
     obligation discharged by a depth-bounded induction on the
     elements. -/
 private theorem valuesEqB_bounded : ∀ (len fuel : Nat)
-    (ih : ∀ (a b : Value), valueDepth a ≤ fuel → a.eqB b = true → a = b)
+    (_ih : ∀ (a b : Value), valueDepth a ≤ fuel → a.eqB b = true → a = b)
     (xs ys : List Value)
-    (hxs : (xs.map valueDepth).foldl max 0 ≤ fuel)
-    (hlen : xs.length ≤ len)
-    (h : valuesEqB xs ys = true), xs = ys := by
+    (_hxs : (xs.map valueDepth).foldl max 0 ≤ fuel)
+    (_hlen : xs.length ≤ len)
+    (_h : valuesEqB xs ys = true), xs = ys := by
   intro len
   induction len with
   | zero =>
@@ -1563,7 +1629,7 @@ theorem value_eqB_leaf_fueled : ∀ (fuel : Nat) (a b : Value),
       | bool x =>
         cases b with
         | bool y =>
-          simp only [Value.eqB, beq_iff_eq, decide_eq_true_eq] at h
+          simp only [Value.eqB, beq_iff_eq] at h
           rw [h]
         | _ => simp [Value.eqB] at h
       | int x =>
@@ -1577,8 +1643,7 @@ theorem value_eqB_leaf_fueled : ∀ (fuel : Nat) (a b : Value),
           | enumeration xs =>
             cases y with
             | enumeration ys =>
-              simp only [Value.eqB, IntSetValue.eqB, Bool.and_eq_true,
-                decide_eq_true_eq] at h
+              simp only [Value.eqB, IntSetValue.eqB, Bool.and_eq_true] at h
               have h1 : xs.length = ys.length := by simpa using h.1
               have h2 : (xs.zip ys).all (fun (a, b) => decide (a = b)) = true :=
                 h.2
@@ -1591,7 +1656,7 @@ theorem value_eqB_leaf_fueled : ∀ (fuel : Nat) (a b : Value),
             | enumeration ys => simp [Value.eqB, IntSetValue.eqB] at h
             | interval lo' hi' =>
               simp only [Value.eqB, IntSetValue.eqB, Bool.and_eq_true,
-                beq_iff_eq, decide_eq_true_eq] at h
+                beq_iff_eq] at h
               rw [h.1, h.2]
         | _ => simp [Value.eqB] at h
       | array xs =>
@@ -1607,7 +1672,7 @@ theorem value_eqB_leaf_fueled : ∀ (fuel : Nat) (a b : Value),
     | bool x =>
       cases b with
       | bool y =>
-        simp only [Value.eqB, beq_iff_eq, decide_eq_true_eq] at h
+        simp only [Value.eqB, beq_iff_eq] at h
         rw [h]
       | _ => simp [Value.eqB] at h
     | int x =>
@@ -1621,8 +1686,7 @@ theorem value_eqB_leaf_fueled : ∀ (fuel : Nat) (a b : Value),
         | enumeration xs =>
           cases y with
           | enumeration ys =>
-            simp only [Value.eqB, IntSetValue.eqB, Bool.and_eq_true,
-              decide_eq_true_eq] at h
+            simp only [Value.eqB, IntSetValue.eqB, Bool.and_eq_true] at h
             have h1 : xs.length = ys.length := by simpa using h.1
             have h2 : (xs.zip ys).all (fun (a, b) => decide (a = b)) = true :=
               h.2
@@ -1635,7 +1699,7 @@ theorem value_eqB_leaf_fueled : ∀ (fuel : Nat) (a b : Value),
           | enumeration ys => simp [Value.eqB, IntSetValue.eqB] at h
           | interval lo' hi' =>
             simp only [Value.eqB, IntSetValue.eqB, Bool.and_eq_true,
-              beq_iff_eq, decide_eq_true_eq] at h
+              beq_iff_eq] at h
             rw [h.1, h.2]
       | _ => simp [Value.eqB] at h
     | array xs =>

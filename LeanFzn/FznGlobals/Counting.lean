@@ -606,7 +606,15 @@ def countingInterpB : LeanFzn.Ident → List Value → Bool := fun x =>
 theorem fzn_nvalue_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_nvalue") args = true ↔
       countingInterp (Ident.mk "fzn_nvalue") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_nvalue") args
+      = match intAndArr args with
+  | some (n, l) => decide (n = (nvalueCount l : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_nvalue") args
+      = match intAndArr args with
+  | some (n, l) => n = (nvalueCount l : Int)
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intAndArr args with
   | none => simp
   | some p =>
@@ -617,7 +625,15 @@ theorem fzn_nvalue_iff (args : List Value) :
 theorem fzn_among_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_among") args = true ↔
       countingInterp (Ident.mk "fzn_among") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_among") args
+      = match intArrSet args with
+  | some (n, l, S) => amongB l S n
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_among") args
+      = match intArrSet args with
+  | some (n, l, S) => amongProp l S n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intArrSet args with
   | none => simp
   | some p =>
@@ -628,7 +644,15 @@ theorem fzn_among_iff (args : List Value) :
 theorem fzn_at_least_int_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_at_least_int") args = true ↔
       countingInterp (Ident.mk "fzn_at_least_int") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_at_least_int") args
+      = match intArrInt args with
+  | some (n, l, v) => decide ((n : Int) ≤ (intCount l v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_at_least_int") args
+      = match intArrInt args with
+  | some (n, l, v) => atLeastIntProp n l v
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intArrInt args with
   | none => simp
   | some p =>
@@ -639,7 +663,15 @@ theorem fzn_at_least_int_iff (args : List Value) :
 theorem fzn_at_most_int_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_at_most_int") args = true ↔
       countingInterp (Ident.mk "fzn_at_most_int") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_at_most_int") args
+      = match intArrInt args with
+  | some (n, l, v) => decide ((intCount l v : Int) ≤ n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_at_most_int") args
+      = match intArrInt args with
+  | some (n, l, v) => atMostIntProp n l v
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intArrInt args with
   | none => simp
   | some p =>
@@ -650,7 +682,15 @@ theorem fzn_at_most_int_iff (args : List Value) :
 theorem fzn_exactly_int_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_exactly_int") args = true ↔
       countingInterp (Ident.mk "fzn_exactly_int") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_exactly_int") args
+      = match intArrInt args with
+  | some (n, l, v) => decide ((intCount l v : Int) = n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_exactly_int") args
+      = match intArrInt args with
+  | some (n, l, v) => exactlyIntProp n l v
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : intArrInt args with
   | none => simp
   | some p =>
@@ -661,7 +701,15 @@ theorem fzn_exactly_int_iff (args : List Value) :
 theorem fzn_count_eq_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_eq") args = true ↔
       countingInterp (Ident.mk "fzn_count_eq") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_eq") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((n : Int) = (intCount l v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_eq") args
+      = match arrIntInt args with
+  | some (l, v, n) => countEqProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -672,7 +720,15 @@ theorem fzn_count_eq_iff (args : List Value) :
 theorem fzn_count_eq_par_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_eq_par") args = true ↔
       countingInterp (Ident.mk "fzn_count_eq_par") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_eq_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((n : Int) = (intCount l v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_eq_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => countEqProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -683,7 +739,15 @@ theorem fzn_count_eq_par_iff (args : List Value) :
 theorem fzn_count_geq_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_geq") args = true ↔
       countingInterp (Ident.mk "fzn_count_geq") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_geq") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((intCount l v : Int) ≤ n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_geq") args
+      = match arrIntInt args with
+  | some (l, v, n) => countGeqProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -694,7 +758,15 @@ theorem fzn_count_geq_iff (args : List Value) :
 theorem fzn_count_geq_par_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_geq_par") args = true ↔
       countingInterp (Ident.mk "fzn_count_geq_par") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_geq_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((intCount l v : Int) ≤ n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_geq_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => countGeqProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -705,7 +777,15 @@ theorem fzn_count_geq_par_iff (args : List Value) :
 theorem fzn_count_gt_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_gt") args = true ↔
       countingInterp (Ident.mk "fzn_count_gt") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_gt") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((intCount l v : Int) < n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_gt") args
+      = match arrIntInt args with
+  | some (l, v, n) => countGtProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -716,7 +796,15 @@ theorem fzn_count_gt_iff (args : List Value) :
 theorem fzn_count_gt_par_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_gt_par") args = true ↔
       countingInterp (Ident.mk "fzn_count_gt_par") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_gt_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((intCount l v : Int) < n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_gt_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => countGtProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -727,7 +815,15 @@ theorem fzn_count_gt_par_iff (args : List Value) :
 theorem fzn_count_leq_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_leq") args = true ↔
       countingInterp (Ident.mk "fzn_count_leq") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_leq") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((n : Int) ≤ (intCount l v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_leq") args
+      = match arrIntInt args with
+  | some (l, v, n) => countLeqProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -738,7 +834,15 @@ theorem fzn_count_leq_iff (args : List Value) :
 theorem fzn_count_leq_par_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_leq_par") args = true ↔
       countingInterp (Ident.mk "fzn_count_leq_par") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_leq_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((n : Int) ≤ (intCount l v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_leq_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => countLeqProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -749,7 +853,15 @@ theorem fzn_count_leq_par_iff (args : List Value) :
 theorem fzn_count_lt_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_lt") args = true ↔
       countingInterp (Ident.mk "fzn_count_lt") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_lt") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((n : Int) < (intCount l v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_lt") args
+      = match arrIntInt args with
+  | some (l, v, n) => countLtProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -760,7 +872,15 @@ theorem fzn_count_lt_iff (args : List Value) :
 theorem fzn_count_lt_par_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_lt_par") args = true ↔
       countingInterp (Ident.mk "fzn_count_lt_par") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_lt_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((n : Int) < (intCount l v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_lt_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => countLtProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -771,7 +891,15 @@ theorem fzn_count_lt_par_iff (args : List Value) :
 theorem fzn_count_neq_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_neq") args = true ↔
       countingInterp (Ident.mk "fzn_count_neq") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_neq") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((intCount l v : Int) ≠ n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_neq") args
+      = match arrIntInt args with
+  | some (l, v, n) => countNeqProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -782,7 +910,15 @@ theorem fzn_count_neq_iff (args : List Value) :
 theorem fzn_count_neq_par_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_neq_par") args = true ↔
       countingInterp (Ident.mk "fzn_count_neq_par") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_neq_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => decide ((intCount l v : Int) ≠ n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_neq_par") args
+      = match arrIntInt args with
+  | some (l, v, n) => countNeqProp l v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : arrIntInt args with
   | none => simp
   | some p =>
@@ -793,7 +929,15 @@ theorem fzn_count_neq_par_iff (args : List Value) :
 theorem fzn_distribute_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_distribute") args = true ↔
       countingInterp (Ident.mk "fzn_distribute") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_distribute") args
+      = match threeIntArrs args with
+  | some (count, cover, xs) => distributeB count cover xs
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_distribute") args
+      = match threeIntArrs args with
+  | some (count, cover, xs) => distributeProp count cover xs
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : threeIntArrs args with
   | none => simp
   | some p =>
@@ -804,7 +948,15 @@ theorem fzn_distribute_iff (args : List Value) :
 theorem fzn_global_cardinality_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_global_cardinality") args = true ↔
       countingInterp (Ident.mk "fzn_global_cardinality") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_global_cardinality") args
+      = match threeIntArrs args with
+  | some (xs, cover, counts) => gccB xs cover counts
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_global_cardinality") args
+      = match threeIntArrs args with
+  | some (xs, cover, counts) => gccProp xs cover counts
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : threeIntArrs args with
   | none => simp
   | some p =>
@@ -815,7 +967,15 @@ theorem fzn_global_cardinality_iff (args : List Value) :
 theorem fzn_global_cardinality_closed_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_global_cardinality_closed") args = true ↔
       countingInterp (Ident.mk "fzn_global_cardinality_closed") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_global_cardinality_closed") args
+      = match threeIntArrs args with
+  | some (xs, cover, counts) => gccClosedB xs cover counts
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_global_cardinality_closed") args
+      = match threeIntArrs args with
+  | some (xs, cover, counts) => gccClosedProp xs cover counts
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : threeIntArrs args with
   | none => simp
   | some p =>
@@ -826,7 +986,15 @@ theorem fzn_global_cardinality_closed_iff (args : List Value) :
 theorem fzn_global_cardinality_low_up_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_global_cardinality_low_up") args = true ↔
       countingInterp (Ident.mk "fzn_global_cardinality_low_up") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_global_cardinality_low_up") args
+      = match fourIntArrs args with
+  | some (xs, cover, low, up) => gccLowUpB xs cover low up
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_global_cardinality_low_up") args
+      = match fourIntArrs args with
+  | some (xs, cover, low, up) => gccLowUpProp xs cover low up
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : fourIntArrs args with
   | none => simp
   | some p =>
@@ -837,7 +1005,15 @@ theorem fzn_global_cardinality_low_up_iff (args : List Value) :
 theorem fzn_global_cardinality_low_up_closed_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_global_cardinality_low_up_closed") args = true ↔
       countingInterp (Ident.mk "fzn_global_cardinality_low_up_closed") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_global_cardinality_low_up_closed") args
+      = match fourIntArrs args with
+  | some (xs, cover, low, up) => gccLowUpClosedB xs cover low up
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_global_cardinality_low_up_closed") args
+      = match fourIntArrs args with
+  | some (xs, cover, low, up) => gccLowUpClosedProp xs cover low up
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : fourIntArrs args with
   | none => simp
   | some p =>
@@ -848,7 +1024,15 @@ theorem fzn_global_cardinality_low_up_closed_iff (args : List Value) :
 theorem fzn_count_eq_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_eq_set") args = true ↔
       countingInterp (Ident.mk "fzn_count_eq_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_eq_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => decide ((n : Int) = (setEqCount ss v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_eq_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => setCountEqProp ss v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setCountArgs args with
   | none => simp
   | some p =>
@@ -859,7 +1043,15 @@ theorem fzn_count_eq_set_iff (args : List Value) :
 theorem fzn_count_eq_set_par_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_eq_set_par") args = true ↔
       countingInterp (Ident.mk "fzn_count_eq_set_par") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_eq_set_par") args
+      = match setCountArgs args with
+  | some (ss, v, n) => decide ((n : Int) = (setEqCount ss v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_eq_set_par") args
+      = match setCountArgs args with
+  | some (ss, v, n) => setCountEqProp ss v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setCountArgs args with
   | none => simp
   | some p =>
@@ -870,7 +1062,15 @@ theorem fzn_count_eq_set_par_iff (args : List Value) :
 theorem fzn_count_geq_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_geq_set") args = true ↔
       countingInterp (Ident.mk "fzn_count_geq_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_geq_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => decide ((setEqCount ss v : Int) ≤ n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_geq_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => setCountGeqProp ss v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setCountArgs args with
   | none => simp
   | some p =>
@@ -881,7 +1081,15 @@ theorem fzn_count_geq_set_iff (args : List Value) :
 theorem fzn_count_gt_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_gt_set") args = true ↔
       countingInterp (Ident.mk "fzn_count_gt_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_gt_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => decide ((setEqCount ss v : Int) < n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_gt_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => setCountGtProp ss v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setCountArgs args with
   | none => simp
   | some p =>
@@ -892,7 +1100,15 @@ theorem fzn_count_gt_set_iff (args : List Value) :
 theorem fzn_count_leq_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_leq_set") args = true ↔
       countingInterp (Ident.mk "fzn_count_leq_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_leq_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => decide ((n : Int) ≤ (setEqCount ss v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_leq_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => setCountLeqProp ss v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setCountArgs args with
   | none => simp
   | some p =>
@@ -903,7 +1119,15 @@ theorem fzn_count_leq_set_iff (args : List Value) :
 theorem fzn_count_lt_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_lt_set") args = true ↔
       countingInterp (Ident.mk "fzn_count_lt_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_lt_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => decide ((n : Int) < (setEqCount ss v : Int))
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_lt_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => setCountLtProp ss v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setCountArgs args with
   | none => simp
   | some p =>
@@ -914,7 +1138,15 @@ theorem fzn_count_lt_set_iff (args : List Value) :
 theorem fzn_count_neq_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_count_neq_set") args = true ↔
       countingInterp (Ident.mk "fzn_count_neq_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_count_neq_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => decide ((setEqCount ss v : Int) ≠ n)
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_count_neq_set") args
+      = match setCountArgs args with
+  | some (ss, v, n) => setCountNeqProp ss v n
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : setCountArgs args with
   | none => simp
   | some p =>
@@ -925,7 +1157,15 @@ theorem fzn_count_neq_set_iff (args : List Value) :
 theorem fzn_at_least_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_at_least_set") args = true ↔
       countingInterp (Ident.mk "fzn_at_least_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_at_least_set") args
+      = match atLeastSetArgs args with
+  | some (n, ss, v) => atLeastSetB n ss v
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_at_least_set") args
+      = match atLeastSetArgs args with
+  | some (n, ss, v) => atLeastSetProp n ss v
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : atLeastSetArgs args with
   | none => simp
   | some p =>
@@ -936,7 +1176,15 @@ theorem fzn_at_least_set_iff (args : List Value) :
 theorem fzn_at_most_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_at_most_set") args = true ↔
       countingInterp (Ident.mk "fzn_at_most_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_at_most_set") args
+      = match atLeastSetArgs args with
+  | some (n, ss, v) => atMostSetB n ss v
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_at_most_set") args
+      = match atLeastSetArgs args with
+  | some (n, ss, v) => atMostSetProp n ss v
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : atLeastSetArgs args with
   | none => simp
   | some p =>
@@ -947,7 +1195,15 @@ theorem fzn_at_most_set_iff (args : List Value) :
 theorem fzn_exactly_set_iff (args : List Value) :
     countingInterpB (Ident.mk "fzn_exactly_set") args = true ↔
       countingInterp (Ident.mk "fzn_exactly_set") args := by
-  simp only [countingInterp, countingInterpB]
+  have hB : ∀ args, countingInterpB (Ident.mk "fzn_exactly_set") args
+      = match atLeastSetArgs args with
+  | some (n, ss, v) => exactlySetB n ss v
+  | none => false := fun _ => rfl
+  have hI : ∀ args, countingInterp (Ident.mk "fzn_exactly_set") args
+      = match atLeastSetArgs args with
+  | some (n, ss, v) => exactlySetProp n ss v
+  | none => False := fun _ => rfl
+  rw [hB args, hI args]
   cases h : atLeastSetArgs args with
   | none => simp
   | some p =>
