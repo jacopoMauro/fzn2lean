@@ -7041,6 +7041,81 @@ theorem lexToken_int_segment {x y : List Char} {q : Nat}
       next e hi =>
         exact absurd (hli.symm.trans hi) (by simp)
 
+/-! #### The char-class facts used by the skip lemmas -/
+
+theorem ws_space : isWhitespace ' ' = true := rfl
+theorem ws_nl : isWhitespace '\n' = true := rfl
+theorem nws_eq : isWhitespace '=' = false := rfl
+theorem nws_semi : isWhitespace ';' = false := rfl
+theorem pct_eq : (('=' : Char) == '%') = false := rfl
+theorem pct_semi : ((';' : Char) == '%') = false := rfl
+/-! #### The walk step and the skip facts of an emitted line (P0.7)
+
+`tokenizeAux_step` is the success-conditioned one-step unfold of
+the walk; the skip facts pin `skipTrivia`'s behavior on the entry
+line's structure (the identifier-start head stops the skip; the
+spaces step it; `=` and `;` are significant; the newline steps
+it).  These drive the four-step entry-line walk composition. -/
+
+/-- One walk step at a position whose skip is `k'` and whose token
+    is known (success-conditioned unfold of `tokenizeAux`). -/
+theorem tokenizeAux_step {a : Array Char} {k k' : Nat} (acc : Array Token)
+    (hskip : skipTrivia a k = k')
+    (hlt : k' < a.size)
+    {tok : Token} {p : Nat} {hp : k' < p}
+    (hok : lexToken a k' hlt = .ok (tok, ⟨p, hp⟩)) :
+    tokenizeAux a k acc = tokenizeAux a p (acc.push tok) := by
+  rw [tokenizeAux.eq_def (s := a) (pos := k) (acc := acc)]
+  simp only []
+  rw [hskip]
+  rw [dif_pos hlt]
+  rw [hok]
+  rfl
+
+/-- Whitespace steps the skip. -/
+theorem skip_ws_step {a : Array Char} {k : Nat} (hlt : k < a.size)
+    (hc : a[k]'hlt = ' ') : skipTrivia a k = skipTrivia a (k + 1) := by
+  rw [skipTrivia.eq_def (s := a) (pos := k), dif_pos hlt]
+  show (if isWhitespace (a[k]'hlt) = true then skipTrivia a (k+1)
+    else if ((a[k]'hlt) == '%') = true then skipTrivia a _
+    else k) = skipTrivia a (k+1)
+  rw [hc, if_pos ws_space]
+
+/-- The `=` sign is significant (stops the skip). -/
+theorem skip_eq_significant {a : Array Char} {k : Nat} (hlt : k < a.size)
+    (hc : a[k]'hlt = '=') : skipTrivia a k = k := by
+  rw [skipTrivia.eq_def (s := a) (pos := k), dif_pos hlt]
+  show (if isWhitespace (a[k]'hlt) = true then skipTrivia a (k+1)
+    else if ((a[k]'hlt) == '%') = true then skipTrivia a _
+    else k) = k
+  rw [hc, if_neg (by
+    intro hp; rw [nws_eq] at hp; exact Bool.noConfusion hp),
+    if_neg (by
+      intro hp; rw [pct_eq] at hp; exact Bool.noConfusion hp)]
+
+/-- The `;` sign is significant (stops the skip). -/
+theorem skip_semi_significant {a : Array Char} {k : Nat} (hlt : k < a.size)
+    (hc : a[k]'hlt = ';') : skipTrivia a k = k := by
+  rw [skipTrivia.eq_def (s := a) (pos := k), dif_pos hlt]
+  show (if isWhitespace (a[k]'hlt) = true then skipTrivia a (k+1)
+    else if ((a[k]'hlt) == '%') = true then skipTrivia a _
+    else k) = k
+  rw [hc, if_neg (by
+    intro hp; rw [nws_semi] at hp; exact Bool.noConfusion hp),
+    if_neg (by
+      intro hp; rw [pct_semi] at hp; exact Bool.noConfusion hp)]
+
+/-- The newline steps the skip. -/
+theorem skip_nl_step {a : Array Char} {k : Nat} (hlt : k < a.size)
+    (hc : a[k]'hlt = '\n') : skipTrivia a k = skipTrivia a (k + 1) := by
+  rw [skipTrivia.eq_def (s := a) (pos := k), dif_pos hlt]
+  show (if isWhitespace (a[k]'hlt) = true then skipTrivia a (k+1)
+    else if ((a[k]'hlt) == '%') = true then skipTrivia a _
+    else k) = skipTrivia a (k+1)
+  rw [hc, if_pos ws_nl]
+
+
+
 end LexerCons
 
 end LeanFzn.Solver
