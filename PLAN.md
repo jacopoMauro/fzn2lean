@@ -76,21 +76,22 @@ In recommended order; each entry cites the section that owns it:
 3. **Emit/parse round-trip theorem, remaining layers** (IDEAS item 2,
    §worklog): the string-splitting and lexer-composition layers are
    proven; the identifier half (`tokenize_ident`), the Boolean half
-   (`tokenize_bool`), and the nonnegative-integer half
-   (`tokenize_int_nonneg`, added 2026-09-18 — see the worklog)
-   are proven; the value/identifier halves of the entry round-trip,
-   the master theorem
+   (`tokenize_bool`), the nonnegative-integer half
+   (`tokenize_int_nonneg`, added 2026-09-18 — see the worklog), the
+   negative-integer half (`tokenize_int_negsucc`), and **the strip
+   layer** (`stripSeparators_emitSolution`, proven 2026-09-19 — the
+   `startsWith` transparency blocker was passed via the semantic
+   `IsPrefix` route, see the worklog) are proven.  What remains of
+   item 2: the line-level entry round-trip through `parseEntry`, the
+   master theorem assembly
    `parseSolution (stripSeparators (emitSolution ps)) = …`,
-   and the string-free leaf wiring (the runtime win) remain.
+   and the string-free leaf wiring (the runtime win).
 4. **Engineering and assurance** (§5): CI, malformed-input/adversarial-size
    tests, generated name inventory.  Completed 2026-09-18: all linter
    warnings removed (609 → 0; the two split-heavy parser modules carry
    a documented `linter.unusedSimpArgs` suppression) and the stale
    `bench_ab`/`test_enum_tmp` Lake targets were dropped after their
-   scratch roots were archived.  Completed 2026-09-18: all linter
-   warnings removed (609 → 0; the two split-heavy parser modules carry a
-   documented `linter.unusedSimpArgs` suppression) and the stale
-   `bench_ab`/`test_enum_tmp` Lake targets were dropped after their
+
    scratch roots were archived.
 5. **Performance** (§4 + IDEAS): dispatcher decision tree, precompiled
    constraint closures, lexer/parser allocation, sorted-set
@@ -637,10 +638,27 @@ In the doc's own order of attack, with current status:
    arm on all-digit input), `takeWhile_digits_end` (the scan
    runs to the end), `lexToken_digits` (the digit-head token
    pair), and `tokenizeAux_stop` (the past-end walk stop).
-   Remaining in item 2: the negative-`Int` half (`lexInt` on
-   the `-`-prefixed form), the master theorem
-   `parseSolution (stripSeparators (emitSolution ps)) = …`,
-   and the string-free leaf wiring.
+   Remaining in item 2: **the negative-`Int` half is PROVEN**
+   (2026-09-18/19 — `tokenize_int_negsucc` in `solver/Emit.lean`,
+   via `lexInt_neg_head` (the `-`-prefixed head dispatch),
+   `lexUnsigned_decimalTail` and `takeWhile_digits_endTail`
+   (the decimal-arm agreement after the sign), see the worklog
+   below); **the strip layer is PROVEN** (2026-09-19 —
+   `stripSeparators_emitSolution`, closing the last two proof
+   holes of the emit-side stack; the `startsWith` transparency
+   blocker was passed not by kernel-decoding the searcher but by
+   the semantic route: `String.Slice.startsWith_string_iff` +
+   the full-range copy bridge `toSlice_copy`
+   (`ByteArray.extract_zero_size` + proof-irrelevance via
+   `string_eq_of_ba`) give `startsWith_iff_isPrefix`, and the
+   head-mismatch consequence `startsWith_eq_false_of_head` with
+   `ident_head_not_sep` drive the filter-safety side; the
+   theorem needed a strengthened hypothesis — identifier-start
+   name heads, since `'\n'`-freedom alone admits a ten-dash
+   name; all axiom-clean, no `decide +kernel` needed).  The
+   remaining master theorem
+   `parseSolution (stripSeparators (emitSolution ps)) = …` and
+   the string-free leaf wiring remain.
 2. **Item 5, more propagators** — **the linear family is
    COMPLETE** this pass: `propLinEq_preserves` and
    `propLinLe_preserves` are fully proven (all three
@@ -694,6 +712,53 @@ In the doc's own order of attack, with current status:
    the above.
 
 ### Engineering notes from this pass
+
+- **2026-09-19 — the `startsWith` strip layer unblocked and
+  complete** (IDEAS item 2): `stripSeparators_emitSolution` is
+  fully proven (0 sorries, axioms
+  `[propext, Classical.choice, Quot.sound]`), closing the last
+  two proof holes of the emit-side round-trip stack.  The
+  blocker (documented in `solver/Emit.lean`'s strip-layer note):
+  Lean 4.33's `String.startsWith` chains through
+  `String.Slice.Pattern.ForwardPattern` instances whose
+  `memcmpStr` recursion neither `rfl`/`decide`/`simp` (elaborator
+  `whnf` does not run it) nor the banned `native_decide` could
+  close even on literals.  TWO candidate escapes were probed:
+  `decide +kernel` (the kernel *does* evaluate the searcher — it
+  proves the three literal separator facts axiom-cleanly, and a
+  `startsWith_short` size-guard lemma was proven through the
+  searcher's `dif_pos` arm), and the eventually-used **semantic
+  route**: core's `String.Slice.startsWith_string_iff` says
+  `s.startsWith pat = true ↔ pat.toList <+: s.copy.toList`, and
+  the `copy` conversion is discharged once by the new bridge
+  `toSlice_copy` (a full-range slice copy is the string itself:
+  `ByteArray.extract_zero_size` at the byte level, packaged via
+  `string_eq_of_ba` — strings with equal `toByteArray` are equal,
+  so the UTF-8 side condition is proof-irrelevant).  The result:
+  `startsWith_iff_isPrefix` (the workhorse frame),
+  `startsWith_eq_false_of_head` (a head mismatch kills a prefix
+  — the entry-side mismatch: an entry line's head char is the
+  name's head char, an identifier start via `ident_head_not_sep`
+  never `'-'`/`'='`/`'%'`), the three literal facts
+  (`sep_starts_sep` by the identity prefix `⟨[], rfl⟩`,
+  `sep_starts_eqs`/`sep_starts_stat` by head chars), and
+  `emitEntry_head_eq_name_head`/`emitEntry_not_sep` (the
+  `name = value;` shape is a flat append starting with the name).
+  Consequence for the statement: the theorem needed a
+  **strengthened hypothesis** — identifier-start name heads
+  (∃ head char, alpha or `_`) alongside the `'\n'`-freedom, since
+  `'\n'`-freedom alone admits e.g. a ten-dash name whose entry
+  line would genuinely start with the separator.  Validated:
+  `lake build` green, all 22 test suites green (smoke 30,
+  stdlib 64, solution, gecode 64, globals 52, coverage 465,
+  wellformed 49, pretty 39, check 12, solver 198, prop 109,
+  heur 93, fast 7, fix 21, enum 31, sbench 4, opt 73, rev 26,
+  learn 37, restart 26, bench, prof), CLI sanity (`leanfzn
+  solve` on a 1-var model), and `#print axioms` clean on the
+  whole new stack.  What remains for item 2 is the parse side:
+  the line-level entry round-trip through `parseEntry` and the
+  master `parseSolution` assembly, then the string-free leaf
+  wiring (Step 3 of the agreed plan).
 
 - All timing measurements use `lake env lean <file>` (elaboration
   against existing oleans; does not touch the build state).  The

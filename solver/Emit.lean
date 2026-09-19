@@ -193,9 +193,21 @@ Layer status:
    round-trip is PROVEN (`tokenize_bool` via `tokenize_keyword`);
    the lexer cons law is COMPLETE (`tokenize_cons_newline_full`,
    the full left-composition stack — see the layer-status notes);
-   still open — the integer half's master assembly
-   (`tokenize_int_nonneg`) and the negative-`Int` half of the
-   decimal round-trip (`lexInt` on the `-`-prefixed form).
+   the integer halves are PROVEN (`tokenize_int_nonneg` and
+   `tokenize_int_negsucc`, the negative-`Int` half of the decimal
+   round-trip).
+4. **PROVEN** — the strip layer `stripSeparators_emitSolution`:
+   stripping the separators of `emitSolution ps` yields the
+   `"\n"`-intercalation of the entry lines, under the two name
+   hypotheses (`'\n'`-freedom for the `splitOn` layer;
+   identifier-start heads for the filter safety).  Built on
+   `emitSolution_splitOn`/`emitSolution_intercalate` (the line
+   list views) and the `startsWith` frame (`startsWith_iff_
+   isPrefix`, `startsWith_eq_false_of_head` — see the strip
+   layer's note below).  The emitted-text half of the master
+   round-trip is thereby complete; what remains is the parse
+   side: the line-level entry round-trip through `parseEntry`
+   and the master `parseSolution` assembly.
 
 Each remaining layer is a bounded, mechanical induction on top of
 the dictionary below; no new ideas are needed, only volume.  The
@@ -5222,27 +5234,199 @@ the scalar entry list of `ps`.  The proof decomposes into:
   `;`-terminated chunks of the token array partition the entries.
 -/
 
-/-! ### REMAINING (the `startsWith` pattern layer)
+/-! ### The `startsWith` strip layer, unblocked (2026-09-19)
 
-The three remaining holes in this section all reduce to one missing
-foundation: Lean 4.33's `String.startsWith` goes through the
-`String.Slice.Pattern.ForwardPattern` instance layer, which the
-project's byte dictionary does not yet characterize.  Concretely,
-the kernel-reducible facts needed are, for the literal separator
-line `sep := "----------"` and any name-headed line:
+The blocker was an elaborator transparency boundary, not a
+missing foundation: Lean 4.33's `String.startsWith` chains
+through `String.Slice.Pattern.ForwardPattern` instances whose
+`memcmpStr` recursion the default `whnf` does not run, so
+neither `rfl`/`decide` nor `simp` closes even literal facts
+(`("----------").startsWith "----------" = true`) — and
+`native_decide` is banned by the repo's axiom policy.
 
-* `sep.startsWith sep = true` (drops the separator line), and
-* `l.startsWith seg = false` when `l`'s head char is an identifier
-  start and `seg`'s head char is `-`/`=`/`%` (keeps entry lines)
-  — a char-level mismatch fact of the same shape as
-  `digit_not_xo`, once the pattern unfolding is in place.
+The escape is a *semantic* route around the searcher instead of
+through it, via two core lemmas:
 
-This is the same treatment the module already gives `get`/`atEnd`/
-`next`/`extract` in the byte dictionary; adding `startsWith` there
-closes all three holes mechanically.  Until then the two strip-layer
-theorems below are stated with their proofs left open (they are
-NOT used by any solver path — the leaf still checks through the
-verified front door). -/
+* `String.Slice.startsWith_string_iff` — for a `String` pattern,
+  `s.startsWith pat = true ↔ pat.toList <+: s.copy.toList`;
+* `String.startsWith_eq_startsWith_toSlice` — the `String`
+  method is the `Slice` method on `s.toSlice`.
+
+The bridge `toSlice_copy` (below) discharges the `copy`
+conversion: a full-range slice copy is the string itself
+(`ByteArray.extract_zero_size` at the byte level, plus
+proof-irrelevance of the UTF-8 side condition — packaged once
+via `string_eq_of_ba`, strings with equal `toByteArray` are
+equal).  The result is the workhorse frame:
+
+* `startsWith_iff_isPrefix` — `l.startsWith seg = true ↔
+  seg.toList <+: l.toList`;
+
+and the two consequences the strip needs, both axiom-clean
+(`[propext, Classical.choice, Quot.sound]`, no `sorry`, no
+`native_decide`, and no `decide +kernel` either — every fact
+below goes through the general lemmas):
+
+* `startsWith_eq_false_of_head` — if `l`'s first char is `c`,
+  `seg`'s first char is `d`, and `c ≠ d`, then
+  `l.startsWith seg = false` (a head mismatch kills the prefix);
+* the three literal facts `sep_starts_sep`/`sep_starts_eqs`/
+  `sep_starts_stat` about the separator line (the identity
+  prefix via `⟨[], rfl⟩`, the mismatches via head chars
+  `'-'` vs `'='`/`'%'`).
+-/
+
+/-- Strings with equal byte arrays are equal (the UTF-8 side
+    condition is proof-irrelevant). -/
+theorem string_eq_of_ba {l r : String} (h : l.toByteArray = r.toByteArray) :
+    l = r := by
+  obtain ⟨bl, pl⟩ := l
+  obtain ⟨br, pr⟩ := r
+  have h' : bl = br := h
+  cases h'
+  rfl
+
+/-- A full-range slice copy is the string itself: the byte
+    array extract of `[0, size)` is the array, and the UTF-8
+    validity side condition is proof-irrelevant. -/
+theorem toSlice_copy (l : String) : l.toSlice.copy = l := by
+  show String.extract l.startPos l.endPos = l
+  apply string_eq_of_ba
+  show l.toByteArray.extract l.startPos.offset.byteIdx l.endPos.offset.byteIdx
+      = l.toByteArray
+  rw [show l.startPos.offset.byteIdx = 0 by rfl,
+      show l.endPos.offset.byteIdx = l.toByteArray.size by rfl]
+  exact ByteArray.extract_zero_size
+
+/-- The workhorse frame: `startsWith` for a string pattern is
+    list-prefix of the character lists (`String.Slice`'s
+    string-pattern iff + the full-range copy bridge). -/
+theorem startsWith_iff_isPrefix (l seg : String) :
+    (l.startsWith seg = true) ↔ (seg.toList <+: l.toList) := by
+  rw [String.startsWith_eq_startsWith_toSlice,
+      String.Slice.startsWith_string_iff,
+      show l.toSlice.copy = l from toSlice_copy l]
+
+/-- A head mismatch kills a prefix: if `l`'s first char is `c`,
+    `seg`'s first char is `d`, and `c ≠ d`, then `l` does not
+    start with `seg`. -/
+theorem startsWith_eq_false_of_head (l seg : String) (c d : Char)
+    (hl : l.toList.head? = some c) (hseg : seg.toList.head? = some d)
+    (hcd : c ≠ d) :
+    l.startsWith seg = false := by
+  cases hd : l.toSlice.startsWith seg with
+  | false => rw [String.startsWith_eq_startsWith_toSlice, hd]
+  | true =>
+      exfalso
+      apply hcd
+      have hpre : seg.toList <+: l.toSlice.copy.toList :=
+        (String.Slice.startsWith_string_iff).mp hd
+      rw [toSlice_copy] at hpre
+      cases hs : seg.toList with
+      | nil => rw [hs] at hseg; simp at hseg
+      | cons x xs =>
+          rw [hs] at hseg
+          simp only [List.head?_cons] at hseg
+          injection hseg with hdx
+          subst hdx
+          cases hl2 : l.toList with
+          | nil => rw [hl2] at hl; simp at hl
+          | cons y ys =>
+              rw [hl2] at hl
+              simp only [List.head?_cons] at hl
+              injection hl with hy
+              subst hy
+              have hp2 : (x :: xs) <+: (y :: ys) := by
+                rw [← hl2, ← hs]; exact hpre
+              rcases hp2 with ⟨t', heq⟩
+              injection heq with hxy _
+              exact hxy.symm
+
+/-- The separator line starts with itself (the identity prefix,
+    by the frame lemma — no kernel decoding involved). -/
+theorem sep_starts_sep : ("----------").startsWith "----------" = true := by
+  have hiff : ("----------").startsWith "----------" = true
+      ↔ ("----------").toList <+: ("----------").toList :=
+    startsWith_iff_isPrefix _ _
+  have h : ("----------").toList <+: ("----------").toList := ⟨[], rfl⟩
+  rw [hiff]
+  exact h
+
+/-- The separator line does not start with the `=` separator
+    (head chars `'-'` vs `'='`). -/
+theorem sep_starts_eqs : ("----------").startsWith "==========" = false :=
+  startsWith_eq_false_of_head (l := "----------") (seg := "==========")
+    (c := '-') (d := '=') (by decide) (by decide) (by decide)
+
+/-- The separator line does not start with the `%%%mzn-stat`
+    prefix (head chars `'-'` vs `'%'`). -/
+theorem sep_starts_stat : ("----------").startsWith "%%%mzn-stat" = false :=
+  startsWith_eq_false_of_head (l := "----------") (seg := "%%%mzn-stat")
+    (c := '-') (d := '%') (by decide) (by decide) (by decide)
+
+/-- An entry line's first char is the name's first char (the
+    `name = value;` shape is a flat append starting with the
+    name). -/
+theorem emitEntry_head_eq_name_head (nm : String) (v : Value) (c : Char)
+    (hhead : nm.toList.head? = some c) :
+    (emitEntry nm v).toList.head? = some c := by
+  rw [show emitEntry nm v = nm ++ " = " ++ emitScalar v ++ ";" from by
+    simp only [emitEntry]
+    rfl]
+  rw [String.toList_append, String.toList_append, String.toList_append]
+  cases hn : nm.toList with
+  | nil => rw [hn] at hhead; simp at hhead
+  | cons x xs =>
+      rw [hn] at hhead
+      simp only [List.head?_cons] at hhead
+      injection hhead with hcc
+      subst hcc
+      simp
+
+/-- An identifier start char (alpha or `_`) is none of the
+    separator prefix head chars `'-'`/`'='`/`'%'`. -/
+theorem ident_head_not_sep {c : Char} (h : isAlpha c = true ∨ c = '_') :
+    c ≠ '-' ∧ c ≠ '=' ∧ c ≠ '%' := by
+  rcases h with ha | rfl
+  · have hA : ('A' ≤ c ∧ c ≤ 'Z') ∨ ('a' ≤ c ∧ c ≤ 'z') := by
+      unfold isAlpha at ha
+      simp only [Bool.or_eq_true, Bool.and_eq_true, decide_eq_true_eq] at ha
+      exact ha
+    refine ⟨?_, ?_, ?_⟩
+    · intro hcc; subst hcc
+      rcases hA with ⟨h1, h2⟩ | ⟨h1, h2⟩ <;> simp at h1 h2
+    · intro hcc; subst hcc
+      rcases hA with ⟨h1, h2⟩ | ⟨h1, h2⟩ <;> simp at h1 h2
+    · intro hcc; subst hcc
+      rcases hA with ⟨h1, h2⟩ | ⟨h1, h2⟩ <;> simp at h1 h2
+  · refine ⟨by decide, by decide, by decide⟩
+
+/-- An entry line starts with none of the separator prefixes:
+    its head char is the name's head char, an identifier start
+    (alpha or `_`), which is never `'-'`/`'='`/`'%'`. -/
+theorem emitEntry_not_sep {nm : String} {v : Value} {c : Char}
+    (hhead : nm.toList.head? = some c)
+    (hstart : isAlpha c = true ∨ c = '_') :
+    ¬ ((emitEntry nm v).startsWith "----------" = true ∨
+       (emitEntry nm v).startsWith "==========" = true ∨
+       (emitEntry nm v).startsWith "%%%mzn-stat" = true) := by
+  obtain ⟨hdash, heq, hpct⟩ := ident_head_not_sep hstart
+  have hline : (emitEntry nm v).toList.head? = some c :=
+    emitEntry_head_eq_name_head nm v c hhead
+  have h1 : (emitEntry nm v).startsWith "----------" = false :=
+    startsWith_eq_false_of_head (l := emitEntry nm v) (seg := "----------")
+      (c := c) (d := '-') hline (by decide) hdash
+  have h2 : (emitEntry nm v).startsWith "==========" = false :=
+    startsWith_eq_false_of_head (l := emitEntry nm v) (seg := "==========")
+      (c := c) (d := '=') hline (by decide) heq
+  have h3 : (emitEntry nm v).startsWith "%%%mzn-stat" = false :=
+    startsWith_eq_false_of_head (l := emitEntry nm v) (seg := "%%%mzn-stat")
+      (c := c) (d := '%') hline (by decide) hpct
+  intro h
+  rcases h with h | h | h
+  · rw [h1] at h; exact Bool.noConfusion h
+  · rw [h2] at h; exact Bool.noConfusion h
+  · rw [h3] at h; exact Bool.noConfusion h
 
 /-- The value literal texts are `'\n'`-free: only `true`/`false`
     and decimal digit strings (with an optional `-`). -/
@@ -5399,9 +5583,18 @@ theorem emitSolution_splitOn (ps : List (String × Value))
 /-- **The strip step of the master round-trip**: stripping the
     separators of the emitted solution text yields the `"\n"`
     intercalation of the entry lines (the separator line is the
-    only line starting with `-`/`=`/`%` and is filtered out). -/
+    only line starting with `-`/`=`/`%` and is filtered out).
+
+    Two name hypotheses drive the two sides: `'\n'`-freedom
+    (the `splitOn` layer) and identifier-start heads (the filter
+    safety side — an entry line's head char is the name's head
+    char, an identifier start, never `'-'`/`'='`/`'%'`).
+    Pure `'\n'`-freedom would not suffice: a ten-dash name's
+    entry line would genuinely start with the separator. -/
 theorem stripSeparators_emitSolution (ps : List (String × Value))
-    (hnames : ∀ x ∈ ps, '\n' ∉ x.1.toList) :
+    (hnames : ∀ x ∈ ps, '\n' ∉ x.1.toList)
+    (hheads : ∀ x ∈ ps, ∃ c, x.1.toList.head? = some c
+      ∧ (isAlpha c = true ∨ c = '_')) :
     stripSeparators (emitSolution ps)
       = String.intercalate "\n" (ps.map (fun p => emitEntry p.1 p.2)) := by
   -- stripSeparators = intercalate "\n" (filter over splitOn lines):
@@ -5419,9 +5612,16 @@ theorem stripSeparators_emitSolution (ps : List (String × Value))
         l.startsWith "%%%mzn-stat") := by
     intro l hl
     obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hl
-    -- an entry line starts with the name's head char — an ident
-    -- start is never '-'/'='/'%':
-    sorry
+    obtain ⟨c, hhead, hstart⟩ := hheads p hp
+    have hnot := emitEntry_not_sep (nm := p.1) (v := p.2) hhead hstart
+    -- the Bool disjunction unfolds to a Prop disjunction of the
+    -- three `= true` equations:
+    intro hdisj
+    simp only [Bool.or_eq_true] at hdisj
+    rcases hdisj with (ha | hb) | hc
+    · exact hnot (Or.inl ha)
+    · exact hnot (Or.inr (Or.inl hb))
+    · exact hnot (Or.inr (Or.inr hc))
   -- the filter drops the sep line (its predicate is false) and
   -- keeps every entry line (hnotsep):
   have hentrypass : (ps.map (fun p => emitEntry p.1 p.2)).filter
@@ -5437,11 +5637,14 @@ theorem stripSeparators_emitSolution (ps : List (String × Value))
     show (["----------"] : List String).filter (fun l =>
         !(l.startsWith "----------" || l.startsWith "==========" ||
           l.startsWith "%%%mzn-stat")) = [] from by
-      rw [List.filter_cons]
-      -- the sep line starts with itself; the negated predicate is
-      -- false, so the line drops (String.Slice.Pattern-Char
-      -- unfolding — see the startsWith note in the module doc):
-      sorry,
+      rw [List.filter_cons, if_neg]
+      · rfl
+      · -- the sep line starts with itself, so the negated
+        -- predicate is false (the three literal facts):
+        intro hc
+        simp only [Bool.not_eq_true, Bool.or_eq_true, sep_starts_sep,
+          sep_starts_eqs, sep_starts_stat] at hc
+        exact Bool.noConfusion hc,
     List.append_nil]
 
 end LexerCons
