@@ -617,9 +617,13 @@ In the doc's own order of attack, with current status:
    entry above; the lemmas are true but vacuous (never
    applicable).  The honest foundation is landed
    (`takeWhile_append_of_tail_fail`, `noScans`, and the boundary
-   instances — axioms clean); the walk-level cons law, the
-   `lexUnsigned`/`lexInt`/`lexToken` agreement lemmas on
-   `noScans`, and a `tokenize_cons_newline` restatement remain
+   instances — axioms clean); the **token-level agreement layer
+   is rebuilt on it** (commit `286c02e`: `lexUnsigned_prefix_congr`,
+   `lexUnsigned_left_of_noScans`, `lexInt_left_of_noScans` — all
+   axiom-clean with satisfiable premises).  The walk-level cons
+   law, the `lexToken` agreement on `noScans` (the 13-branch
+   token walk, mirrors `lexToken_append_left'` but on the honest
+   premises), and a `tokenize_cons_newline` restatement remain
    to be rebuilt on it (the `lexUnsigned` hex/octal arm needs
    an `'x'`/`'o'` lookahead exclusion premise mirroring
    `lexToken_append_left'`'s `':'`/`'.'` one, since a `'0'` at
@@ -762,6 +766,23 @@ In the doc's own order of attack, with current status:
   **Lesson recorded in repo memory**: quantify scan-stop premises
   over positions the walk actually visits, or state them as
   tail-character failures.
+  **Progress on the honest replacement** (commit `286c02e`): the
+  token-level agreement layer is rebuilt on `noScans` —
+  `lexUnsigned_prefix_congr` (the hex/octal two-char lookahead
+  agreement under a lookahead-exclusion premise; axioms
+  `[propext, Quot.sound]`), `lexUnsigned_left_of_noScans` (the
+  full `lexUnsigned` agreement: three scan arms +
+  two prefix conditions), and `lexInt_left_of_noScans` (with the
+  honest `hnonlastdash` premise: a `-` head never ends `s`, since
+  emitted literals carry their digits).  All premises are
+  satisfiable for the entry-line application (boundary chars
+  `;`/` `/`=`/`\n` fail all four scan predicates and are never
+  `x`/`o`/`:`/`.`).  **Next on item 2**: `lexToken_left_of_noScans`
+  (the 13-branch token agreement — the `':'`/`'.'` lookahead
+  mirrors `lexToken_append_left'`'s, the ident/int arm uses
+  `lexInt_left_of_noScans` + `takeWhile_noScans`), then the
+  walk-level cons law and the entry-line theorem
+  `tokenize (emitEntry nm v) = #[ident nm, eq, literal, semi]`.
 
 - **2026-09-19 — the `startsWith` strip layer unblocked and
   complete** (IDEAS item 2): `stripSeparators_emitSolution` is
