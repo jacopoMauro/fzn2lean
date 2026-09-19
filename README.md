@@ -3,11 +3,11 @@
 LeanFzn is a machine-checked formalization of the **integer/Boolean fragment
 of FlatZinc**, the solver input language of the MiniZinc toolchain. It provides
 a lexer, a parser, an independent declarative grammar, static and dynamic
-semantics — and a machine-checked proof that the parser accepts **exactly** the
+semantics — and a machine-checked proof that the parser accepts exactly the
 grammatically valid FlatZinc strings.
 
-It can also be used to **check a solver-produced solution against a FlatZinc
-model**. The checker parses the candidate assignments, completes aliases and
+It can also be used to check a solver-produced solution against a FlatZinc
+model. The checker parses the candidate assignments, completes aliases and
 initializers, checks declared domains, and evaluates every supported standard
 and global constraint. Its executable decision procedure is connected to the
 declarative semantics by Lean proofs; the exact supported fragment and
@@ -342,8 +342,7 @@ and probe files live under `archive/` and are not part of any Lake target).
 ### The verified solver (`solver/`)
 
 On top of the checker, the repository includes a verified
-finite-domain satisfaction solver for the same fragment (PLAN.md item
-6, phases 6.1–6.7), exposed through the `leanfzn solve`, `enum`, and
+finite-domain satisfaction solver for the same fragment, exposed through the `leanfzn solve`, `enum`, and
 `optimize` subcommands (the composed front door `solveModelWith`;
 see below). The stack: exhaustive reference search
 (`solveModel`), fixpoint propagation with branch pruning

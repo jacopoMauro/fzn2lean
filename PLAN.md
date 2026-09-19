@@ -54,92 +54,115 @@ exposes it: `leanfzn solve [--prop] [--mrv] [--budget N] [--nogoods]`,
 end-to-end (every emitted solution is re-checked through the verified
 front door).
 
-## What remains (summary)
+## Remaining work (authoritative checklist)
 
-In recommended order; each entry cites the section that owns it:
+This is the authoritative list of open work as of 2026-09-19.  The detailed
+sections and worklogs below preserve design context and completed theorem
+names; where an older paragraph conflicts with this checklist, this checklist
+wins.
 
-1. **Clean and simplify the repository** (§1): separate committed source
-   from scratch experiments, remove stale artifacts, simplify duplicated or
-   obsolete code paths, reduce linter noise, and make the documented clean
-   build/test command authoritative. Do this before adding more solver logic
-   so subsequent proofs and performance work start from a smaller, clearer
-   baseline.
-2. **Linear propagators' preservation theorem** (IDEAS item 5, §6.3
-   worklog): the arithmetic core is proven (`dotSum_bounds`,
-   `term_bound`, `dotProduct_eq_sum`, `dotLe_eq` in
-   `solver/Propagators.lean`); the master narrowing-soundness
-   induction for `linNarrowAll` remains (it needs the
-   processed-prefix invariant threaded through the recursion), after
-   which `domPropagators` can attach `propLinEq`/`propLinLe` in
-   place of the sound `propIdSlot` placeholder, and `Extract.lean`
-   must learn the `int_lin_eq`/`int_lin_le` shapes.
-3. **Emit/parse round-trip theorem, remaining layers** (IDEAS item 2,
-   §worklog): the string-splitting layer is proven; the identifier
-   half (`tokenize_ident`), the Boolean half (`tokenize_bool`), the
-   nonnegative-integer half (`tokenize_int_nonneg`, added 2026-09-18
-   — see the worklog), the negative-integer half
-   (`tokenize_int_negsucc`), and **the strip layer**
-   (`stripSeparators_emitSolution`, proven 2026-09-19 — the
-   `startsWith` transparency blocker was passed via the semantic
-   `IsPrefix` route, see the worklog) are proven.  The lexer cons
-   law, previously claimed complete, was **withdrawn on
-   2026-09-19** (unsatisfiable premises — audit recorded in the
-   worklog); its honest replacement foundation
-   (`takeWhile_append_of_tail_fail`/`noScans`) is landed.  What
-   remains of item 2: the walk/token-level cons laws on the
-   `noScans` foundation, the line-level entry round-trip through
-   `parseEntry`, the master theorem assembly
-   `parseSolution (stripSeparators (emitSolution ps)) = …`,
-   and the string-free leaf wiring (the runtime win).
-4. **Engineering and assurance** (§5): CI, malformed-input/adversarial-size
-   tests, generated name inventory.  Completed 2026-09-18: all linter
-   warnings removed (609 → 0; the two split-heavy parser modules carry
-   a documented `linter.unusedSimpArgs` suppression) and the stale
-   `bench_ab`/`test_enum_tmp` Lake targets were dropped after their
+### P0 — Finish the emitted-solution round trip
 
-   scratch roots were archived.
-5. **Performance** (§4 + IDEAS): dispatcher decision tree, precompiled
-   constraint closures, lexer/parser allocation, sorted-set
-   operations, streaming `optPairs`, RevState search wiring,
-   single-pass B&B, event-driven propagation (watch lists),
-   `SolverStats` counters.
-6. **Solver depth** (§6 future work): watched-literal NoGoods,
-   queue-based propagation, learned-fact retention across restarts,
-   objective shapes beyond slot literals, one-hot presolve rewrites,
-   the `completedStore`-opacity string step of the propagation UNSAT
-   licence, and the 6.8 differential testing against Gecode/Sabori.
+This closes the remaining proof gap needed to remove rendering and reparsing
+from every solver leaf.
 
-## Next work
+- [ ] Rebuild lexer composition on the satisfiable `noScans` foundation:
+  add the end-of-prefix hex/octal lookahead exclusion, prove `lexToken`
+  agreement, lift it through the token walk, and restate
+  `tokenize_cons_newline`.  Do not reuse the withdrawn, vacuous `htw`
+  premises.
+- [ ] Prove the emitted scalar-entry round trip through `parseEntry` for
+  identifiers, Booleans, nonnegative integers, and negative integers.
+- [ ] Assemble the list/line result into the master theorem
+  `parseSolution (stripSeparators (emitSolution ps)) = .ok (entriesOf ps)`
+  under the emitter's explicit name hypotheses.
+- [ ] Add a string-free solver-leaf path that passes `entriesOf ps` directly
+  to the prepared dynamic checker, and prove it equivalent to the existing
+  emitted-text path.
+- [ ] Add focused regression tests and before/after leaf benchmarks; retain
+  the text path at the CLI boundary.
 
-### 1. Clean and simplify
+Already complete for this item: newline splitting/intercalation,
+`tokenize_ident`, `tokenize_bool`, `tokenize_int_nonneg`,
+`tokenize_int_negsucc`, `stripSeparators_emitSolution`, and the honest
+`takeWhile_append_of_tail_fail`/`noScans` token-level foundation.
 
-Complete this milestone before extending the solver:
+### P1 — Wire the verified fast solver structures
 
-- Classify every currently untracked file as production source,
-  documentation, generated output, or disposable experiment. Add intended
-  project files to version control and remove or archive `.orig`, `probe*.lean`,
-  temporary benchmarks, and one-off theorem experiments.
-- Confirm that a clean checkout contains every file required by the Lake
-  targets and that the build does not depend on local scratch files.
-- Consolidate duplicate implementations and obsolete compatibility paths,
-  keeping the proved executable twin when both a reference and optimized
-  implementation are intentionally required.
-- Simplify module imports and the Lake target list; keep one clear umbrella
-  module for the library and one for the solver, with test-only and benchmark
-  targets visibly separated.
-- Remove straightforward unused variables and unused `simp` arguments so
-  new warnings are visible. Treat deeper proof refactors separately when they
-  would obscure correctness review.
-- Reconcile `README.md`, this plan, the dependency graph, and performance
-  notes with the resulting layout. Replace hand-maintained counts with
-  generated checks where practical.
-- Finish with one documented clean-build command and one functional-test
-  command, both run successfully from a clean working tree.
+- [ ] Integrate `RevState` into trail-based search and prove refinement to
+  `prunedSearch`; the sparse-domain operations and one-pass refinement theorem
+  already exist.
+- [ ] Replace round-robin propagation with a queue and variable/constraint
+  wake-up events; prove that every affected constraint is eventually run.
+- [ ] Add watched-literal NoGood propagation and retain only globally valid
+  learned facts across restarts.
+- [ ] Make optimization a streaming, single-pass branch-and-bound traversal
+  instead of materializing all accepted assignments; extend objectives beyond
+  slot literals/identifiers.
+- [ ] Remove the remaining quadratic accumulation paths, notably
+  `searchBudget`'s `acc ++ [v]`, enumeration result concatenation, and
+  string-based quadratic deduplication.
+- [ ] Consider one-hot presolve rewrites only after each rewrite has an
+  equisatisfiability theorem.
 
-**Exit criteria:** no unexplained artifacts at the repository root; every
-Lake target builds from a clean checkout; all functional tests pass; docs
-describe the actual module/target layout; and remaining warnings or duplicate
-paths are explicitly recorded rather than accidental.
+The linear propagators are not open work: `propLinEq_preserves` and
+`propLinLe_preserves` are proved, wired into `domPropagators`, extracted for
+`int_lin_eq`/`int_lin_le`, and covered by regression tests.  Propagation+MRV
+is likewise already integrated by `solveModelPropMrv`.
+
+### P2 — Engineering and independent assurance
+
+- [ ] Add CI that performs a clean checkout, builds every documented Lake
+  target, and runs every functional test suite.
+- [ ] Implement §6.8 differential testing: exhaustively generate small finite
+  models, compare the reference and optimized Lean solvers, and compare the
+  common fragment with Gecode and Sabori.
+- [ ] Expand malformed-input and adversarial-size tests, including integer
+  boundaries, empty collections, duplicate assignments, and unsupported-name
+  diagnostics.
+- [ ] Generate the supported-predicate inventory and documentation from the
+  Lean name lists so the reported names and counts cannot drift.
+- [ ] Add `SolverStats` counters (nodes, propagations, failures, leaf checks,
+  store builds) and use scaling-ratio thresholds in performance regressions.
+- [ ] Keep the pinned MiniZinc source version and checksums explicit whenever
+  the normative reference is upgraded.
+
+Repository cleanup, archive classification, umbrella modules, Lake-target
+cleanup, documentation reconciliation, and the 609-to-zero linter cleanup are
+complete.  CI is the remaining clean-checkout enforcement mechanism.
+
+### P3 — Further performance work
+
+- [ ] Replace repeated predicate-name scans with a generated decision tree or
+  verified hash-based dispatcher.
+- [ ] Precompile typed constraint closures in `PreparedModel` so repeated
+  checks avoid dispatch, arity checks, and expression-shape traversal.
+- [ ] Reduce lexer/parser allocation with position-based and accumulator-based
+  implementations, each connected to the reference operation by a theorem.
+- [ ] Use canonical sorted domains, verified merge operations, or specialized
+  integer-domain representations where benchmarks justify the change.
+- [ ] Extend benchmarks to batches of solutions, large set/graph constraints,
+  and peak-memory measurements.
+
+### Deliberate scope boundaries
+
+Optional-variable globals (`fzn_alternative`, `fzn_span`), float-dependent
+globals, and `_reif`/float/opt variants remain outside the supported fragment.
+Adding any of them is a fragment extension, not unfinished work in the current
+integer/Boolean/set scope, and requires an authoritative semantic source plus
+the usual declarative/executable agreement theorem and coverage.
+
+## Detailed roadmap and completed milestones
+
+The sections below retain the original milestone descriptions and proof
+history.  Use the checklist above to select new work.
+
+### 1. Clean and simplify — complete
+
+Scratch experiments are archived, obsolete Lake targets were removed, the
+library and solver have clear umbrella modules, the documentation reflects
+the current tree, and the build is warning-free.  The clean-checkout build is
+currently validated manually; automating it is tracked under P2.
 
 ### 2. Encode the missing global constraints
 
@@ -230,7 +253,9 @@ Potential improvements, in recommended order:
 
 - Add continuous integration that builds every executable and runs all test
   suites on a clean checkout.
-- Remove the remaining Lean linter warnings so new warnings are visible.
+- Keep the build warning-free; the 609 existing Lean linter warnings were
+  removed on 2026-09-18, with documented local suppressions only in the two
+  split-heavy parser modules.
 - Add tests for malformed models and solutions, duplicate assignments,
   unsupported predicate diagnostics, empty arrays and sets, integer boundary
   behavior, and adversarial input sizes.
@@ -711,8 +736,8 @@ In the doc's own order of attack, with current status:
    tests); the `all_different` pigeonhole counting propagator
    (`propAllDiff` + `allDiff_pigeonhole`) was already in place
    and is covered.
-3. **Item 6.1/6.4**: combined propagation+MRV entry point;
-   value ordering toward the objective for B&B.
+3. **Item 6.1/6.4**: the combined propagation+MRV entry point is complete
+   (`solveModelPropMrv`); value ordering toward the objective for B&B remains.
 4. **Item 4.5 streaming**: `optPairs` fold with running best
    (extremal-value membership theorem), replacing the
    materialize-all-assignments path; `solver/Restarts.lean`'s
