@@ -78,9 +78,10 @@ from every solver leaf.
   `takeWhile_take_drop`), so no intra-line walk-agreement premises are
   needed: the `;`/`=`/space boundary characters fail all four scan
   predicates by decidability.
-- [ ] Finish the digit-literal segment token (`lexToken_int_segment`:
-  the same in-place pattern; the hex/octal guards close through the
-  `'0'`-head `x/o` exclusion on the boundary char).
+- [x] Finish the digit-literal segment token: `lexToken_int_segment` lands
+  (P0.6) with the hex/octal guards closed by the two-character argument
+  (the `q+1` char is a digit inside the segment, never `x`/`o`, or the
+  y head — excluded by the `'0'`-head premise).
 - [ ] Prove the emitted scalar-entry round trip through `parseEntry` for
   identifiers, Booleans, nonnegative integers, and negative integers.
 - [ ] Assemble the list/line result into the master theorem
@@ -99,7 +100,9 @@ Already complete for this item: newline splitting/intercalation,
 success-conditioned offset-transport stack (P0.2), the walk-level
 `tokenizeAux_offset_ok` (P0.3), and the intra-line segment-token layer
 (P0.5: kw/ident/eq/semi at offsets, `takeWhile_take_drop`,
-`composite_read`/`composite_read_head`, `digit_not_punct`).
+`composite_read`/`composite_read_head`, `digit_not_punct`), plus the
+digit-literal segment (P0.6: `lexInt_nonneg_segment`,
+`lexToken_int_segment`, `guard_fail`).
 
 ### P1 — Wire the verified fast solver structures
 
