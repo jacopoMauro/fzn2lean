@@ -1,7 +1,9 @@
-# LeanFzn Dependency DAG
+# LeanFzn dependency structure
 
-This file records the module dependency graph for the fzn2lean project.
-Dependencies flow downward; roots are at the top, leaves at the bottom.
+This file records the current module dependency graph for LeanFzn.
+Arrows written as `A ← B` mean that `A` directly imports `B`.  The numbered
+layers are explanatory groupings, not enforced package boundaries; the direct
+imports are the source of truth.
 
 ## Legend
 
@@ -12,17 +14,13 @@ Dependencies flow downward; roots are at the top, leaves at the bottom.
 
 ---
 
-## LeanFzn Library
+## Library and solver layers
 
 ```
 Layer 0 — Foundation (no project imports)
 ├── LeanFzn/FznAST.lean ★         AST types (Ident, Value, BaseType, VDecl, ConstraintItem, Model)
 ├── LeanFzn/FznLexer.lean ★       Tokenizer (Token type, tokenize)
-├── solver/Search.lean ★           Generic exhaustive search (allAssigns, search_some/none)
-└── solver/Emit.lean               Solution text emission (emitSolution) +
-                                   round-trip Layer A theorems (splitOn_intercalate_newline,
-                                   splitOn_eq_list, splitOnAux_eq_splitAux, splitAux_spec,
-                                   extract_ofList_seg, boundary/shift lemmas, repr_val)
+└── solver/Search.lean ★          Generic exhaustive search (allAssigns, search_some/none)
 
 Layer 1 — Grammar, Parser, Semantics
 ├── LeanFzn/FznGrammar.lean        Derivability relation (GrModel, GrSepList, …)
@@ -37,7 +35,7 @@ Layer 1 — Grammar, Parser, Semantics
 │   └── ← solver/Search
 └── solver/Propagators.lean ★      Propagation contract + propagators (Preserves, propEqSlot, …)
                                    + linear propagators (propLinEq/propLinLe, DomConstraint.linEq/linLe,
-                                   dotSum_bounds, term_bound, propIdSlot placeholder)
+                                   dotSum_bounds, term_bound, proved preservation theorems)
     └── ← LeanFzn*, solver/Search
 
 Layer 2 — Correctness, StdLib, Fixpoint
@@ -59,6 +57,9 @@ Layer 3 — Completeness, Solution, Extraction
 │   └── ← LeanFzn*, solver/Search, solver/Domain, solver/Propagators
 ├── solver/Domain.lean ★           Finite-domain extraction from parsed models (modelSlots)
 │   └── ← LeanFzn*
+├── solver/Emit.lean               Solution text emission plus the in-progress
+│                                  emitted-solution lexer/parser round-trip proof stack
+│   └── ← Lean, solver/Domain
 ├── solver/Enum.lean               All-solutions enumeration (enumerateAll)
 │   └── ← solver/Solve
 ├── solver/Optimize.lean           Branch-and-bound optimization (optimizeModelBb)
@@ -74,7 +75,7 @@ Layer 4 — Assembly, Global Common, Solver Core
 ├── LeanFzn/FznGlobals/Common.lean ★  Shared global-constraint helpers (setMemB, arraySlice, iff lemmas)
 │   └── ← FznSolution
 └── solver/Solve.lean ★            FlatZinc-facing solver (solveModel, SolveResult,
-                                   domPropagators incl. linEq/linLe wiring via propIdSlot)
+                                   domPropagators incl. proved linEq/linLe wiring)
     └── ← solver/Search, solver/Emit, solver/Domain, solver/Heuristic,
          solver/Propagators, solver/Fixpoint, solver/Extract, LeanFzn/FznCheck
 
@@ -120,7 +121,7 @@ Layer 8 — Top-Level Modules
 
 Layer 9 — Library Roots
 ├── LeanFzn.lean ★                 Library root: imports all 14 LeanFzn modules
-└── solver.lean                    Library root: imports Search, Domain, Emit, Solve
+└── solver.lean                    Core solver root: imports Search, Domain, Emit, Solve
 
 Layer 10 — Executable
 └── Main.lean                      CLI entry point (check/solve/enum/optimize)
@@ -136,6 +137,12 @@ Layer 10 — Executable
   families; `AllDiffCounting` is additionally shared by `Counting` and `SetMath`.
 - `solver/Domain.lean` and `solver/Search.lean` are the solver's foundational modules.
 - The dependency chain from `FznAST` to `FznGlobals.lean` is 7 layers deep.
+- `solver.lean` and `solver/Solver.lean` are currently different roots; the
+  former is core-only and the latter exposes the complete stack.  Consolidating
+  or renaming them is tracked in `PLAN.md` P4.
+- Several solver modules directly import the broad `LeanFzn` umbrella.  The
+  graph above records that as `LeanFzn*`; narrowing those imports is also
+  tracked in P4.
 
 ## Test Executables
 
@@ -164,18 +171,22 @@ solver/TestsLearn.lean    → solver/Solver
 solver/TestsRestart.lean  → solver/Restarts
 ```
 
-## Dependency fan-out (most-imported modules)
+## Dependency fan-out (qualitative)
 
-| Module | Imported by |
-|--------|-------------|
-| `FznAST` | 6 (Grammar, Lexer-used-by-Parser, Parser, Pretty, Semantics, indirectly all) |
-| `FznParser` | 8 (Correctness, Assembled, Solution, many tests) |
-| `FznSemantics` | 3 (StdLib, Correctness, indirectly Solution) |
-| `FznSolution` | 3 (Globals/Common, FznGlobals, indirectly FznCheck) |
-| `FznGlobals/Common` | 8 (7 family modules + SetMath) |
-| `solver/Search` | 6 (Propagators, Heuristic, Fixpoint, Extract, Learning, config chain) |
-| `solver/Domain` | 4 (Emit→Solve, Extract, Solve, Domain itself) |
-| `solver/Propagators` | 3 (Fixpoint, Extract, Learning) |
+| Module | Main downstream users |
+|--------|-----------------------|
+| `FznAST` | grammar, parser, pretty-printer, semantics, and all downstream library modules |
+| `FznParser` | correctness, assembled recognition, solution parsing, and parser-facing tests |
+| `FznSemantics` | correctness, standard predicates, solution checking, and globals |
+| `FznSolution` | global common utilities, global aggregation, and the verified front door |
+| `FznGlobals/Common` | the base global-constraint family modules |
+| `solver/Search` | heuristics, propagators, fixpoint search, learning, and solver composition |
+| `solver/Domain` | emission, extraction, and FlatZinc-facing solving |
+| `solver/Propagators` | fixpoint search, extraction, learning, and configuration |
+
+Exact counts are intentionally omitted because transitive and direct fan-out
+were previously mixed.  A generated direct-import inventory is proposed in
+`PLAN.md` P4.
 
 ## Archived Development Artifacts (not part of any build target)
 

@@ -1,17 +1,26 @@
 # LeanFzn — FlatZinc, formalized in Lean 4
 
-LeanFzn is a machine-checked formalization of the **integer/Boolean fragment
-of FlatZinc**, the solver input language of the MiniZinc toolchain. It provides
-a lexer, a parser, an independent declarative grammar, static and dynamic
-semantics — and a machine-checked proof that the parser accepts exactly the
-grammatically valid FlatZinc strings.
+LeanFzn is a verified FlatZinc toolchain in Lean 4 for the
+**integer/Boolean/set fragment** of the MiniZinc solver language. Its checker
+covers that fragment, while its search engine solves models whose decision
+variables have explicit finite integer or Boolean domains. Its three main
+results are:
 
-It can also be used to check a solver-produced solution against a FlatZinc
-model. The checker parses the candidate assignments, completes aliases and
-initializers, checks declared domains, and evaluates every supported standard
-and global constraint. Its executable decision procedure is connected to the
-declarative semantics by Lean proofs; the exact supported fragment and
-preconditions are described below.
+- a finite-domain solver that can decide satisfiability, enumerate solutions,
+  and optimize objectives;
+- a solution checker covering 218 standard and global predicate names; and
+- a parser proved to recognize exactly the declarative FlatZinc grammar.
+
+These are one connected development rather than three unrelated programs.
+The CLI receives a FlatZinc source file, so it first uses the verified parser
+to turn that text into the `Model` syntax tree on which both checking and
+solving are defined. The checker is then reused inside the solver as the
+predicate for complete candidate assignments: a search leaf succeeds exactly
+when the emitted assignment is accepted by the checker. Thus the solver's SAT
+proof composes two results—search returns only a successful leaf, and checker
+acceptance implies declarative satisfaction. Reference search,
+propagation, heuristics, learning, restarts, enumeration, and branch-and-bound
+optimization all carry Lean theorems describing the results they may return.
 
 The normative reference is **MiniZinc 2.10.0**, pinned to immutable commit
 `c9f9b649b2a251a40aa427a84d7cce73a8807fea` (see
@@ -19,6 +28,101 @@ The normative reference is **MiniZinc 2.10.0**, pinned to immutable commit
 deliberately excluded; strings remain supported in annotations.
 
 ## Main results
+
+### Verified finite-domain solver
+
+The solver is a main result of this repository, not merely an application of
+the parser.  It is available through `leanfzn solve`, `leanfzn enum`, and
+`leanfzn optimize`, and its complete umbrella module is
+`solver/Solver.lean`.
+
+The current search fragment contains initializer-free Boolean variables and
+bounded or explicitly enumerated integer variables. Unbounded integer
+variables, set decision variables, domains above `domainCap`, and search
+spaces above `leavesCap` are reported as unsupported rather than searched
+incompletely. Variables determined by initializers—including array aliases—are
+reconstructed by the solution checker's completion machinery instead of
+becoming search slots.
+
+For supported finite models, the proof-facing solver contract distinguishes:
+
+- **SAT:** the returned assignment is accepted by the verified front door and
+  therefore satisfies the model's declarative `fullInterp` semantics;
+- **UNSAT:** no assignment drawn from the declared finite domains satisfies
+  the model, subject to the documented round-trip licence for propagating
+  entry points while P0 in `PLAN.md` remains open;
+- **unknown:** a bounded run exhausted its resource budget and makes no SAT or
+  UNSAT claim; and
+- **unsupported:** the model or requested feature combination is outside the
+  implemented solver interface.
+
+The unbounded reference search terminates because each branch decreases a
+finite-domain measure.  Its central results are exposed by
+`solveModel_sat_sound` and `solveModel_unsat_sound`; the composed configurable
+front door is covered by `solveModelWith_sat_sound`,
+`solveModelWith_unsat_sound`, and
+`solveModelWith_budget_never_falseUnsat`.
+
+#### How the solver works
+
+1. **Validate and extract the finite problem.** The FlatZinc model first
+   passes the same static well-formedness and supported-predicate gates used by
+   the checker. `modelSlots` extracts explicit finite domains for decision
+   variables, while `extractConstraints` recognizes constraints supported by
+   the propagation layer. The extraction bridge
+   `extractConstraints_holds` connects those internal constraints back to the
+   model semantics.
+2. **Run a complete reference search.** `search` enumerates assignments over
+   the extracted slots. Its leaf predicate pairs slot names with candidate
+   values, emits that assignment in FlatZinc solution syntax, and calls the
+   verified checker. The search returns an assignment only when this predicate
+   is true. This makes `checkModelSolution_correct` the semantic bridge in the
+   SAT proof, while reference search remains the simple, deterministic baseline
+   for optimized variants.
+3. **Prune with verified propagation.** A propagator returns narrowed domains
+   or a contradiction. Every propagator implements the `Preserves` contract:
+   narrowing retains every compatible satisfying assignment, while a reported
+   contradiction excludes all satisfying extensions. A fuel-bounded fixpoint
+   composes these local results before and during `prunedSearch`.
+4. **Recognize useful constraint shapes.** The wired propagators include
+   equality, disequality, order, constant equality, integer arithmetic and
+   bounds, Boolean connectives, `all_different`, and linear equality/inequality.
+   The linear propagators `propLinEq` and `propLinLe` have proved preservation
+   theorems and are extracted from `int_lin_eq` and `int_lin_le` models.
+5. **Change search order without changing coverage.** `mrvOrder` selects a
+   minimum-remaining-values order. The branch-coverage and permutation lemmas
+   show that MRV changes only exploration order, not the assignments covered.
+   `solveModelPropMrv` composes propagation and MRV through the same proof
+   boundary.
+6. **Learn and restart safely.** Decision-trail NoGoods have a declarative
+   clause semantics and scope-limited entailment proofs. `learnSearch` agrees
+   with reference search. Budgeted `searchBudget` and `restartSearch`
+   distinguish exhaustion from budget interruption; interrupted searches
+   return `unknown`, and fair schedules recover completeness.
+7. **Enumerate and optimize.** `enumModel` proves membership, completeness,
+   distinctness, and UNSAT results for all-solutions enumeration.
+   `optimizeModel` and `optimizeModelBb` prove solution soundness, optimality,
+   UNSAT behavior, and objective-value agreement; the branch-and-bound result
+   is related to the reference optimizer by `optimizeModelBb_agrees`.
+8. **Connect search results to model satisfaction.** The text returned by a
+   successful solve is the same text accepted by the leaf predicate; the CLI
+   does not perform a second redundant check after solving. The theorem
+   `solveModelWith_sat_sound` transports that recorded leaf acceptance through
+   `checkModelSolution_correct`, yielding satisfaction of the declarative
+   model semantics.
+
+The implementation also contains a reversible sparse-set state and trail.
+`sparseNarrow_spec`, `revBacktrack_recovers`, and `revPropPass_refines` prove
+its domain view, restoration behavior, and one-pass agreement with the
+functional propagator. Wiring that state into search, adding queued wake-up
+propagation, and watched NoGoods are future performance work rather than
+missing pieces of the reference solver.
+
+The remaining emitter/parser round-trip work is active in
+`solver/Emit.lean`. The honest offset-transport, walk-step, and emitted
+token-segment layers are proved; next come the scalar-entry `parseEntry`
+round trip, the list-level `parseSolution` theorem, and a string-free leaf
+path. See `PLAN.md` P0 for the authoritative checklist.
 
 ### Exact parser recognition
 
@@ -81,7 +185,7 @@ Unknown or unsupported constraints evaluate to `false`, so they are rejected
 rather than assigned guessed semantics. Float syntax and semantics are
 outside the project fragment entirely.
 
-### The verified front door (`FznCheck.lean`)
+#### The verified front door (`FznCheck.lean`)
 
 `checkSolutionFull` itself decides the dynamic part of satisfaction only;
 its correctness theorem takes static well-formedness and predicate
@@ -115,6 +219,7 @@ leanfzn/
 ├── Main.lean                  # CLI: parse a file/stdin, check a solution,
 │                              #   or solve / enumerate / optimize
 ├── PLAN.md                    # Current status and prioritized future work
+├── code-structure.md          # Direct-import dependency map and module layers
 ├── lakefile.toml              # Lake build configuration
 ├── lean-toolchain             # Lean 4.33.1
 │
@@ -162,7 +267,7 @@ leanfzn/
 ├── solver/                    # The verified constraint solver (PLAN item 6)
 │   ├── Search.lean            #   exhaustive reference search + master theorems
 │   ├── Domain.lean            #   finite-domain extraction from a model
-│   ├── Emit.lean              #   solution-text emission
+│   ├── Emit.lean              #   solution-text emission + round-trip proof work
 │   ├── Solve.lean             #   entry points: solveModel / solveModelProp / solveModelHeur
 │   ├── Propagators.lean       #   propagation contract + first propagators
 │   ├── Fixpoint.lean          #   propagation fixpoint + pruning search
@@ -174,8 +279,10 @@ leanfzn/
 │   ├── Learning.lean          #   decision-trail NoGood learning
 │   ├── Restarts.lean          #   budgeted restarts with the `unknown` verdict
 │   ├── Config.lean            #   composed front door: SolveConfig / solveModelWith
-│   ├── Solver.lean            #   umbrella module (whole-stack overview)
+│   ├── Solver.lean            #   complete solver umbrella used by CLI/tests
 │   └── Tests*.lean            #   test executables (unit + integration + bench)
+│
+├── solver.lean                # Core-only solver root (Search/Domain/Emit/Solve)
 │
 └── specification/
     ├── minizinc-2.10.0/        # The pinned normative reference
@@ -271,7 +378,7 @@ lake env tests_prof      # profiling driver (parser timing analysis)
 lake env tests_fast      # 7 fast-path differential tests
 
 # Solver suites
-lake env tests_solver    # 197 solver tests (unit + e2e + config-matrix integration)
+lake env tests_solver    # 198 solver tests (unit + e2e + config-matrix integration)
 lake env tests_prop      # 109 propagator tests
 lake env tests_heur      # 93 heuristic tests
 lake env tests_fix       # 21 fixpoint tests
@@ -280,7 +387,7 @@ lake env tests_sbench    # 4 solver benchmark checks
 lake env tests_opt       # 73 optimization tests
 lake env tests_rev       # 26 reversible-state tests
 lake env tests_learn     # 37 learning tests
-lake env tests_restart   # 23 restart tests
+lake env tests_restart   # 26 restart tests
 
 # Parse a FlatZinc file (prints the AST), or pipe via stdin
 lake env leanfzn model.fzn
@@ -339,40 +446,10 @@ corresponding executable targets above. The clean build completes with
 `linter.unusedSimpArgs` suppression documented in their headers; scratch
 and probe files live under `archive/` and are not part of any Lake target).
 
-### The verified solver (`solver/`)
-
-On top of the checker, the repository includes a verified
-finite-domain satisfaction solver for the same fragment, exposed through the `leanfzn solve`, `enum`, and
-`optimize` subcommands (the composed front door `solveModelWith`;
-see below). The stack: exhaustive reference search
-(`solveModel`), fixpoint propagation with branch pruning
-(`solveModelProp`), minimum-remaining-values branch ordering
-(`solveModelHeur`), all-solutions enumeration (`enumModel`),
-optimization in a reference and a branch-and-bound form
-(`optimizeModel`, `optimizeModelBb`), a sparse-set reversible state
-with a trail refining the propagation pass, decision-trail NoGood
-learning, and budgeted restarts with an explicit `unknown` verdict
-(`solveModelBounded`). All entry points share one architecture — every
-candidate leaf is validated by the verified checker itself — and each
-carries a Lean theorem: a returned solution text is always
-checker-accepted (so it satisfies the full declarative semantics via
-`checkModelSolution_correct`), and an `unsat` verdict excludes every
-assignment of the declared finite domains — for the propagating
-entry points under one documented hypothesis (the emitter round-trip
-licence; see `solver/Solve.lean`).
-
-The composed front door is `solveModelWith` (`solver/Config.lean`):
-a `SolveConfig` (`useProp`, `useMrv`, `budget`, `nogoods`) selects the
-features, and each supported combination — every switch alone, plus
-propagation with MRV together — routes through the corresponding
-proven entry point (the prop+MRV combination is composed by
-permutation, with its own master theorems). `solveModelWith_sat_sound`
-proves SAT soundness for the full supported configuration space;
-budgeted runs report an interrupted search as `unknown`, never as
-`unsat` (`solveModelWith_budget_never_falseUnsat`). Other feature
-combinations are refused with an explicit reason.
-
 ## Project status and roadmap
 
 See [`PLAN.md`](PLAN.md) for the completed milestones, current limitations,
-and prioritized correctness-preserving extensions and performance work.
+and prioritized correctness-preserving extensions and performance work.  See
+[`code-structure.md`](code-structure.md) for the current dependency map;
+candidate simplifications are recorded in `PLAN.md` P4 and have not yet been
+applied to the source tree.
