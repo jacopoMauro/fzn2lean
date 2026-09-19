@@ -4050,6 +4050,85 @@ theorem lexToken_le {arr : Array Char} {pos : Nat} (h : pos < arr.size)
       · rw [if_neg hdigit] at hok
         exact absurd hok (by simp)
 
+/-! #### The honest walk-level offset law (P0.3)
+
+`tokenizeAux_offset_ok` below lifts the honest
+`lexToken_offset_ok` through the token walk — the replacement of
+the withdrawn vacuous `tokenizeAux_append_right_ok`.  The premise
+set is *satisfiable*: every in-bounds `lexToken` of the tail
+succeeds (`hnoerr`) and the tail contains no string opener
+(`hnostr`).  There is NO scan premise: the divergence the withdrawn
+`htw` premise (unsatisfiable) tried to exclude cannot occur in a
+*successful* walk, because `lexToken_offset_ok` conditions on the
+success itself.  The error-message asymmetry (messages embed
+absolute positions) is again handled by conditioning on success
+only — an in-bounds lexing error makes the hypothesis `hnoerr`
+fail before the walk can reach it. -/
+
+/-- **The walk-level honest offset law**: the tokenizer walk past
+    a consumed prefix `s` is the tail's walk, whenever the tail
+    lexes cleanly (every in-bounds token succeeds, no string
+    opener).  This is the P0.3 replacement of the withdrawn
+    vacuous `tokenizeAux_append_right_ok`. -/
+theorem tokenizeAux_offset_ok {s t : Array Char}
+    (hnoerr : ∀ (k : Nat) (h : k < t.size),
+      (lexToken t k h).isOk = true)
+    (hnostr : ∀ (k : Nat) (h : k < t.size), t[k]'h ≠ '"') :
+    ∀ (k : Nat) (acc : Array Token),
+      tokenizeAux (s ++ t) (s.size + k) acc
+        = tokenizeAux t k acc := by
+  intro k acc
+  induction k, acc using tokenizeAux.induct (s := t) with
+  | case1 k acc hsk hpos ih =>
+      have hskip : skipTrivia (s ++ t) (s.size + k)
+          = s.size + skipTrivia t k :=
+        skipTrivia_append_right
+      rw [tokenizeAux.eq_def (s := s ++ t) (pos := s.size + k)]
+      rw [tokenizeAux.eq_def (s := t) (pos := k)]
+      simp only [] at *
+      rw [hskip]
+      have hbound : s.size + hsk < (s ++ t).size := by
+        rw [Array.size_append]
+        omega
+      rw [dif_pos hbound, dif_pos hpos]
+      have hsklt : hsk < t.size := hpos
+      cases htok : lexToken t hsk hsklt with
+      | ok tp =>
+          obtain ⟨tok, p', hp'⟩ := tp
+          have hoffset : lexToken (s ++ t) (s.size + hsk) hbound
+              = .ok (tok, ⟨s.size + p', by omega⟩) :=
+            lexToken_offset_ok (s := s) (t := t) (k := hsk)
+              hsklt (hnostr hsk hsklt) htok
+          rw [hoffset]
+          have hgtp : hsk < p' := by
+            have hdef := htok
+            rw [lexToken.eq_def (s := t) (pos := hsk) (h := hsklt)] at hdef
+            simp only [] at hdef
+            repeat' (first | split at hdef | skip)
+            all_goals
+              first
+              | (injection hdef with hpair; obtain ⟨_, hpos'⟩ :=
+                  Prod.mk.inj hpair; injection hpos' with hv; omega)
+              | omega
+          exact ih tok p' hgtp
+      | error e =>
+          exfalso
+          have hsome := hnoerr hsk hsklt
+          rw [htok] at hsome
+          exact Bool.noConfusion hsome
+  | case2 k acc hsk hpos =>
+      have hskip : skipTrivia (s ++ t) (s.size + k)
+          = s.size + skipTrivia t k :=
+        skipTrivia_append_right
+      rw [tokenizeAux.eq_def (s := s ++ t) (pos := s.size + k)]
+      rw [tokenizeAux.eq_def (s := t) (pos := k)]
+      simp only [] at *
+      rw [hskip]
+      have hbound : ¬ (s.size + hsk < (s ++ t).size) := by
+        rw [Array.size_append]
+        omega
+      rw [dif_neg hbound, dif_neg hpos]
+
 theorem tokenizeAux_exit_tail {s u : Array Char} (acc : Array Token)
     (hnopct : ∀ (q : Nat) (h : q < s.size), (s[q]'h) ≠ '%')
     (husize : 0 < u.size)
@@ -6488,6 +6567,290 @@ theorem takeWhile_take_drop {p : Char → Bool} :
           rw [List.drop_succ_cons]
           rw [show (a :: as).length = as.length + 1 from rfl,
             Nat.add_comm as.length 1]
+
+/-! ### The composite-access + segment-token layer (P0.5)
+
+`composite_read`/`composite_read!` read a composite `(x ++ y)`
+list's array at a position inside `x`; `word_scan_acc` stitches
+the scan accumulator after the head push; `lexToken_kw_segment`
+computes a word token (keyword, Boolean, or — with its sibling
+shape — identifier) directly over the composite array.  These are
+the intra-line computation lemmas for the entry-line round trip:
+every token of an emitted entry line ends at a boundary character
+that fails all scan predicates, so each token is computable
+*in place* without any walk-agreement premise. -/
+
+/-- The composite read: `(x ++ y).toArray[q]'h = x[q]'hq` for a
+    position inside `x`. -/
+theorem composite_read {x y : List Char} {q : Nat}
+    (hq : q < x.length) :
+    ((x ++ y).toArray)[q]'(by
+      rw [list_toArray_size, List.length_append]; omega)
+      = x[q]'(by omega) :=
+  List.getElem_append_left hq
+
+/-- Bang-read form of `composite_read`. -/
+theorem composite_read! {x y : List Char} {q : Nat}
+    (hq : q < x.length) :
+    ((x ++ y).toArray)[q]! = x[q] := by
+  have hlt : q < (x ++ y).toArray.size := by
+    rw [list_toArray_size, List.length_append]; omega
+  rw [show ((x ++ y).toArray)[q]! = ((x ++ y).toArray)[q]'hlt from by
+    rw [Array.getElem!_eq_getD, Array.getElem_eq_getD (α := Char)]]
+  rw [show ((x ++ y).toArray)[q]'hlt = x[q]'(by omega) from composite_read hq]
+
+/-- The composite word-scan shape: the takeWhile acc after the head
+    push reconstructs the word string. -/
+theorem word_scan_acc {x : List Char} {q : Nat} (hlt : q < x.length) :
+    String.singleton x[q] ++ String.ofList (x.drop (q + 1))
+      = String.ofList (x.drop q) := by
+  have hdrop : x.drop q = x[q] :: x.drop (q + 1) :=
+    List.drop_eq_getElem_cons hlt
+  rw [hdrop, String.ofList_cons]
+
+/-- The composite array's size (list form). -/
+theorem composite_size (x y : List Char) :
+    ((x ++ y).toArray).size = x.length + y.length := by
+  rw [list_toArray_size, List.length_append]
+
+/-- An alpha char is none of the 12 punctuation heads (both bound
+    directions; char order by decide). -/
+private theorem alpha_ne_puncts {c : Char}
+    (hb : ('A' ≤ c ∧ c ≤ 'Z') ∨ ('a' ≤ c ∧ c ≤ 'z')) :
+    c ≠ '(' ∧ c ≠ ')' ∧ c ≠ '[' ∧ c ≠ ']' ∧ c ≠ '{' ∧ c ≠ '}' ∧
+    c ≠ ',' ∧ c ≠ ';' ∧ c ≠ '=' ∧ c ≠ ':' ∧ c ≠ '.' ∧ c ≠ '"' := by
+  rcases hb with ⟨hlo, hhi⟩ | ⟨hlo, hhi⟩
+  · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    all_goals intro hcc <;> subst hcc <;> simp at hlo hhi
+  · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    all_goals intro hcc <;> subst hcc <;> simp at hlo hhi
+
+/-- The identifier-start head is none of the 12 punctuation
+    characters. -/
+theorem identstart_not_punct {c : Char}
+    (h : isAlpha c = true ∨ c = '_') :
+    c ≠ '(' ∧ c ≠ ')' ∧ c ≠ '[' ∧ c ≠ ']' ∧ c ≠ '{' ∧ c ≠ '}' ∧
+    c ≠ ',' ∧ c ≠ ';' ∧ c ≠ '=' ∧ c ≠ ':' ∧ c ≠ '.' ∧ c ≠ '"' := by
+  rcases h with ha | hu
+  · unfold isAlpha at ha
+    simp only [Bool.or_eq_true, Bool.and_eq_true, decide_eq_true_eq] at ha
+    exact alpha_ne_puncts ha
+  · subst hu
+    refine ⟨by decide, by decide, by decide, by decide, by decide,
+      by decide, by decide, by decide, by decide, by decide, by decide,
+      by decide⟩
+
+/-- **The word-segment token** (keyword case): at position `q`
+    inside the composite `x ++ y` where the word `x.drop q` starts
+    with an identifier start, has all ident chars, the tail head
+    fails `isIdentChar`, and `keywordToken` yields `tok` —
+    `lexToken` returns `tok` ending at `x.length`.
+
+    The keyword case covers the entry line's Boolean literals
+    (`true`/`false` via `keywordToken`); the identifier case is
+    its sibling with `keywordToken = none` plus the
+    not-reserved premise. -/
+theorem lexToken_kw_segment {x y : List Char} {q : Nat} {tok : Token}
+    (hle : q < x.length)
+    (hstart : isAlpha x[q] = true ∨ x[q] = '_')
+    (hall : ∀ c ∈ x.drop (q + 1), isIdentChar c = true)
+    (hfail : ∀ (c : Char), y.head? = some c → isIdentChar c = false)
+    (hkw : keywordToken (String.ofList (x.drop q)) = some tok) :
+    lexToken ((x ++ y).toArray) q
+        (by
+          have := composite_size x y
+          omega)
+      = .ok (tok, ⟨x.length, by
+          have := composite_size x y
+          omega⟩) := by
+  have hread : ((x ++ y).toArray)[q]'
+      (by
+        have := composite_size x y
+        omega) = x[q] := composite_read hle
+  rw [lexToken]
+  simp only [hread]
+  obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12⟩ :=
+    identstart_not_punct hstart
+  split
+  case h_1 heq => exact absurd heq h1
+  case h_2 heq => exact absurd heq h2
+  case h_3 heq => exact absurd heq h3
+  case h_4 heq => exact absurd heq h4
+  case h_5 heq => exact absurd heq h5
+  case h_6 heq => exact absurd heq h6
+  case h_7 heq => exact absurd heq h7
+  case h_8 heq => exact absurd heq h8
+  case h_9 heq => exact absurd heq h9
+  case h_10 heq => exact absurd heq h10
+  case h_11 heq => exact absurd heq h11
+  case h_12 heq => exact absurd heq h12
+  case h_13 =>
+    have halpha : (isAlpha x[q] || x[q] == '_') = true := by
+      rcases hstart with h | h
+      · simp [h]
+      · simp [h]
+    rw [if_pos halpha]
+    have hscan : takeWhile isIdentChar ((x ++ y).toArray) (q + 1)
+        (String.singleton x[q])
+        = (String.ofList (x.drop q), x.length) := by
+      have h := takeWhile_take_drop x y (q + 1) (by omega) hall hfail
+        (String.singleton x[q])
+      rw [h, show String.singleton x[q] ++ String.ofList (x.drop (q + 1))
+        = String.ofList (x.drop q) from word_scan_acc hle]
+    simp only [hscan]
+    rw [hkw]
+    rfl
+
+/-- **The word-segment token** (identifier case): with
+    `keywordToken = none` and the not-reserved premise, the token
+    is `.ident` of the word string. -/
+theorem lexToken_ident_segment {x y : List Char} {q : Nat}
+    (hle : q < x.length)
+    (hstart : isAlpha x[q] = true ∨ x[q] = '_')
+    (hall : ∀ c ∈ x.drop (q + 1), isIdentChar c = true)
+    (hfail : ∀ (c : Char), y.head? = some c → isIdentChar c = false)
+    (hkw : keywordToken (String.ofList (x.drop q)) = none)
+    (hres : reservedNonFzn.contains (String.ofList (x.drop q)) = false) :
+    lexToken ((x ++ y).toArray) q
+        (by
+          have := composite_size x y
+          omega)
+      = .ok (.ident (String.ofList (x.drop q)), ⟨x.length, by
+          have := composite_size x y
+          omega⟩) := by
+  have hread : ((x ++ y).toArray)[q]'
+      (by
+        have := composite_size x y
+        omega) = x[q] := composite_read hle
+  rw [lexToken]
+  simp only [hread]
+  obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12⟩ :=
+    identstart_not_punct hstart
+  split
+  case h_1 heq => exact absurd heq h1
+  case h_2 heq => exact absurd heq h2
+  case h_3 heq => exact absurd heq h3
+  case h_4 heq => exact absurd heq h4
+  case h_5 heq => exact absurd heq h5
+  case h_6 heq => exact absurd heq h6
+  case h_7 heq => exact absurd heq h7
+  case h_8 heq => exact absurd heq h8
+  case h_9 heq => exact absurd heq h9
+  case h_10 heq => exact absurd heq h10
+  case h_11 heq => exact absurd heq h11
+  case h_12 heq => exact absurd heq h12
+  case h_13 =>
+    have halpha : (isAlpha x[q] || x[q] == '_') = true := by
+      rcases hstart with h | h
+      · simp [h]
+      · simp [h]
+    rw [if_pos halpha]
+    have hscan : takeWhile isIdentChar ((x ++ y).toArray) (q + 1)
+        (String.singleton x[q])
+        = (String.ofList (x.drop q), x.length) := by
+      have h := takeWhile_take_drop x y (q + 1) (by omega) hall hfail
+        (String.singleton x[q])
+      rw [h, show String.singleton x[q] ++ String.ofList (x.drop (q + 1))
+        = String.ofList (x.drop q) from word_scan_acc hle]
+    simp only [hscan]
+    rw [hkw, if_neg (by intro hc; rw [hres] at hc; exact Bool.noConfusion hc)]
+    rfl
+
+/-! #### The single-char segment tokens (`=`, `;`) -/
+
+/-- The `=` token at a position holding `=` (a direct match arm). -/
+theorem lexToken_eq_segment {x y : List Char} {q : Nat}
+    (hle : q < x.length)
+    (hc : x[q] = '=') :
+    lexToken ((x ++ y).toArray) q
+        (by
+          have := composite_size x y
+          omega)
+      = .ok (.eq, ⟨q + 1, by
+          have := composite_size x y
+          omega⟩) := by
+  have hread : ((x ++ y).toArray)[q]'
+      (by
+        have := composite_size x y
+        omega) = x[q] := composite_read hle
+  rw [lexToken]
+  simp only [hread, hc]
+  rfl
+
+/-- The `;` token at a position holding `;` (a direct match arm). -/
+theorem lexToken_semi_segment {x y : List Char} {q : Nat}
+    (hle : q < x.length)
+    (hc : x[q] = ';') :
+    lexToken ((x ++ y).toArray) q
+        (by
+          have := composite_size x y
+          omega)
+      = .ok (.semi, ⟨q + 1, by
+          have := composite_size x y
+          omega⟩) := by
+  have hread : ((x ++ y).toArray)[q]'
+      (by
+        have := composite_size x y
+        omega) = x[q] := composite_read hle
+  rw [lexToken]
+  simp only [hread, hc]
+  rfl
+
+/-! #### The digit exclusions and the past-`x` read bridge -/
+
+/-- Helper: a digit-window char is not a non-digit literal char
+    (the window bound contradiction, decided). -/
+private theorem digitwin_ne {d c : Char}
+    (hwin : ('0' : Char) ≤ d ∧ d ≤ ('9' : Char)) (hcd : d = c)
+    (hf : ¬ (('0' : Char) ≤ c ∧ c ≤ ('9' : Char))) : False := by
+  rw [← hcd] at hf
+  exact hf hwin
+
+/-- A digit char is not any punct, not `_`, and not alpha. -/
+theorem digit_not_punct {d : Char} (hd : isDigit d = true) :
+    d ≠ '(' ∧ d ≠ ')' ∧ d ≠ '[' ∧ d ≠ ']' ∧ d ≠ '{' ∧ d ≠ '}' ∧
+    d ≠ ',' ∧ d ≠ ';' ∧ d ≠ '=' ∧ d ≠ ':' ∧ d ≠ '.' ∧ d ≠ '"' ∧
+    d ≠ '_' ∧ isAlpha d = false := by
+  unfold isDigit at hd
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at hd
+  obtain ⟨hlo, hhi⟩ := hd
+  have hwin : ('0' : Char) ≤ d ∧ d ≤ ('9' : Char) := ⟨hlo, hhi⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact fun h => digitwin_ne hwin h (by decide)
+  · exact isDigit_not_alpha (by
+      unfold isDigit
+      simp only [Bool.and_eq_true, decide_eq_true_eq]
+      exact ⟨hlo, hhi⟩)
+
+/-- The composite's read at `x.length` is `y`'s head (when `y` is
+    nonempty). -/
+theorem composite_read_head {x : List Char} {c : Char} {cs : List Char} :
+    ((x ++ (c :: cs)).toArray)[x.length]! = c := by
+  have hlt : x.length < (x ++ (c :: cs)).toArray.size := by
+    rw [list_toArray_size, List.length_append]
+    simp
+  rw [show ((x ++ (c :: cs)).toArray)[x.length]! =
+      ((x ++ (c :: cs)).toArray)[x.length]'hlt from
+    arrGetElem!_of_lt hlt]
+  rw [List.getElem_toArray]
+  have hget : (x ++ (c :: cs))[x.length]
+      = (c :: cs)[x.length - x.length] := by
+    apply List.getElem_append_right
+    simp
+  rw [hget]
+  simp
 
 end LexerCons
 
