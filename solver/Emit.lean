@@ -2098,6 +2098,139 @@ theorem boundary_noScans_eq : noScans #[('=')]
 theorem boundary_noScans_nl : noScans #[('\n')]
     := ⟨by decide, by decide, by decide, by decide⟩
 
+/-! #### The token-level agreement layer on `noScans`
+
+Three lemmas rebuild the (withdrawn, vacuous) `lexUnsigned_append_left` /
+`lexInt_append_left` family on the honest foundation.  The premises are
+all satisfiable for the entry-line application:
+
+* `hlook` — the joined array's two-char lookahead never reads `'x'`/`'o'`
+  past the end of `s` (excludes the `'0'`-at-boundary hex/octal prefix
+  divergence; holds for entry lines since the boundary chars are
+  `;`/` `/`=`/`\n`, none of which is `x`/`o`);
+* `hns` — the tail fails all four scan predicates;
+* `hnonlastdash` (lexInt only) — a `-` at the position is never the last
+  character of `s` (emitted literals carry their digits inside the
+  literal text; a lone trailing `-` would push `lexUnsigned` to a
+  past-end scan whose hex/octal prefix reads genuinely differ between
+  `s` and `s ++ t`).
+-/
+
+/-- The hex/octal prefix-condition agreement: the two-character
+    lookahead (`'0'` at `pos`, `c` at `pos + 1` with `c` either `'x'`
+    or `'o'`) decides identically on `s ++ t` and `s`, under the
+    lookahead exclusion (the joined read at `pos + 1` past the end of
+    `s` is neither `'x'` nor `'o'`). -/
+theorem lexUnsigned_prefix_congr {s t : Array Char} {pos : Nat}
+    (hpos : pos < s.size)
+    (hlook : ∀ (q : Nat), s.size ≤ q + 1 → q + 1 < (s ++ t).size →
+      (s ++ t)[q + 1]! ≠ 'x' ∧ (s ++ t)[q + 1]! ≠ 'o')
+    (c : Char) (hcx : c = 'x' ∨ c = 'o') :
+    (decide (pos + 1 < (s ++ t).size) && (s ++ t)[pos]! == '0'
+      && (s ++ t)[pos + 1]! == c)
+      = (decide (pos + 1 < s.size) && s[pos]! == '0' && s[pos + 1]! == c) := by
+  have hA : (s ++ t)[pos]! = s[pos]! := arrGetElem!_append_left hpos
+  by_cases h1 : pos + 1 < s.size
+  · have hB : (s ++ t)[pos + 1]! = s[pos + 1]! :=
+      arrGetElem!_append_left h1
+    rw [hA, hB]
+    have hsz : (s ++ t).size = s.size + t.size := Array.size_append
+    have hd : decide (pos + 1 < (s ++ t).size)
+        = decide (pos + 1 < s.size) := by
+      rw [hsz]
+      rw [decide_eq_true (show pos + 1 < s.size + t.size by omega),
+          decide_eq_true (show pos + 1 < s.size by omega)]
+    rw [hd]
+  · have hsd : decide (pos + 1 < s.size) = false :=
+      decide_eq_false (by omega)
+    rw [hsd]
+    simp only [Bool.false_and]
+    cases hsd2 : decide (pos + 1 < (s ++ t).size) with
+    | false => rfl
+    | true =>
+        have hlt : pos + 1 < (s ++ t).size := of_decide_eq_true hsd2
+        have hsz : (s ++ t).size = s.size + t.size := Array.size_append
+        -- the joined read at pos+1 is a t char, excluded by hlook:
+        have hread2 : (s ++ t)[pos + 1]! = t[pos + 1 - s.size]! := by
+          have hap := arrGetElem!_append_right' (s := s) (t := t)
+            (k := pos + 1 - s.size) (show pos + 1 - s.size < t.size by omega)
+          rw [show s.size + (pos + 1 - s.size) = pos + 1 from by omega] at hap
+          exact hap
+        have hlookb : (s ++ t)[pos + 1]! ≠ 'x' ∧ (s ++ t)[pos + 1]! ≠ 'o' := by
+          have hge : s.size ≤ pos + 1 := by omega
+          exact hlook pos hge hlt
+        have hreadbang : (s ++ t)[pos + 1] = (s ++ t)[pos + 1]! :=
+          (arrGetElem!_of_lt (a := s ++ t) (i := pos + 1) hlt).symm
+        by_cases hzero : (s ++ t)[pos]! == '0'
+        · have hnc : (s ++ t)[pos + 1]! ≠ c := by
+            intro hc
+            rcases hcx with rfl | rfl
+            · exact hlookb.1 hc
+            · exact hlookb.2 hc
+          show (true && ((s ++ t)[pos]! == '0') && ((s ++ t)[pos + 1]! == c))
+              = false
+          rw [show ((s ++ t)[pos]! == '0') = true from hzero]
+          have : ((s ++ t)[pos + 1]! == c) = false :=
+            Bool.eq_false_iff.mpr (fun hcon => hnc (eq_of_beq hcon))
+          rw [this]
+          rfl
+        · rw [show ((s ++ t)[pos]! == '0') = false from
+            Bool.not_eq_true _ ▸ hzero]
+          simp
+
+/-- `lexUnsigned` agrees on `s ++ t` and `s` under `noScans` and
+    the hex/octal lookahead exclusion (the three scan arms agree by
+    `takeWhile_noScans`, the two prefix conditions by
+    `lexUnsigned_prefix_congr`). -/
+theorem lexUnsigned_left_of_noScans {s t : Array Char} {pos : Nat}
+    (hpos : pos < s.size)
+    (hlook : ∀ (q : Nat), s.size ≤ q + 1 → q + 1 < (s ++ t).size →
+      (s ++ t)[q + 1]! ≠ 'x' ∧ (s ++ t)[q + 1]! ≠ 'o')
+    (hns : noScans t) :
+    lexUnsigned (s ++ t) pos = lexUnsigned s pos := by
+  have hhex : takeWhile isHexDigit (s ++ t) (pos + 2) ""
+      = takeWhile isHexDigit s (pos + 2) "" :=
+    takeWhile_noScans (p := isHexDigit) (Or.inr (Or.inr (Or.inl rfl))) hns
+      (pos + 2) ""
+  have hoct : takeWhile isOctDigit (s ++ t) (pos + 2) ""
+      = takeWhile isOctDigit s (pos + 2) "" :=
+    takeWhile_noScans (p := isOctDigit) (Or.inr (Or.inr (Or.inr rfl))) hns
+      (pos + 2) ""
+  have hdec : takeWhile isDigit (s ++ t) pos ""
+      = takeWhile isDigit s pos "" :=
+    takeWhile_noScans (p := isDigit) (Or.inr (Or.inl rfl)) hns pos ""
+  have hcx := lexUnsigned_prefix_congr hpos hlook 'x' (Or.inl rfl)
+  have hco := lexUnsigned_prefix_congr hpos hlook 'o' (Or.inr rfl)
+  rw [lexUnsigned, lexUnsigned, hcx, hco, hhex, hoct, hdec]
+
+/-- `lexInt` agrees on `s ++ t` and `s` under the same premises,
+    plus the honest `hnonlastdash` (a `-` head never ends `s`:
+    otherwise the subsequent `lexUnsigned` at the boundary would
+    read past-the-end hex/octal prefixes that genuinely differ
+    between the arrays). -/
+theorem lexInt_left_of_noScans {s t : Array Char} {pos : Nat}
+    (hpos : pos < s.size)
+    (hlook : ∀ (q : Nat), s.size ≤ q + 1 → q + 1 < (s ++ t).size →
+      (s ++ t)[q + 1]! ≠ 'x' ∧ (s ++ t)[q + 1]! ≠ 'o')
+    (hns : noScans t)
+    (hnonlastdash : s[pos]! = '-' → pos + 1 < s.size) :
+    lexInt (s ++ t) pos = lexInt s pos := by
+  have hcond : (decide (pos < (s ++ t).size) && (s ++ t)[pos]! == '-')
+      = (decide (pos < s.size) && s[pos]! == '-') := by
+    rw [arrGetElem!_append_left hpos]
+    rw [decide_eq_true (show pos < (s ++ t).size by
+      rw [Array.size_append]; omega)]
+    rw [decide_eq_true (show pos < s.size by omega)]
+  rw [lexInt, lexInt, hcond]
+  by_cases hneg : (decide (pos < s.size) && s[pos]! == '-') = true
+  · rw [if_pos hneg, if_pos hneg]
+    have hdash : s[pos]! = '-' := by
+      have := (Bool.and_eq_true_iff.mp hneg).2
+      exact eq_of_beq this
+    rw [lexUnsigned_left_of_noScans (hnonlastdash hdash) hlook hns]
+  · rw [if_neg hneg, if_neg hneg]
+    rw [lexUnsigned_left_of_noScans hpos hlook hns]
+
 /-- The whitespace/`=` separator array of an entry line (`" = "`)
     satisfies `noScans`. -/
 theorem boundary_noScans_wsEq : noScans #[(' '), ('='), (' ')] := by
