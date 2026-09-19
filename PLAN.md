@@ -66,8 +66,8 @@ wins.
 This closes the remaining proof gap needed to remove rendering and reparsing
 from every solver leaf.
 
-- [x] Rebuild lexer composition on the satisfiable foundations: the honest
-  success-conditioned offset-transport stack — `lexInt_offset_ok`,
+- [x] Rebuild lexer composition on the satisfiable foundations: the
+  honest success-conditioned offset-transport stack — `lexInt_offset_ok`,
   `lexToken_offset_ok`, and the walk-level `tokenizeAux_offset_ok` (no scan
   premise at all; branch room derives from success via `lexUnsigned_gt`)
   — replaces the withdrawn vacuous `htw` family for the round-trip's
@@ -84,6 +84,11 @@ from every solver leaf.
   y head — excluded by the `'0'`-head premise).
 - [ ] Prove the emitted scalar-entry round trip through `parseEntry` for
   identifiers, Booleans, nonnegative integers, and negative integers.
+  The four-step walk composition is mapped and its fuel landed
+  (P0.7a/P0.7b: `tokenizeAux_step`, the skip facts,
+  `composite_cons_head`, `composite_skip_origin_ident`); the remaining
+  work is the step chain itself (ident/bool/negative-int siblings of
+  `lexToken_int_segment`'s statement shape, validated).
 - [ ] Assemble the list/line result into the master theorem
   `parseSolution (stripSeparators (emitSolution ps)) = .ok (entriesOf ps)`
   under the emitter's explicit name hypotheses.
