@@ -2231,6 +2231,81 @@ theorem lexInt_left_of_noScans {s t : Array Char} {pos : Nat}
   · rw [if_neg hneg, if_neg hneg]
     rw [lexUnsigned_left_of_noScans hpos hlook hns]
 
+/-- `lexToken` agrees on `s ++ t` and `s` at a position whose head
+    is none of the two-char lookahead heads (`':'`, `'.'`) and not
+    a string opener (`'"'`), under the hex/octal lookahead
+    exclusions and `noScans` — the entry-line token shapes
+    (identifiers, integers, Booleans) all satisfy these premises.
+
+    The dependent-match transport (the `lexInt` result matches on
+    both sides carry different position proofs) closes by the
+    double `split`: both matches case to the same arm pair, the
+    token/position pairs are equal by `Except.ok.inj` +
+    `Prod.mk.inj`, and the subtype components then agree by proof
+    irrelevance (`rfl`). -/
+theorem lexToken_int_ident_agree {s t : Array Char} {pos : Nat}
+    (hpos : pos < s.size)
+    (hcond : s[pos]'hpos ≠ ':' ∧ s[pos]'hpos ≠ '.' ∧ s[pos]'hpos ≠ '"')
+    (_hlook : ∀ (q : Nat), s.size ≤ q + 1 → q + 1 < s.size + t.size →
+      ((s ++ t)[q + 1]! ≠ ':' ∧ (s ++ t)[q + 1]! ≠ '.'))
+    (hlookxo : ∀ (q : Nat), s.size ≤ q + 1 → q + 1 < s.size + t.size →
+      ((s ++ t)[q + 1]! ≠ 'x' ∧ (s ++ t)[q + 1]! ≠ 'o'))
+    (hns : noScans t)
+    (hnonlastdash : s[pos]! = '-' → pos + 1 < s.size) :
+    lexToken (s ++ t) pos (by rw [Array.size_append]; omega)
+      = lexToken s pos hpos := by
+  have hlexintok : lexInt (s ++ t) pos = lexInt s pos := by
+    have hbang : s[pos]! = s[pos]'hpos := arrGetElem!_of_lt hpos
+    refine lexInt_left_of_noScans hpos ?_ hns (fun hd =>
+      hnonlastdash (hbang ▸ hd))
+    intro q hge hq
+    exact hlookxo q hge (by rw [Array.size_append] at hq; omega)
+  have hlt : pos < (s ++ t).size := by rw [Array.size_append]; omega
+  have heq : (s ++ t)[pos]'hlt = s[pos]'hpos := arrGetElem_append_left hpos
+  rw [lexToken, lexToken]
+  simp only [heq]
+  have hscans : takeWhile isIdentChar (s ++ t) (pos + 1)
+      (String.singleton s[pos])
+      = takeWhile isIdentChar s (pos + 1) (String.singleton s[pos]) :=
+    takeWhile_noScans (p := isIdentChar) (s := s) (t := t)
+      (Or.inl rfl) hns (pos + 1) (String.singleton s[pos])
+  all_goals simp_all
+  all_goals (try split)
+  all_goals (try simp_all [hscans])
+  all_goals (try omega)
+  all_goals (try rfl)
+  case h_13 =>
+    by_cases halpha : isAlpha s[pos] = true ∨ s[pos] = '_'
+    · rw [if_pos halpha, if_pos halpha]
+    · rw [if_neg halpha, if_neg halpha]
+      by_cases hdigit : isDigit s[pos] = true ∨ s[pos] = '-'
+      · rw [if_pos hdigit, if_pos hdigit]
+        split
+        · rename_i tok1 p1 htp
+          split
+          · rename_i tok1' p1' hts
+            rw [← hlexintok, htp] at hts
+            have hp : (tok1, p1) = (tok1', p1') := Except.ok.inj hts
+            obtain ⟨hA, hB⟩ := Prod.mk.inj hp
+            subst hA
+            subst hB
+            rfl
+          · rename_i e hts
+            rw [← hlexintok, htp] at hts
+            exact absurd hts (by simp)
+        · rename_i e hte
+          split
+          · rename_i tok1' p1' hts
+            rw [← hlexintok] at hts
+            rw [hte] at hts
+            exact absurd hts (by simp)
+          · rename_i e' hts'
+            rw [← hlexintok, hte] at hts'
+            have hee : e = e' := Except.error.inj hts'
+            subst hee
+            rfl
+      · rw [if_neg hdigit, if_neg hdigit]
+
 /-- The whitespace/`=` separator array of an entry line (`" = "`)
     satisfies `noScans`. -/
 theorem boundary_noScans_wsEq : noScans #[(' '), ('='), (' ')] := by
@@ -2241,6 +2316,7 @@ theorem boundary_noScans_wsEq : noScans #[(' '), ('='), (' ')] := by
   | 0, _ => decide
   | 1, _ => decide
   | 2, _ => decide
+
 theorem lexUnsigned_append_right_ok {s t : Array Char} {k : Nat}
     (hpos : k < t.size)
     {n : Int} {p : Nat}
