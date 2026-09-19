@@ -66,11 +66,21 @@ wins.
 This closes the remaining proof gap needed to remove rendering and reparsing
 from every solver leaf.
 
-- [ ] Rebuild lexer composition on the satisfiable `noScans` foundation:
-  add the end-of-prefix hex/octal lookahead exclusion, prove `lexToken`
-  agreement, lift it through the token walk, and restate
-  `tokenize_cons_newline`.  Do not reuse the withdrawn, vacuous `htw`
-  premises.
+- [x] Rebuild lexer composition on the satisfiable foundations: the honest
+  success-conditioned offset-transport stack — `lexInt_offset_ok`,
+  `lexToken_offset_ok`, and the walk-level `tokenizeAux_offset_ok` (no scan
+  premise at all; branch room derives from success via `lexUnsigned_gt`)
+  — replaces the withdrawn vacuous `htw` family for the round-trip's
+  needs.  The intra-line layer computes every entry-line token *in place*
+  over the composite array (`lexToken_kw_segment`,
+  `lexToken_ident_segment`, `lexToken_eq_segment`,
+  `lexToken_semi_segment` on `composite_read`/`word_scan_acc`/
+  `takeWhile_take_drop`), so no intra-line walk-agreement premises are
+  needed: the `;`/`=`/space boundary characters fail all four scan
+  predicates by decidability.
+- [ ] Finish the digit-literal segment token (`lexToken_int_segment`:
+  the same in-place pattern; the hex/octal guards close through the
+  `'0'`-head `x/o` exclusion on the boundary char).
 - [ ] Prove the emitted scalar-entry round trip through `parseEntry` for
   identifiers, Booleans, nonnegative integers, and negative integers.
 - [ ] Assemble the list/line result into the master theorem
@@ -84,8 +94,12 @@ from every solver leaf.
 
 Already complete for this item: newline splitting/intercalation,
 `tokenize_ident`, `tokenize_bool`, `tokenize_int_nonneg`,
-`tokenize_int_negsucc`, `stripSeparators_emitSolution`, and the honest
-`takeWhile_append_of_tail_fail`/`noScans` token-level foundation.
+`tokenize_int_negsucc`, `stripSeparators_emitSolution`, the honest
+`takeWhile_append_of_tail_fail`/`noScans` token-level foundation, the
+success-conditioned offset-transport stack (P0.2), the walk-level
+`tokenizeAux_offset_ok` (P0.3), and the intra-line segment-token layer
+(P0.5: kw/ident/eq/semi at offsets, `takeWhile_take_drop`,
+`composite_read`/`composite_read_head`, `digit_not_punct`).
 
 ### P1 — Wire the verified fast solver structures
 
