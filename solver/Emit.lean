@@ -3427,6 +3427,378 @@ theorem lexInt_le (arr : Array Char) (pos : Nat) (hle : pos ≤ arr.size)
       omega
     · exact absurd hok (by simp)
 
+
+/-! #### The honest offset-transport layer (P0 round-trip, 2026-09-19)
+
+`lexInt_offset_ok` and `lexToken_offset_ok` below are the honest,
+*satisfiable* replacements of the withdrawn vacuous
+`lexInt_append_right_ok`/`lexToken_append_right_ok` family (whose
+`htw` scan premises are unsatisfiable; see the audit note above).
+The statement shape changes from "all scans stop inside" (vacuous)
+to **success-conditioned transport**: given that the tail's lexer
+*succeeds* at `k`, the joined array's lexer at the offset position
+` s.size + k` succeeds with the same token and the end position
+shifted by `s.size`.  Branch room (`k+1 < t.size` where the
+two-char lookahead needs it) is derived from the success itself —
+`lexUnsigned_gt` guarantees the unsigned part consumed at least
+one character — rather than from a scan premise.  Error results
+genuinely differ (the messages embed absolute positions), so the
+honest statement is success-transport only, exactly like the
+withdrawn family. -/
+
+/-- `lexInt` past a consumed prefix: success-transport.  The branch
+    room is derived from the success itself (the unsigned part
+    consumed at least one char), not from a scan premise — closing
+    the vacuous-premise gap of the withdrawn `lexInt_append_right_ok`. -/
+theorem lexInt_offset_ok {s t : Array Char} {k : Nat}
+    (hpos : k < t.size)
+    {tok : Token} {p : Nat}
+    (hok : lexInt t k = .ok (tok, p)) :
+    lexInt (s ++ t) (s.size + k) = .ok (tok, p + s.size) := by
+  rw [lexInt.eq_def (s := t) (pos := k)] at hok
+  rw [lexInt.eq_def (s := s ++ t) (pos := s.size + k)]
+  have hread0 : (s ++ t)[s.size + k]! = t[k]! :=
+    arrGetElem!_append_right' hpos
+  by_cases hneg : (decide (k < t.size) && t[k]! == '-') = true
+  · have hnegrw : (decide (s.size + k < (s ++ t).size)
+        && (s ++ t)[s.size + k]! == '-') = true := by
+      rw [hread0, decide_eq_true (show s.size + k < (s ++ t).size by
+        rw [Array.size_append]; omega)]
+      have hdec : decide (k < t.size) = true := decide_eq_true hpos
+      rw [hdec] at hneg
+      exact hneg
+    rw [if_pos hnegrw]
+    rw [if_pos hneg] at hok
+    split at hok
+    · rename_i n p1 hu
+      have hgt : k + 1 < p1 := lexUnsigned_gt t (k + 1) n p1 hu
+      have hle : p1 ≤ t.size :=
+        lexUnsigned_le t (k + 1) (by omega) n p1 hu
+      have hroom : k + 1 < t.size := by omega
+      have hu' : lexUnsigned (s ++ t) (s.size + (k + 1))
+          = .ok (n, p1 + s.size) :=
+        lexUnsigned_append_right_ok (s := s) (t := t) (k := k + 1)
+          hroom hu
+      obtain ⟨htok, hpp⟩ := Prod.mk.inj (Except.ok.inj hok)
+      subst htok
+      have hpp' : p = p1 := by omega
+      subst hpp'
+      rw [show s.size + (k + 1) = s.size + k + 1 from by omega] at hu'
+      rw [hu']
+    · exact absurd hok (by simp)
+  · rw [if_neg (by
+      intro hc
+      rw [hread0] at hc
+      rw [decide_eq_true (show s.size + k < (s ++ t).size by
+        rw [Array.size_append]; omega)] at hc
+      have hdec : decide (k < t.size) = true := decide_eq_true hpos
+      rw [hdec] at hneg
+      exact absurd hc hneg)]
+    rw [if_neg hneg] at hok
+    split at hok
+    · rename_i n p1 hu
+      have hu' : lexUnsigned (s ++ t) (s.size + k)
+          = .ok (n, p1 + s.size) :=
+        lexUnsigned_append_right_ok (s := s) (t := t) (k := k) hpos hu
+      obtain ⟨htok, hpp⟩ := Prod.mk.inj (Except.ok.inj hok)
+      subst htok
+      have hpp' : p = p1 := by omega
+      subst hpp'
+      rw [hu']
+    · exact absurd hok (by simp)
+
+/-- `lexToken` past a consumed prefix: success-transport (the
+    honest replacement of the withdrawn vacuous
+    `lexToken_append_right_ok`; branch room comes from the
+    success, the scans from the unconditional
+    `takeWhile_append_right`/`skipToNewline_append_right`). -/
+theorem lexToken_offset_ok {s t : Array Char} {k : Nat}
+    {tok : Token} {p : Nat} {hp : k < p} (hpos : k < t.size)
+    (hnostr : t[k]'hpos ≠ '"')
+    (hok : lexToken t k hpos = .ok (tok, ⟨p, hp⟩)) :
+    lexToken (s ++ t) (s.size + k) (by rw [Array.size_append]; omega)
+        = .ok (tok, ⟨s.size + p, by omega⟩) := by
+  have hlt : s.size + k < (s ++ t).size := by rw [Array.size_append]; omega
+  have heq : (s ++ t)[s.size + k]'hlt = t[k]'hpos :=
+    arrGetElem_append_right' hpos
+  -- transport the RHS through the char equality: case on t[k]'hpos
+  -- is over 14 chars — instead use the general match transport:
+  -- generalize the char and the hypothesis hok
+  rw [lexToken.eq_def (s := t) (pos := k) (h := hpos)] at hok
+  simp only [] at hok
+  split at hok
+  case h_1 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  case h_2 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  case h_3 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  case h_4 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  case h_5 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  case h_6 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  case h_7 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  case h_8 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  case h_9 heqc =>
+    have hpair := Except.ok.inj hok
+    obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+    subst htok
+    have hk1 : p = k + 1 := by injection hpp with hpv; omega
+    subst hk1
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rfl
+  -- h_10 (':'): the lookahead conditions agree
+  case h_10 heqc =>
+    by_cases hcond : (decide (k + 1 < t.size) && t[k + 1]! == ':') = true
+    · have hlt1 : k + 1 < t.size :=
+        of_decide_eq_true (Bool.and_eq_true_iff.mp hcond).1
+      have hlk : (s ++ t)[s.size + k + 1]! = t[k + 1]! :=
+        arrGetElem!_append_right' hlt1
+      have hk2 : p = k + 2 := by
+        rw [if_pos hcond] at hok
+        have hpair := Except.ok.inj hok
+        obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+        injection hpp with hpv
+        omega
+      subst hk2
+      rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+      simp only [heq, heqc]
+      rw [show (s ++ t)[s.size + k + 1]! = t[k + 1]! from hlk]
+      have hdect : decide (s.size + k + 1 < (s ++ t).size) = true :=
+        decide_eq_true (show s.size + k + 1 < (s ++ t).size from by
+          rw [Array.size_append]; omega)
+      rw [hdect]
+      have hcond2 : (t[k + 1]! == ':') = true :=
+        (Bool.and_eq_true_iff.mp hcond).2
+      rw [hcond2]
+      have htokcc : tok = Token.colonColon := by
+        rw [if_pos hcond] at hok
+        have hpair := Except.ok.inj hok
+        exact (Prod.mk.inj hpair).1.symm
+      rw [htokcc]
+      rfl
+    · rw [if_neg hcond] at hok
+      have hpair := Except.ok.inj hok
+      obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+      subst htok
+      have hk1 : p = k + 1 := by injection hpp with hpv; omega
+      subst hk1
+      rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+      simp only [heq, heqc]
+      by_cases hlt1 : k + 1 < t.size
+      · have hlk : (s ++ t)[s.size + k + 1]! = t[k + 1]! :=
+          arrGetElem!_append_right' hlt1
+        have hdect : decide (k + 1 < t.size) = true :=
+          decide_eq_true hlt1
+        have hcondf : (t[k + 1]! == ':') = false := by
+          have hpair := Bool.and_eq_false_iff.mp (by
+            cases hh : (decide (k + 1 < t.size) && t[k + 1]! == ':') with
+            | true => exact absurd hh hcond
+            | false => rfl)
+          rw [hdect] at hpair
+          exact hpair.resolve_left (by simp)
+        rw [hlk, hcondf, Bool.and_false, if_neg (by simp)]
+        rfl
+      · rw [decide_eq_false (by
+          rw [Array.size_append]
+          omega)]
+        rfl
+  -- h_11 ('.'): hok is .ok, so the t-side condition must be true
+  case h_11 heqc =>
+    have hlt1 : k + 1 < t.size := by
+      by_cases hc : k + 1 < t.size
+      · exact hc
+      · exfalso
+        have hsd : decide (k + 1 < t.size) = false :=
+          decide_eq_false (by omega)
+        rw [hsd, Bool.false_and, if_neg (by simp)] at hok
+        exact absurd hok (by simp)
+    have hlk : (s ++ t)[s.size + k + 1]! = t[k + 1]! :=
+      arrGetElem!_append_right' hlt1
+    have hcond : (decide (k + 1 < t.size) && t[k + 1]! == '.') = true := by
+      cases hh : (decide (k + 1 < t.size) && t[k + 1]! == '.') with
+      | true => rfl
+      | false =>
+          exfalso
+          have hcondneg : ¬ ((decide (k + 1 < t.size) && t[k + 1]! == '.') = true) := by
+            rw [hh]; simp
+          rw [if_neg hcondneg] at hok
+          exact absurd hok (by simp)
+    have hk2 : p = k + 2 := by
+      rw [if_pos hcond] at hok
+      have hpair := Except.ok.inj hok
+      obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+      injection hpp with hpv
+      omega
+    subst hk2
+    have htokdd : tok = Token.dotDot := by
+      rw [if_pos hcond] at hok
+      have hpair := Except.ok.inj hok
+      exact (Prod.mk.inj hpair).1.symm
+    rw [htokdd]
+    rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+    simp only [heq, heqc]
+    rw [decide_eq_true (by rw [Array.size_append]; omega), hlk]
+    have hread : (t[k + 1]! == '.') = true :=
+      (Bool.and_eq_true_iff.mp hcond).2
+    rw [hread]
+    rfl
+  -- h_12 ('"'): excluded
+  case h_12 heqc =>
+    exact absurd (show t[k]'hpos = '"' from by rw [heqc]) hnostr
+  -- h_13: ident/int
+  case h_13 heqc =>
+    by_cases halpha : (isAlpha t[k] || t[k] == '_') = true
+    · rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+      simp only [heq, heqc]
+      rw [if_pos halpha]
+      rw [if_pos halpha] at hok
+      cases hhk : keywordToken
+          (takeWhile isIdentChar t (k + 1) (String.singleton t[k])).1 with
+      | some tok2 =>
+          rw [hhk] at hok
+          have htok : tok = tok2 := by
+            have hpair := Except.ok.inj hok
+            exact (Prod.mk.inj hpair).1.symm
+          subst htok
+          have h := takeWhile_append_right (p := isIdentChar)
+            (s := s) (t := t) (k := k + 1) (acc := String.singleton t[k])
+          have hpos : s.size + (k + 1) = s.size + k + 1 := by omega
+          rw [hpos] at h
+          have hpp : p = (takeWhile isIdentChar t (k + 1)
+              (String.singleton t[k])).2 := by
+            have hpair := Except.ok.inj hok
+            obtain ⟨_, hp2⟩ := Prod.mk.inj hpair
+            injection hp2 with hpv
+            omega
+          subst hpp
+          simp only [h]
+          rw [hhk]
+          rfl
+      | none =>
+          rw [hhk] at hok
+          by_cases hres : reservedNonFzn.contains
+              (takeWhile isIdentChar t (k + 1) (String.singleton t[k])).1 = true
+          · rw [if_pos hres] at hok
+            exact absurd hok (by simp)
+          · rw [if_neg hres] at hok
+            have hpair := Except.ok.inj hok
+            obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+            subst htok
+            have h := takeWhile_append_right (p := isIdentChar)
+              (s := s) (t := t) (k := k + 1) (acc := String.singleton t[k])
+            have hpos : s.size + (k + 1) = s.size + k + 1 := by omega
+            rw [hpos] at h
+            simp only [h]
+            rw [if_neg hres]
+            have hpp2 : p = (takeWhile isIdentChar t (k + 1)
+                (String.singleton t[k])).2 := by
+              injection hpp with hpv
+              omega
+            simp only [hpp2]
+            rw [hhk]
+            rfl
+    · rw [lexToken.eq_def (s := s ++ t) (pos := s.size + k) (h := hlt)]
+      simp only [heq, heqc]
+      rw [if_neg halpha]
+      by_cases hdigit : (isDigit t[k] || t[k] == '-') = true
+      · rw [if_pos hdigit]
+        rw [if_neg halpha] at hok
+        rw [if_pos hdigit] at hok
+        split at hok
+        next tok2 p2 hli =>
+          have hpair := Except.ok.inj hok
+          obtain ⟨htok, hpp⟩ := Prod.mk.inj hpair
+          have htok2 : tok = tok2 := htok.symm
+          have hpp2 : p = p2 := by
+            injection hpp with hpv
+            omega
+          subst htok2
+          subst hpp2
+          split
+          · next tok3 p3 hli' =>
+              have hoffset := lexInt_offset_ok (s := s) (t := t)
+                (k := k) hpos hli
+              have hident : Except.ok (tok3, p3)
+                  = Except.ok (tok, p + s.size) :=
+                hli'.symm.trans hoffset
+              obtain ⟨rfl, hpp3⟩ := (Prod.mk.inj (Except.ok.inj hident))
+              have hpp3eq : p3 = s.size + p := by omega
+              subst hpp3eq
+              rfl
+          · rename_i e hlierr
+            have hoffset := lexInt_offset_ok (s := s) (t := t)
+              (k := k) hpos hli
+            rw [hoffset] at hlierr
+            exact absurd hlierr (by simp)
+        · rename_i e hli
+          exact absurd hok (by simp)
+      · rw [if_neg hdigit]
+        exfalso
+        rw [if_neg halpha, if_neg hdigit] at hok
+        exact absurd hok (by simp)
+
 theorem skipTrivia_ws_agree' (arr : Array Char)
     (k k' : Nat) (hkk : k ≤ k') (hk'le : k' ≤ arr.size)
     (hws : ∀ (m : Nat), k ≤ m → m < k' →
@@ -5991,6 +6363,131 @@ theorem stripSeparators_emitSolution (ps : List (String × Value))
           sep_starts_eqs, sep_starts_stat] at hc
         exact Bool.noConfusion hc,
     List.append_nil]
+
+/-! ### The emitted-token scan shape (P0: the emitted-solution
+round trip, honest lexer layer)
+
+A scan that takes a whole name/digit body and stops at the *join*
+character (the `;`/` `/`=`/`\n` that follows every emitted token)
+cannot run past the join: on the joined side the first tail char
+fails the predicate, on the isolated side the array ends.  The
+lemma below is the list-level version of this — the emitted pieces
+are naturally lists (names from `String.toList`, digit strings
+from `Nat.toDigits`), and `tokenize` converts through
+`String.ofList`, whose array is the list's array
+(`internal_toArray_ofList`). -/
+
+/-- **Scan-takes-segment**: over the array of the composite list
+    `x ++ y`, a scan started at `q ≤ x.length`, where all of `x`'s
+    chars from `q` pass `p` and `y`'s head (if any) fails `p`,
+    consumes exactly `x`'s tail and stops at the join position
+    `x.length`.  The emitted-token shape: a name/digit body
+    followed by a boundary char that fails the scan predicate. -/
+theorem takeWhile_take_drop {p : Char → Bool} :
+    ∀ (x y : List Char) (q : Nat), q ≤ x.length →
+      (∀ c ∈ x.drop q, p c = true) →
+      (∀ (c : Char), y.head? = some c → p c = false) →
+      ∀ (acc : String),
+        takeWhile p ((x ++ y).toArray) q acc
+          = (acc ++ String.ofList (x.drop q), x.length) := by
+  intro x
+  induction x with
+  | nil =>
+      intro y q hq hall hfail acc
+      have hq0 : q = 0 := Nat.eq_zero_of_le_zero hq
+      subst hq0
+      cases y with
+      | nil =>
+          have hz : ([] ++ ([] : List Char)).toArray = #[] := by
+            apply Array.toList_inj.mp
+            simp
+          rw [hz]
+          rw [takeWhile.eq_def (pos := 0) (acc := acc)]
+          rw [dif_neg (by
+            show ¬ 0 < (#[] : Array Char).size
+            decide)]
+          show (acc, 0) = _
+          rw [show ([] : List Char).drop 0 = [] from rfl,
+            String.ofList_nil, String.append_empty]
+          rfl
+      | cons d ds =>
+          have hz : ([] ++ (d :: ds)).toArray = (d :: ds).toArray := by
+            apply Array.toList_inj.mp
+            simp
+          rw [hz]
+          have h0 : 0 < (d :: ds : List Char).toArray.size := by
+            rw [list_toArray_size]; simp
+          rw [takeWhile.eq_def (pos := 0) (acc := acc)]
+          simp only [h0, dif_pos]
+          have hd : p ((d :: ds : List Char).toArray)[0] = false := by
+            rw [show (d :: ds : List Char).toArray[0] = d from by
+              rw [List.getElem_toArray (xs := d :: ds) (i := 0) (h := h0)]
+              rfl]
+            exact hfail d rfl
+          rw [hd, if_neg (by intro hc; exact Bool.noConfusion hc)]
+          show (acc, 0) = _
+          rw [show ([] : List Char).drop 0 = [] from rfl,
+            String.ofList_nil, String.append_empty]
+          rfl
+  | cons a as ih =>
+      intro y q hq hall hfail acc
+      cases q with
+      | zero =>
+          have hpa : p a = true := hall a (by simp)
+          have hz : ((a :: as) ++ y).toArray
+              = (a :: (as ++ y)).toArray := rfl
+          rw [hz]
+          have h0 : 0 < (a :: (as ++ y) : List Char).toArray.size := by
+            rw [list_toArray_size]; simp
+          rw [takeWhile.eq_def (pos := 0) (acc := acc)]
+          simp only [h0, dif_pos]
+          have harr : (a :: (as ++ y) : List Char).toArray[0] = a := by
+            rw [List.getElem_toArray (xs := a :: (as ++ y)) (i := 0) (h := h0)]
+            rfl
+          rw [harr, show p a = true from hpa, if_pos rfl]
+          rw [show String.push acc a = acc ++ String.singleton a from
+            String.push_eq_append a]
+          rw [show (0 : Nat) + 1 = 1 from rfl]
+          rw [takeWhile_cons_shift p a (as ++ y) 0
+            (acc ++ String.singleton a)]
+          -- the IH at 0 on the tail composite (membership in `as`):
+          have hall' : ∀ c ∈ as.drop 0, p c = true := by
+            intro c hc
+            simp only [List.drop_zero] at hc
+            exact hall c (List.mem_cons_of_mem _ hc)
+          have hrec := ih y 0 (Nat.zero_le _) hall' hfail
+            (acc ++ String.singleton a)
+          rw [hrec]
+          show (acc ++ String.singleton a ++ String.ofList (as.drop 0), 1 + as.length) = _
+          rw [show (as : List Char).drop 0 = as from rfl,
+            show (a :: as).drop 0 = (a :: as : List Char) from rfl,
+            String.ofList_cons, String.append_assoc]
+          rw [show (a :: as).length = as.length + 1 from rfl,
+            Nat.add_comm as.length 1]
+      | succ q' =>
+          have hz : ((a :: as) ++ y).toArray
+              = (a :: (as ++ y)).toArray := rfl
+          rw [hz]
+          -- the cons-shift at the successor position (commuted to
+          -- the lemma's `1 + q'` form):
+          have hshift : takeWhile p ((a :: (as ++ y) : List Char).toArray)
+                (q' + 1) acc
+              = ((takeWhile p (as ++ y).toArray q' acc).1,
+                 1 + (takeWhile p (as ++ y).toArray q' acc).2) := by
+            rw [Nat.add_comm q' 1]
+            exact takeWhile_cons_shift p a (as ++ y) q' acc
+          rw [hshift]
+          have hmem : ∀ c ∈ as.drop q', p c = true := by
+            intro c hc
+            refine hall c ?_
+            rw [List.drop_succ_cons]
+            exact hc
+          have hrec := ih y q' (by simp at hq; omega) hmem hfail acc
+          rw [hrec]
+          show (acc ++ String.ofList (as.drop q'), 1 + as.length) = _
+          rw [List.drop_succ_cons]
+          rw [show (a :: as).length = as.length + 1 from rfl,
+            Nat.add_comm as.length 1]
 
 end LexerCons
 
