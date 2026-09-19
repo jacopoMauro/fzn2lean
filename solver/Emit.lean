@@ -6852,6 +6852,195 @@ theorem composite_read_head {x : List Char} {c : Char} {cs : List Char} :
   rw [hget]
   simp
 
+/-! #### The digit-literal segment token
+
+The last intra-line shape: a digit-headed all-digit literal
+(`Nat.toDigits`), ending at the boundary.  The hex/octal guards of
+`lexUnsigned` close by the two-character argument: the char at
+`q+1` is either a digit inside the segment (never `x`/`o`) or the
+y-head (excluded by the `'0'`-head premise). -/
+
+/-- The digit scan over the composite from `q` (takes `x.drop q`,
+    stops at the y head). -/
+theorem composite_scan_digit {x y : List Char} {q : Nat}
+    (hle : q ≤ x.length)
+    (hdigits : ∀ c ∈ x.drop q, isDigit c = true)
+    (hfail : ∀ (c : Char), y.head? = some c → isDigit c = false) :
+    takeWhile isDigit ((x ++ y).toArray) q ""
+      = (String.ofList (x.drop q), x.length) :=
+  takeWhile_take_drop x y q hle hdigits hfail ""
+
+/-- The member fact: `x[q+1]` is a digit when it exists. -/
+private theorem digit_at_succ {x : List Char} {q : Nat}
+    (hle : q < x.length) (hqx : q + 1 < x.length)
+    (hdigits : ∀ c ∈ x.drop q, isDigit c = true) :
+    isDigit x[q + 1] = true := by
+  have hdrop : x.drop q = x[q] :: x.drop (q + 1) :=
+    List.drop_eq_getElem_cons hle
+  have hmem : x[q + 1] ∈ x.drop (q + 1) := by
+    have hdrop2 : x.drop (q + 1) = x[q + 1] :: x.drop (q + 2) :=
+      List.drop_eq_getElem_cons hqx
+    rw [hdrop2]
+    exact List.mem_cons_self ..
+  exact hdigits x[q + 1] (by rw [hdrop]; exact List.mem_cons_of_mem _ hmem)
+
+/-- The hex/octal guard failure: the char at `q+1` is a digit
+    inside `x` or the y head (excluded by `hzero`). -/
+private theorem guard_fail {x y : List Char} {q : Nat}
+    (hle : q < x.length)
+    (hbang : ((x ++ y).toArray)[q]! = x[q])
+    (hdigits : ∀ c ∈ x.drop q, isDigit c = true)
+    (hzero : x[q] = '0' → ∀ (c : Char), y.head? = some c → c ≠ 'x' ∧ c ≠ 'o')
+    (hc : Char) (hcx : hc = 'x' ∨ hc = 'o')
+    (hcond : (decide (q + 1 < (x ++ y).toArray.size)
+      && ((x ++ y).toArray)[q]! == '0'
+      && ((x ++ y).toArray)[q + 1]! == hc) = true) : False := by
+  rw [Bool.and_eq_true, Bool.and_eq_true] at hcond
+  obtain ⟨⟨hq1, h0c⟩, hcc⟩ := hcond
+  rw [hbang] at h0c
+  have h0 : x[q] = '0' := eq_of_beq h0c
+  have hlt : q + 1 < (x ++ y).toArray.size := of_decide_eq_true hq1
+  rw [composite_size] at hlt
+  by_cases hqx : q + 1 < x.length
+  · rw [composite_read! hqx] at hcc
+    have hdig2 : isDigit x[q + 1] = true :=
+      digit_at_succ hle hqx hdigits
+    have hccx : x[q + 1] = hc := eq_of_beq hcc
+    rw [hccx] at hdig2
+    have hnotdig : isDigit hc = false := by
+      rcases hcx with rfl | rfl
+      · decide
+      · decide
+    rw [hnotdig] at hdig2
+    exact Bool.noConfusion hdig2
+  · rcases y with _ | ⟨c, cs⟩
+    · exact absurd hlt hqx
+    · have hq1x : q + 1 = x.length := by omega
+      rw [hq1x] at hcc
+      rw [composite_read_head] at hcc
+      rcases hcx with rfl | rfl
+      · exact (hzero h0 c rfl).1 (eq_of_beq hcc)
+      · exact (hzero h0 c rfl).2 (eq_of_beq hcc)
+
+/-- The `lexInt` segment: a digit-headed all-digit segment. -/
+theorem lexInt_nonneg_segment {x y : List Char} {q : Nat}
+    (hle : q < x.length)
+    (hzero : x[q] = '0' → ∀ (c : Char), y.head? = some c → c ≠ 'x' ∧ c ≠ 'o')
+    (hdigits : ∀ c ∈ x.drop q, isDigit c = true)
+    (hfail : ∀ (c : Char), y.head? = some c → isDigit c = false) :
+    lexInt ((x ++ y).toArray) q
+      = .ok (.intLit (parseDecNat (String.ofList (x.drop q))), x.length) := by
+  have hbang : ((x ++ y).toArray)[q]! = x[q] := composite_read! hle
+  have hdigit : isDigit x[q] = true := hdigits x[q] (by
+    have hdrop : x.drop q = x[q] :: x.drop (q + 1) :=
+      List.drop_eq_getElem_cons hle
+    rw [hdrop]
+    exact List.mem_cons_self ..)
+  rw [lexInt]
+  rw [if_neg (by
+    intro hcon
+    rw [Bool.and_eq_true] at hcon
+    obtain ⟨_, hneg⟩ := hcon
+    rw [hbang] at hneg
+    have hfalse : (x[q] == '-') = false := digit_not_minus hdigit
+    rw [hfalse] at hneg
+    exact Bool.noConfusion hneg)]
+  rw [lexUnsigned]
+  rw [if_neg (fun hcon => guard_fail hle hbang hdigits hzero 'x'
+    (Or.inl rfl) hcon)]
+  rw [if_neg (fun hcon => guard_fail hle hbang hdigits hzero 'o'
+    (Or.inr rfl) hcon)]
+  have hscan := composite_scan_digit (x := x) (y := y) (q := q)
+    (hle := Nat.le_of_lt hle) (hdigits := hdigits) (hfail := hfail)
+  have hne : ¬ ((takeWhile isDigit ((x ++ y).toArray) q "").1.isEmpty
+      = true) := by
+    intro hempty
+    rw [hscan] at hempty
+    have hstr : (String.ofList (x.drop q), x.length).1
+        = String.ofList (x.drop q) := rfl
+    rw [hstr] at hempty
+    have hlen0 : (String.ofList (x.drop q)).length = 0 := by
+      rw [(String.isEmpty_iff.mp hempty), String.length_empty]
+    have hlen : (String.ofList (x.drop q)).length = (x.drop q).length :=
+      String.length_ofList
+    have hdroplen : (x.drop q).length = x.length - q := by
+      rw [List.length_drop]
+    omega
+  rw [if_neg hne]
+  rw [hscan]
+
+/-- **The nonnegative-integer segment token**: at position `q`
+    holding a digit, with all of `x.drop q` digits and the tail
+    head failing `isDigit` (plus the `'0'`-head `x/o` exclusion),
+    `lexToken` returns the `.intLit` of the parsed segment, ending
+    at `x.length`. -/
+theorem lexToken_int_segment {x y : List Char} {q : Nat}
+    (hle : q < x.length)
+    (hzero : x[q] = '0' → ∀ (c : Char), y.head? = some c → c ≠ 'x' ∧ c ≠ 'o')
+    (hdigits : ∀ c ∈ x.drop q, isDigit c = true)
+    (hfail : ∀ (c : Char), y.head? = some c → isDigit c = false) :
+    lexToken ((x ++ y).toArray) q
+        (by
+          have := composite_size x y
+          omega)
+      = .ok (.intLit (parseDecNat (String.ofList (x.drop q))), ⟨x.length, by
+          have := composite_size x y
+          omega⟩) := by
+  have hread : ((x ++ y).toArray)[q]'
+      (by
+        have := composite_size x y
+        omega) = x[q] := composite_read hle
+  have hdigit : isDigit x[q] = true := hdigits x[q] (by
+    have hdrop : x.drop q = x[q] :: x.drop (q + 1) :=
+      List.drop_eq_getElem_cons hle
+    rw [hdrop]
+    exact List.mem_cons_self ..)
+  have hp := digit_not_punct hdigit
+  have hli := lexInt_nonneg_segment hle hzero hdigits hfail
+  rw [lexToken]
+  simp only [hread]
+  split
+  case h_1 heq => exact absurd heq hp.1
+  case h_2 heq => exact absurd heq hp.2.1
+  case h_3 heq => exact absurd heq hp.2.2.1
+  case h_4 heq => exact absurd heq hp.2.2.2.1
+  case h_5 heq => exact absurd heq hp.2.2.2.2.1
+  case h_6 heq => exact absurd heq hp.2.2.2.2.2.1
+  case h_7 heq => exact absurd heq hp.2.2.2.2.2.2.1
+  case h_8 heq => exact absurd heq hp.2.2.2.2.2.2.2.1
+  case h_9 heq => exact absurd heq hp.2.2.2.2.2.2.2.2.1
+  case h_10 heq => exact absurd heq hp.2.2.2.2.2.2.2.2.2.1
+  case h_11 heq => exact absurd heq hp.2.2.2.2.2.2.2.2.2.2.1
+  case h_12 heq => exact absurd heq hp.2.2.2.2.2.2.2.2.2.2.2.1
+  case h_13 =>
+    have hAlphaOr : (isAlpha x[q] || x[q] == '_') = false := by
+      have halphaF := hp.2.2.2.2.2.2.2.2.2.2.2.2.2
+      have hunderscoreF : (x[q] == '_') = false := by
+        by_cases hcc : (x[q] == '_') = true
+        · exact absurd (eq_of_beq hcc) hp.2.2.2.2.2.2.2.2.2.2.2.2.1
+        · exact Bool.not_eq_true _ |>.mp (by simpa using hcc)
+      rw [halphaF, hunderscoreF]
+      rfl
+    rw [if_neg (by
+      intro hcon
+      rw [hAlphaOr] at hcon
+      exact Bool.noConfusion hcon)]
+    rw [if_pos (by
+      show (isDigit x[q] || x[q] == '-') = true
+      rw [hdigit]
+      rfl)]
+    split
+    case h_1 =>
+      next t p hi =>
+        have hchain : Except.ok (Token.intLit ↑(parseDecNat
+            (String.ofList (x.drop q))), x.length) = Except.ok (t, p) :=
+          hli.symm.trans hi
+        obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj hchain)
+        rfl
+    case h_2 =>
+      next e hi =>
+        exact absurd (hli.symm.trans hi) (by simp)
+
 end LexerCons
 
 end LeanFzn.Solver
