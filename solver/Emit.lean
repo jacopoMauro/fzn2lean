@@ -7114,7 +7114,33 @@ theorem skip_nl_step {a : Array Char} {k : Nat} (hlt : k < a.size)
     else k) = skipTrivia a (k+1)
   rw [hc, if_pos ws_nl]
 
+/-! #### The entry-line origin helpers (P0.7) -/
 
+/-- The head read at origin of the composite `(c :: cs) ++ rest`. -/
+theorem composite_cons_head (c : Char) (cs rest : List Char) :
+    ((c :: cs) ++ rest).toArray[0]! = c := by
+  have hlt : 0 < (((c :: cs) ++ rest)).toArray.size := by
+    rw [list_toArray_size]
+    have h1 : ((c :: cs) ++ rest).length
+        = cs.length + 1 + rest.length := by
+      rw [List.length_append]
+      simp only [List.length_cons]
+    omega
+  rw [show (((c :: cs) ++ rest)).toArray[0]! =
+      (((c :: cs) ++ rest)).toArray[0]'hlt from
+    arrGetElem!_of_lt hlt]
+  rw [List.getElem_toArray]
+  simp
+
+/-- The origin skip on the composite `(nm ++ rest)` where `nm`'s
+    head is an identifier start (the name stops the skip). -/
+theorem composite_skip_origin_ident {nm rest : List Char}
+    {c : Char} {cs : List Char}
+    (hnm : nm = c :: cs)
+    (hstart : isAlpha c = true ∨ c = '_') :
+    skipTrivia ((nm ++ rest).toArray) 0 = 0 := by
+  rw [hnm]
+  exact skipTrivia_ident_head hstart
 
 end LexerCons
 
