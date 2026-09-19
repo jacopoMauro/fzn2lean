@@ -5203,6 +5203,247 @@ theorem tokenize_int_negsucc (n : Nat) :
   -- past the end: the walk stops with the accumulator:
   exact tokenizeAux_stop
 
+/-! ### The master entry round-trip (IDEAS item 2, the assembly)
+
+`parseSolution (stripSeparators (emitSolution ps))` recovers exactly
+the scalar entry list of `ps`.  The proof decomposes into:
+
+* **The strip step** (below): `stripSeparators` of the emitted text is
+  the `"\n"`-intercalation of the entry lines (the separator line is
+  filtered; no emitted line starts with the separator prefixes —
+  entry lines end in `;`, and an entry text's chars are ident/digit/
+  `= ` forms, never the dashes of a separator line);
+* **The line step**: each entry's tokens are `.ident name, .eq,
+  <literal token>, .semi` (by `tokenize_ident`/`tokenize_int_nonneg`/
+  `tokenize_int_negsucc`/`tokenize_bool` composed with the lexer cons
+  law `tokenize_cons_newline_full`), and `parseEntry` on that
+  four-token line yields exactly `(name, scalar value)`;
+* **The list step**: `splitLines`/`parseEntries` over the
+  `;`-terminated chunks of the token array partition the entries.
+-/
+
+/-! ### REMAINING (the `startsWith` pattern layer)
+
+The three remaining holes in this section all reduce to one missing
+foundation: Lean 4.33's `String.startsWith` goes through the
+`String.Slice.Pattern.ForwardPattern` instance layer, which the
+project's byte dictionary does not yet characterize.  Concretely,
+the kernel-reducible facts needed are, for the literal separator
+line `sep := "----------"` and any name-headed line:
+
+* `sep.startsWith sep = true` (drops the separator line), and
+* `l.startsWith seg = false` when `l`'s head char is an identifier
+  start and `seg`'s head char is `-`/`=`/`%` (keeps entry lines)
+  — a char-level mismatch fact of the same shape as
+  `digit_not_xo`, once the pattern unfolding is in place.
+
+This is the same treatment the module already gives `get`/`atEnd`/
+`next`/`extract` in the byte dictionary; adding `startsWith` there
+closes all three holes mechanically.  Until then the two strip-layer
+theorems below are stated with their proofs left open (they are
+NOT used by any solver path — the leaf still checks through the
+verified front door). -/
+
+/-- The value literal texts are `'\n'`-free: only `true`/`false`
+    and decimal digit strings (with an optional `-`). -/
+theorem emitScalar_newline_free (v : Value) :
+    '\n' ∉ (emitScalar v).toList := by
+  cases v with
+  | bool b =>
+      cases b
+      · show '\n' ∉ ("false".toList)
+        decide
+      · show '\n' ∉ ("true".toList)
+        decide
+  | int i =>
+      cases i with
+      | ofNat n =>
+          show '\n' ∉ (emitInt (Int.ofNat n)).toList
+          rw [show emitInt (Int.ofNat n) = String.ofList (Nat.toDigits 10 n) from rfl,
+            String.toList_ofList]
+          intro hc
+          have hd := toDigits_isDigit n '\n' hc
+          exact absurd hd (by decide)
+      | negSucc m =>
+          show '\n' ∉ (emitInt (Int.negSucc m)).toList
+          rw [show emitInt (Int.negSucc m)
+              = "-" ++ String.ofList (Nat.toDigits 10 (m+1)) from rfl,
+            String.toList_append, List.mem_append]
+          intro hc
+          rcases hc with hc | hc
+          · exact absurd hc (by decide)
+          · rw [String.toList_ofList] at hc
+            have hd := toDigits_isDigit (m+1) '\n' hc
+            exact absurd hd (by decide)
+  | setOfInt s =>
+      show '\n' ∉ ("<unemittable set value>".toList)
+      decide
+  | array a =>
+      show '\n' ∉ ("<unemittable array value>".toList)
+      decide
+
+/-- An entry's emitted line is nonempty (it starts with the
+    identifier and ends with `;`). -/
+theorem emitEntryLine_nonempty (name : String) (v : Value) :
+    (emitEntry name v) ≠ "" := by
+  -- the entry ends with ";", hence nonempty:
+  intro hc
+  -- the length arithmetic: the entry holds name + (lit + 4) chars:
+  have hlen : (emitEntry name v).length
+      = name.length + ((emitScalar v).length + 4) := by
+    show (name ++ " = " ++ emitScalar v ++ ";").length = _
+    simp only [String.length_append]
+    have h3 : (" = ").length = 3 := rfl
+    have h1 : (";").length = 1 := rfl
+    omega
+  simp only [hc, String.length_empty] at hlen
+  omega
+
+/-- The entry-line list facts: `'\n'`-free lines (names are
+    `'\n'`-free by declaration — a lexable identifier never
+    contains one; the literal part is `emitScalar`-free). -/
+theorem emitEntryLines_newline_free (ps : List (String × Value))
+    (hnames : ∀ x ∈ ps, '\n' ∉ x.1.toList) :
+    ∀ x ∈ (ps.map (fun p => emitEntry p.1 p.2)),
+      '\n' ∉ x.toList := by
+  intro x hx
+  obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hx
+  -- the entry's toList is the flat append of the parts:
+  show '\n' ∉ (emitEntry p.1 p.2).toList
+  rw [show (emitEntry p.1 p.2).toList
+      = p.1.toList ++ (" = ").toList ++ (emitScalar p.2).toList ++ (";").toList from by
+    simp only [emitEntry]
+    rw [String.toList_append, String.toList_append, String.toList_append]
+    rfl]
+  intro hc
+  rw [List.mem_append, List.mem_append, List.mem_append] at hc
+  -- hc : (('\n' ∈ name ∨ '\n' ∈ " = ") ∨ '\n' ∈ lit) ∨ '\n' ∈ ";"
+  rcases hc with hc | hc
+  · rcases hc with hc | hc
+    · rcases hc with hc | hc
+      · exact hnames p hp hc
+      · exact absurd hc (by decide)
+    · exact emitScalar_newline_free p.2 hc
+  · exact absurd hc (by decide)
+
+/-- The emitted solution text, as a line intercalation: the entry
+    lines followed by the separator line, all joined with `"\n"`
+    (the shape `stripSeparators` and `splitOn "\\n"` see). -/
+theorem emitSolution_intercalate (ps : List (String × Value)) :
+    emitSolution ps
+      = String.intercalate "\n"
+          ((ps.map (fun p => emitEntry p.1 p.2)) ++ ["----------"]) := by
+  induction ps with
+  | nil =>
+      -- intercalate "\n" ["----------"] = "----------":
+      show "----------" = String.intercalate "\n" ["----------"]
+      rfl
+  | cons p rest ih =>
+      -- LHS: line ++ "\n" ++ emitSolution rest
+      -- RHS: intercalate "\n" (line :: (restLines ++ [sep]))
+      show emitEntry p.1 p.2 ++ "\n" ++ emitSolution rest = _
+      rw [ih]
+      show emitEntry p.1 p.2 ++ "\n" ++ String.intercalate "\n"
+            ((rest.map (fun q => emitEntry q.1 q.2)) ++ ["----------"])
+          = _
+      cases rest with
+      | nil =>
+          -- restLines = []: intercalate [sep] = sep:
+          show emitEntry p.1 p.2 ++ "\n" ++ String.intercalate "\n" ["----------"]
+            = String.intercalate "\n" [emitEntry p.1 p.2, "----------"]
+          rw [show String.intercalate "\n" ["----------"] = "----------" from rfl]
+          rfl
+      | cons q qs =>
+          -- intercalate (line :: restLines ++ [sep]) via the cons law:
+          show emitEntry p.1 p.2 ++ "\n" ++ String.intercalate "\n"
+                ((emitEntry q.1 q.2 :: (qs.map (fun r => emitEntry r.1 r.2)))
+                  ++ ["----------"])
+              = _
+          rw [List.cons_append]
+          -- RHS view: map on (p :: q :: qs) = line :: (q's line :: qs's lines):
+          show emitEntry p.1 p.2 ++ "\n" ++ String.intercalate "\n"
+                (emitEntry q.1 q.2 :: ((qs.map (fun r => emitEntry r.1 r.2))
+                  ++ ["----------"]))
+              = String.intercalate "\n"
+                  (emitEntry p.1 p.2 :: emitEntry q.1 q.2
+                    :: ((qs.map (fun r => emitEntry r.1 r.2)) ++ ["----------"]))
+          rw [intercalate_cons_cons, String.append_assoc]
+
+/-- The emitted solution text's `splitOn "\\n"`: the entry lines,
+    then the separator line. -/
+theorem emitSolution_splitOn (ps : List (String × Value))
+    (hnames : ∀ x ∈ ps, '\n' ∉ x.1.toList) :
+    (emitSolution ps).splitOn "\n"
+      = (ps.map (fun p => emitEntry p.1 p.2)) ++ ["----------"] := by
+  -- the intercalation form, then the intercalate split law on
+  -- (lines ++ [sep]) (the entry lines and the sep line are all
+  -- '\n'-free and the list is nonempty — it ends with the sep):
+  rw [emitSolution_intercalate]
+  have hfree : ∀ x ∈ ((ps.map (fun p => emitEntry p.1 p.2)) ++ ["----------"]),
+      '\n' ∉ x.toList := by
+    intro x hx
+    rw [List.mem_append] at hx
+    rcases hx with hx | hx
+    · exact emitEntryLines_newline_free ps hnames x hx
+    · rw [List.mem_singleton.mp hx]
+      decide
+  have hne : ((ps.map (fun p => emitEntry p.1 p.2)) ++ ["----------"]) ≠ [] := by
+    intro hc
+    have hmm : ("----------" : String)
+        ∈ (ps.map (fun p => emitEntry p.1 p.2) ++ ["----------"]) :=
+      List.mem_append.mpr (Or.inr (List.mem_singleton_self _))
+    rw [hc] at hmm
+    exact absurd hmm (by simp)
+  rw [splitOn_intercalate_newline _ hfree hne]
+
+/-- **The strip step of the master round-trip**: stripping the
+    separators of the emitted solution text yields the `"\n"`
+    intercalation of the entry lines (the separator line is the
+    only line starting with `-`/`=`/`%` and is filtered out). -/
+theorem stripSeparators_emitSolution (ps : List (String × Value))
+    (hnames : ∀ x ∈ ps, '\n' ∉ x.1.toList) :
+    stripSeparators (emitSolution ps)
+      = String.intercalate "\n" (ps.map (fun p => emitEntry p.1 p.2)) := by
+  -- stripSeparators = intercalate "\n" (filter over splitOn lines):
+  show String.intercalate "\n"
+      (((emitSolution ps).splitOn "\n").filter (fun l =>
+        !(l.startsWith "----------" || l.startsWith "==========" ||
+          l.startsWith "%%%mzn-stat")))
+    = _
+  -- rewrite splitOn to (entryLines ++ [sep]):
+  rw [emitSolution_splitOn ps hnames]
+  -- the filter keeps exactly the entry lines (the sep line is
+  -- dropped; no entry line starts with a separator prefix):
+  have hnotsep : ∀ l ∈ ps.map (fun p => emitEntry p.1 p.2),
+      ¬ (l.startsWith "----------" || l.startsWith "==========" ||
+        l.startsWith "%%%mzn-stat") := by
+    intro l hl
+    obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hl
+    -- an entry line starts with the name's head char — an ident
+    -- start is never '-'/'='/'%':
+    sorry
+  -- the filter drops the sep line (its predicate is false) and
+  -- keeps every entry line (hnotsep):
+  have hentrypass : (ps.map (fun p => emitEntry p.1 p.2)).filter
+      (fun l => !(l.startsWith "----------" || l.startsWith "==========" ||
+        l.startsWith "%%%mzn-stat"))
+      = ps.map (fun p => emitEntry p.1 p.2) := by
+    rw [List.filter_eq_self]
+    intro l hl
+    have hs := hnotsep l hl
+    simp only [Bool.not_eq_true, hs]
+    rfl
+  rw [List.filter_append, hentrypass,
+    show (["----------"] : List String).filter (fun l =>
+        !(l.startsWith "----------" || l.startsWith "==========" ||
+          l.startsWith "%%%mzn-stat")) = [] from by
+      rw [List.filter_cons]
+      -- the sep line starts with itself; the negated predicate is
+      -- false, so the line drops (String.Slice.Pattern-Char
+      -- unfolding — see the startsWith note in the module doc):
+      sorry,
+    List.append_nil]
+
 end LexerCons
 
 end LeanFzn.Solver
