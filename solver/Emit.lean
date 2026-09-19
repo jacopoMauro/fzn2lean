@@ -1967,11 +1967,147 @@ theorem takeWhile_append_right {p : Char → Bool} {s t : Array Char} {k : Nat}
   exact key k acc (Nat.le_refl k)
 
 
-/-- `lexUnsigned` past the join is the tail's scan with the end
-    position offset — the character-window agreement (the reads at
-    `s.size + k` and `s.size + k + 1` agree with `t`'s while inside
-    `t`, and the three prefix conditions agree), then the digit
-    scans transport by `takeWhile_append_right`. -/
+/-! ### The honest scan-agreement layer (2026-09-19 audit + repair)
+
+**Audit finding.**  The `htw`-premise family used by the cons-law
+stack below (`lexToken_append_right_ok`,
+`tokenizeAux_append_right_ok`, `walk_nl_eq_walk_t`,
+`split_helper`, `tokenize_cons_newline_full`, …) is
+**unsatisfiable**: for every `p`, `takeWhile p s s.size "" =
+("", s.size)` (the past-the-end `dif_neg` arm), so a premise
+
+* `∀ p q, pos ≤ q → (takeWhile p s q "").2 < s.size` (with
+  `pos < s.size`) derives `False` (instantiate at `q = s.size`),
+* `∀ p q, (takeWhile p s q "").2 < s.size` (all `q`) forces
+  `s.size = 0`.
+
+The intended reading was "every scan the walk actually takes
+stops inside `s`", but `q` was quantified over *all* positions
+`≥ pos`, including the past-the-end ones where the scan trivially
+stops *at* it.  Those lemmas are therefore true but **vacuous**
+— never applicable — and the claims built on them (the "lexer
+cons law COMPLETE" status) are withdrawn; see PLAN.md's worklog.
+
+**The repair.**  The honest, satisfiable premise for scan
+agreement across a join is *every character of the tail fails the
+scan predicate* (then a scan that runs to `s.size` on `s` stops
+there on `s ++ t` as well, because the first tail character
+fails `p`): `takeWhile_append_of_tail_fail`.  For the lexer's
+uses the predicate is always one of the four scan predicates
+(`isIdentChar`, `isDigit`, `isHexDigit`, `isOctDigit`), so the
+packaged form `noScans t` (all four fail on every char of `t`)
+covers every scan the lexer performs — and it holds for the
+entry-line tails by decidability of the boundary characters
+(`;`, ` `, `=`, `\n` all fail all four; `boundary_noScans`
+below). -/
+
+/-- The prim read at a position past `s` in `s ++ t` is the tail's
+    bang-read at the offset (via the bang/prim bridge and
+    `congrArg` on the index; the prim read carries its own proof,
+    so the index equality is applied at *term* level). -/
+theorem joined_read_past {s t : Array Char} {q : Nat}
+    (hqs : s.size ≤ q) (hlt : q < (s ++ t).size) :
+    (s ++ t)[q]'hlt = t[q - s.size]! := by
+  have hsz : (s ++ t).size = s.size + t.size := Array.size_append
+  have h1 : (s ++ t)[q]'hlt = (s ++ t)[q]! :=
+    (arrGetElem!_of_lt hlt).symm
+  have htt : q - s.size < t.size := by omega
+  rw [h1]
+  rw [show (s ++ t)[q]! = t[q - s.size]! from by
+    rw [show (s ++ t)[q]! = (s ++ t)[s.size + (q - s.size)]! from by
+      exact congrArg (fun i => (s ++ t)[i]!)
+        (show q = s.size + (q - s.size) by omega)]
+    exact arrGetElem!_append_right' (s := s) (t := t)
+      (k := q - s.size) htt]
+
+/-- A tail whose every character fails the scan predicate `p`:
+    any scan that reaches the join stops at the join. -/
+theorem takeWhile_append_of_tail_fail {p : Char → Bool} {s t : Array Char}
+    (hfail : ∀ (j : Nat), j < t.size → p t[j]! = false) :
+    ∀ (q : Nat) (acc : String),
+      takeWhile p (s ++ t) q acc = takeWhile p s q acc := by
+  intro q acc
+  induction q, acc using takeWhile.induct (p := p) (s := s) with
+  | case1 q acc h c hp ih =>
+      have hlt : q < (s ++ t).size := by rw [Array.size_append]; omega
+      rw [takeWhile.eq_def (s := s ++ t), takeWhile.eq_def (s := s)]
+      simp only [h, hlt, dif_pos]
+      have hread : (s ++ t)[q]'hlt = s[q]'h := arrGetElem_append_left h
+      rw [hread]
+      rw [show p (s[q]'h) = true from by
+        rw [show (s[q]'h) = c from rfl]
+        exact hp]
+      show takeWhile p (s ++ t) (q + 1) (acc.push c)
+          = takeWhile p s (q + 1) (acc.push c)
+      exact ih
+  | case2 q acc h c hp =>
+      have hlt : q < (s ++ t).size := by rw [Array.size_append]; omega
+      rw [takeWhile.eq_def (s := s ++ t), takeWhile.eq_def (s := s)]
+      simp only [h, hlt, dif_pos]
+      have hread : (s ++ t)[q]'hlt = s[q]'h := arrGetElem_append_left h
+      rw [hread]
+      rw [show p (s[q]'h) = false from by
+        rw [show (s[q]'h) = c from rfl]
+        exact Bool.eq_false_iff.mpr (fun hcon => hp hcon)]
+      rfl
+  | case3 q acc h =>
+      rw [takeWhile.eq_def (s := s ++ t), takeWhile.eq_def (s := s)]
+      simp only [h, dif_neg]
+      by_cases hlt : q < (s ++ t).size
+      · rw [dif_pos hlt]
+        have hread : (s ++ t)[q]'hlt = t[q - s.size]! :=
+          joined_read_past (by omega) hlt
+        rw [hread]
+        rw [hfail (q - s.size)
+          (show q - s.size < t.size by rw [Array.size_append] at hlt; omega)]
+        rfl
+      · rw [dif_neg hlt]
+        rfl
+
+/-- No character of `a` satisfies any of the four lexer scan
+    predicates — the packaged honest premise for the lexer's
+    scans across a join. -/
+def noScans (a : Array Char) : Prop :=
+  (∀ j : Nat, j < a.size → isIdentChar a[j]! = false) ∧
+  (∀ j : Nat, j < a.size → isDigit a[j]! = false) ∧
+  (∀ j : Nat, j < a.size → isHexDigit a[j]! = false) ∧
+  (∀ j : Nat, j < a.size → isOctDigit a[j]! = false)
+
+/-- The scan agreement for any of the lexer's four scan
+    predicates, under `noScans t`. -/
+theorem takeWhile_noScans {p : Char → Bool} {s t : Array Char}
+    (hmem : p = isIdentChar ∨ p = isDigit ∨ p = isHexDigit ∨ p = isOctDigit)
+    (hns : noScans t) :
+    ∀ (q : Nat) (acc : String),
+      takeWhile p (s ++ t) q acc = takeWhile p s q acc := by
+  rcases hmem with rfl | rfl | rfl | rfl
+  · exact takeWhile_append_of_tail_fail hns.1
+  · exact takeWhile_append_of_tail_fail hns.2.1
+  · exact takeWhile_append_of_tail_fail hns.2.2.1
+  · exact takeWhile_append_of_tail_fail hns.2.2.2
+
+/-- The one-character boundary arrays of an entry line all
+    satisfy `noScans` (each of `;`, ` `, `=`, `\n` fails all four
+    scan predicates — decidable character facts). -/
+theorem boundary_noScans_semi : noScans #[(';')]
+    := ⟨by decide, by decide, by decide, by decide⟩
+theorem boundary_noScans_space : noScans #[(' ')]
+    := ⟨by decide, by decide, by decide, by decide⟩
+theorem boundary_noScans_eq : noScans #[('=')]
+    := ⟨by decide, by decide, by decide, by decide⟩
+theorem boundary_noScans_nl : noScans #[('\n')]
+    := ⟨by decide, by decide, by decide, by decide⟩
+
+/-- The whitespace/`=` separator array of an entry line (`" = "`)
+    satisfies `noScans`. -/
+theorem boundary_noScans_wsEq : noScans #[(' '), ('='), (' ')] := by
+  have hsize : #[(' '), ('='), (' ')].size = 3 := by decide
+  refine ⟨fun j hj => ?_, fun j hj => ?_, fun j hj => ?_, fun j hj => ?_⟩
+  all_goals rw [hsize] at hj
+  all_goals match j, hj with
+  | 0, _ => decide
+  | 1, _ => decide
+  | 2, _ => decide
 theorem lexUnsigned_append_right_ok {s t : Array Char} {k : Nat}
     (hpos : k < t.size)
     {n : Int} {p : Nat}

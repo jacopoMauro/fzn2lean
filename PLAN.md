@@ -74,16 +74,21 @@ In recommended order; each entry cites the section that owns it:
    place of the sound `propIdSlot` placeholder, and `Extract.lean`
    must learn the `int_lin_eq`/`int_lin_le` shapes.
 3. **Emit/parse round-trip theorem, remaining layers** (IDEAS item 2,
-   §worklog): the string-splitting and lexer-composition layers are
-   proven; the identifier half (`tokenize_ident`), the Boolean half
-   (`tokenize_bool`), the nonnegative-integer half
-   (`tokenize_int_nonneg`, added 2026-09-18 — see the worklog), the
-   negative-integer half (`tokenize_int_negsucc`), and **the strip
-   layer** (`stripSeparators_emitSolution`, proven 2026-09-19 — the
+   §worklog): the string-splitting layer is proven; the identifier
+   half (`tokenize_ident`), the Boolean half (`tokenize_bool`), the
+   nonnegative-integer half (`tokenize_int_nonneg`, added 2026-09-18
+   — see the worklog), the negative-integer half
+   (`tokenize_int_negsucc`), and **the strip layer**
+   (`stripSeparators_emitSolution`, proven 2026-09-19 — the
    `startsWith` transparency blocker was passed via the semantic
-   `IsPrefix` route, see the worklog) are proven.  What remains of
-   item 2: the line-level entry round-trip through `parseEntry`, the
-   master theorem assembly
+   `IsPrefix` route, see the worklog) are proven.  The lexer cons
+   law, previously claimed complete, was **withdrawn on
+   2026-09-19** (unsatisfiable premises — audit recorded in the
+   worklog); its honest replacement foundation
+   (`takeWhile_append_of_tail_fail`/`noScans`) is landed.  What
+   remains of item 2: the walk/token-level cons laws on the
+   `noScans` foundation, the line-level entry round-trip through
+   `parseEntry`, the master theorem assembly
    `parseSolution (stripSeparators (emitSolution ps)) = …`,
    and the string-free leaf wiring (the runtime win).
 4. **Engineering and assurance** (§5): CI, malformed-input/adversarial-size
@@ -569,25 +574,32 @@ of slow files, scratch-file measurement of proof recipes.
   The remaining layers: the master theorem
   `parseSolution (stripSeparators (emitSolution ps)) = ...` and the
   string-free leaf wiring (item 2's runtime win not yet realized).
-  **Lexer cons law (layer 2) COMPLETE**:
-  `tokenizeAux_append_right_ok` and `tokenize_cons_newline` are
-  PROVEN in `solver/Emit.lean`, on top of the full agreement
-  stack: the prefix laws (`arrGetElem_append_left`,
-  `takeWhile_append_left`, `skipTrivia_append_left`,
-  `lexUnsigned_append_left`, `lexInt_append_left`,
-  `lexToken_append_left` — the complete 13-branch token
-  agreement), the tail laws (`arrGetElem_append_right'`,
-  `skipToNewline`/`skipTrivia`/`takeWhile_append_right` with
-  position offsets), and `lexToken_append_right_ok` in
-  success-transport form.  KEY SEMANTIC FACT discovered and
-  documented: `lexToken`'s error MESSAGES embed the absolute
-  position, so error results genuinely differ between `s ++ t` and
-  `t` — every tail law must be stated success-transport only (the
-  tokenizer's downstream ignores messages, so this is the honest
-  statement). The success-transport lemmas
-  `lexInt_append_right_ok` and the left-composition layer used by
-  `tokenize_cons_newline` are now proved; no proof holes remain in
-  this layer.
+  **Lexer cons law (layer 2) — WITHDRAWN (2026-09-19 audit)**: the
+  previously-claimed-complete cons-law stack
+  (`lexToken_append_left'`, `tokenizeAux_append_right_ok`,
+  `split_helper`, `walk_nl_eq_walk_t`, `tokenize_cons_newline`,
+  `tokenize_cons_newline_full`, …) is **vacuous**: its `htw`
+  scan premises (`∀ p q, pos ≤ q → (takeWhile p s q "").2 <
+  s.size`, and the all-`q` variant) are UNSATISFIABLE —
+  `takeWhile p s s.size "" = ("", s.size)` stops *at* the
+  past-the-end position, so instantiating at `q = s.size`
+  derives `False` (the all-`q` variant forces `s.size = 0`).
+  Those lemmas are true but never applicable; the "COMPLETE"
+  status is retracted (the proofs stand, the applications do
+  not exist).  The honest repair landed the same day:
+  `takeWhile_append_of_tail_fail` (scan agreement when every
+  tail char fails the scan predicate — axioms
+  `[propext, Quot.sound]`), the packaged `noScans t` premise
+  (all four lexer scan predicates fail on every tail char),
+  `takeWhile_noScans`, and the boundary instances
+  (`boundary_noScans_semi/space/eq/nl/wsEq` — `;`, ` `, `=`,
+  `\n` all fail all four predicates by `decide`).  The
+  walk/token-level cons laws still need restatement on this
+  foundation (see the remaining-work notes).  KEY SEMANTIC FACT
+  (still valid, from the earlier pass): `lexToken`'s error
+  MESSAGES embed the absolute position, so tail laws must be
+  stated success-transport only — the tokenizer's downstream
+  ignores messages, so this is the honest statement.
 
 ### Remaining work on IDEAS_FOR_IMPROVING_PERF.md
 
@@ -597,21 +609,23 @@ In the doc's own order of attack, with current status:
    PROVEN (`splitOn_intercalate_newline`, through
    `splitOn_eq_list`/`splitOnAux_eq_splitAux`/`splitAux_spec` and
    the byte dictionary — all in `solver/Emit.lean`).  The lexer
-   cons law `tokenize (s ++ "\n" ++ t)` is COMPLETE
-   (`tokenize_cons_newline` + the full tail-agreement stack —
-   see the worklog above; **the lexer cons law `tokenize (s ++
-   "\n" ++ t)` is COMPLETE** - `tokenize_cons_newline_full` is
-   fully proven (0 sorries, axioms clean), via the complete
-   left-composition stack: `split_helper` (the walk-splitting
-   induction with both exit cases), `tokenizeAux_exit_tail` +
-   `skip_exit_join` + `skipTrivia_ws_agree'` + `skipTrivia_path`
-   (the exit-position and whitespace-run analysis),
-   `tokenizeAux_acc_append` (the accumulator-append
-   homomorphism), `walk_nl_eq_walk_t` (the separator is trivia),
-   `lexToken_le`/`lexInt_le`/`lexUnsigned_le`/`lexString_le`/
-   `takeWhile_stop_le'` (the token end-position bounds), and
-   `lexToken_append_left'` (the lookahead-room-free token
-   agreement).  **The identifier half is PROVEN** (`tokenize_ident`
+   cons law `tokenize (s ++ "\n" ++ t)` is **WITHDRAWN
+   (2026-09-19 audit)**: the previously proven stack
+   (`tokenize_cons_newline_full` via `split_helper`,
+   `tokenizeAux_append_right_ok`, `walk_nl_eq_walk_t`, …) rests
+   on the unsatisfiable `htw` scan premises — see the worklog
+   entry above; the lemmas are true but vacuous (never
+   applicable).  The honest foundation is landed
+   (`takeWhile_append_of_tail_fail`, `noScans`, and the boundary
+   instances — axioms clean); the walk-level cons law, the
+   `lexUnsigned`/`lexInt`/`lexToken` agreement lemmas on
+   `noScans`, and a `tokenize_cons_newline` restatement remain
+   to be rebuilt on it (the `lexUnsigned` hex/octal arm needs
+   an `'x'`/`'o'` lookahead exclusion premise mirroring
+   `lexToken_append_left'`'s `':'`/`'.'` one, since a `'0'` at
+   the very end of `s` with `'x'` heading `t` would extend the
+   prefix check on the joined side only).  **The identifier half
+   is PROVEN** (`tokenize_ident`
    in `solver/Emit.lean`: `tokenize (String.ofList l)
    = .ok #[.ident (String.ofList l)]` for nonempty `l` whose
    head is alpha/`_`, all chars ident chars, not keyword,
@@ -712,6 +726,42 @@ In the doc's own order of attack, with current status:
    the above.
 
 ### Engineering notes from this pass
+
+- **2026-09-19 — VACUOUS-PREMISE AUDIT of the lexer cons-law
+  stack** (IDEAS item 2): while assembling the entry-line tokenize
+  round-trip, the `htw` scan premises of the (previously claimed
+  COMPLETE) cons-law layer were found **unsatisfiable**:
+  `takeWhile p s s.size "" = ("", s.size)` (the past-the-end
+  `dif_neg` arm) means `∀ p q, pos ≤ q → (takeWhile p s q "").2 <
+  s.size` derives `False` at `q = s.size` whenever `pos <
+  s.size`, and the all-`q` variant forces `s.size = 0`.
+  Affected (proven, axiom-clean, but never applicable):
+  `lexUnsigned_append_left`, `lexInt_append_left`,
+  `lexToken_append_left(_')`, `lexToken_append_right_ok`,
+  `lexInt_append_right_ok`, `tokenizeAux_append_right_ok`,
+  `walk_nl_eq_walk_t`, `split_helper`, `tokenize_cons_newline(_full)`.
+  NOT affected (single-position premises):
+  `takeWhile_append_left`, `skipTrivia_append_left/right`,
+  `skipToNewline_append_right`, `takeWhile_append_right`,
+  `tokenizeAux_skip_eq`, `skipTrivia_fixpoint`,
+  `tokenizeAux_acc_append`, `tokenizeAux_exit_tail`, `skip_exit_join`.
+  **Root cause**: "every scan the walk takes stops inside `s`"
+  was stated with `q` quantified over ALL positions, including
+  past-the-end ones where the scan trivially stops AT them.
+  **Honest repair landed** (axioms `[propext, Quot.sound]`):
+  `takeWhile_append_of_tail_fail` — scan agreement across a join
+  whenever every tail character fails the scan predicate (then a
+  scan that reaches `s.size` stops there on `s ++ t` too) —
+  plus `noScans t` (all four lexer scan predicates fail on
+  every tail char), `takeWhile_noScans`, `joined_read_past`
+  (the prim-read bridge past the join), and the decided
+  boundary instances (`boundary_noScans_semi/space/eq/nl/wsEq`).
+  PLAN.md's earlier "lexer cons law COMPLETE" claims are
+  retracted above; the withdrawn proofs remain in the file
+  (harmless, but flagged as vacuous in the layer note).
+  **Lesson recorded in repo memory**: quantify scan-stop premises
+  over positions the walk actually visits, or state them as
+  tail-character failures.
 
 - **2026-09-19 — the `startsWith` strip layer unblocked and
   complete** (IDEAS item 2): `stripSeparators_emitSolution` is
