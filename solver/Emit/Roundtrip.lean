@@ -8372,4 +8372,3 @@ theorem entry_lit_drop_rest {nm : List Char} {c : Char} {cs : List Char} :
 end LexerCons
 
 end LeanFzn.Solver
-

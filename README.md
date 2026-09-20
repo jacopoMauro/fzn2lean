@@ -118,11 +118,14 @@ functional propagator. Wiring that state into search, adding queued wake-up
 propagation, and watched NoGoods are future performance work rather than
 missing pieces of the reference solver.
 
-The remaining emitter/parser round-trip work is active in
-`solver/Emit.lean`. The honest offset-transport, walk-step, and emitted
-token-segment layers are proved; next come the scalar-entry `parseEntry`
-round trip, the list-level `parseSolution` theorem, and a string-free leaf
-path. See `PLAN.md` P0 for the authoritative checklist.
+The remaining emitter/parser round-trip work is isolated in
+`solver/Emit/Roundtrip.lean`, which currently builds successfully. The honest
+offset-transport and emitted token-segment layers are proved for Boolean,
+nonnegative-integer, and negative-integer literals; the complete nonnegative
+entry walk and the generic four-token entry walk are also proved. Next come
+the Boolean/negative walk instances and scalar-entry `parseEntry` reduction,
+followed by the list-level `parseSolution` theorem and a string-free leaf path.
+See `PLAN.md` P0 for the authoritative checklist.
 
 ### Exact parser recognition
 

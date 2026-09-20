@@ -1,5 +1,5 @@
 import solver.Search
-import solver.Emit
+import solver.Emit.Basic
 import solver.Domain
 import solver.Heuristic
 import solver.Propagators

@@ -52,8 +52,8 @@ exactly that, mirroring the architecture of `solver/Search.lean` and
   - the emitted texts are passed through `dedup` as well, so the
     *reported* solutions are pairwise distinct unconditionally
     (`enumModel_nodup`), without a string-level round-trip theorem
-    about the emitter (which `solver/Emit.lean` deliberately does
-    not provide).  Under duplicate-free domains the two dedups are
+    about the emitter (the in-progress proof branch is isolated in
+    `solver/Emit/Roundtrip.lean`). Under duplicate-free domains the two dedups are
     no-ops for distinctness purposes; they exist to make the
     distinctness guarantee hold in full generality.
 
@@ -397,8 +397,8 @@ reported solutions by construction: domain value lists may contain
 duplicates (explicitly enumerated sets such as `var {1, 1}: x;` are
 accepted by the checker's semantics), and the emitter's texts are
 only distinct modulo injectivity of `emitAssignment`, which this
-development deliberately does not assume (see the module discussion
-in `solver/Emit.lean`). -/
+    development deliberately does not assume (see the proof branch in
+    `solver/Emit/Roundtrip.lean`). -/
 def dedup {α : Type} [BEq α] : List α → List α
   | [] => []
   | a :: as =>

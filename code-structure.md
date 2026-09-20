@@ -57,9 +57,13 @@ Layer 3 — Completeness, Solution, Extraction
 │   └── ← LeanFzn*, solver/Search, solver/Domain, solver/Propagators
 ├── solver/Domain.lean ★           Finite-domain extraction from parsed models (modelSlots)
 │   └── ← LeanFzn*
-├── solver/Emit.lean               Solution text emission plus the in-progress
-│                                  emitted-solution lexer/parser round-trip proof stack
+├── solver/Emit/Basic.lean         Stable executable solution emission
 │   └── ← Lean, solver/Domain
+├── solver/Emit/Roundtrip.lean     Buildable emitted-solution proof branch;
+│                                  entry parsing/master round trip still open
+│   └── ← solver/Emit/Basic
+├── solver/Emit.lean               Stable public emission re-export
+│   └── ← solver/Emit/Basic
 ├── solver/Enum.lean               All-solutions enumeration (enumerateAll)
 │   └── ← solver/Solve
 ├── solver/Optimize.lean           Branch-and-bound optimization (optimizeModelBb)
@@ -76,7 +80,7 @@ Layer 4 — Assembly, Global Common, Solver Core
 │   └── ← FznSolution
 └── solver/Solve.lean ★            FlatZinc-facing solver (solveModel, SolveResult,
                                    domPropagators incl. proved linEq/linLe wiring)
-    └── ← solver/Search, solver/Emit, solver/Domain, solver/Heuristic,
+    └── ← solver/Search, solver/Emit/Basic, solver/Domain, solver/Heuristic,
          solver/Propagators, solver/Fixpoint, solver/Extract, LeanFzn/FznCheck
 
 Layer 5 — Global Constraint Families
@@ -121,7 +125,7 @@ Layer 8 — Top-Level Modules
 
 Layer 9 — Library Roots
 ├── LeanFzn.lean ★                 Library root: imports all 14 LeanFzn modules
-└── solver.lean                    Core solver root: imports Search, Domain, Emit, Solve
+└── solver.lean                    Core solver root: imports Search, Domain, Emit/Basic, Solve
 
 Layer 10 — Executable
 └── Main.lean                      CLI entry point (check/solve/enum/optimize)
@@ -181,7 +185,7 @@ solver/TestsRestart.lean  → solver/Restarts
 | `FznSolution` | global common utilities, global aggregation, and the verified front door |
 | `FznGlobals/Common` | the base global-constraint family modules |
 | `solver/Search` | heuristics, propagators, fixpoint search, learning, and solver composition |
-| `solver/Domain` | emission, extraction, and FlatZinc-facing solving |
+| `solver/Domain` | executable emission, extraction, and FlatZinc-facing solving |
 | `solver/Propagators` | fixpoint search, extraction, learning, and configuration |
 
 Exact counts are intentionally omitted because transitive and direct fan-out

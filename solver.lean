@@ -7,7 +7,7 @@ Purpose:
 
 Dependencies:
   solver.Search (exhaustive search), solver.Domain (domain extraction),
-  solver.Emit (solution emission), solver.Solve (FlatZinc-facing solver).
+  solver.Emit.Basic (solution emission), solver.Solve (FlatZinc-facing solver).
 
 Why:
   `solveModel` and `SolveResult` in `solver/Solve.lean` are the solver's
@@ -16,10 +16,10 @@ Why:
   lives behind `solver/Solver.lean`.
 
 DAG:
-  solver.Search/Domain/Emit -> solver.Solve -> solver.lean -> Main
+  solver.Search/Domain/Emit.Basic -> solver.Solve -> solver.lean -> Main
 -/
 
 import solver.Search
 import solver.Domain
-import solver.Emit
+import solver.Emit.Basic
 import solver.Solve

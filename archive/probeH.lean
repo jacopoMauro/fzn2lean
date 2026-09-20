@@ -1,32 +1,47 @@
-import solver.Emit
-open LeanFzn LeanFzn.Solver LeanFzn.Lexer
+import solver.Emit.Roundtrip
 
-/-- **The lexer cons law** (IDEAS item 2, layer 2): tokenizing
-    `s ++ "\n" ++ t` continues the tokenization of `s` into `t` —
-    on the success path, under the walk premises (every scan stops
-    inside `t`, `t`'s lexing from `k` never errors, no string
-    literals in `t`), the walk past the join is `t`'s walk from 0
-    with the accumulated tokens. -/
-theorem tokenize_cons_newline {s t : Array Char} {toks : Array Token}
-    (hsok : tokenizeAux s 0 #[] = .ok toks)
-    (htw : ∀ (p : Char → Bool) (q : Nat),
-      (takeWhile p t q "").2 < t.size)
-    (hnoerr : ∀ (k : Nat) (h : k < t.size),
-      (lexToken t k h).isOk = true)
-    (hnostr : ∀ (k : Nat) (h : k < t.size), t[k]'h ≠ '"') :
-    tokenizeAux (s ++ #[('\n' : Char)] ++ t) 0 #[]
-      = (tokenizeAux t 0 #[]).map
-        (fun acc => toks ++ acc) := by
-  -- the array associativity: (s ++ nl) ++ t = s ++ (nl ++ t)
-  rw [show s ++ #[('\n' : Char)] ++ t
-      = (s ++ #[('\n' : Char)]) ++ t from rfl]
-  -- the tail law, instantiated at the join offset
-  have hwalk := tokenizeAux_append_right_ok
-    (s := s ++ #[('\n' : Char)]) (t := t) htw hnoerr hnostr
-  -- the remaining composition layer: the walk from 0 in the joined
-  -- array must be transported to the offset walk — this needs the
-  -- left-composition lemma (the walk in s ++ nl from 0 equals
-  -- toks ++ the walk in nl from 0, itself [] by whitespace) plus
-  -- the walk-continuation at the boundary. Genuinely remaining:
-  -- see PLAN.md item 2a (the left-composition lemma).
-  sorry
+namespace LeanFzn.Solver
+
+open LeanFzn.Lexer
+
+/-! Probe for the P0.7g helper layer: list reshaping for the
+left-associated entry-line composite.  If these land, the bool
+sibling reduces to: segment lemma + array-equality transports. -/
+
+-- 1. The composite's length, spelled left-to-right:
+example {nm lit tl : List Char} :
+    (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).length
+      = (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length
+        + lit.length + 1 + tl.length := by
+  have h1 : (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).length
+      = (nm ++ [' ', '=', ' ']).length + (lit ++ [';'] ++ tl).length := by
+    show (nm ++ [' ', '=', ' '] ++ (lit ++ [';'] ++ tl)).length
+        = (nm ++ [' ', '=', ' ']).length + (lit ++ [';'] ++ tl).length
+    exact List.length_append _ _
+  have h2 : (lit ++ [';'] ++ tl).length = lit.length + 1 + tl.length := by
+    have h3 : (lit ++ [';'] ++ tl).length
+        = lit.length + (([';'] : List Char) ++ tl).length := by
+      show (lit ++ (([';'] : List Char) ++ tl)).length
+          = lit.length + (([';'] : List Char) ++ tl).length
+      exact List.length_append _ _
+    have h4 : (([';'] : List Char) ++ tl).length = 1 + tl.length := by
+      show ((';' : Char) :: tl).length = 1 + tl.length
+      simp
+    omega
+  have hws : (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length
+      = (nm ++ [' ', '=', ' ']).length := rfl
+  omega
+
+-- 2. the array equality between the two spellings (used as the
+--    transport for lexToken calls):
+example {nm lit tl : List Char} :
+    ((nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)])
+      ++ (lit ++ ((';' : Char) :: tl))).toArray
+      = (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray := by
+  apply congrArg List.toArray
+  show (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)])
+      ++ (lit ++ (';' :: tl))
+      = nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl
+  exact List.append_assoc _ _ _
+
+end LeanFzn.Solver

@@ -2,7 +2,7 @@ import LeanFzn
 import LeanFzn.FznCheck
 import solver.Search
 import solver.Domain
-import solver.Emit
+import solver.Emit.Basic
 import solver.Solve
 import solver.Heuristic
 import solver.Propagators
@@ -38,7 +38,7 @@ or placeholders.
   initializer-free basic variables, whose candidate values are proved
   (`varDomain_values_iff`) to be exactly the declared domains, with
   the per-variable and total-leaf caps (`domainCap`, `leavesCap`).
-* `solver/Emit.lean` (PLAN 6.2) — solution-text emission in the exact
+* `solver/Emit/Basic.lean` (PLAN 6.2) — solution-text emission in the exact
   format the verified checker parses (`emitSolution`).
 * `solver/Solve.lean` (PLAN 6.1, 6.2 + Round 3 integration) — the
   FlatZinc-facing entry points, all sharing the leaf-check

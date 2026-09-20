@@ -56,7 +56,7 @@ front door).
 
 ## Remaining work (authoritative checklist)
 
-This is the authoritative list of open work as of 2026-09-19.  The detailed
+This is the authoritative list of open work as of 2026-09-20.  The detailed
 sections and worklogs below preserve design context and completed theorem
 names; where an older paragraph conflicts with this checklist, this checklist
 wins.
@@ -84,11 +84,14 @@ from every solver leaf.
   y head — excluded by the `'0'`-head premise).
 - [ ] Prove the emitted scalar-entry round trip through `parseEntry` for
   identifiers, Booleans, nonnegative integers, and negative integers.
-  The four-step walk composition is mapped and its fuel landed
-  (P0.7a/P0.7b: `tokenizeAux_step`, the skip facts,
-  `composite_cons_head`, `composite_skip_origin_ident`); the remaining
-  work is the step chain itself (ident/bool/negative-int siblings of
-  `lexToken_int_segment`'s statement shape, validated).
+  The segment layer now covers nonnegative integers, negative integers, and
+  Booleans (`lexToken_int_segment`, `lexToken_neg_segment`, and
+  `lexToken_bool_segment`). The complete nonnegative four-token walk is
+  proved by `tokenizeAux_entry_line`, and `tokenizeAux_entry_line_gen`
+  factors out the common identifier/`=`/literal/`;` walk for the remaining
+  literal forms. The next step is to instantiate that generic walk for
+  Boolean and negative literals and reduce the resulting four-token arrays
+  through `parseEntry`.
 - [ ] Assemble the list/line result into the master theorem
   `parseSolution (stripSeparators (emitSolution ps)) = .ok (entriesOf ps)`
   under the emitter's explicit name hypotheses.
@@ -106,8 +109,12 @@ success-conditioned offset-transport stack (P0.2), the walk-level
 `tokenizeAux_offset_ok` (P0.3), and the intra-line segment-token layer
 (P0.5: kw/ident/eq/semi at offsets, `takeWhile_take_drop`,
 `composite_read`/`composite_read_head`, `digit_not_punct`), plus the
-digit-literal segment (P0.6: `lexInt_nonneg_segment`,
-`lexToken_int_segment`, `guard_fail`).
+literal segment and entry-walk layers (P0.6/P0.7:
+`lexInt_nonneg_segment`, `lexToken_int_segment`, `lexInt_neg_segment`,
+`lexToken_neg_segment`, `lexToken_bool_segment`, `tokenizeAux_entry_line`,
+`tokenizeAux_entry_line_gen`, `entry_lit_head_read`, and
+`entry_lit_drop`/`entry_lit_drop_rest`). The isolated
+`solver.Emit.Roundtrip` module currently builds successfully.
 
 ### P1 — Wire the verified fast solver structures
 
@@ -181,11 +188,12 @@ build-checked steps after the emitted-solution round trip is complete.
   modules (`Domain`, `Propagators`, `Fixpoint`, `Extract`, `Learning`, and
   `RevState`) with the smallest stable submodule imports.  Measure clean and
   incremental elaboration before and after each change.
-- [ ] Split `solver/Emit.lean` after P0 lands.  Keep executable emission and
-  small value-formatting lemmas in a stable module, and move the large
-  lexer/parser round-trip proof stack into one or more proof-only modules.
-  This should prevent changes to round-trip proofs from recompiling unrelated
-  solver code.
+- [x] Split `solver/Emit.lean`: executable emission and its accumulator proof
+  live in stable `solver/Emit/Basic.lean`, while the evolving lexer/parser
+  proof stack lives in `solver/Emit/Roundtrip.lean`.  `solver/Emit.lean`
+  remains the stable public emission module and intentionally does not import
+  the unfinished proof stack; the solver stack imports only `Basic`, so
+  round-trip work does not recompile unrelated solver code.
 - [ ] Separate generic search/propagation machinery from the FlatZinc-facing
   adapter currently concentrated in `solver/Solve.lean`; keep model
   extraction, checker integration, and emitted-text results at the boundary.
