@@ -6737,6 +6737,40 @@ theorem keywordToken_bool (b : Bool) :
     keywordToken (String.ofList (boolLitChars b)) = some (.boolLit b) := by
   cases b <;> rfl
 
+/-- The Boolean word's cons form, with every char fact needed by
+    the walk's step 3 (head identified, all ident chars, the
+    head not trivia, and the `b`-head disjunction). -/
+theorem boolLitChars_cons (b : Bool) :
+    ∃ (c : Char) (cs : List Char),
+      boolLitChars b = c :: cs
+      ∧ (isAlpha c = true)
+      ∧ (∀ ch ∈ cs, isIdentChar ch = true)
+      ∧ (isWhitespace c = false)
+      ∧ ((c == '%') = false)
+      ∧ (b = true ∧ c = 't' ∨ b = false ∧ c = 'f') := by
+  cases b with
+  | true =>
+      refine ⟨'t', ['r', 'u', 'e'], rfl, by decide, ?_, by decide, by decide, by decide⟩
+      intro ch hch
+      simp only [List.mem_cons] at hch
+      rcases hch with h1 | h1 | h1
+      · rw [h1]; decide
+      · rw [h1]; decide
+      · cases h1 with
+        | inl h2 => rw [h2]; decide
+        | inr h2 => cases h2
+  | false =>
+      refine ⟨'f', ['a', 'l', 's', 'e'], rfl, by decide, ?_, by decide, by decide, by decide⟩
+      intro ch hch
+      simp only [List.mem_cons] at hch
+      rcases hch with h1 | h1 | h1 | h1
+      · rw [h1]; decide
+      · rw [h1]; decide
+      · rw [h1]; decide
+      · cases h1 with
+        | inl h2 => rw [h2]; decide
+        | inr h2 => cases h2
+
 /-- The Boolean segment token: at position `q` holding the head of
     the word `true`/`false`, with all ident chars and the tail head
     failing `isIdentChar`, `lexToken` returns the `.boolLit`. -/
@@ -6754,6 +6788,29 @@ theorem lexToken_bool_segment {x y : List Char} {q : Nat} {b : Bool}
           have := composite_size x y
           omega⟩) := by
   exact lexToken_kw_segment hle hstart hall hfail hkw
+
+/-- The char-level Boolean segment token: the head premise at the
+    CHAR `c` (the bang read at `q`), avoiding the dependent-index
+    transport of callers. -/
+theorem lexToken_bool_segment' {x y : List Char} {q : Nat} {c : Char} {b : Bool}
+    (hle : q < x.length)
+    (hhead : ((x ++ y).toArray)[q]! = c)
+    (hstart : isAlpha c = true ∨ c = '_')
+    (hall : ∀ ch ∈ x.drop (q + 1), isIdentChar ch = true)
+    (hfail : ∀ (ch : Char), y.head? = some ch → isIdentChar ch = false)
+    (hkw : keywordToken (String.ofList (x.drop q)) = some (.boolLit b)) :
+    lexToken ((x ++ y).toArray) q
+        (by
+          have := composite_size x y
+          omega)
+      = .ok (.boolLit b, ⟨x.length, by
+          have := composite_size x y
+          omega⟩) := by
+  have hxc : x[q] = c := (composite_read! hle).symm.trans hhead
+  have hstart' : isAlpha x[q] = true ∨ x[q] = '_' := by
+    rw [hxc]
+    exact hstart
+  exact lexToken_bool_segment hle hstart' hall hfail hkw
 
 /-! #### The digit exclusions and the past-`x` read bridge -/
 
@@ -8278,6 +8335,18 @@ theorem entry_lit_drop {nm lit : List Char} :
     exact Nat.le_refl _
   rw [h1, hw]
   simp
+
+/-- The drop past the whole `= ` prefix is the literal (position
+    spelled as the prefix's own length). -/
+theorem entry_lit_drop' {nm lit : List Char} :
+    ((nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]) ++ lit).drop
+        ((nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length) = lit := by
+  have hw : (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length
+      = nm.length + 3 := by
+    rw [List.length_append]
+    rfl
+  rw [hw]
+  exact entry_lit_drop
 
 /-- The drop past the `= ` prefix and the literal's head is the
     literal's tail. -/
