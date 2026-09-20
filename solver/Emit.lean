@@ -7142,6 +7142,262 @@ theorem composite_skip_origin_ident {nm rest : List Char}
   rw [hnm]
   exact skipTrivia_ident_head hstart
 
+/-! #### The entry-line walk composition (P0.7: the step chain)
+
+The composite of an emitted scalar entry line is
+
+`line := nm ++ " = " ++ lit ++ ";" ++ tail`
+
+(char lists: `nm ++ [' ','=',' '] ++ lit ++ [';'] ++ tail`), and
+the walk from `0` over `line.toArray` consumes exactly the four
+tokens `[ident nm, eq, <lit token>, semi]`, landing at
+`lineLen := nm.length + 3 + lit.length + 1`.  Each step is a
+`tokenizeAux_step` at a skip-fixed position whose token is a
+P0.5/P0.6 segment lemma over the composite; the skip positions
+between the tokens are pinned by the ws/eq/semi skip facts over
+the composite reads. -/
+
+/-- The composite's list read at the join `x.length` is the tail
+    list's head. -/
+theorem composite_read_at_join {x : List Char} {c : Char} {cs : List Char} :
+    (x ++ (c :: cs))[x.length] = c := by
+  have hlen : x.length < (x ++ (c :: cs)).length := by
+    rw [List.length_append]; simp
+  have hgt := List.getElem_append_right (as := x) (bs := c :: cs)
+    (i := x.length) (h₁ := Nat.le_refl _) (h₂ := hlen)
+  have hidx : x.length - x.length = 0 := Nat.sub_self x.length
+  -- the dependent read blocks `rw [hidx]`; re-derive the read at
+  -- the collapsed index via List.getElem with the transport:
+  have hcongr : (c :: cs)[x.length - x.length] = (c :: cs)[0] := by
+    simp only [hidx]
+  rw [hgt, hcongr]
+  show (c :: cs)[0] = c
+  exact rfl
+
+/-- The join position is inside the composite (array bound). -/
+theorem composite_join_lt {x : List Char} {c : Char} {cs : List Char} :
+    x.length < (x ++ (c :: cs)).toArray.size := by
+  rw [list_toArray_size, List.length_append]
+  simp
+
+/-- The ws step at the join: at `nm.length`, the char (the first
+    separator space) steps the skip. -/
+theorem composite_skip_ws1 {nm lit tl : List Char}
+    (hlt : nm.length < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size) :
+    skipTrivia ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray) nm.length
+      = skipTrivia ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)
+          (nm.length + 1) := by
+  apply skip_ws_step hlt
+  -- transport the prim read to the bang read, prove the char
+  -- fact at bang level (no dependent motive), then bridge back:
+  rw [show ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)[nm.length]'hlt
+      = ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)[nm.length]! from
+      (arrGetElem!_of_lt hlt).symm]
+  -- the composite reshaped so the join read is the ws head:
+  have hs : nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl
+      = nm ++ (' ' : Char) :: (('=' : Char) :: ((' ' : Char)
+          :: (lit ++ (';' :: tl)))) := by
+    simp only [List.cons_append, List.append_assoc, List.nil_append]
+  rw [hs]
+  exact composite_read_head
+
+/-- The `=` at `nm.length + 1` is significant (stops the skip). -/
+theorem composite_skip_eq {nm lit tl : List Char}
+    (hlt : nm.length + 1 < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size) :
+    skipTrivia ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray) (nm.length + 1)
+      = nm.length + 1 := by
+  apply skip_eq_significant hlt
+  rw [show ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)[nm.length + 1]'hlt
+      = ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)[nm.length + 1]! from
+      (arrGetElem!_of_lt hlt).symm]
+  -- the composite reshaped with `[ws]` at the split:
+  have hs : nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl
+      = (nm ++ [(' ' : Char)]) ++ ('=' : Char) :: (' ' : Char)
+          :: (lit ++ (';' :: tl)) := by
+    simp only [List.cons_append, List.append_assoc, List.nil_append]
+  rw [hs, show nm.length + 1
+      = (nm ++ [(' ' : Char)]).length from by
+        rw [List.length_append]
+        show nm.length + 1 = nm.length + 1
+        rfl]
+  exact composite_read_head
+
+/-- The ws step at the second separator space (`nm.length + 2`
+    holds the post-`=` space). -/
+theorem composite_skip_ws2 {nm lit tl : List Char}
+    (hlt : nm.length + 2 < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size) :
+    skipTrivia ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray) (nm.length + 2)
+      = skipTrivia ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)
+          (nm.length + 3) := by
+  apply skip_ws_step hlt
+  rw [show ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)[nm.length + 2]'hlt
+      = ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)[nm.length + 2]! from
+      (arrGetElem!_of_lt hlt).symm]
+  -- the composite reshaped with `[ws,=]` at the split:
+  have hs : nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl
+      = (nm ++ [(' ' : Char), ('=' : Char)]) ++ (' ' : Char)
+          :: (lit ++ (';' :: tl)) := by
+    simp only [List.cons_append, List.append_assoc, List.nil_append]
+  have hlen : (nm ++ [(' ' : Char), ('=' : Char)]).length = nm.length + 2 := by
+    rw [List.length_append]
+    show nm.length + (1 + 1) = nm.length + 2
+    rfl
+  rw [hs, show nm.length + 2
+      = (nm ++ [(' ' : Char), ('=' : Char)]).length from hlen.symm]
+  exact composite_read_head
+
+/-! #### The bound facts of the entry-line composite -/
+
+/-- The composite's array bound at `nm.length + j` (for the three
+    separator positions; `tl` nonempty gives the room). -/
+theorem entry_bound {nm lit tl : List Char} {j : Nat}
+    (hj : j ≤ 3 + lit.length + 1)
+    (htl : tl ≠ []) :
+    nm.length + j < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size := by
+  have htlne : 0 < tl.length := by
+    cases tl with
+    | nil => exact absurd rfl htl
+    | cons c cs => simp
+  rw [list_toArray_size]
+  rw [show (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).length
+      = nm.length + (3 + lit.length + 1 + tl.length) from by
+    rw [List.length_append]
+    simp +arith]
+  omega
+
+/-! #### The four-step entry-line walk (the step chain) -/
+
+/-- The `lexToken` call transports along array equality (the two
+    position proofs prove the same proposition by `rfl`-level
+    defeq of the equality; stated as an equation between the
+    *calls* so it composes in rewrites). -/
+theorem lexToken_eq_trans {a b : Array Char} (hab : a = b) (q : Nat)
+    (ha : q < a.size) (hb : q < b.size) :
+    lexToken a q ha = lexToken b q hb := by
+  subst hab
+  rfl
+
+/-- **The entry-line walk**: over the composite of an emitted
+    scalar entry line with an identifier name and an all-digit
+    nonnegative literal, the tokenizer walk from `0` consumes
+    exactly `[ident nm, eq, intLit (parseDecNat lit), semi]` and
+    lands at `lineLen = nm.length + 3 + lit.length + 1`.
+
+    The four steps are `tokenizeAux_step` applications at the
+    pinned skip positions; the tokens are the P0.5/P0.6 segment
+    lemmas over the composite. -/
+theorem tokenizeAux_entry_line {nm lit tl : List Char} {acc : Array Token}
+    (hne : nm ≠ [])
+    (hall : ∀ c ∈ nm, isIdentChar c = true)
+    (hstart : isAlpha nm[0]! = true ∨ nm[0]! = '_')
+    (hkw : keywordToken (String.ofList nm) = none)
+    (hres : reservedNonFzn.contains (String.ofList nm) = false)
+    (hlitne : lit ≠ [])
+    (hdigits : ∀ c ∈ lit, isDigit c = true)
+    (hxo : ∀ (c : Char), (';' :: tl).head? = some c → c ≠ 'x' ∧ c ≠ 'o')
+    (htl : tl ≠ []) :
+    tokenizeAux ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray) 0 acc
+      = tokenizeAux ((nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray)
+          (nm.length + 3 + lit.length + 1)
+          (((acc.push (.ident (String.ofList nm))).push .eq)
+            |>.push (.intLit (parseDecNat (String.ofList lit)))
+            |>.push .semi) := by
+  -- bounds (no `set`: plain haves over the spelled-out composite):
+  have hb1 : nm.length + 1 < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size :=
+    entry_bound (j := 1) (by omega) htl
+  have hb2 : nm.length + 2 < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size :=
+    entry_bound (j := 2) (by omega) htl
+  have hb3 : nm.length + 3 < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size :=
+    entry_bound (j := 3) (by omega) htl
+  have hbl : nm.length + (3 + lit.length)
+      < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size :=
+    entry_bound (j := 3 + lit.length) (by omega) htl
+  have hbs : nm.length + (3 + lit.length + 1)
+      < (nm ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size :=
+    entry_bound (j := 3 + lit.length + 1) (by omega) htl
+  -- normalize the goal's position spelling to the same shape:
+  rw [show nm.length + 3 + lit.length + 1
+      = nm.length + (3 + lit.length + 1) from by omega]
+  -- step 1: the identifier token at 0 stops the skip at 0 and
+  -- consumes through nm:
+  obtain ⟨c0, nmrest, hnm⟩ : ∃ h t, nm = h :: t := by
+    cases nm with
+    | nil => exact absurd rfl hne
+    | cons h t => exact ⟨h, t, rfl⟩
+  subst hnm
+  -- `nm` is now `(c0 :: nmrest)`; the head read is definitionally c0:
+  have hstartc : isAlpha c0 = true ∨ c0 = '_' := hstart
+  have hskip0 : skipTrivia (((c0 :: nmrest) ++ [' ', '=', ' '] ++ lit
+      ++ [';'] ++ tl).toArray) 0 = 0 :=
+    composite_skip_origin_ident rfl hstartc
+  -- the digit-tail membership for the ident segment lemma (q = 0):
+  have hall0 : ∀ c ∈ (c0 :: nmrest).drop (0 + 1), isIdentChar c = true := by
+    intro c hc
+    exact hall c (List.mem_of_mem_drop hc)
+  -- the tail head fails isIdentChar (the first separator space):
+  have hfail0 : ∀ (c : Char),
+      (([' ', '=', ' '] ++ lit ++ [';'] ++ tl) : List Char).head? = some c →
+      isIdentChar c = false := by
+    intro c hc
+    -- the head of (' ' :: '=' :: ' ' :: rest) is ' ' by the cons law:
+    have hhead : (([' ', '=', ' '] ++ lit ++ [';'] ++ tl) : List Char).head?
+        = some ' ' := by
+      show ((' ' : Char) :: (('=' : Char) :: ((' ' : Char)
+        :: (lit ++ (';' :: tl))))).head? = some ' '
+      rfl
+    rw [hhead] at hc
+    injection hc with hcc
+    subst hcc
+    decide
+  have htok1 := lexToken_ident_segment (x := (c0 :: nmrest))
+    (y := (([' ', '=', ' '] ++ lit ++ [';'] ++ tl) : List Char)) (q := 0)
+    (hle := by
+      show 0 < (c0 :: nmrest).length
+      simp)
+    (hstart := hstartc) (hall := hall0) (hfail := hfail0)
+    (hkw := hkw) (hres := hres)
+  -- the array bound at 0 (the goal's flat spelling; the segment
+  -- lemma's parenthesized spelling is defeq):
+  have hb0 : 0 < ((c0 :: nmrest) ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size := by
+    have hlen := composite_size (c0 :: nmrest)
+      (([' ', '=', ' '] ++ lit ++ [';'] ++ tl) : List Char)
+    show 0 < ((c0 :: nmrest) ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray.size
+    simp
+  -- normalize the token's string (drop 0 is the identity; avoid
+  -- touching the dependent position component):
+  -- normalize the token's string (List.drop 0 is the identity):
+  have hdrop : String.ofList (List.drop 0 (c0 :: nmrest : List Char))
+      = String.ofList (c0 :: nmrest : List Char) := by
+    show String.ofList (c0 :: nmrest) = String.ofList (c0 :: nmrest)
+    rfl
+  have htok1' : lexToken ((c0 :: nmrest) ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray 0 hb0
+      = .ok (.ident (String.ofList (c0 :: nmrest : List Char)),
+          ⟨(c0 :: nmrest).length, by
+            show 0 < (c0 :: nmrest).length
+            simp⟩) := by
+    -- transport htok1 along the two spellings of the array
+    -- (associativity of ++, propositional):
+    have harr : ((c0 :: nmrest) ++ ([' ', '=', ' '] ++ lit ++ [';'] ++ tl)
+        : List Char).toArray
+        = ((c0 :: nmrest) ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl
+            : List Char).toArray := by
+      apply congrArg List.toArray
+      show (c0 :: nmrest) ++ ([' ', '=', ' '] ++ (lit ++ [';'] ++ tl))
+          = (c0 :: nmrest) ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl
+      simp only [List.append_assoc]
+    have h := htok1
+    rw [hdrop] at h
+    rw [lexToken_eq_trans harr 0 _ hb0] at h
+    exact h
+  -- step 1 of the walk:
+  have hstep1 : tokenizeAux ((c0 :: nmrest) ++ [' ', '=', ' '] ++ lit
+      ++ [';'] ++ tl).toArray 0 acc
+      = tokenizeAux ((c0 :: nmrest) ++ [' ', '=', ' '] ++ lit ++ [';'] ++ tl).toArray
+          (c0 :: nmrest).length (acc.push (.ident (String.ofList (c0 :: nmrest)))) :=
+    tokenizeAux_step acc hskip0 hb0 htok1'
+  rw [hstep1]
+  sorry
+
 end LexerCons
 
 end LeanFzn.Solver
