@@ -8237,6 +8237,70 @@ theorem tokenizeAux_entry_line_gen {nm lit tl : List Char} {acc : Array Token}
     omega
   rw [hfinal]
 
+/-- The literal's head read at the join between the `= ` prefix
+    and the literal (bang form over the flat composite). -/
+theorem entry_lit_head_read {nm : List Char} {c : Char} {cs tl : List Char} :
+    ((nm ++ [' ', '=', ' '] ++ (c :: cs) ++ [';'] ++ tl).toArray)[nm.length + 3]!
+      = c := by
+  rw [show (nm ++ [' ', '=', ' '] ++ (c :: cs) ++ [';'] ++ tl)
+      = ((nm ++ [((' ' : Char)), (('=' : Char)), ((' ' : Char))])
+        ++ (c :: cs)) ++ ((';' : Char) :: tl) from by
+    simp only [List.append_assoc, List.cons_append, List.nil_append]]
+  rw [show nm.length + 3
+      = (nm ++ [((' ' : Char)), (('=' : Char)), ((' ' : Char))]).length from by
+    rw [List.length_append]
+    rfl]
+  have hq : ((nm ++ [((' ' : Char)), (('=' : Char)), ((' ' : Char))])
+        ++ (c :: cs)).length
+      = (nm ++ [((' ' : Char)), (('=' : Char)), ((' ' : Char))]).length
+        + (c :: cs).length := by
+    rw [List.length_append]
+  have hpos : (0 : Nat) < (c :: cs).length := by simp
+  have hlt : ((nm ++ [((' ' : Char)), (('=' : Char)), ((' ' : Char))])).length
+      < ((nm ++ [((' ' : Char)), (('=' : Char)), ((' ' : Char))])
+        ++ (c :: cs)).length := by omega
+  rw [composite_read! hlt]
+  exact composite_read_at_join
+
+/-- The drop past the whole `= ` prefix is the literal. -/
+theorem entry_lit_drop {nm lit : List Char} :
+    (((nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]) ++ lit)).drop
+        (nm.length + 3) = lit := by
+  rw [List.drop_append]
+  have hw : (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length
+      = nm.length + 3 := by
+    rw [List.length_append]
+    rfl
+  have h1 : List.drop (nm.length + 3)
+      (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]) = [] := by
+    rw [List.drop_eq_nil_of_le]
+    rw [hw]
+    exact Nat.le_refl _
+  rw [h1, hw]
+  simp
+
+/-- The drop past the `= ` prefix and the literal's head is the
+    literal's tail. -/
+theorem entry_lit_drop_rest {nm : List Char} {c : Char} {cs : List Char} :
+    ((nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]) ++ (c :: cs)).drop
+        ((nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length + 1) = cs := by
+  have hw : (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length
+      = nm.length + 3 := by
+    rw [List.length_append]
+    rfl
+  rw [List.drop_append]
+  have h0 : List.drop ((nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length + 1)
+      (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]) = [] := by
+    rw [List.drop_eq_nil_of_le]
+    omega
+  rw [h0]
+  have hsub : ((nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length + 1)
+      - (nm ++ [(' ' : Char), ('=' : Char), (' ' : Char)]).length = 1 := by
+    omega
+  rw [hsub]
+  rfl
+
 end LexerCons
 
 end LeanFzn.Solver
+
