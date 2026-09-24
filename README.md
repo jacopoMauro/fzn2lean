@@ -2,25 +2,20 @@
 
 LeanFzn is a verified FlatZinc toolchain in Lean 4 for the
 **integer/Boolean/set fragment** of the MiniZinc solver language. Its checker
-covers that fragment, while its search engine solves models whose decision
-variables have explicit finite integer or Boolean domains. Its three main
-results are:
+covers that fragment. Its finite-domain solver is being rebuilt around a
+direct correctness theorem rather than checker acceptance. Its main results
+and active development target are:
 
-- a finite-domain solver that can decide satisfiability, enumerate solutions,
-  and optimize objectives;
+- reusable finite-domain search, propagation, and refinement components, now
+  being assembled into a directly verified solver;
 - a solution checker covering 218 standard and global predicate names; and
 - a parser proved to recognize exactly the declarative FlatZinc grammar.
 
-These are one connected development rather than three unrelated programs.
-The CLI receives a FlatZinc source file, so it first uses the verified parser
-to turn that text into the `Model` syntax tree on which both checking and
-solving are defined. The checker is then reused inside the solver as the
-predicate for complete candidate assignments: a search leaf succeeds exactly
-when the emitted assignment is accepted by the checker. Thus the solver's SAT
-proof composes two results—search returns only a successful leaf, and checker
-acceptance implies declarative satisfaction. Reference search,
-propagation, heuristics, learning, restarts, enumeration, and branch-and-bound
-optimization all carry Lean theorems describing the results they may return.
+The parser and declarative semantics remain the common foundation. The
+solution checker is for external solutions and independent testing. The new
+solver correctness argument will instead connect compiled constraints, solver
+states, propagation, branching, and terminal results directly to
+`Satisfies fullSig fullInterp`; output rendering happens only afterward.
 
 The normative reference is **MiniZinc 2.10.0**, pinned to immutable commit
 `c9f9b649b2a251a40aa427a84d7cce73a8807fea` (see
@@ -29,103 +24,92 @@ deliberately excluded; strings remain supported in annotations.
 
 ## Main results
 
-### Verified finite-domain solver
+### Directly verified finite-domain solver — redesign in progress
 
-The solver is a main result of this repository, not merely an application of
-the parser.  It is available through `leanfzn solve`, `leanfzn enum`, and
-`leanfzn optimize`, and its complete umbrella module is
-`solver/Solver.lean`.
+The previous solver used the verified solution checker as its leaf predicate.
+That architecture safely filtered SAT candidates, but it did not prove that
+the solver transitions themselves established model satisfaction, and its
+UNSAT statement was relative to the extracted candidate space. That is no
+longer the target correctness architecture.
 
-The current search fragment contains initializer-free Boolean variables and
-bounded or explicitly enumerated integer variables. Unbounded integer
-variables, set decision variables, domains above `domainCap`, and search
-spaces above `leavesCap` are reported as unsupported rather than searched
-incompletely. Variables determined by initializers—including array aliases—are
-reconstructed by the solution checker's completion machinery instead of
-becoming search slots.
+The intended certified solver will return a source `Store` and prove directly:
 
-For supported finite models, the proof-facing solver contract distinguishes:
+- a `sat store` result implies `Satisfies fullSig fullInterp m store`;
+- an `unsat` result excludes every admissible satisfying store for the
+  supported model; and
+- resource exhaustion returns `unknown`, never `unsat`.
 
-- **SAT:** the returned assignment is accepted by the verified front door and
-  therefore satisfies the model's declarative `fullInterp` semantics;
-- **UNSAT:** no assignment drawn from the declared finite domains satisfies
-  the model, subject to the documented round-trip licence for propagating
-  entry points while P0 in `PLAN.md` remains open;
-- **unknown:** a bounded run exhausted its resource budget and makes no SAT or
-  UNSAT claim; and
-- **unsupported:** the model or requested feature combination is outside the
-  implemented solver interface.
+The proof proceeds through exact source-to-internal compilation, exact initial
+search-space coverage, and local preservation theorems for propagation,
+branching, backtracking, and terminal states. UNSAT follows from exhaustive
+coverage and proved-safe elimination, without an unsat core. SAT does not use
+solution rendering, parsing, or checker acceptance.
 
-The unbounded reference search terminates because each branch decreases a
-finite-domain measure.  Its central results are exposed by
-`solveModel_sat_sound` and `solveModel_unsat_sound`; the composed configurable
-front door is covered by `solveModelWith_sat_sound`,
-`solveModelWith_unsat_sound`, and
-`solveModelWith_budget_never_falseUnsat`.
+Generic search coverage, propagator preservation, heuristic permutation, and
+reversible-state refinement lemmas are retained where they are independent of
+the old leaf predicate. `solver.Emit` is now output-only. The external checker
+remains supported for user-provided solutions and differential testing.
 
-#### How the solver works
+The replacement is scaffolded with a strict algorithm/proof split:
 
-1. **Validate and extract the finite problem.** The FlatZinc model first
-   passes the same static well-formedness and supported-predicate gates used by
-   the checker. `modelSlots` extracts explicit finite domains for decision
-   variables, while `extractConstraints` recognizes constraints supported by
-   the propagation layer. The extraction bridge
-   `extractConstraints_holds` connects those internal constraints back to the
-   model semantics.
-2. **Run a complete reference search.** `search` enumerates assignments over
-   the extracted slots. Its leaf predicate pairs slot names with candidate
-   values, emits that assignment in FlatZinc solution syntax, and calls the
-   verified checker. The search returns an assignment only when this predicate
-   is true. This makes `checkModelSolution_correct` the semantic bridge in the
-   SAT proof, while reference search remains the simple, deterministic baseline
-   for optimized variants.
-3. **Prune with verified propagation.** A propagator returns narrowed domains
-   or a contradiction. Every propagator implements the `Preserves` contract:
-   narrowing retains every compatible satisfying assignment, while a reported
-   contradiction excludes all satisfying extensions. A fuel-bounded fixpoint
-   composes these local results before and during `prunedSearch`.
-4. **Recognize useful constraint shapes.** The wired propagators include
-   equality, disequality, order, constant equality, integer arithmetic and
-   bounds, Boolean connectives, `all_different`, and linear equality/inequality.
-   The linear propagators `propLinEq` and `propLinLe` have proved preservation
-   theorems and are extracted from `int_lin_eq` and `int_lin_le` models.
-5. **Change search order without changing coverage.** `mrvOrder` selects a
-   minimum-remaining-values order. The branch-coverage and permutation lemmas
-   show that MRV changes only exploration order, not the assignments covered.
-   `solveModelPropMrv` composes propagation and MRV through the same proof
-   boundary.
-6. **Learn and restart safely.** Decision-trail NoGoods have a declarative
-   clause semantics and scope-limited entailment proofs. `learnSearch` agrees
-   with reference search. Budgeted `searchBudget` and `restartSearch`
-   distinguish exhaustion from budget interruption; interrupted searches
-   return `unknown`, and fair schedules recover completeness.
-7. **Enumerate and optimize.** `enumModel` proves membership, completeness,
-   distinctness, and UNSAT results for all-solutions enumeration.
-   `optimizeModel` and `optimizeModelBb` prove solution soundness, optimality,
-   UNSAT behavior, and objective-value agreement; the branch-and-bound result
-   is related to the reference optimizer by `optimizeModelBb_agrees`.
-8. **Connect search results to model satisfaction.** The text returned by a
-   successful solve is the same text accepted by the leaf predicate; the CLI
-   does not perform a second redundant check after solving. The theorem
-   `solveModelWith_sat_sound` transports that recorded leaf acceptance through
-   `checkModelSolution_correct`, yielding satisfaction of the declarative
-   model semantics.
+- `solver/Direct/Types.lean`, `Compile.lean`, and `Search.lean` contain data
+  and executable definitions only;
+- `solver/Direct/Proofs/Compile.lean`, `Proofs/Search.lean`, and
+  `Correctness.lean` contain the semantic theorem statements.
 
-The implementation also contains a reversible sparse-set state and trail.
-`sparseNarrow_spec`, `revBacktrack_recovers`, and `revPropPass_refines` prove
-its domain view, restoration behavior, and one-pass agreement with the
-functional propagator. Wiring that state into search, adding queued wake-up
-propagation, and watched NoGoods are future performance work rather than
-missing pieces of the reference solver.
+The direct proof modules compile without `sorry` or `admit`, but their
+source-level SAT/UNSAT results are vacuous while `compileModel` rejects every
+model. Opening the first supported fragment requires exact compilation and
+coverage proofs.
 
-The remaining emitter/parser round-trip work is isolated in
-`solver/Emit/Roundtrip.lean`, which currently builds successfully. The honest
-offset-transport and emitted token-segment layers are proved for Boolean,
-nonnegative-integer, and negative-integer literals; the complete nonnegative
-entry walk and the generic four-token entry walk are also proved. Next come
-the Boolean/negative walk instances and scalar-entry `parseEntry` reduction,
-followed by the list-level `parseSolution` theorem and a string-free leaf path.
-See `PLAN.md` P0 for the authoritative checklist.
+The solver foundation is layered. `solver/Core` defines only shared compiled
+problems, slots, domains, assignments, results, and assignment semantics.
+Classical decisions, NoGoods, trails, and domain-narrowing state live in
+`solver/Tree`. The first new solver is the separate `solver/LCG` layer, which
+implements a CP-SAT-style lazy clause generation architecture: signed Boolean
+and integer-bound literals, clauses, implication reasons, decision levels,
+learned clauses, propagation queues, and conflicts.
+
+The LCG executable runs the full loop — order-encoding propagation with
+explanations, unit propagation, first-UIP conflict analysis, learning,
+backjumping, bisection decisions — and returns `sat`/`unsat`/`unknown`
+verdicts (fuel exhaustion maps to `unknown`, never `unsat`). Its verdicts
+are validated by differential tests against brute-force enumeration
+(`solver/TestsLCG.lean`). Proof status: `LCG.solve_sat_correct` is proved;
+the propagation soundness lift `propagateLoop_lift` is fully proved
+(`solver/LCG/Proofs/Lift.lean`, sorry-free): any conflict report from a
+conflict-free propagation run originates from (a) a clause-scanning
+verdict on a database clause, (b) an opposing-fact pair, or (c) a
+propagator's own conflict report — pinned by the scanAll inversion, the
+enqueueNorm three-branch analysis, the sweep pass-through guard, and the
+sweep inversion. `LCG.solve_unsat_correct` is proved relative to the
+explicit two-field `EngineSafe` obligation bundle
+(`solver/LCG/Proofs/Search.lean`); dropping that bundle constructively is
+the registered `PLAN.md` Step 2 execution order (7 items, each ending in
+a compiling theorem). **Conflict analysis is
+now fully proved**: `analyzeConflict_correct` establishes both the
+learned-clause entailment and the strict-backjump conjunct from the
+`AnalysisReady` reachability premise, via the tracked-disjunction
+worklist lift (`analyzeStep_tracked`) in
+`solver/LCG/Proofs/Analyze.lean` — no `sorry` or `admit` remains
+anywhere in `solver/`, `LeanFzn/`, or `Tests/`, and the theorem depends
+only on `[propext, Quot.sound]`. The engine-safety layer (Step 2) is
+under construction in `solver/LCG/Proofs/Engine.lean`: domain-extrema
+bounds, trail↔domain coherence (`fits_domOfLit_sat_pos/neg/bool`), and
+Boolean clause-scanning soundness
+(`scanClause_conflict_falsified`, `scanClause_unit_justified`) are
+proved, all axiom-clean, as are the root-fact validity and membership
+characterization plus the full domain-coherence layer
+(`DomainCoherent` preserved by `enqueueNorm` and
+`repairAfterBackjump`, established at `initialStateWithRoots`);
+`PLAN.md` is the authoritative order for the remaining reachability
+obligations, redressed as the 7-item premise-drop order above.
+Existing solver approaches have not all been ported to the layered core
+yet.
+
+The checker-mediated entry points still present in the source are migration
+code, not the intended public correctness boundary. `PLAN.md` gives the
+authoritative replacement order and theorem targets.
 
 ### Exact parser recognition
 
@@ -267,11 +251,27 @@ leanfzn/
 │   ├── Check.lean             # 12 front-door tests: every outcome class + exit codes
 │   └── Bench.lean              # compiled perf regression suite (front door + checker + parser)
 │
-├── solver/                    # The verified constraint solver (PLAN item 6)
+├── solver/                    # Solver components; direct proof redesign in PLAN.md
+│   ├── Core.lean              #   shared solver-core umbrella
+│   ├── Core/                  #   architecture-neutral problem semantics
+│   │   ├── Types.lean         #     problems, slots, domains, assignments
+│   │   └── Semantics.lean     #     assignment/domain agreement
+│   ├── Tree.lean              #   classical CP tree-state umbrella
+│   ├── Tree/                  #   decisions, NoGoods, trails, reference state
+│   ├── LCG.lean               #   lazy-clause-generation umbrella
+│   ├── LCG/                   #   literals, clauses, reasons, LCG state/proofs
+│   ├── Direct.lean            #   direct-solver umbrella
+│   ├── Direct/                #   replacement solver
+│   │   ├── Types.lean         #     compiled data and result types
+│   │   ├── Compile.lean       #     executable compiler and constraint evaluation
+│   │   ├── Search.lean        #     executable exhaustive solver driver
+│   │   ├── Proofs/Compile.lean#     exact compiler correspondence obligations
+│   │   ├── Proofs/Search.lean #     finite-search correctness obligations
+│   │   └── Correctness.lean   #     public direct SAT/UNSAT theorems
 │   ├── Search.lean            #   exhaustive reference search + master theorems
 │   ├── Domain.lean            #   finite-domain extraction from a model
-│   ├── Emit.lean              #   solution-text emission + round-trip proof work
-│   ├── Solve.lean             #   entry points: solveModel / solveModelProp / solveModelHeur
+│   ├── Emit.lean              #   output-only solution-text emission
+│   ├── Solve.lean             #   legacy checker-mediated entry points (being replaced)
 │   ├── Propagators.lean       #   propagation contract + first propagators
 │   ├── Fixpoint.lean          #   propagation fixpoint + pruning search
 │   ├── Heuristic.lean         #   MRV branch ordering (permutation composition)
@@ -355,14 +355,14 @@ lake build leanfzn solver tests_smoke tests_stdlib tests_solution tests_globals 
       tests_gecode tests_coverage tests_check tests_bench tests_wellformed \
       tests_pretty tests_prof tests_fast tests_solver tests_prop \
       tests_heur tests_fix tests_enum tests_sbench tests_opt tests_rev \
-      tests_learn tests_restart
+      tests_learn tests_restart tests_lcg
 
-# The one documented functional-test command (runs every suite and
-# fails on the first failure):
+# Run the listed test and benchmark suites; stop at the first failure:
 for t in tests_smoke tests_stdlib tests_solution tests_globals tests_gecode \
          tests_coverage tests_check tests_bench tests_wellformed tests_pretty \
          tests_prof tests_fast tests_solver tests_prop tests_heur tests_fix \
-         tests_enum tests_sbench tests_opt tests_rev tests_learn tests_restart; do
+         tests_enum tests_sbench tests_opt tests_rev tests_learn tests_restart \
+         tests_lcg; do
   lake env $t || exit 1
 done
 
@@ -391,6 +391,7 @@ lake env tests_opt       # 73 optimization tests
 lake env tests_rev       # 26 reversible-state tests
 lake env tests_learn     # 37 learning tests
 lake env tests_restart   # 26 restart tests
+lake env tests_lcg       # 31 LCG engine tests
 
 # Parse a FlatZinc file (prints the AST), or pipe via stdin
 lake env leanfzn model.fzn
@@ -400,7 +401,7 @@ echo 'solve satisfy;' | lake env leanfzn -
 # static validation + predicate checkability + dynamic checking)
 lake env leanfzn check model.fzn solution.txt
 
-# Solve a model (verified solver, reference search by default).
+# Run the legacy solver while the direct-proof replacement is developed.
 # Flags: --prop (fixpoint propagation), --mrv (MRV branch ordering),
 # --budget N (budgeted restarts, may report `unknown`),
 # --nogoods (NoGood learning); supported combos are each switch
@@ -444,15 +445,14 @@ Exit codes of `leanfzn`:
 
 `Tests/WellFormed.lean` and `Tests/Pretty.lean` can also be run directly
 with `lake env lean`; their `#eval`-based checks are compiled by the
-corresponding executable targets above. The clean build completes with
-**zero linter warnings** (the two split-heavy parser modules carry an explicit
-`linter.unusedSimpArgs` suppression documented in their headers; scratch
-and probe files live under `archive/` and are not part of any Lake target).
+corresponding executable targets above. The listed build targets are the intended aggregate check; a plain
+`lake build` currently has no default target. The LCG proof modules and direct
+correctness module build, and all 31 LCG tests pass. A full clean build and all
+functional suites have not been rechecked for this status update. Lean emits
+some unused simp argument and unused variable warnings in the LCG proof stack.
 
 ## Project status and roadmap
 
-See [`PLAN.md`](PLAN.md) for the completed milestones, current limitations,
-and prioritized correctness-preserving extensions and performance work.  See
-[`code-structure.md`](code-structure.md) for the current dependency map;
-candidate simplifications are recorded in `PLAN.md` P4 and have not yet been
-applied to the source tree.
+See [`PLAN.md`](PLAN.md) for the active certification steps and completion
+criteria. See [`code-structure.md`](code-structure.md) for the module dependency
+map.

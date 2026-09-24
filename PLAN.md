@@ -95,15 +95,9 @@ must make that choice explicit.
   conflict report at some state.
 - **Remaining Step 2 obligation (stated, not sorry)**: the `EngineSafe`
   bundle in `Proofs/Search.lean` — `unsat_root_conflict` and
-  `unsat_root_leaf` are now explicit structure fields that the caller
-  must derive (`LCG.solve_unsat_correct` takes the bundle as a
-  premise; no `sorry` anywhere in `solver/`). The conflict-shape arm
-  reduces to reading the report's falsification off `propagateLoop_lift`'s
-  origin arms plus the trail's reason-validity invariant (LoopInf
-  obligations); the leaf-shape arm reduces to the all-singleton
-  exhaustiveness at the leaf check. Closing both constructively is the
-  next work item, after which the premise drops and the theorem is
-  unconditional.
+  `unsat_root_leaf` are explicit premises of `LCG.solve_unsat_correct`
+  (no `sorry` anywhere in `solver/`). Closing both constructively and
+  dropping the premise is the next work item (order below).
 - `solver.Direct.compileModel` rejects every model, so the existing source-level
   direct SAT/UNSAT theorems are vacuous.
 - The LCG proof modules and direct correctness module build; all 31 LCG tests
@@ -113,69 +107,104 @@ must make that choice explicit.
 
 ## Execution order
 
-### 2. Eliminate the `EngineSafe` assumption
+### 2. Drop the `EngineSafe` premise (no artificial premises)
 
-Goal: derive internal LCG UNSAT correctness from reachable-state invariants.
+Goal: make `LCG.solve_unsat_correct` premise-free by proving both
+`EngineSafe` fields constructively from what the engine's own run
+actually establishes. No new opaque premises may be introduced; every
+obligation must reduce to executable-state reasoning plus the fragment
+assumption.
 
-#### 2.1 Boolean propagation
+The two fields and their constructive discharge:
 
-1. Specify reference clause-propagation semantics independently of the
-   executable scanning/queue implementation.
-2. Prove each enqueued unit literal follows from an entailed reason clause and
-   the trail literals that falsify its other disjuncts.
-3. Prove every detected conflict is an entailed clause falsified by all
-   assignments represented by the current state.
-4. Prove propagation preserves state well-formedness, chronology, reason
-   validity, and represented solutions.
-5. Prove queue completeness: propagation reaches the required fixpoint or
-   returns `unknown`.
+* `unsat_root_conflict`: a level-0 post-propagation conflict excludes
+  every internal solution. Reduction: with `propagateLoop_lift`, the
+  reported clause `cc` is (a) a `scanClause` verdict on a database
+  clause, (b) an opposing-fact pair, or (c) a propagator's conflict
+  report. Arm (a): the scanned clause is satisfied at every internal
+  solution (`clausesSatOfSol` reachability) and falsified wherever
+  `scanClause` fired (`scanClause_conflict_falsified'`), so no
+  represented solution survives. Arm (b): the pair is complementary,
+  so one literal agrees with the trail and its negation with the
+  conflicting report — excluded by `RootFacts` + trail satisfaction.
+  Arm (c): per-family propagator conflict soundness (Step 2.2
+  premise 5): `propX_preserves`'s contradiction half is
+  state-level; the LCG-level `PropagationResult.conflict` report must
+  be lifted per family (narrow-by-narrow nogood validity).
+* `unsat_root_leaf`: a level-0 conflict-free post-propagation state
+  with `allSingleton = true`, `fitsB` or constraint check failed
+  (else the verdict was `.sat`, not `.unsat`), excludes every internal
+  solution. Reduction: the leaf report fires from
+  `not (fitsB a && all constraints)` under the complete singleton
+  assignment `a`; since `a` IS the only assignment the state
+  represents (all domain slots are singletons), a violated `fitsB`
+  conjunct contradicts `Represents a` (fit) and a failed constraint
+  conjunct contradicts `clausesSatOfSol` via
+  `DomConstraint.satisfiedB_iff`.
 
-#### 2.2 CP propagation and explanations
+#### 2.E Execution order (each item ends in a compiling, axiom-clean theorem)
 
-For every propagator already used by the LCG engine, prove:
+1. **Singleton characterization.** Prove in `Proofs/Engine.lean`
+   (or a new `Proofs/Singleton.lean`):
+   `allSingleton st = true` and
+   `singletonAssignment st = some a` imply `∀ b, b.Fits st.domains →
+   b = a` (every fitting assignment IS `a`). This is the leaf-shape's
+   "only represented assignment" fact. Pure list lemma, no semantics.
 
-1. its assumed domain representation (interval, arbitrary finite domain, or
-   order-encoding view);
-2. every emitted explanation is entailed by the internal constraint;
-3. the explanation premises hold when it is emitted;
-4. each narrowing preserves all represented solutions;
-5. any reported conflict excludes all represented assignments;
-6. registered wake-up events schedule every necessary re-run.
+2. **Leaf-shape exclusion.** In `Proofs/Search.lean`, unfold
+   `lcgSearch.go`'s leaf branch under `decisionLevel = 0` and the
+   false leaf condition; combine with item 1 and `Represents`'s
+   `Fits` conjunct to discharge `EngineSafe.unsat_root_leaf` — the
+   violated-constraint case additionally passes through
+   `DomConstraint.satisfiedB_iff` (or the generic
+   `constraintHoldsB`-agreement premise when instantiating).
 
-Do not add new constraint families during this phase.
+3. **Database-clause scan exclusion (lift arm (a)).** Strengthen
+   `propagateLoop_lift` (or state a corollary) to carry, alongside the
+   origin, the *falsification*: for arm (a), from
+   `scanClause st1 d = some (.inl cc)` derive `cc = d` and
+   `∀ a, st1.TrailSatisfied a → ¬ cc.SatisfiedBy a` (combine
+   `scanClause_conflict_falsified'` with the equality `cc = d`).
 
-#### 2.3 Decisions, learning, and backjumping
+4. **Pair-arm exclusion (lift arm (b)).** For the opposing-fact pair
+   `[w, w.negate]`: prove the `enqueueNorm` opposing-fact branch's
+   state has `w.norm` falsified-by-trail (the branch fired because
+   `negOnTrail` hit) and `w.negate` falsified (the report's head),
+   so any trail-satisfying assignment satisfies ONE of them and
+   `cc` cannot be satisfied — a two-literal contradiction for
+   represented solutions.
 
-1. Prove decisions partition the represented solution set into the selected
-   branch and its complement.
-2. Prove reachable conflict states satisfy `AnalysisReady`.
-3. Combine Step 1 with reachability to prove every learned clause is entailed
-   by the original problem.
-4. Prove learned-clause insertion preserves original solutions.
-5. Prove backjumping restores the correct trail prefix and logical domains.
-6. Prove the learned clause justifies its asserting literal after backjump.
+5. **Propagator-arm exclusion (lift arm (c)) per family.** For each
+   propagator used by `propagatorsOf` (plus/le/lt/eq/ne/linLe and the
+   Boolean channelings): a theorem
+   `propX_lcg_sound : p.run st = .conflict c →
+      ∀ a, st.TrailSatisfied a → st.FitsOn a → ¬ c.SatisfiedBy a`.
+   The heavy lifting is shared with `solver/Propagators.lean`
+   preservation theorems (`Preserves.contradicts`), but the LCG
+   propagator works on `State` (trail+domain extrema) rather than
+   plain domain lists — a bridging lemma per family connects the two
+   via `DomainCoherent`. Non-proven hybrids (`propIdSlot`,
+   `linNarrowAll`) stay replaced (identity/deferred) — no new family
+   work in this phase.
 
-#### 2.4 Terminal classifications
+6. **Contract monotonicity through the loop.** Prove the sweep arm's
+   intermediate states keep a `LoopInv`-shaped bundle (this is what
+   `PropContract.problem`-level callers needed): from
+   `enqueueNorm_coherent` + `unitEnqueue_trailSat` + item 5 soundness,
+   induction over `runPropagators.go` re-establishes the contract at
+   every state the arm (c) reading needs.
 
-1. SAT: reconstructed assignments are complete, fit initial domains, and
-   satisfy every internal constraint.
-2. Root-conflict UNSAT: entailed-clause falsification excludes every internal
-   solution.
-3. Conflict-free terminal UNSAT: prove that this state represents no solution,
-   or remove this outcome if the engine cannot justify it.
-4. Fuel exhaustion, failed reconstruction, incomplete propagation, or an
-   unavailable decision returns `unknown`.
+7. **Assemble and drop the premise.** In `Proofs/Search.lean`:
+   `theorem unsat_root_conflict_constructive` from items 3+4+5+6, and
+   `theorem unsat_root_leaf_constructive` from item 2; then delete
+   `EngineSafe` and rewrite `solve_unsat_correct` premise-free.
+   Update `README.md` / `code-structure.md` to the unconditional
+   statement, re-run every functional suite, and commit.
 
-Completion gate:
-
-- `LCG.solve_unsat_correct` no longer takes `EngineSafe` or an equivalent
-  opaque safety premise.
-- The internal theorems state:
-
-```lean
-solve ... = .sat assignment → ProblemSolution problem holds assignment
-solve ... = .unsat → ¬ ∃ assignment, ProblemSolution problem holds assignment
-```
+Gate: `LCG.solve_unsat_correct` takes no `EngineSafe` (or equivalent)
+premise; `lake build LeanFzn solver` + all suites stay green and
+`#print axioms LCG.solve_unsat_correct` lists only `[propext,
+Quot.sound]`.
 
 ### 3. Freeze the first certified FlatZinc fragment
 
