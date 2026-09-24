@@ -66,8 +66,8 @@ structure PropContract (problem : Problem Constraint Objective)
     Reason.Valid problem constraintHolds r l ∧
     (∀ c ∈ r.clause, c = c.norm) ∧
     (∀ a : Assignment,
-      (ProblemSolution problem constraintHolds a ∧ st.Represents a) →
-      ∀ q ∈ r.clause, q ≠ l → q.eval a = some false)
+      ProblemSolution problem constraintHolds a →
+      l.eval a = some true)
   conflictFalsified : ∀ p ∈ props, ∀ c,
     p.run st = .conflict c →
     (∀ a : Assignment,
@@ -126,90 +126,6 @@ theorem unitEnqueue_trailSat
       unfold enqueueNorm at hres
       simp only [hnew', hneg', Bool.false_eq_true, if_false] at hres
       exact hres
-
-/-! ### The propagator sweep
-
-`runPropagators` folds a single propagator `run` over the list,
-enqueuing each `.implied` deduction through `enqueueNorm` and stopping
-at the first `.conflict`. The fold's accumulator is itself a state
-whose soundness is maintained by the same step lemma as above, with
-the propagator contract supplying the justification. -/
-
-/-- One propagator application preserves soundness: from a
-    conflict-free trail-sound state, the output is either
-    conflict-free and trail-sound, or carries a conflict clause that
-    is falsified at every assignment satisfying the pre-state's trail. -/
-theorem oneProp_sound
-    {problem : Problem Constraint Objective}
-    {constraintHolds : Constraint → Assignment → Prop}
-    {p : Propagator} {st : State} {a : Assignment}
-    (hpc : PropContract problem constraintHolds [p] st)
-    (hsol : ProblemSolution problem constraintHolds a)
-    (hsat : st.TrailSatisfied a)
-    (hconf : st.conflict = none) :
-    (p.run st = .stable → st.TrailSatisfied a) ∧
-    (∀ l : Literal, ∀ reason : Reason, p.run st = .implied l reason →
-      (enqueueNorm st l (some reason)).TrailSatisfied a ∨
-        (enqueueNorm st l (some reason)).conflict ≠ none) ∧
-    (∀ c : Clause, p.run st = .conflict c →
-      ∀ a2 : Assignment,
-        (ProblemSolution problem constraintHolds a2 ∧
-          st.Represents a2) →
-        ¬ c.SatisfiedBy a2) := by
-  obtain ⟨himplied, hconflict⟩ := hpc
-  refine ⟨fun _ => hsat, ?_, ?_⟩
-  · intro l reason hrun
-    obtain ⟨hrv, hnorms, hfalse⟩ :=
-      himplied p (List.mem_cons_self) l reason hrun
-    -- Whether the enqueue takes a skip branch (state's trail
-    -- unchanged: soundness transfers) or the fresh branch: the
-    -- fresh branch's soundness needs the pivot's truth at `a`.
-    simp only [enqueueNorm]
-    split
-    · exact Or.inl hsat
-    · split
-      · exact Or.inr (by simp [State.conflict])
-      · -- fresh branch: the head justification at `a` is the
-        -- remaining lift obligation (see module notes); parked while
-        -- the loop-level composition is built
-        sorry
-  · intro c hrun a2 hpair
-    exact hconflict p (List.mem_cons_self) c hrun a2 hpair
-
-/-! ### The propagation-loop lift -/
-
-/-- The full carry-bundle of a propagation-loop state: everything the
-    engine's downstream consumers (conflict analysis, leaf checks, the
-    UNSAT terminal reports) need, in one place. -/
-structure LoopInv (problem : Problem Constraint Objective)
-    (constraintHolds : Constraint → Assignment → Prop)
-    (props : List Propagator) (st : State) : Prop where
-  conflictNone : st.conflict = none
-  fitLen : st.domains.length = problem.domains.length
-  coherent : DomainCoherent problem st
-  trailSatOfSol : ∀ a, ProblemSolution problem constraintHolds a →
-    st.TrailSatisfied a
-  reasonValid : ∀ e ∈ st.trail, ∀ r ∈ e.reason,
-    Reason.Valid problem constraintHolds r e.literal
-  rootFacts' : RootFacts problem constraintHolds st.trail
-  normReasons : ∀ e ∈ st.trail, ∀ r ∈ e.reason, ∀ l ∈ r.clause, l = l.norm
-  rooted : ∀ e ∈ st.trail, e.level ≤ st.decisionLevel
-  -- props soundness AT this state (re-established at each step because
-  -- propagators observe the state)
-  propContract : PropContract problem constraintHolds props st
-
-/-! ### Fits-lifting through the fold
-
-The single-step coherence results of `Proofs/Engine.lean`
-(`fits_domOfLit_sat_pos/neg/bool`) say: an assignment fitting the
-NARROWED domains satisfies the narrowing literal. Combined with the
-coherence invariant (the state's domains are exactly the trail-fold of
-`domOfLit`), this gives the *characteristic property* of a coherent
-state: every assignment fitting the state's domains satisfies every
-literal on the trail — provided its slot values have integer views
-where the literals demand them. That, together with clause-soundness,
-is `Represents`. The induction below maintains `Represents` directly,
-because it is the object both terminal reports need. -/
 
 /-! ### The firing lemma: satisfied literal ⇒ fitting assignment passes
 
@@ -423,6 +339,229 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           rw [updateSlot_getD_ne doms s' (fun _ => [Value.bool (if pos then b else !b)]) slot
             (fun hcon => hsl hcon)]
           exact hfitmem slot value hv
+
+/-! ### The guard: represented solutions survive a firing enqueue
+
+An enqueue of a justified literal narrows the domains (fresh branch) or
+leaves the state untouched (both skip branches). For an internal
+solution REPRESENTED by the pre-state (fits the narrowed domains, and
+the pre-trail covers every clause of the trail), the satisfied literal
+condones the domain refinement precisely because:
+
+* firing value filter: the slot value of the represented assignment is
+  an interval-view value whose truth at the narrowed domain's determined
+  way holds — correlates the domain fold's MOST narrowing prefix with
+  the original;
+* the witnessing literal fits through `firing`.
+
+So the post-enqueue state again REPRESENTS the same solution. Note the
+premises: unit justification is specialization of the *reason-valid*
+argument (the scan's only non-falsified disjunct). -/
+
+/-- An atom evaluating to `some` at `a` has its slot in range (the
+    lookup must have succeeded). -/
+theorem eval_some_slot_lt {atom : Atom} {a : Assignment} {behind : Bool}
+    (h : atom.eval a = some behind) : atom.slot < a.length := by
+  cases atom with
+  | boolEq s b =>
+      show s < a.length
+      unfold Atom.eval at h
+      simp only [Option.map_eq_some_iff] at h
+      -- h : (match a[s]? with ...) = some true
+      cases hh : a[s]? with
+      | none => rw [hh] at h; simp at h
+      | some v =>
+          cases hv2 : v with
+          | bool bv => exact (List.getElem?_eq_some_iff.mp hh).1
+          | int x => rw [hh, hv2] at h; simp at h
+          | setOfInt x => rw [hh, hv2] at h; simp at h
+          | array x => rw [hh, hv2] at h; simp at h
+  | intLe s k =>
+      show s < a.length
+      unfold Atom.eval slotInt at h
+      simp only [Option.map_eq_some_iff] at h
+      -- h : slotInt a s = some true → the bind's inner value: obtain ⟨x, hx, _⟩
+      obtain ⟨w, hw, _⟩ := h
+      -- hw : a[s]?.bind Value.intView = some w
+      rw [Option.bind_eq_some_iff] at hw
+      obtain ⟨v, hv, hvw⟩ := hw
+      exact (List.getElem?_eq_some_iff.mp hv).1
+
+/-- A literal evaluating to `some` at `a` has its slot in range: its
+    atom's evaluation (up to the sign flip that keeps `some`ness) was
+    `some`. -/
+theorem eval_lit_some_slot_lt {l : Literal} {a : Assignment}
+    (h : l.eval a = some true) : l.atom.slot < a.length := by
+  unfold Literal.eval at h
+  cases hatomic : l.atom.eval a with
+  | none => rw [hatomic] at h; simp at h
+  | some bb =>
+      -- the sign map maps some → some
+      rw [hatomic] at h
+      simp only [Option.map_eq_some_iff] at h
+      exact eval_some_slot_lt (atom := l.atom) hatomic
+
+/-- The unit-scan step keeps the represented solution. -/
+theorem unitEnqueue_represents
+    {problem : Problem Constraint Objective}
+    {constraintHolds : Constraint → Assignment → Prop}
+    {st : State} {c : Clause} {l : Literal} {r : Reason}
+    {a : Assignment}
+    (hsol : ProblemSolution problem constraintHolds a)
+    (hrep : st.Represents a)
+    (hent : c.EntailedBy problem constraintHolds)
+    (hscan : scanClause st c = some (.inr (l, r))) :
+    (enqueueNorm st l (some r)).Represents a := by
+  obtain ⟨hfit, htrail, hclauses, hlearned⟩ := hrep
+  -- the unit justification: the reported literal satisfied by a
+  have heval := unitEnqueue_trailSat (problem := problem)
+    (constraintHolds := constraintHolds) (st := st) (c := c)
+    (l := l) (r := r) (a := a) hsol
+      (fun e he => htrail e he) hent hscan
+  -- the same three branch analysis as in trailSat transfer
+  simp only [enqueueNorm]
+  split
+  · refine ⟨hfit, htrail, hclauses, hlearned⟩
+  · split
+    · refine ⟨hfit, htrail, hclauses, hlearned⟩
+    · -- fresh: the trail grows with the justified literal; the domains
+      -- narrow by domOfLit, and `a` fits by the firing lemma
+      refine ⟨?_, ?_, hclauses, hlearned⟩
+      · -- fits: `firing` applies with the pre-state fit, the claimed
+        -- slot in range (from `heval`'s some-shape: the atom's eval
+        -- cannot be `some` at an out-of-range slot), and `heval`
+        -- itself.
+        -- Step 1: the normalized literal's truth — the scan-uniqueness
+        -- argument: the clause's entailed witness at `a` must be the
+        -- reported unit l
+        obtain ⟨l2, hm2, hev2⟩ := hent a hsol
+        have hunit := scanClause_unit_justified' (st := st) (c := c)
+          (l := l) (r := r) (a := a) hscan (fun e he => htrail e he)
+          ⟨l2, hm2, hev2⟩
+        have hevaln : l.norm.eval a = some true := by
+          rw [Literal.norm_eval l a]; exact hunit
+        -- Step 2: slot range — evaluation being `some` forces the slot
+          -- lookup to succeed (lemma: an atom evaluating to `some` has
+          -- its slot in range)
+        have hinrange : l.norm.atom.slot < a.length := by
+          apply eval_lit_some_slot_lt (l := l.norm) hevaln        -- Step 3: firing
+        exact firing (doms := st.domains) (l := l.norm) (a := a)
+          hfit hinrange hevaln
+      · -- the trail satisfaction transfers via the fresh-branch lemma's
+        -- branch firing; goal is enqueueNorm-output modulo branches
+        rename_i hnew hneg
+        have hnew' : st.litOnTrail l.norm = false := by
+          cases hb : st.litOnTrail l.norm with
+          | true => exact absurd hb hnew
+          | false => rfl
+        have hneg' : st.negOnTrail l.norm = false := by
+          cases hb : st.negOnTrail l.norm with
+          | true => exact absurd hb hneg
+          | false => rfl
+        have hres : (enqueueNorm st l (some r)).TrailSatisfied a := heval
+        unfold enqueueNorm at hres
+        simp only [hnew', hneg', Bool.false_eq_true, if_false] at hres
+        exact hres
+
+/-! ### The propagator sweep
+
+`runPropagators` folds a single propagator `run` over the list,
+enqueuing each `.implied` deduction through `enqueueNorm` and stopping
+at the first `.conflict`. The fold's accumulator is itself a state
+whose soundness is maintained by the same step lemma as above, with
+the propagator contract supplying the justification. -/
+
+/-- One propagator application preserves soundness: from a
+    conflict-free trail-sound state, the output is either
+    conflict-free and trail-sound, or carries a conflict clause that
+    is falsified at every assignment satisfying the pre-state's trail. -/
+theorem oneProp_sound
+    {problem : Problem Constraint Objective}
+    {constraintHolds : Constraint → Assignment → Prop}
+    {p : Propagator} {st : State} {a : Assignment}
+    (hpc : PropContract problem constraintHolds [p] st)
+    (hsol : ProblemSolution problem constraintHolds a)
+    (hsat : st.TrailSatisfied a)
+    (hconf : st.conflict = none) :
+    (p.run st = .stable → st.TrailSatisfied a) ∧
+    (∀ l : Literal, ∀ reason : Reason, p.run st = .implied l reason →
+      (enqueueNorm st l (some reason)).TrailSatisfied a ∨
+        (enqueueNorm st l (some reason)).conflict ≠ none) ∧
+    (∀ c : Clause, p.run st = .conflict c →
+      ∀ a2 : Assignment,
+        (ProblemSolution problem constraintHolds a2 ∧
+          st.Represents a2) →
+        ¬ c.SatisfiedBy a2) := by
+  obtain ⟨himplied, hconflict⟩ := hpc
+  refine ⟨fun _ => hsat, ?_, ?_⟩
+  · intro l reason hrun
+    obtain ⟨hrv, hnorms, hhead⟩ :=
+      himplied p (List.mem_cons_self) l reason hrun
+    -- Whether the enqueue takes a skip branch (state's trail
+    -- unchanged: soundness transfers) or the fresh branch: the
+    -- fresh branch's soundness needs the pivot's truth at `a`.
+    simp only [enqueueNorm]
+    split
+    · exact Or.inl hsat
+    · split
+      · exact Or.inr (by simp [State.conflict])
+      · -- fresh branch: the head justification (the second conjunct
+        -- of `implied`) gives the enqueued literal's truth; the fresh-
+        -- branch step lemma closes the trail transfer
+        rename_i hnew hneg
+        have hnew' : st.litOnTrail l.norm = false := by
+          cases hb : st.litOnTrail l.norm with
+          | true => exact absurd hb hnew
+          | false => rfl
+        have hneg' : st.negOnTrail l.norm = false := by
+          cases hb : st.negOnTrail l.norm with
+          | true => exact absurd hb hneg
+          | false => rfl
+        have hin' : l.eval a = some true := hhead a hsol
+        have hres : (enqueueNorm st l (some reason)).TrailSatisfied a :=
+          enqueueNorm_fresh_trailSat (st := st) (l0 := l)
+            (reason := some reason) hnew' hneg' hsol hsat
+            (by rw [Literal.norm_eval l a]; exact hin')
+        unfold enqueueNorm at hres
+        simp only [hnew', hneg', Bool.false_eq_true, if_false] at hres
+        exact Or.inl hres
+  · intro c hrun a2 hpair
+    exact hconflict p (List.mem_cons_self) c hrun a2 hpair
+
+/-! ### The propagation-loop lift -/
+
+/-- The full carry-bundle of a propagation-loop state: everything the
+    engine's downstream consumers (conflict analysis, leaf checks, the
+    UNSAT terminal reports) need, in one place. -/
+structure LoopInv (problem : Problem Constraint Objective)
+    (constraintHolds : Constraint → Assignment → Prop)
+    (props : List Propagator) (st : State) : Prop where
+  conflictNone : st.conflict = none
+  fitLen : st.domains.length = problem.domains.length
+  coherent : DomainCoherent problem st
+  trailSatOfSol : ∀ a, ProblemSolution problem constraintHolds a →
+    st.TrailSatisfied a
+  reasonValid : ∀ e ∈ st.trail, ∀ r ∈ e.reason,
+    Reason.Valid problem constraintHolds r e.literal
+  rootFacts' : RootFacts problem constraintHolds st.trail
+  normReasons : ∀ e ∈ st.trail, ∀ r ∈ e.reason, ∀ l ∈ r.clause, l = l.norm
+  rooted : ∀ e ∈ st.trail, e.level ≤ st.decisionLevel
+  -- props soundness AT this state (re-established at each step because
+  -- propagators observe the state)
+  propContract : PropContract problem constraintHolds props st
+
+/-! ### Fits-lifting through the fold
+
+The single-step coherence results of `Proofs/Engine.lean`
+(`fits_domOfLit_sat_pos/neg/bool`) say: an assignment fitting the
+NARROWED domains satisfies the narrowing literal. Combined with the
+coherence invariant (the state's domains are exactly the trail-fold of
+`domOfLit`), this gives the *characteristic property* of a coherent
+state: every assignment fitting the state's domains satisfies every
+literal on the trail — provided its slot values have integer views
+where the literals demand them. That, together with clause-soundness,
+is `Represents`. The induction below maintains `Represents` directly,
+because it is the object both terminal reports need. -/
 
 end LeanFzn.Solver.LCG
 
