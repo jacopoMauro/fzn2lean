@@ -563,6 +563,332 @@ where the literals demand them. That, together with clause-soundness,
 is `Represents`. The induction below maintains `Represents` directly,
 because it is the object both terminal reports need. -/
 
+/-! ### The scanAll inversion -/
+
+/-- Inversion on scanAll: a `.inl` verdict comes from a scanClause call
+    on a clause of the scanned state's database. -/
+theorem scanAll_inl_inv {st : State} {c : Clause}
+    (h : scanAll st = some (Sum.inl c)) :
+    ∃ d, scanClause st d = some (Sum.inl c) := by
+  unfold scanAll at h
+  have walkFun : ∀ (cs : List Clause) (v : Clause ⊕ (Literal × Reason)),
+      scanAll.go st cs = some v →
+      ∃ d, scanClause st d = some v := by
+        intro cs
+        induction cs with
+        | nil => intro v hv; cases hv
+        | cons d rest ih =>
+            intro v hv
+            simp only [scanAll.go] at hv
+            match hm2 : scanClause st d, hv with
+            | none, hv' =>
+                exact ih v (by simpa [scanAll.go, hm2] using hv')
+            | some r0, hv' =>
+                exact ⟨d, by
+                  cases hv'
+                  exact hm2⟩
+  obtain ⟨d, hd⟩ := walkFun _ _ h
+  exact ⟨d, hd⟩
+
+/-! ### The runPropagators conflict-guard -/
+
+/-- Once a state's conflict is set, the sweep fold is a pass-through of
+    the conflict value. -/
+theorem runPropagators_go_conflict_fixed (props : List Propagator) :
+    ∀ (ps : List Propagator) (s : State) (d : Clause),
+      s.conflict = some d → (runPropagators.go ps s).conflict = some d := by
+  intro ps
+  induction ps with
+  | nil => intro s d h; exact h
+  | cons p rest ih =>
+      intro s d h
+      simp only [runPropagators.go]
+      rw [if_pos (show s.conflict.isSome = true from by rw [h]; simp)]
+      exact h
+
+/-- Inversion for `runPropagators`: if the swept state reports a conflict
+    clause `c` where the starting state had none, then the report's
+    origin is either some propagator's own `.conflict` report at some
+    state, or the opposing-fact pair of some literal (set inside
+    `enqueueNorm` when a propagator's implied literal contradicts the
+    trail). -/
+theorem runPropagators_conflict_inv (props : List Propagator)
+    (st : State) (c : Clause)
+    (hnone : st.conflict = none)
+    (hsome : (runPropagators props st).conflict = some c) :
+    (∃ p, p ∈ props ∧ ∃ st2 : State, p.run st2 = .conflict c)
+      ∨ (∃ w : Literal, c = [w, w.negate]) := by
+  have goInv : ∀ (ps : List Propagator) (acc : State),
+      acc.conflict = none →
+      ∀ d, (runPropagators.go ps acc).conflict = some d →
+        (∃ p, p ∈ ps ∧ ∃ st2 : State, p.run st2 = .conflict d)
+          ∨ (∃ w : Literal, d = [w, w.negate]) := by
+    intro ps
+    induction ps with
+    | nil =>
+        intro acc hacnone d hgo
+        have h1 : (runPropagators.go [] acc).conflict = acc.conflict := rfl
+        rw [h1, hacnone] at hgo
+        exact absurd hgo (by simp)
+    | cons p rest ih =>
+        intro acc hacnone d hgo
+        simp only [runPropagators.go] at hgo
+        split at hgo
+        · -- guard-true: acc.conflict.isSome, contradicting hacnone
+          rename_i his
+          rw [hacnone] at his
+          exact absurd his (by simp)
+        · split at hgo
+          · -- stable: recurse with acc
+            obtain hres := ih acc hacnone d hgo
+            rcases hres with ⟨q, hqm, st2, hrun⟩ | hpair
+            · exact Or.inl ⟨q, List.mem_cons_of_mem _ hqm, st2,
+                hrun⟩
+            · exact Or.inr hpair
+          · -- conflict: p's own report wrote it
+            rename_i c2 heq
+            have hc2c : c2 = d := by injection hgo
+            refine Or.inl ⟨p, List.mem_cons_self, acc, ?_⟩
+            rw [← hc2c]
+            exact heq
+          · -- implied: the fold continues at the enqueued state
+            rename_i lig rsn heq
+            cases hb1 : acc.litOnTrail lig.norm with
+            | true =>
+                -- skip arm: enqueued state is acc itself
+                have hstate : enqueueNorm acc lig (some rsn) = acc := by
+                  simp only [enqueueNorm, hb1, if_true]
+                have hgo2 : (runPropagators.go rest acc).conflict = some d := by
+                  rw [← hstate]; exact hgo
+                obtain hres := ih acc hacnone d hgo2
+                rcases hres with ⟨q, hqm, st2, hrun⟩ | hpair
+                · exact Or.inl ⟨q, List.mem_cons_of_mem _ hqm, st2,
+                    hrun⟩
+                · exact Or.inr hpair
+            | false =>
+                cases hb2 : acc.negOnTrail lig.norm with
+                | true =>
+                    -- opposing-fact arm: the pair state's conflict is
+                    -- the pair, and the next sweep guard passes it
+                    -- through unchanged
+                    have hstate : (enqueueNorm acc lig (some rsn)).conflict
+                        = some [lig.norm, lig.norm.negate] := by
+                      simp only [enqueueNorm, hb1, Bool.false_eq_true,
+                        if_false, hb2, if_true]
+                    have hpass : (runPropagators.go rest (enqueueNorm
+                        acc lig (some rsn))).conflict
+                        = some [lig.norm, lig.norm.negate] :=
+                      runPropagators_go_conflict_fixed props rest
+                        (enqueueNorm acc lig (some rsn))
+                        [lig.norm, lig.norm.negate] hstate
+                    rw [hpass] at hgo
+                    injection hgo with hgo4
+                    exact Or.inr ⟨lig.norm, hgo4.symm⟩
+                | false =>
+                    -- fresh enqueue: keeps acc's none conflict
+                    -- the fresh enqueue never writes the conflict slot
+                    have hstate2 : (enqueueNorm acc lig (some rsn)).conflict
+                        = none := by
+                      simp only [enqueueNorm, hb1, hb2,
+                        Bool.false_eq_true, if_false]
+                      exact hacnone
+                    obtain hres := ih (enqueueNorm acc lig (some rsn))
+                      hstate2 d hgo
+                    rcases hres with ⟨q, hqm, s2, hrun2⟩ | hpair
+                    · exact Or.inl ⟨q, List.mem_cons_of_mem _ hqm, s2,
+                        hrun2⟩
+                    · exact Or.inr hpair
+  exact goInv props st hnone c hsome
+
+/-! ### The propagation-loop bumped-up lift -/
+
+/-- THE LOOP-LEVEL ORIGIN LIFT: if a conflict-free propagation run from
+    `st` reports a conflict, then the reported clause's origin is one of
+    the engine's three structural sources:
+
+    (a) a scan verdict at some state reached by the run,
+    (b) the opposing-fact pair of some literal,
+    (c) some propagator's own conflict report at some state.
+
+    The fuel induction unfolds `propagateLoop` one step and transports
+    the origin through the recursion via `scanAll_inl_inv` (scan arm),
+    `enqueueNorm`'s three-branch analysis (unit-enqueue arm), and the
+    sweep's pass-through guard (quiesce/extend arms). -/
+theorem propagateLoop_lift :
+    ∀ (problem : Problem Constraint Objective)
+      (constraintHolds : Constraint → Assignment → Prop)
+      (props : List Propagator) (fuel : Nat) (st : State),
+      st.conflict = none →
+      (propagateLoop fuel props st).conflict.isSome = true →
+      ∃ cc, (propagateLoop fuel props st).conflict = some cc ∧
+        ((∃ st1 : State, ∃ d, scanClause st1 d = some (.inl cc))
+          ∨ (∃ w : Literal, cc = [w, w.negate])
+            ∨ ∃ p ∈ props, ∃ d : Clause, ∃ st2 : State,
+              p.run st2 = .conflict d) := by
+  intro problem constraintHolds props fuel
+  induction fuel with
+  | zero =>
+      intro st hc hisSome
+      simp only [propagateLoop] at hisSome
+      rw [hc] at hisSome
+      exact absurd hisSome (by simp)
+  | succ fuel ih =>
+      intro st hc hisSome
+      cases hscan : scanAll st with
+      | none =>
+          -- the sweep branch: the driver runs the propagators and
+          -- either quiesces (returns the sweep result) or recurses at
+          -- the swept state
+          have hstep : propagateLoop (fuel + 1) props st
+              = propagateLoop fuel props (runPropagators props st) ∨
+                propagateLoop (fuel + 1) props st
+                  = runPropagators props st := by
+            simp only [propagateLoop, hc, Bool.false_eq_true, if_false,
+              hscan, Option.isSome_none]
+            split
+            · exact Or.inr rfl
+            · exact Or.inl rfl
+          rcases hstep with hext | hquiesce
+          · -- extend: recursion at the swept state
+            cases hcp : (runPropagators props st).conflict with
+            | none =>
+                have hstepEq : propagateLoop (fuel + 1) props st
+                    = propagateLoop fuel props (runPropagators props st) := hext
+                rw [hstepEq]
+                exact ih (runPropagators props st) (by rw [hcp])
+                  (by rw [hstepEq] at hisSome; exact hisSome)
+            | some c =>
+                -- swept state's conflict locks the report (guard);
+                -- origin pinned by the sweep inversion
+                have hfix : (propagateLoop fuel props
+                    (runPropagators props st)).conflict
+                  = some c := by
+                  cases fuel with
+                  | zero => exact hcp
+                  | succ k =>
+                      show ((if (runPropagators props st).conflict.isSome
+                        = true then (runPropagators props st)
+                        else _) : State).conflict = _
+                      rw [show (runPropagators props st).conflict.isSome
+                        = true from by rw [hcp]; simp, if_pos rfl]
+                      exact hcp
+                have hstate : propagateLoop (fuel + 1) props st
+                    = propagateLoop fuel props (runPropagators props st) := hext
+                rw [hstate]
+                rcases runPropagators_conflict_inv props st c hc hcp
+                  with ⟨p, hp, st2, hrun⟩ | hpair
+                · exact Exists.intro c (And.intro hfix
+                    (Or.inr (Or.inr (Exists.intro p (And.intro hp
+                      (Exists.intro c (Exists.intro st2 hrun)))))))
+                · exact Exists.intro c (And.intro hfix
+                    (Or.inr (Or.inl hpair)))
+          · -- quiesce: the run IS `runPropagators props st`
+            rw [hquiesce] at hisSome
+            cases hcp : (runPropagators props st).conflict with
+            | none =>
+                rw [hcp] at hisSome
+                exact absurd hisSome (by simp)
+            | some c =>
+                refine Exists.intro c (And.intro ?_ ?_)
+
+                · rw [hquiesce]; exact hcp
+
+                · rcases runPropagators_conflict_inv props st c hc hcp
+                    with ⟨p, hp, st2, hrun⟩ | hpair
+                  · exact Or.inr (Or.inr (Exists.intro p (And.intro hp
+                      (Exists.intro c (Exists.intro st2 hrun)))))
+                  · exact Or.inr (Or.inl hpair)
+      | some verdict =>
+          cases verdict with
+          | inl c =>
+              -- the scan reported the conflict directly
+              refine Exists.intro c (And.intro ?_ ?_)
+              · have hstate : propagateLoop (Nat.succ fuel) props st
+                    = { st with conflict := some c } := by
+                  simp only [propagateLoop, hc, Bool.false_eq_true, if_false,
+                    hscan, Option.isSome_none]
+                rw [hstate]
+              · exact Or.inl (Exists.intro st
+                  (scanAll_inl_inv hscan))
+          | inr w =>
+              -- the loop enqueued and recursed: w = (l, r)
+              obtain ⟨l, r⟩ := w
+              cases hnt : st.litOnTrail l.norm with
+              | true =>
+                  -- skip-on-trail: the enqueued state is st itself
+                  have h1 : propagateLoop (fuel + 1) props st
+                      = propagateLoop fuel props (enqueueNorm st l
+                        (some r)) := by
+                    simp only [propagateLoop, hc, Bool.false_eq_true,
+                      if_false, hscan, Option.isSome_none]
+                  have h2 : enqueueNorm st l (some r) = st := by
+                    simp only [enqueueNorm, hnt, if_true]
+                  have hstep : (propagateLoop fuel props st).conflict.isSome
+                      = true := by
+                    rw [h1, h2] at hisSome
+                    exact hisSome
+                  obtain ⟨cc, hcc, horg⟩ := ih st hc hstep
+                  refine Exists.intro cc (And.intro ?_ horg)
+                  show (propagateLoop (fuel + 1) props st).conflict = some cc
+                  rw [h1, h2]
+                  exact hcc
+              | false =>
+                  cases hneg : st.negOnTrail l.norm with
+                  | true =>
+                      -- opposing-fact: the enqueued state's conflict is
+                      -- the pair; the driver's next guard passes it
+                      -- through unchanged, so the reported clause IS
+                      -- the pair
+                      have h2 : (enqueueNorm st l (some r)).conflict
+                          = some [l.norm, l.norm.negate] := by
+                        simp only [enqueueNorm, hnt, Bool.false_eq_true,
+                          if_false, hneg]
+                        rfl
+                      have hstep : propagateLoop (fuel + 1) props st
+                          = propagateLoop fuel props (enqueueNorm st l
+                            (some r)) := by
+                        simp only [propagateLoop, hc, Bool.false_eq_true,
+                          if_false, hscan, Option.isSome_none]
+                      have hguard : (propagateLoop fuel props
+                          (enqueueNorm st l (some r))).conflict
+                        = some [l.norm, l.norm.negate] := by
+                        cases fuel with
+                        | zero => exact h2
+                        | succ k =>
+                            show ((if (enqueueNorm st l (some r)).conflict.isSome
+                              = true then (enqueueNorm st l (some r))
+                              else _) : State).conflict = _
+                            rw [show (enqueueNorm st l (some r)).conflict.isSome
+                              = true from by rw [h2]; simp, if_pos rfl]
+                            exact h2
+                      rw [hstep]
+                      refine Exists.intro [l.norm, l.norm.negate]
+                        (And.intro hguard ?_)
+                      exact Or.inr (Or.inl (Exists.intro l.norm rfl))
+                  | false =>
+                      -- fresh enqueue: never writes the conflict slot
+                      have hst2none : (enqueueNorm st l (some r)).conflict
+                          = none := by
+                        simp only [enqueueNorm, hnt, Bool.false_eq_true,
+                          if_false, hneg, Bool.false_eq_true, if_false,
+                          enqueue]
+                        exact hc
+                      have hstep : propagateLoop (fuel + 1) props st
+                          = propagateLoop fuel props (enqueueNorm st l
+                            (some r)) := by
+                        simp only [propagateLoop, hc, Bool.false_eq_true,
+                          if_false, hscan, Option.isSome_none]
+                      obtain ⟨cc, hcc, horg⟩ := ih (enqueueNorm st l
+                        (some r)) hst2none (by rw [← hstep] at *; exact hisSome)
+                      refine Exists.intro cc (And.intro ?_ horg)
+                      have hcongr :
+                          (propagateLoop (fuel + 1) props st).conflict
+                            = (propagateLoop fuel props (enqueueNorm st l
+                              (some r))).conflict := by
+                        rw [hstep]
+                      rw [hcongr]
+                      exact hcc
+
 end LeanFzn.Solver.LCG
 
 

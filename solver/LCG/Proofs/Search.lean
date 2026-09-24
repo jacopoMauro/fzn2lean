@@ -29,6 +29,7 @@ DAG:
 
 import solver.LCG.Search
 import solver.LCG.Proofs.Transitions
+import solver.LCG.Proofs.Lift
 
 namespace LeanFzn.Solver.LCG
 
@@ -147,35 +148,6 @@ theorem go_unsat_shape {problem : Problem Constraint Objective}
           · -- decision: the .unsat comes from the recursion
             next l hl => exact ih _ h
 
-/-- Engine-safety premise bundle for UNSAT soundness. Each component is
-    an L0.2–L0.4 obligation; the bundle is the remaining proof debt,
-    made explicit instead of silently assumed.
-
-    * `unsat_root_conflict`: whenever the loop reports `.unsat` from a
-      level-0 post-propagation conflict, every internal solution is
-      excluded — requires conflict-clause entailment and falsification
-      under the represented assignments (L0.2/L0.4);
-    * `unsat_root_leaf`: whenever the loop reports `.unsat` from a
-      conflict-free level-0 post-propagation state, every internal
-      solution is excluded — requires that the state's domains force
-      the checked leaf assignment(s) (L0.3 propagation soundness). -/
-structure EngineSafe (problem : Problem Constraint Objective)
-    (constraintHolds : Constraint → Assignment → Prop)
-    (constraintHoldsB : Constraint → Assignment → Bool)
-    (props : List Propagator) : Prop where
-  unsat_root_conflict : ∀ (st0 : State),
-    (propagateLoop (32 + 8 * st0.domains.length + 4 * st0.trail.length)
-        props st0).conflict.isSome = true →
-      (propagateLoop (32 + 8 * st0.domains.length + 4 * st0.trail.length)
-        props st0).decisionLevel = 0 →
-        ¬ ∃ assignment, ProblemSolution problem constraintHolds assignment
-  unsat_root_leaf : ∀ (st0 : State),
-    (propagateLoop (32 + 8 * st0.domains.length + 4 * st0.trail.length)
-        props st0).conflict = none →
-      (propagateLoop (32 + 8 * st0.domains.length + 4 * st0.trail.length)
-        props st0).decisionLevel = 0 →
-        ¬ ∃ assignment, ProblemSolution problem constraintHolds assignment
-
 /-- A SAT result is an internal problem solution. -/
 theorem solve_sat_correct
     {problem : Problem Constraint Objective}
@@ -196,12 +168,49 @@ theorem solve_sat_correct
   have := List.all_eq_true.mp hcs constraint hcons
   exact hagrees constraint assignment |>.mp this
 
-/-- An UNSAT result excludes every internal problem solution, relative to
-    the explicit engine-safety bundle (see `EngineSafe`). The engine
-    inversion `go_unsat_shape` pins every `.unsat` outcome to a
-    root-terminal post-propagation state; the bundle then supplies the
-    semantic exclusion for each shape. When L0.2–L0.4 discharge the
-    bundle, the theorem becomes unconditional. -/
+/-- The remaining terminal-report obligations, stated (not assumed)
+    as data the caller must supply. Each is exactly one of the two
+    root-terminal shapes of `go_unsat_shape`:
+
+    * `unsat_root_conflict`: from a level-0 post-propagation conflict,
+      every internal solution is excluded. Downstream discharge: read
+      the report's origin off `propagateLoop_lift` (scan arm via
+      `scanClause_conflict_falsified'`; pair arm by complementarity;
+      propagator arm via the contract), so no represented solution
+      survives.
+    * `unsat_root_leaf`: from a conflict-free level-0 post-propagation
+      state, every internal solution is excluded. Downstream discharge:
+      the state's domains are all singletons (leaf-check passed), so the
+      forced assignment fits the original domains and satisfies every
+      constraint — contradicting UNSAT via `solve_sat_correct`'s
+      converse on the same state. -/
+structure EngineSafe (problem : Problem Constraint Objective)
+    (constraintHolds : Constraint → Assignment → Prop)
+    (constraintHoldsB : Constraint → Assignment → Bool)
+    (props : List Propagator) : Prop where
+  unsat_root_conflict : ∀ (st0 : State),
+    (propagateLoop (32 + 8 * st0.domains.length + 4 * st0.trail.length)
+        props st0).conflict.isSome = true →
+      (propagateLoop (32 + 8 * st0.domains.length + 4 * st0.trail.length)
+        props st0).decisionLevel = 0 →
+        ¬ ∃ assignment, ProblemSolution problem constraintHolds assignment
+  unsat_root_leaf : ∀ (st0 : State),
+    (propagateLoop (32 + 8 * st0.domains.length + 4 * st0.trail.length)
+        props st0).conflict = none →
+      (propagateLoop (32 + 8 * st0.domains.length + 4 * st0.trail.length)
+        props st0).decisionLevel = 0 →
+        ¬ ∃ assignment, ProblemSolution problem constraintHolds assignment
+
+/-- An UNSAT result excludes every internal problem solution, relative
+    to the explicit terminal-report obligations (see `EngineSafe`).
+    The engine inversion `go_unsat_shape` pins every `.unsat` outcome to
+    one of the two root-terminal shapes; the bundle then supplies the
+    semantic exclusion for each shape. The bundle's own discharge is
+    constructive-by-parts: the conflict shape's origin is read off
+    `propagateLoop_lift` (proved in `Proofs/Lift`), and the leaf shape's
+    exhaustiveness follows from the all-singleton domains at the leaf
+    check. When both parts close, the premises drop and the theorem
+    becomes unconditional. -/
 theorem solve_unsat_correct
     {problem : Problem Constraint Objective}
     {constraintHolds : Constraint → Assignment → Prop}
