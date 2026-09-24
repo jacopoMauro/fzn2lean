@@ -79,17 +79,31 @@ must make that choice explicit.
   proved. The engine now normalizes learned clauses (evaluation-
   preserving; `Literal.norm_eval`), which the semantic equivalence the
   reachability invariant needs (`clausesSatOfSol` etc.).
-- **Remaining Step 2 obligation (registered, one `sorry`)**:
-  `propagateLoop_lift` in `Proofs/Lift.lean` — the loop-level
-  preserve-or-refute fuel induction combining the step lemmas with the
-  propagator-sweep contract lift (each intermediate sweep state
-  satisfies the same soundness bundle; monotone because sweep prefixes
-  only enqueue). After it closes: the two `EngineSafe` obligations
-  (`unsat_root_conflict` — level-0 conflict excludes every solution
-  via the falsified entailed report; `unsat_root_leaf` — level-0 leaf
-  violation via the violated-constraint exclusion under a complete
-  `allSingleton` assignment) become derivable from the lift, and
-  `LCG.solve_unsat_correct` drops its `EngineSafe` premise.
+- **`propagateLoop_lift` is fully proved (Lift is sorry-free)**: the
+  loop-level fuel induction now combines `scanAll_inl_inv` (a `.inl`
+  verdict inverts to a scanClause witness on the reporting state), the
+  unit-enqueue three-branch analysis (skip-on-trail recurses on `st`
+  itself; the opposing-fact branch sets the conflict to the pair,
+  discharged as arm (b) by complementarity; the fresh-enqueue branch
+  never writes a conflict), the sweep pass-through guard
+  (`runPropagators_go_conflict_fixed`: a set conflict survives every
+  later fold step), and the sweep inversion
+  (`runPropagators_conflict_inv`: a reported conflict's origin is some
+  propagator's own report or the opposing-fact pair). The theorem's
+  reported-clause origin is one of: (a) a scan verdict at some state
+  the run reached, (b) the opposing-fact pair, (c) a propagator's own
+  conflict report at some state.
+- **Remaining Step 2 obligation (stated, not sorry)**: the `EngineSafe`
+  bundle in `Proofs/Search.lean` — `unsat_root_conflict` and
+  `unsat_root_leaf` are now explicit structure fields that the caller
+  must derive (`LCG.solve_unsat_correct` takes the bundle as a
+  premise; no `sorry` anywhere in `solver/`). The conflict-shape arm
+  reduces to reading the report's falsification off `propagateLoop_lift`'s
+  origin arms plus the trail's reason-validity invariant (LoopInf
+  obligations); the leaf-shape arm reduces to the all-singleton
+  exhaustiveness at the leaf check. Closing both constructively is the
+  next work item, after which the premise drops and the theorem is
+  unconditional.
 - `solver.Direct.compileModel` rejects every model, so the existing source-level
   direct SAT/UNSAT theorems are vacuous.
 - The LCG proof modules and direct correctness module build; all 31 LCG tests
