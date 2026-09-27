@@ -18,7 +18,9 @@ following the lexical rules of the vendored FlatZinc specification
 
 Every function is total; termination is proved by the decreasing measure
 `s.size - pos` (the number of unconsumed characters), and every successful
-lexing step strictly advances the position (proved in `lexToken_gt`).
+lexing step strictly advances the position (`lexToken` returns the new
+position paired with a proof `pos < p`; see `lexInt_gt`,
+`lexUnsigned_gt`, `lexString_ge`).
 -/
 
 namespace LeanFzn.Lexer

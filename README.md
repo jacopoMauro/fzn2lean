@@ -127,13 +127,11 @@ The recognition theorem is proven with no `sorry` or user-declared `axiom`.
 ```lean
 theorem parseModel_ok_iff_valid (s : String) :
     (∃ m, Parser.parseModel s = .ok m) ↔ ValidFlatZinc s
-
-theorem parseModel_error_iff_invalid (s : String) :
-    (∃ e, Parser.parseModel s = .error e) ↔ ¬ ValidFlatZinc s
 ```
 
 That is: the parser succeeds on a string if and only if that string is a valid
-FlatZinc program, and it fails exactly on the invalid ones. This is the
+FlatZinc program (and by case analysis on the `Except` result, it fails
+exactly on the invalid ones). This is the
 combination of two directions, each proven independently:
 
 - **Soundness** (`FznCorrectness.lean`): every successful parse yields a model

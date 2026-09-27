@@ -37,11 +37,12 @@ The interpretive decision behind every family member's meaning —
 1-based positions, tie-breaking, partiality, closedness, corner
 cases — is recorded in
 `specification/flatzinc_specification_assumptions.md`, G-series
-(G1–G23), with per-predicate handbook quotations and `.mzn`
+(G1–G33), with per-predicate handbook quotations and `.mzn`
 decomposition citations in the family module docstrings.
 
 Excluded from the fragment (and therefore not in `globalsNames`): every
-`_reif`, float, and opt (`var opt`) variant, string-regexp `regular`,
+`_reif`, float, and opt (`var opt`) variant, the string-regexp form
+of `regular` (the integer `fzn_regular` family is supported),
 `fzn_neural_net`/`fzn_piecewise_linear`/`fzn_piecewise_linear_non_continuous`
 (floats), and `fzn_alternative`/`fzn_span` (optional variables).  The
 five core out-of-fragment names — `fzn_alternative`, `fzn_span`,

@@ -9,7 +9,8 @@ An *executable* checker that decides whether a FlatZinc solution string
 (Section 4.3.3.1 of the MiniZinc 2.10.0 handbook: lines of the form
 `x = <literal>;` or `xs = array1d(1..n, [ ... ]);`) solves a given
 FlatZinc model, together with a machine-checked proof of its correctness
-(`checkSolution_correct`): the checker returns `true` **if and only if**
+(`checkSolutionFull_correct`, proved in `FznGlobals.lean` on the full
+predicate scope): the checker returns `true` **if and only if**
 the assignment described by the solution string satisfies every dynamic
 condition of the `Satisfies` semantics of `FznSemantics.lean` — variable
 domains, initializers, and all constraints under the standard predicate
@@ -77,17 +78,6 @@ structure Entry where
 def SolValue.toValue : SolValue → Value
   | .scalar l => l.denote
   | .array ls => .array (ls.map (·.denote))
-
-/-- Comma-separated integer atoms of a set literal `{i, j, ...}` up to
-    and including the closing `}`. -/
-private def parseSetAtoms : List Token → Except String (List Int × List Token)
-  | .intLit i :: .comma :: rest =>
-      match parseSetAtoms rest with
-      | .ok (is, rest') => .ok (i :: is, rest')
-      | .error e => .error e
-  | .intLit i :: .rBrace :: rest => .ok ([i], rest)
-  | .rBrace :: rest => .ok ([], rest)
-  | _ => .error "expected integer or '}' in set literal"
 
 /-- The continuation of a set literal after `{`: more comma-separated
     atoms until `}`, which is consumed.  The result list is built by
@@ -247,7 +237,7 @@ private def parseScalarEntry (x : String) : List Token →
       .ok (⟨x, .scalar (.set (.intRange i hi))⟩, rest)
   | .intLit i :: .semi :: rest => .ok (⟨x, .scalar (.int i)⟩, rest)
   | .lBrace :: rest =>
-      match parseSetAtoms rest with
+      match parseSetTail rest with
       | .ok (is, .semi :: rest') => .ok (⟨x, .scalar (.set (.intSet is))⟩, rest')
       | .ok _ => .error s!"expected ';' after assignment to '{x}'"
       | .error e => .error e
@@ -1344,10 +1334,12 @@ private theorem constraintHoldsB_iff {store : Store} {c : ConstraintItem}
 `checkSolution m sol` parses the solution string, builds the candidate
 store, and checks every dynamic condition of `Satisfies` — variable
 domains, initializers, and constraints — with executable Boolean
-twins.  `checkSolution_correct` proves the result correct **iff**
-against `Satisfies stdSig stdInterp` for models whose constraints all
-use checkable (standard-library) predicates and whose variables are
-all assigned by the solution. -/
+twins.  `checkSolutionFull_correct` (in `FznGlobals.lean`) proves the
+result correct **iff** against `Satisfies` for models whose
+constraints all use checkable predicates and whose variables are all
+assigned by the solution.  The full-scope fast twin
+`checkSolutionFullFast` (in `FznGlobals.lean`) and the per-condition
+Boolean twins below carry per-name `iff`-theorems. -/
 
 /-- Domains: does the value lie in the variable's declared domain? -/
 def varTypeContainsB (ty : BasicVarType) (v : Value) : Bool :=

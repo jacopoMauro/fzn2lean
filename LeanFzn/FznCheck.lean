@@ -34,7 +34,7 @@ Two developments beyond the plain composition:
   every initializer identifier against the declaration lists with
   `lookupIdent`; a model with `n` variables therefore costs Θ(n²) —
   about 37 s at the benchmark's 32,000 variables, making a CLI that
-  must "run `wellFormedB` before checking" (PLAN.md, item 1) unusable
+  must run `wellFormedB` before checking unusable
   on exactly the models the checker targets.  `wellFormedFastB`
   re-implements the static checks with hash-set membership and a
   hash-map-backed static environment and is proved to agree with
@@ -60,16 +60,16 @@ Two developments beyond the plain composition:
   condition conjoins it, so a parameter-reassigning string can never
   reach the `accepted` verdict.
 
-A third development (IDEAS 3) extends the prepared checker of PLAN
-item 4 with an *incremental store base*: `PreparedStore` carries the
+A third development extends the prepared checker with an *incremental
+store base*: `PreparedStore` carries the
 model's parameters pre-inserted into a persistent hash map plus the
 completion plan filtered to declarations with initializers, and the
 `completedBoxPrepared` seam keeps `completedBox` as its kernel-visible
 body (so `checkPreparedSolution_eq` needs no new store theorem) while
 the compiled code inserts each solution's k entries into the prepared
-base — the per-batch rebuild of the parameter map, IDEAS 3's dominant
-leaf cost, is paid once per `prepareModel` instead of once per
-solution check.
+base — the per-batch rebuild of the parameter map (the dominant leaf
+cost of the earlier design) is paid once per `prepareModel` instead of
+once per solution check.
 -/
 
 namespace LeanFzn.Check
@@ -1054,7 +1054,7 @@ theorem checkModelSolution_correct (m : Model) (sol : String) :
           rw [hfast] at hwf
           exact (hwf rfl).elim
 
-/-! ## The hash-dispatched front door (PLAN item 4)
+/-! ## The hash-dispatched front door
 
 `checkSolutionFullFast` (in `FznGlobals.lean`) is the dynamic checker
 with the hash-map dispatcher behind the name gate; here it is wired
@@ -1106,7 +1106,7 @@ theorem checkModelSolutionFast_eq (m : Model) (sol : String) :
             · simp only [hentries, Bool.false_eq_true, if_false]
       · rw [if_neg hwf, if_neg hwf]
 
-/-! ## Prepared model checking (PLAN item 4: parse once, check many)
+/-! ## Prepared model checking (parse once, check many)
 
 `checkModelSolution` re-runs the static gates and re-dispatches every
 constraint name on each call.  A `PreparedModel` performs that work
@@ -1119,7 +1119,7 @@ The dynamic store construction (`completedBox`) is per solution, as it
 must be.  `checkPreparedSolution_eq` proves the prepared path returns
 exactly the `checkModelSolution` outcome on every input.
 
-The store layer follows IDEAS 3 (incremental store construction per
+The store layer follows the incremental-store design (construction per
 leaf): the parameter map and the initializer-dependency *plan* are
 invariant across the solutions of one model, so `PreparedStore` (the
 `store` field below) carries the parameters pre-inserted into a
@@ -1145,7 +1145,7 @@ structure PreparedConstraint where
   twin : Option (LeanFzn.Ident → List Value → Bool)
   deriving Nonempty, Inhabited
 
-/-! ### The prepared store base (IDEAS 3)
+/-! ### The prepared store base
 
 The private twins below mirror the private store builders of
 `LeanFzn/FznSolution.lean` (`parValue`/`paramMap`, `initValue`,
@@ -1271,7 +1271,7 @@ private theorem completeFix_filter_eq (vars : List VarDeclItem) :
       | true => rfl
       | false => exact ih _
 
-/-- The prepared store base (IDEAS 3): the parts of the store
+/-- The prepared store base: the parts of the store
     construction that are invariant across the solutions of one
     model, so a batch of checks builds them once. -/
 structure PreparedStore where
@@ -1305,7 +1305,7 @@ structure PreparedModel where
   unsupported : Option String
   /-- The declared-variable set behind the entry check. -/
   declaredVars : Std.HashSet String
-  /-- The prepared store base (IDEAS 3): parameters pre-inserted and
+  /-- The prepared store base: parameters pre-inserted and
       the initializer-only completion plan. -/
   store : PreparedStore
   deriving Nonempty, Inhabited
@@ -1326,7 +1326,7 @@ def prepareModel (m : Model) : PreparedModel where
   declaredVars := Std.HashSet.ofList (m.variables.map (fun d => d.name.name))
   store := ⟨paramMapP m, m.variables.filter isInitVar, m.variables.length⟩
 
-/-- Runtime twin of `completedBoxPrepared` (IDEAS 3): insert the
+/-- Runtime twin of `completedBoxPrepared`: insert the
     solution's entries into the *prepared* parameter map and complete
     along the *filtered* initializer plan — no parameter re-walk, no
     probing of the initializer-less declarations. -/
@@ -1430,8 +1430,7 @@ private theorem prepared_all_eq (store : Store) (cs : List ConstraintItem)
 
 /-- The dynamic part of the prepared checker (the fast twin's body
     with the pre-dispatched constraints; the store comes through the
-    `completedBoxPrepared` seam, definitionally `completedBox` —
-    IDEAS 3). -/
+    `completedBoxPrepared` seam, definitionally `completedBox`). -/
 private def checkPreparedDyn (p : PreparedModel) (sol : String) : Bool :=
   match LeanFzn.Solution.parseSolution
       (LeanFzn.Solution.stripSeparators sol) with
