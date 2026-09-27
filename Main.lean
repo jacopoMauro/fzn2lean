@@ -22,13 +22,14 @@ DAG:
 
 import LeanFzn
 import solver.Solver
+import solver.Direct.Cli
 
 open LeanFzn
 
 /-- The one-line usage summary, printed on argument-level errors. -/
 private def usageString : String :=
-  "usage: leanfzn [FILE|-] | leanfzn check MODEL.fzn SOLUTION.txt | \
-  leanfzn solve [--prop] [--mrv] [--budget N] [--nogoods] FILE|- | \
+"usage: leanfzn [FILE|-] | leanfzn check MODEL.fzn SOLUTION.txt | \
+  leanfzn solve [--certified] [--prop] [--mrv] [--budget N] [--nogoods] FILE|- | \
   leanfzn enum FILE|- | leanfzn optimize FILE|-"
 
 private def readFileArg (path : String) : IO (Except String String) := do
@@ -156,35 +157,64 @@ separator, the FlatZinc convention).  Exit codes:
     file argument, and an unrecognized `--`-prefixed argument is
     refused. -/
 private def parseSolveFlags (args : List String) :
-    Except String (Solver.SolveConfig × List String) :=
-  let rec go (cfg : Solver.SolveConfig) :
-      List String → Except String (Solver.SolveConfig × List String)
-    | [] => .ok (cfg, [])
-    | "--prop" :: rest => go { cfg with useProp := true } rest
-    | "--mrv" :: rest => go { cfg with useMrv := true } rest
-    | "--nogoods" :: rest => go { cfg with nogoods := true } rest
+    Except String (Option Solver.SolveConfig × List String) :=
+  let rec go (cfg : Solver.SolveConfig) (certified : Bool) :
+      List String → Except String (Option Solver.SolveConfig × List String)
+    | [] => .ok (if certified then none else some cfg, [])
+    | "--certified" :: rest => go cfg true rest
+    | "--prop" :: rest => go { cfg with useProp := true } certified rest
+    | "--mrv" :: rest => go { cfg with useMrv := true } certified rest
+    | "--nogoods" :: rest => go { cfg with nogoods := true } certified rest
     | "--budget" :: n :: rest =>
         match n.toNat? with
-        | some b => go { cfg with budget := some b } rest
+        | some b => go { cfg with budget := some b } certified rest
         | none => .error s!"invalid budget '{n}' (expected a natural number)"
     | "--budget" :: _ => .error "option --budget requires a natural number argument"
     | arg :: rest =>
         if arg.startsWith "--" then
           .error s!"unknown option '{arg}'"
         else
-          match go cfg rest with
+          match go cfg certified rest with
           | .ok (cfg', srcArgs) => .ok (cfg', arg :: srcArgs)
           | .error e => .error e
-  go ⟨false, false, none, false⟩ args
+  go ⟨false, false, none, false⟩ false args
 
 /-- The `solve` subcommand: parse the model, run the composed front
-    door, and report the verdict. -/
+    door, and report the verdict. `--certified` routes through the
+    LCG fragment path whose SAT/UNSAT theorems are kernel-checked
+    end to end (`Direct.solveCertified`). -/
 private def runSolve (args : List String) : IO UInt32 := do
   match parseSolveFlags args with
   | .error e =>
       IO.eprintln s!"leanfzn: {e}"
       return 2
-  | .ok (cfg, srcArgs) =>
+  | .ok (none, srcArgs) =>
+      -- the certified LCG path
+      match ← parseModelSource srcArgs with
+      | .error e =>
+          IO.eprintln s!"leanfzn: {e}"
+          return 2
+      | .ok model =>
+          if LeanFzn.Check.wellFormedFastB model then
+            match LeanFzn.Solver.Direct.solveCertified model with
+            | .sat store =>
+                -- emit the satisfying assignment as a solution text
+                let text := LeanFzn.Solver.Direct.emitCertifiedSolution model store
+                IO.println text
+                return 0
+            | .unsat =>
+                IO.println "=====UNSATISFIABLE====="
+                return 1
+            | .unknown reason =>
+                IO.eprintln s!"leanfzn: {reason}"
+                return 2
+            | .unsupported reason =>
+                IO.eprintln s!"leanfzn: {reason}"
+                return 3
+          else
+            IO.eprintln "leanfzn: model is not well-formed"
+            return 2
+  | .ok (some cfg, srcArgs) =>
       match ← parseModelSource srcArgs with
       | .error e =>
           IO.eprintln s!"leanfzn: {e}"
