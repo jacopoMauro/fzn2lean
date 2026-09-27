@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, lazySolver]
+  pull_request:
+
+jobs:
+  build-test-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan
+        run: |
+          curl -sSfL https://github.com/leanprover/elan/releases/latest/download/elan-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          elan-init -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+      - name: Build (all libraries, executables, test targets)
+        run: lake build LeanFzn solver leanfzn tests_solver tests_lcg
+      - name: Run solver tests
+        run: lake env tests_solver
+      - name: Run LCG tests
+        run: lake env tests_lcg
+      - name: Audit: no active proof holes
+        run: |
+          if grep -rnE '(^|[^a-zA-Z])(sorry|admit)([^a-zA-Z]|$)' \
+              --include='*.lean' LeanFzn/ solver/ Tests/ Main.lean \
+              | grep -vE ':\s*(--|st ← st\.check|IO\.)' \
+              | grep -vE 'sorry-free|no admits|admits only|admits duplicate|admits no|proof target, not hidden|domains admit'; then
+            echo "ERROR: active proof holes found"; exit 1
+          fi
+      - name: Audit: axiom profiles of the public certified theorems
+        run: lake env lean tmp/audit_axioms.lean
+      - name: Audit: no new user axioms
+        run: |
+          if grep -rnE '^\s*axiom ' --include='*.lean' LeanFzn/ solver/ Tests/ Main.lean; then
+            echo "ERROR: user axioms found"; exit 1
+          fi

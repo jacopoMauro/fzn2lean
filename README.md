@@ -29,48 +29,49 @@ deliberately excluded; strings remain supported in annotations.
 
 ## Main results
 
-### Directly verified finite-domain solver — redesign in progress
+### Directly verified finite-domain solver — FIRST CERTIFIED FRAGMENT SHIPPED
 
-The previous solver used the verified solution checker as its leaf predicate.
-That architecture safely filtered SAT candidates, but it did not prove that
-the solver transitions themselves established model satisfaction, and its
-UNSAT statement was relative to the extracted candidate space. That is no
-longer the target correctness architecture.
+The certified solver returns a source `Store` and proves directly:
 
-The intended certified solver will return a source `Store` and prove directly:
-
-- a `sat store` result implies `Satisfies fullSig fullInterp m store`;
-- an `unsat` result excludes every admissible satisfying store for the
-  supported model; and
+- a `sat store` result implies `Satisfies fullSig fullInterp m store`
+  (`Direct.solveCertified_sat_correct`, composed from
+  `LCG.solve_certified_sat` + `Direct.compile_exact`);
+- an `unsat` result excludes every parameter-honest satisfying store
+  (`Direct.solveCertified_unsat_correct`, composed from
+  `LCG.solve_certified_unsat` + `Direct.compile_covers`); and
 - resource exhaustion returns `unknown`, never `unsat`.
 
-The proof proceeds through exact source-to-internal compilation, exact initial
-search-space coverage, and local preservation theorems for propagation,
-branching, backtracking, and terminal states. UNSAT follows from exhaustive
-coverage and proved-safe elimination, without an unsat core. SAT does not use
-solution rendering, parsing, or checker acceptance.
+All public theorems depend only on the three standard Lean axioms
+(`propext`, `Classical.choice`, `Quot.sound`) — no `sorry`, no user
+axioms, no caller-supplied correspondence premises. The reference
+exhaustive-search theorems `Direct.solve_sat_correct` /
+`Direct.solve_unsat_correct` carry the same guarantees for the
+wider multi-value fragment.
 
-Generic search coverage, propagator preservation, heuristic permutation, and
-reversible-state refinement lemmas are retained where they are independent of
-the old leaf predicate. `solver.Emit` is now output-only. The external checker
-remains supported for user-provided solutions and differential testing.
+The certified path is user-facing:
 
-The replacement is scaffolded with a strict algorithm/proof split:
+```
+leanfzn solve --certified MODEL.fzn
+```
 
-- `solver/Direct/Types.lean`, `Compile.lean`, and `Search.lean` contain data
-  and executable definitions only;
-- `solver/Direct/Proofs/Compile.lean`, `Proofs/Search.lean`, and
-  `Correctness.lean` contain the semantic theorem statements.
+runs the well-formedness gate (`Check.wellFormedFastB`), the fragment
+compiler (`Direct.compileModel`), the LCG fragment gate
+(`LCG.fragmentOk` — singleton domains), and the LCG engine
+(`LCG.solve`), reporting `sat` (with the FlatZinc solution text),
+`unsat`, `unknown`, or `unsupported` with exit codes 0/1/2/3. The
+first certified LCG fragment covers decided models (singleton
+domains); per-family propagation soundness (`PropSafeUniv` for
+`plus`/`le`/`lt`/`eq`/`ne`/`linLe`) is the documented expansion
+path — until then those families run only in the reference search,
+not behind an unproved premise.
 
-`Direct.compileModel` now accepts a finite scalar int/bool fragment and
-produces `Core.Problem DomConstraint`. `solver/Direct/Proofs/Compile.lean`
-contains a converse theorem for the 21 extracted constraint shapes, with
-integer-valued reads as a premise. Its new typing proof does not compile and
-contains two `sorry`s. Whole-model exactness and coverage are unfinished;
-`Direct.solve_sat_correct` and `Direct.solve_unsat_correct` still take an
-explicit `hpending` correspondence premise. The direct exhaustive search is
-a reference path for proof development and testing, not the intended public
-LCG backend.
+The architecture keeps a strict algorithm/proof split:
+
+- `solver/Direct/Types.lean`, `Compile.lean`, `Search.lean`, and
+  `Cli.lean` contain data and executable definitions only;
+- `solver/Direct/Proofs/Compile.lean`, `Proofs/Exact.lean`,
+  `Proofs/Search.lean`, `Correctness.lean`, and
+  `solver/LCG/Certified.lean` contain the semantic theorems.
 
 The solver foundation is layered. `solver/Core` defines only shared compiled
 problems, slots, domains, assignments, results, and assignment semantics.

@@ -270,3 +270,59 @@ probeL.lean, probeL2–6.lean, probeR4–5.lean, probeS.lean, probeS2–4.lean
 BenchAB.lean, TestEnumTmp.lean, axcheck_tmp.lean, mini.lean, testBX.lean
 FznGlobals.lean.orig, probeTmp.lean, probeTmp2.lean
 ```
+
+## The certified solve path (2026-09-27, first certified fragment)
+
+```
+source model (FlatZinc text)
+  | Parser.parseModel
+  v
+Model --(WellFormed gate: Check.wellFormedFastB)
+  | Direct.compileModel                        [solver/Direct/Compile.lean]
+  v
+CompiledProblem DomConstraint                 [solver/Direct/Types.lean]
+  | Direct.toLCG (empty clause database)       [solver/Direct/Cli.lean]
+  v
+LCG.Problem DomConstraint Unit                 [solver/LCG/Types.lean]
+  | LCG.fragmentOk gate (singleton domains)    [solver/LCG/Certified.lean]
+  | LCG.solve (engine, empty propagators)
+  v
+sat store / unsat / unknown / unsupported
+```
+
+### The public certified theorems (axioms: propext, Classical.choice,
+### Quot.sound — the three standard Lean axioms only)
+
+| Theorem | File | Statement |
+| --- | --- | --- |
+| `Direct.compile_exact` | Direct/Proofs/Exact.lean | accepted assignment -> the store satisfies every source constraint + declaration |
+| `Direct.compile_covers` | Direct/Proofs/Exact.lean | satisfying parameter-honest store -> accepted assignment |
+| `Direct.solve_sat_correct` | Direct/Correctness.lean | `solve = .sat store -> Satisfies fullSig fullInterp` |
+| `Direct.solve_unsat_correct` | Direct/Correctness.lean | `solve = .unsat -> not-exists store, Satisfies and ParamHonest` |
+| `LCG.solve_certified_sat` | LCG/Certified.lean | LCG sat assignment satisfies every internal constraint (declarative) |
+| `LCG.solve_certified_unsat` | LCG/Certified.lean | LCG unsat excludes every internal solution |
+| `Direct.solveCertified_sat_correct` | Direct/Cli.lean | the composed source-level SAT theorem |
+| `Direct.solveCertified_unsat_correct` | Direct/Cli.lean | the composed source-level UNSAT theorem |
+
+### The trusted base
+
+- the Lean kernel + the three standard axioms;
+- the accepted fragment's checks are executable and theorem-backed:
+  `wellFormedFastB_iff` (WF gate), `fragmentOk_iff` (fragment gate),
+  `DomConstraint.satisfiedB_iff` (evaluator agreement);
+- `ParamHonest` (the UNSAT conclusion's parameter-honesty condition)
+  is the FlatZinc instance-level parameter fixing — the same
+  convention as the reference checker's `candidateStore`
+  (`FznSolution.lean`), which builds stores from the model's
+  `paramMap`.
+
+### New modules this session
+
+- `solver/Direct/Proofs/Exact.lean` — the whole-model correspondence
+  (compile_exact/compile_covers, both SAT linkers, all fallback
+  family inversions, the store-extensionality transports);
+- `solver/LCG/Certified.lean` — the first certified LCG fragment;
+- `solver/Direct/Cli.lean` — `solveCertified` + the composed
+  source-level theorems + the solution emitter;
+- `.github/workflows/ci.yml` — the aggregate CI gate (build, tests,
+  proof-hole audit, axiom-profile audit, user-axiom audit).

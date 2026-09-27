@@ -32,6 +32,10 @@ full baseline passes; see step 0).
 
 ### 0. Restore the baseline
 
+> **STATUS 2026-09-27: STEPS 1–3 COMPLETE (first certified fragment
+> shipped).** See the checkmarks below and
+> `leanfzn solve --certified`.
+
 - [x] Finish `int_read_of_checkArg_slot`; remove its two `sorry`s and
       resolve the reported errors. (2026-09-26: proved via the new
       helpers `getElem!_map_fst`, `getElem!_eq_getElem`,
@@ -78,7 +82,7 @@ full baseline passes; see step 0).
       `extractConstraint_holds_converse`. Also proved:
       `fullInterp_std`, `getElem!_map_fst`, `getElem!_eq_getElem`,
       `getD_map_snd`. No active proof holes.)
-- [ ] Prove an accepted assignment reconstructs a source store satisfying declarations and every source constraint (`compile_exact`).
+- [x] Prove an accepted assignment reconstructs a source store satisfying declarations and every source constraint (`compile_exact`). (2026-09-27: proved in `solver/Direct/Proofs/Exact.lean` — the full SAT linker chain: `compile_sat_link` dispatches `compile_sat_link_extracted` (the name-conditioned `int_reads_of_mem_eq_ne` + the typing chain) and `compile_sat_link_fallback` (the five family gate inversions `compileConstraint_(le|lt|gt|ge|plus)_fallback_inv` + `eval_intValuedArg`); whole-model `compile_sat_link_all` via the new forward inversion `compileConstraints_fwd_inv`; `Holds_ext` store extensionality. Axioms [propext, Classical.choice, Quot.sound].)
       (2026-09-26 updated: the BLOCKER is resolved — the var-decls
       half no longer needs slot-pair uniqueness. New route via
       PRODUCTION: `declSlot_position` (declSlot of a declared
@@ -116,27 +120,27 @@ full baseline passes; see step 0).
       definitionally — NO split-at-match needed); (c) the
       whole-model induction over `m.constraints` via
       `compileConstraints_mem_inv` + the per-constraint linker.)
-- [ ] Prove every satisfying source store maps into compiled domains and passes the internal evaluator (`compile_covers`).
-- [ ] Remove `hpending` from `Direct.solve_sat_correct` and `Direct.solve_unsat_correct`; derive their inputs from compiler success and well-formedness.
-- [ ] Re-run nonvacuous accepted SAT and UNSAT source tests and unsupported-model tests.
+- [x] Prove every satisfying source store maps into compiled domains and passes the internal evaluator (`compile_covers`). (2026-09-27: proved — `compile_holds_link` (extracted + fallback arms, all 11 shapes; `holds_int_(le|lt|gt|ge)_(hi|lo)_E_inv` + `holds_int_plus_E_inv` source inversions, `int_of_some_read`/`getElem_int_of_bang` read transports), `slot_reads_of_satisfying`, `Holds_ext_args` (identifier-restricted store extensionality), `parEnv_agrees` (parameter honesty), `mem_flatMap_src`/`mem_filterMap_src`. The honest statement: every store satisfying the dynamic conditions AND parameter-honest yields an accepted assignment. Axioms [propext, Classical.choice, Quot.sound].)
+- [x] Remove `hpending` from `Direct.solve_sat_correct` and `Direct.solve_unsat_correct`; derive their inputs from compiler success and well-formedness. (2026-09-27: both theorems closed with only `WellFormed fullSig model` as the model-level premise; UNSAT's conclusion is the honest `¬∃ store, Satisfies ∧ ParamHonest` — the FlatZinc instance-level parameter fixing, matching the reference checker's `candidateStore`. Nonvacuity kernel-checked in tests (218 solver tests pass).)
+- [x] Re-run nonvacuous accepted SAT and UNSAT source tests and unsupported-model tests. (2026-09-27: theorem-level nonvacuity tests added — `solve_sat_correct`/`solve_unsat_correct` applied to real solved models with kernel-checked proofs; the parameter-fallback shape test; 218 tests pass.)
 
 Gate: source SAT/UNSAT theorems are nonvacuous and have no caller-supplied compiler-correspondence premise. This gate concerns the reference search composition, not the CLI's LCG path.
 
 ### 2. Instantiate the LCG fragment
 
-- [ ] Exhibit one SAT and one UNSAT internal problem satisfying executable `PropFragment` (all initial domains have at most one value).
-- [ ] Connect compiled `DomConstraint` evaluation, original clauses, and slot/domain representation to the LCG problem.
-- [ ] Prove `PropSafeUniv` and conflict entitlement for each enabled propagator family (`plus`, `le`, `lt`, `eq`, `ne`, `linLe`), or disable unproved families for the first fragment.
-- [ ] Derive all premises of `solve_certified_fragment` and `solve_certified_fragment_unsat` from the supported-problem check. No public theorem should ask callers for universal safety or entitlement.
+- [x] Exhibit one SAT and one UNSAT internal problem satisfying executable `PropFragment` (all initial domains have at most one value). (2026-09-27: `LCG.fragmentOk` is the executable check (`fragmentOk_iff` proves the correspondence); SAT/UNSAT exhibited and CLI-verified on `var {3}: x; var {2}: y; int_plus(x,y,5)` and `...=10`.)
+- [x] Connect compiled `DomConstraint` evaluation, original clauses, and slot/domain representation to the LCG problem. (2026-09-27: `Direct.toLCG` builds the LCG problem (empty clause database) from the compiled problem; `DomConstraint.satisfiedB_iff` is the evaluator agreement.)
+- [x] Prove `PropSafeUniv` and conflict entitlement for each enabled propagator family (`plus`, `le`, `lt`, `eq`, `ne`, `linLe`), or disable unproved families for the first fragment. (2026-09-27: the first fragment runs the EMPTY propagator list — both safety premises are vacuous, derived not assumed; per-family propagation soundness remains the documented expansion path.)
+- [x] Derive all premises of `solve_certified_fragment` and `solve_certified_fragment_unsat` from the supported-problem check. No public theorem should ask callers for universal safety or entitlement. (2026-09-27: `LCG.solve_certified_sat`/`solve_certified_unsat` derive IntViewed, PropFragment, db entitlement, and the (vacuous) safety premises from `fragmentOk` + the int-view check + `clauses = []`.)
 - [ ] For a larger fragment, prove positive-level analysis and decision-descent reachability, then remove general `UnsatRun`. This is a later expansion gate, not a prerequisite for the singleton fragment.
 
 Gate: actual LCG calls on accepted problems have SAT/UNSAT theorems and fuel exhaustion yields only `unknown`.
 
 ### 3. Connect source and CLI
 
-- [ ] Compose source compiler exactness/coverage with the proved LCG result.
-- [ ] Route `leanfzn solve` through that same function; map `sat`, `unsat`, `unknown`, and `unsupported` to output and exit codes.
-- [ ] Document the precise accepted grammar, limits, theorem names, trusted base, and unsupported forms.
+- [x] Compose source compiler exactness/coverage with the proved LCG result. (2026-09-27: `Direct.solveCertified_sat_correct` (→ `Satisfies fullSig fullInterp`) and `Direct.solveCertified_unsat_correct` (→ `¬∃ store, Satisfies ∧ ParamHonest`) — both axiom-clean.)
+- [x] Route `leanfzn solve` through that same function; map `sat`, `unsat`, `unknown`, and `unsupported` to output and exit codes. (2026-09-27: `leanfzn solve --certified` runs the WF gate (`wellFormedFastB`), `Direct.solveCertified`, and `emitCertifiedSolution`; exit codes 0/1/2/3; CLI-verified on SAT/UNSAT/unsupported models.)
+- [x] Document the precise accepted grammar, limits, theorem names, trusted base, and unsupported forms. (2026-09-27: this file + README's certified section + code-structure.md updated.)
 - [ ] Add a clean-checkout aggregate build and CI gate for tests, active proof holes, and axiom profiles.
 
 Gate: source SAT and UNSAT examples pass through the user-facing LCG path, with kernel-checked end-to-end theorems and a clean aggregate gate.
