@@ -132,7 +132,35 @@ Gate: source SAT/UNSAT theorems are nonvacuous and have no caller-supplied compi
 - [x] Connect compiled `DomConstraint` evaluation, original clauses, and slot/domain representation to the LCG problem. (2026-09-27: `Direct.toLCG` builds the LCG problem (empty clause database) from the compiled problem; `DomConstraint.satisfiedB_iff` is the evaluator agreement.)
 - [x] Prove `PropSafeUniv` and conflict entitlement for each enabled propagator family (`plus`, `le`, `lt`, `eq`, `ne`, `linLe`), or disable unproved families for the first fragment. (2026-09-27 second pass: the REAL-propagator certification is proved for `leSlot`/`ltSlot`/`eqSlot` — `propLe_safe`/`propLt_safe`/`propEq_safe` in the new `solver/LCG/Proofs/Propagators.lean` (implied-literal soundness + conflict soundness + integer-valid nogood entitlement, via the implied-head inversions `narrowHi_implied_inv`/`narrowLo_implied_inv`, the coherence bridges `fits_max_bound`/`fits_min_bound`, and `firstEvent_mem`), assembled into `propagatorsOfProved_safeUniv`/`_entitled` over the `propagatorOfProved` registration (le/lt/eq only; plus/ne/linLe return none pending their proofs). The engine's entitlement premise was relativized to `SolvedBy` states (where it holds). New front doors `solve_certified_sat_real`/`solve_certified_unsat_real` run the PROVED propagator list on the singleton fragment with every premise derived. The remaining families (`plusSlot`, `neSlot`, `linLe`) are the documented expansion path.)
 - [x] Derive all premises of `solve_certified_fragment` and `solve_certified_fragment_unsat` from the supported-problem check. No public theorem should ask callers for universal safety or entitlement. (2026-09-27: `LCG.solve_certified_sat`/`solve_certified_unsat` derive IntViewed, PropFragment, db entitlement, and the (vacuous) safety premises from `fragmentOk` + the int-view check + `clauses = []`.)
-- [ ] For a larger fragment, prove positive-level analysis and decision-descent reachability, then remove general `UnsatRun`. This is a later expansion gate, not a prerequisite for the singleton fragment.
+- [ ] **2x. Wire the real-propagator front door into the executable.**
+      The theorems `solve_certified_sat_real` /
+      `solve_certified_unsat_real` (LCG/Certified.lean) are proved but
+      the executable `Direct.solveCertified` still runs the EMPTY
+      propagator list and the CLI theorems cover only that path.
+  - [ ] Prove the fragment-coherence lemma: in the singleton
+        fragment with empty clauses, every state the loop reaches is
+        domain-coherent (discharges the `hcoh : ∀ st,
+        DomainCoherent problem st` premise of the real front doors).
+  - [ ] Switch `Direct.solveCertified` to
+        `compiled.constraints.filterMap propagatorOfProved`.
+  - [ ] Extend `solveCertified_sat_correct` /
+        `solveCertified_unsat_correct` to the real list; update the
+        theorem-level tests.
+- [ ] **2y. Prove the remaining propagator families** (`plusSlot`,
+      `neSlot`, `linLe`): each needs its `prop*_safe` (the
+      constraint-semantics lemma + the arm analysis; `plusSlot_sem`
+      already exists) and its arm in `propagatorOfProved` flipped
+      from `none` to the registration. After 2y, `propagatorOfProved`
+      = `propagatorOf` on all six families.
+- [ ] For a larger fragment, prove positive-level analysis and
+      decision-descent reachability, then remove general `UnsatRun`
+      (the last premise of `solve_unsat_correct`; makes the general
+      LCG engine unconditional). This is the deep engine work:
+      conflict analysis at positive decision levels must produce
+      entailed learned clauses (`analyzeConflict_correct` under
+      `AnalysisReady`) and decisions must descend, so every `.unsat`
+      the engine reports is backed by the run-link invariant rather
+      than the `UnsatRun` premise.
   (2026-09-27 audit note: the deep audit of the LCG layer confirmed
   the proof layer sound as stated — `solve_certified_fragment`'s SAT
   branch is genuine (the leaf test establishes Fits + constraints),
@@ -141,9 +169,8 @@ Gate: source SAT/UNSAT theorems are nonvacuous and have no caller-supplied compi
   were in the EXECUTABLE propagator layer (three propLinLe bugs and
   propNe's non-integer-valid nogoods — the uncertified solveDom path
   returned `.unsat` for satisfiable problems, reproduced end to end);
-  all four are FIXED with regression tests, but per-family propagator
-  soundness theorems (`PropSafeUniv` for real propagatorsOf lists)
-  remain the documented prerequisite for certifying that path.)
+  all four are FIXED with regression tests; the le/lt/eq families are
+  now certified by `propagatorsOfProved_safeUniv`.)
 
 Gate: actual LCG calls on accepted problems have SAT/UNSAT theorems and fuel exhaustion yields only `unknown`.
 
