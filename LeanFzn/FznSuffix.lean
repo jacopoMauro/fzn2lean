@@ -103,7 +103,8 @@ theorem GrSepListTail.suffix_bounded {elem : List Token → α → List Token �
         exact ⟨.comma :: pre₁ ++ pre₂, by simp⟩
   exact key toks.length hbound toks xs rest (Nat.le_refl _) h
 
-/-- Bounded separated-list suffix; see `GrSepListTail.suffix_bounded`. -/
+/-- Bounded separated-list suffix: the element property is only available
+    for token lists up to length `m`. -/
 theorem GrSepList.suffix_bounded {elem : List Token → α → List Token → Prop}
     {m : Nat} (helem : ∀ {t x r}, elem t x r → t.length ≤ m → ∃ pre, t = pre ++ r)
     {toks xs rest} (hbound : toks.length ≤ m)
@@ -118,6 +119,7 @@ theorem GrSepList.suffix_bounded {elem : List Token → α → List Token → Pr
       omega
     obtain ⟨pre₂, rfl⟩ := h₂.suffix_bounded helem hts₂
     exact ⟨pre₁ ++ pre₂, by simp⟩
+
 
 /-! ## Generic item-list lemmas -/
 
@@ -149,12 +151,6 @@ theorem GrIntAtom.suffix {i : Int} (h : GrIntAtom toks i rest) :
   cases h
   exact ⟨[.intLit _], rfl⟩
 
-theorem GrIntAtom.consumes_pos {i : Int} (h : GrIntAtom toks i rest) :
-    1 ≤ toks.length - rest.length := by
-  cases h
-  simp only [List.length_cons]
-  omega
-
 theorem GrBasicLiteral.suffix {l : BasicLiteral} (h : GrBasicLiteral toks l rest) :
     ∃ pre, toks = pre ++ rest := by
   cases h with
@@ -176,14 +172,6 @@ theorem GrBasicLiteral.consumes_pos {l : BasicLiteral} (h : GrBasicLiteral toks 
     simp only [List.length_cons, List.length_append]
     omega
 
-theorem GrSetLiteral.suffix {s : SetLiteral} (h : GrSetLiteral toks s rest) :
-    ∃ pre, toks = pre ++ rest := by
-  cases h with
-  | @intRange lo hi r => exact ⟨[.intLit lo, .dotDot, .intLit hi], rfl⟩
-  | @intSet ts es r hl =>
-    obtain ⟨pre, rfl⟩ := hl.suffix GrIntAtom.suffix
-    exact ⟨.lBrace :: pre ++ [.rBrace], by simp⟩
-
 theorem GrBasicExpr.suffix {e : BasicExpr} (h : GrBasicExpr toks e rest) :
     ∃ pre, toks = pre ++ rest := by
   cases h with
@@ -204,29 +192,12 @@ theorem GrExpr.suffix {e : Expr} (h : GrExpr toks e rest) :
     obtain ⟨pre, rfl⟩ := hl.suffix GrBasicExpr.suffix
     exact ⟨.lBrack :: pre ++ [.rBrack], by simp⟩
 
-theorem GrExpr.consumes_pos {e : Expr} (h : GrExpr toks e rest) :
-    1 ≤ toks.length - rest.length := by
-  cases h with
-  | @basic b ts r hb => exact hb.consumes_pos
-  | @array ts es r hl =>
-    obtain ⟨pre, rfl⟩ := hl.suffix GrBasicExpr.suffix
-    simp only [List.length_cons, List.length_append]
-    omega
-
 theorem GrParArrayLiteral.suffix {v : ParArrayLiteral}
     (h : GrParArrayLiteral toks v rest) : ∃ pre, toks = pre ++ rest := by
   cases h with
   | @mk ts es r hl =>
     obtain ⟨pre, rfl⟩ := hl.suffix GrBasicLiteral.suffix
     exact ⟨.lBrack :: pre ++ [.rBrack], by simp⟩
-
-theorem GrParArrayLiteral.consumes_pos {v : ParArrayLiteral}
-    (h : GrParArrayLiteral toks v rest) : 1 ≤ toks.length - rest.length := by
-  cases h with
-  | @mk ts es r hl =>
-    obtain ⟨pre, rfl⟩ := hl.suffix GrBasicLiteral.suffix
-    simp only [List.length_cons, List.length_append]
-    omega
 
 /-- An annotation-expression derivation leaves a suffix of the input.
     `GrAnnExpr` is recursive through `GrSepList GrAnnExpr` (annotation calls
@@ -274,6 +245,16 @@ theorem GrAnnExpr.suffix {a : AnnExpr} (h : GrAnnExpr toks a rest) :
         obtain ⟨pre, rfl⟩ := hl.suffix_bounded helem hts
         exact ⟨.lBrack :: pre ++ [.rBrack], by simp⟩
   exact key toks.length toks a rest (Nat.le_refl _) h
+
+
+theorem GrExpr.consumes_pos {e : Expr} (h : GrExpr toks e rest) :
+    1 ≤ toks.length - rest.length := by
+  cases h with
+  | @basic b ts r hb => exact hb.consumes_pos
+  | @array ts es r hl =>
+    obtain ⟨pre, rfl⟩ := hl.suffix GrBasicExpr.suffix
+    simp only [List.length_cons, List.length_append]
+    omega
 
 theorem GrAnnExpr.consumes_pos {a : AnnExpr} (h : GrAnnExpr toks a rest) :
     1 ≤ toks.length - rest.length := by
@@ -554,50 +535,6 @@ theorem GrConstraintItem.consumes_pos {c : ConstraintItem} (h : GrConstraintItem
     obtain ⟨pre₁, rfl⟩ := hl.suffix GrExpr.suffix
     simp only [List.length_cons, List.length_append]
     omega
-
-theorem GrSolveItem.suffix {si : SolveItem} (h : GrSolveItem toks si rest) :
-    ∃ pre, toks = pre ++ rest := by
-  cases h with
-  | @satisfy ts a r ha =>
-    obtain ⟨pre, rfl⟩ := ha.suffix
-    exact ⟨.kwSolve :: pre ++ [.kwSatisfy, .semi], by simp⟩
-  | @minimize ts₁ a ts₂ e r ha he =>
-    obtain ⟨pre₂, rfl⟩ := he.suffix
-    obtain ⟨pre₁, rfl⟩ := ha.suffix
-    exact ⟨.kwSolve :: pre₁ ++ .kwMinimize :: pre₂ ++ [.semi], by simp⟩
-  | @maximize ts₁ a ts₂ e r ha he =>
-    obtain ⟨pre₂, rfl⟩ := he.suffix
-    obtain ⟨pre₁, rfl⟩ := ha.suffix
-    exact ⟨.kwSolve :: pre₁ ++ .kwMaximize :: pre₂ ++ [.semi], by simp⟩
-
-theorem GrSolveItem.consumes_pos {si : SolveItem} (h : GrSolveItem toks si rest) :
-    1 ≤ toks.length - rest.length := by
-  cases h with
-  | @satisfy ts a r ha =>
-    obtain ⟨pre, rfl⟩ := ha.suffix
-    simp only [List.length_cons, List.length_append]
-    omega
-  | @minimize ts₁ a ts₂ e r ha he =>
-    obtain ⟨pre₂, rfl⟩ := he.suffix
-    obtain ⟨pre₁, rfl⟩ := ha.suffix
-    simp only [List.length_cons, List.length_append]
-    omega
-  | @maximize ts₁ a ts₂ e r ha he =>
-    obtain ⟨pre₂, rfl⟩ := he.suffix
-    obtain ⟨pre₁, rfl⟩ := ha.suffix
-    simp only [List.length_cons, List.length_append]
-    omega
-
-theorem GrModel.suffix {m : Model} (h : GrModel toks m rest) :
-    ∃ pre, toks = pre ++ rest := by
-  cases h with
-  | @mk ps ts₂ pa ts₃ vs ts₄ cs ts₅ s ts₆ hp hpar hvar hcon hsol =>
-    obtain ⟨pre₅, rfl⟩ := hsol.suffix
-    obtain ⟨pre₄, rfl⟩ := hcon.suffix (fun h => h.suffix)
-    obtain ⟨pre₃, rfl⟩ := hvar.suffix (fun h => h.suffix)
-    obtain ⟨pre₂, rfl⟩ := hpar.suffix (fun h => h.suffix)
-    obtain ⟨pre₁, rfl⟩ := hp.suffix (fun h => h.suffix)
-    exact ⟨pre₁ ++ pre₂ ++ pre₃ ++ pre₄ ++ pre₅, by simp⟩
 
 end SuffixBounds
 

@@ -45,17 +45,6 @@ def State.peek? (st : State) : Option Token :=
     relation. -/
 def State.remaining (st : State) : List Token := st.toks.toList.drop st.pos
 
-/-- `remaining` of a state with position `0` is the whole token list. -/
-theorem State.remaining_zero (st : State) (h : st.pos = 0) :
-    st.remaining = st.toks.toList := by
-  unfold State.remaining; rw [h, List.drop_zero]
-
-/-- Advancing consumes exactly one token from the front of `remaining`. -/
-theorem State.remaining_advance (st : State) (_h : st.pos < st.toks.size) :
-    st.advance.remaining = st.remaining.tail := by
-  unfold State.remaining State.advance
-  simp [List.tail_drop]
-
 /-- Consume the current token if it satisfies `pred`, failing otherwise. -/
 def expect (pred : Token → Bool) (what : String) (st : State) : Except String (Token × State) :=
   if h : st.pos < st.toks.size then
@@ -165,10 +154,6 @@ def expectTok (t : Token) (what : String) (st : State) : Except String State :=
   else
     .error s!"unexpected end of input, expected {what}"
 
-theorem expectTok_eq_fast (t : Token) (what : String) (st : State) :
-    expectTok t what st = expectTokFast t what st := by
-  unfold expectTok
-  exact (expectTokFast_eq t what st).symm
 
 /-- Parse an identifier token (any `[A-Za-z_][A-Za-z0-9_]*`). -/
 def parseIdent (st : State) : Except String (Ident × State) :=

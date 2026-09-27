@@ -228,10 +228,6 @@ inductive GrModel : List Token → Model → List Token → Prop where
       GrSolveItem toks₅ solve rest →
       GrModel toks₁ ⟨preds, params, vars, cons, solve⟩ rest
 
-/-- A token list is a valid FlatZinc model iff it derives one and is fully
-    consumed. -/
-def ValidTokens (toks : List Token) : Prop := ∃ m, GrModel toks m []
-
 /-- A string is valid FlatZinc iff its tokenization derives a model. -/
 def ValidFlatZinc (s : String) : Prop :=
   ∃ toks m, tokenize s = .ok toks ∧ GrModel toks.toList m []
@@ -239,19 +235,5 @@ def ValidFlatZinc (s : String) : Prop :=
 /-- The grammar judgement relating a string to the model it derives. -/
 def Grammar (s : String) (m : Model) : Prop :=
   ∃ toks, tokenize s = .ok toks ∧ GrModel toks.toList m []
-
-/-! ## Determinism at unambiguous grammar leaves -/
-
-theorem GrIntAtom.deterministic
-    (h₁ : GrIntAtom toks i₁ rest₁) (h₂ : GrIntAtom toks i₂ rest₂) :
-    i₁ = i₂ ∧ rest₁ = rest₂ := by
-  cases h₁
-  cases h₂
-  simp_all
-
-theorem GrBasicParType.deterministic
-    (h₁ : GrBasicParType toks t₁ rest₁) (h₂ : GrBasicParType toks t₂ rest₂) :
-    t₁ = t₂ ∧ rest₁ = rest₂ := by
-  cases h₁ <;> cases h₂ <;> simp_all
 
 end LeanFzn
