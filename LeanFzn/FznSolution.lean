@@ -1,5 +1,4 @@
 import LeanFzn.FznParser
-import LeanFzn.FznCorrectness
 import LeanFzn.FznStdLib
 import Lean
 
