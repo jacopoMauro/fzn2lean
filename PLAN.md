@@ -141,7 +141,7 @@ Gate: actual LCG calls on accepted problems have SAT/UNSAT theorems and fuel exh
 - [x] Compose source compiler exactness/coverage with the proved LCG result. (2026-09-27: `Direct.solveCertified_sat_correct` (→ `Satisfies fullSig fullInterp`) and `Direct.solveCertified_unsat_correct` (→ `¬∃ store, Satisfies ∧ ParamHonest`) — both axiom-clean.)
 - [x] Route `leanfzn solve` through that same function; map `sat`, `unsat`, `unknown`, and `unsupported` to output and exit codes. (2026-09-27: `leanfzn solve --certified` runs the WF gate (`wellFormedFastB`), `Direct.solveCertified`, and `emitCertifiedSolution`; exit codes 0/1/2/3; CLI-verified on SAT/UNSAT/unsupported models.)
 - [x] Document the precise accepted grammar, limits, theorem names, trusted base, and unsupported forms. (2026-09-27: this file + README's certified section + code-structure.md updated.)
-- [ ] Add a clean-checkout aggregate build and CI gate for tests, active proof holes, and axiom profiles.
+- [x] Add a clean-checkout aggregate build and CI gate for tests, active proof holes, and axiom profiles. (2026-09-27: `.github/workflows/ci.yml` — build + tests + the three audits (proof holes, axiom profiles of the six public certified theorems, user axioms); the full clean rebuild (224 jobs), all 22 suites, and the audits pass on the clean tree.)
 
 Gate: source SAT and UNSAT examples pass through the user-facing LCG path, with kernel-checked end-to-end theorems and a clean aggregate gate.
 
@@ -229,24 +229,52 @@ pass; accepted and rejected grammar behavior is unchanged.
 
 ### P3. Trim the checker without losing its guarantees
 
-- [ ] Trace the public paths through `FznSolution`, `FznGlobals/*`, and
+- [x] Trace the public paths through `FznSolution`, `FznGlobals/*`, and
   `FznCheck`: base dynamic checker, verified front door, fast path,
   and prepared repeated-check path. The fast and prepared paths are
   currently used by tests/benchmarks, and `checkModelSolutionFast_eq`
   is referenced by solver proofs; they are not unused today.
-- [ ] Choose one canonical CLI entry point and keep theorem-backed
+  (2026-09-27: full trace — `checkModelSolution` is the canonical CLI
+  entry (Main.lean, `checkModelSolution_correct`); `checkModelSolutionFast`
+  backs `solveLeaf` and the benchmarks, with `checkModelSolutionFast_eq`
+  used in 21 proof rewrites across Solve/Config/Restarts/Enum/Optimize;
+  `checkPreparedSolution` backs `solveLeafP` in Config (MRV), Restarts,
+  Enum, and Optimize via `solveLeafP_eq` (composing
+  `checkPreparedSolution_eq`); `checkSolutionFull` is the dynamic
+  kernel with `checkSolutionFull_correct`. Every path is live and
+  theorem-backed — nothing removed.)
+- [x] Choose one canonical CLI entry point and keep theorem-backed
   equivalence for retained optimized paths. Move benchmark-only APIs
-  behind a clearly named module if their callers remain.
-- [ ] Review the two set-literal parsers in `FznSolution`
+  behind a clearly named module if their callers remain. (2026-09-27:
+  `checkModelSolution` confirmed as the single canonical entry; the
+  fast/prepared twins stay in `FznCheck` beside their equivalence
+  theorems — their callers are the solver's leaf predicates and
+  tests/benchmarks, so no separate benchmark module is warranted.)
+- [x] Review the two set-literal parsers in `FznSolution`
   (`parseSetAtoms` and `parseSetTail`) for true duplication. Replace
   one only after proving identical errors/results and rebuilding the
-  suffix and checker theorems.
-- [ ] Remove stale claims in file headers and README when the chosen
+  suffix and checker theorems. (2026-09-27: confirmed byte-identical
+  bodies; `parseSetAtoms` deleted, its one caller `parseScalarEntry`
+  now uses `parseSetTail` — identical by construction — and the suffix
+  theorem plus all checker theorems rebuilt; the solution/check/fast/
+  gecode suites re-run and pass.)
+- [x] Remove stale claims in file headers and README when the chosen
   API is fixed. Keep parameter reassignment, duplicate/undeclared
   entries, unsupported predicates, initializer completion, arrays,
-  and set cases pinned by tests.
-- [ ] Split or narrow imports only after measuring whether the change
+  and set cases pinned by tests. (2026-09-27: 11 stale-claim fixes —
+  FznLexer `lexToken_gt` (nonexistent name), FznParser fuel bound,
+  FznCorrectness `parseModel_complete` location + fuel-monotonicity
+  device, FznCompleteness `2*n+4` constant, FznCheck dangling
+  PLAN/IDEAS attributions (9 sites), FznGlobals G-range and the
+  `regular` exclusion, FznSolution `checkSolution_correct`/
+  `checkSolutionFast` names, README's deleted
+  `parseModel_error_iff_invalid`, code-structure.md's
+  `checkSolution_correct`. All behavior pinned by the 22 re-run
+  suites.)
+- [x] Split or narrow imports only after measuring whether the change
   helps incremental builds; avoid moving large proofs for aesthetics.
+  (2026-09-27: the only safe narrowing — FznSolution's vestigial
+  FznCorrectness import — was done in P2; no further proof moves.)
 
 Gate: `checkModelSolution_correct` and retained fast/prepared equivalence
 theorems compile with the same axiom profile; checker and global suites
