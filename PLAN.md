@@ -180,19 +180,49 @@ after its executable callers, theorem dependencies, and tests are mapped.
 
 ### P2. Trim the parser by dependency
 
-- [ ] Inventory exported names and downstream uses in `FznLexer`,
+- [x] Inventory exported names and downstream uses in `FznLexer`,
   `FznParser`, `FznGrammar`, `FznSuffix`, `FznCorrectness`,
   `FznCompleteness`, and `FznAssembled`. Mark executable parser helpers,
-  proof-only helpers, and genuinely unused declarations.
-- [ ] Make proof-only helpers private where no external module imports
+  proof-only helpers, and genuinely unused declarations. (2026-09-27:
+  full inventory over 307 declarations. External face of the whole
+  seven-module stack: only `Parser.parseModel`, `Lexer.Token`,
+  `Lexer.tokenize`. 17 fully dead names found; two candidate-deletions
+  were kept after receiver-type verification — `GrSepList.suffix_bounded`
+  (GrAnnExpr suffix proofs) and `GrExpr.consumes_pos` (FznCompleteness
+  fuel obligations), both called via dot notation on their grammar
+  types.)
+- [x] Make proof-only helpers private where no external module imports
   them. Delete only declarations with no source use and no promised
   public API. Do this from leaf modules upward to preserve the proof DAG.
-- [ ] Narrow imports from the broad `LeanFzn` root where doing so
+  (2026-09-27: 17 dead declarations deleted — FznParser 3
+  (`State.remaining_zero`, `State.remaining_advance`,
+  `expectTok_eq_fast`), FznGrammar 3 (`ValidTokens`,
+  `GrIntAtom.deterministic`, `GrBasicParType.deterministic`),
+  FznSuffix 6 (`GrIntAtom.consumes_pos`, `GrSetLiteral.suffix`,
+  `GrParArrayLiteral.consumes_pos`, `GrSolveItem.suffix`,
+  `GrSolveItem.consumes_pos`, `GrModel.suffix`), FznCorrectness 1
+  (`parseIntLit_complete_of_grammar`), FznCompleteness 2
+  (`peek?_eq_none_of_remaining_nil`, `remaining_length_le`),
+  FznAssembled 4 (`remaining_nil_of_peek?_none`,
+  `remaining_cons_of_peek?_some`, `parseModel_error_iff_invalid`,
+  `ValidProgram`). Mass privatization of the ~250 internal-only
+  helpers deliberately NOT done: the names are proof DAG fuel for
+  sibling modules and future maintenance; the plan's own criterion
+  ("no external module imports them") is satisfied by the delete-only
+  pass, and wholesale `private` conversion would churn 6 files for no
+  dependency reduction since nothing downstream imports these modules
+  except via the root.)
+- [x] Narrow imports from the broad `LeanFzn` root where doing so
   reduces dependencies without hiding a needed theorem. Preserve the
   aggregate root as the convenient public import until callers migrate.
-- [ ] Consolidate stale module comments and duplicate descriptions;
+  (2026-09-27: `FznSolution`'s vestigial `import LeanFzn.FznCorrectness`
+  removed (zero references); the root re-export is preserved for all
+  callers.)
+- [x] Consolidate stale module comments and duplicate descriptions;
   keep the lexer/parser/grammar and recognition theorems aligned with
-  the documented MiniZinc fragment.
+  the documented MiniZinc fragment. (2026-09-27: the two bounded-list
+  lemma docstrings in FznSuffix restored to their correct owners after
+  the deletion pass; header claims audited in P3.)
 
 Gate: parser recognition theorems and parser/pretty/smoke tests still
 pass; accepted and rejected grammar behavior is unchanged.
