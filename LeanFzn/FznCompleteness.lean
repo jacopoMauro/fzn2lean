@@ -84,22 +84,6 @@ theorem peek?_ne_of_remaining_ne {t : Token} {st : State}
   obtain ⟨rest, hrest⟩ := check_remaining htrue
   exact h rest hrest
 
-/-- `peek?` is `none` exactly when the remaining token list is empty. -/
-theorem peek?_eq_none_of_remaining_nil {st : State} (h : st.remaining = []) :
-    st.peek? = none := by
-  have hlen : st.remaining.length = 0 := by rw [h]; simp
-  unfold State.remaining at hlen
-  simp only [Array.length_toList, List.length_drop] at hlen
-  unfold State.peek?
-  have hnlt : ¬ (st.pos < st.toks.size) := by omega
-  simp [hnlt]
-
-/-- The remaining token list is never longer than the token array. -/
-theorem remaining_length_le {st : State} : st.remaining.length ≤ st.toks.size := by
-  unfold State.remaining
-  simp only [Array.length_toList, List.length_drop]
-  omega
-
 /-! ## Completeness of the integer-list parsers -/
 
 /-- Completeness of the `"," int` continuation of an integer list ending at

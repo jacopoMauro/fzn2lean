@@ -308,14 +308,6 @@ theorem parseStringLit_complete {st : State} {s : String} {rest : List Token}
     rw [(expect_complete h (by rfl)).1]
   · exact (state_of_remaining_cons h).choose_spec.2
 
-/-- Completeness of an integer atom directly from its grammar derivation. -/
-theorem parseIntLit_complete_of_grammar {st : State} {i : Int} {rest : List Token}
-    (h : GrIntAtom st.remaining i rest) :
-    parseIntLit st = .ok (i, st.advance) ∧ st.advance.remaining = rest := by
-  generalize heq : st.remaining = toks at h
-  cases h
-  exact parseIntLit_complete heq
-
 /-- Completeness of `<index-set>`, including the exact resulting remainder. -/
 theorem parseIndexSet_complete {st : State} {idx : IndexSet} {rest : List Token}
     (h : GrIndexSet st.remaining idx rest) :

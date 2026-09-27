@@ -139,35 +139,6 @@ def startConstraintToks (toks : List Token) : Bool :=
 
 /-! ## Bridging `peek?` and `remaining` -/
 
-/-- `peek?` is `none` exactly when the remaining token list is empty. -/
-theorem remaining_nil_of_peek?_none {st : State} (h : st.peek? = none) :
-    st.remaining = [] := by
-  cases hcc : st.remaining with
-  | nil => rfl
-  | cons t r =>
-    have hpeek : st.peek? = some t := peek?_eq_of_remaining_cons hcc
-    rw [hpeek] at h
-    exact absurd h (by simp)
-
-/-- The remaining tokens of a state start with the peeked token. -/
-theorem remaining_cons_of_peek?_some {st : State} {t : Token}
-    (h : st.peek? = some t) : ∃ r, st.remaining = t :: r := by
-  cases hcc : st.remaining with
-  | nil =>
-    have hnone : st.peek? = none := by
-      unfold State.peek?
-      have hlen : st.remaining.length = 0 := by rw [hcc]; simp
-      unfold State.remaining at hlen
-      simp only [Array.length_toList, List.length_drop] at hlen
-      rw [dif_neg (by omega)]
-    rw [hnone] at h; exact absurd h (by simp)
-  | cons t' r' =>
-    have hpeek : st.peek? = some t' := peek?_eq_of_remaining_cons hcc
-    rw [hpeek] at h
-    simp only [Option.some.injEq] at h
-    subst h
-    exact ⟨r', rfl⟩
-
 /-! ## The section predicates agree with the parser's lookahead -/
 
 /-- The `k`-th remaining token is the `pos + k`-th token of the array. -/
@@ -601,23 +572,5 @@ theorem parseModel_ok_iff_valid (s : String) :
   · exact parseModel_ok_implies_valid s
   · rintro ⟨toks, m, htok, hgr⟩
     exact ⟨m, parseModel_complete ⟨toks, htok, hgr⟩⟩
-
-/-- The parser fails on exactly the invalid FlatZinc strings. -/
-theorem parseModel_error_iff_invalid (s : String) :
-    (∃ e, Parser.parseModel s = .error e) ↔ ¬ ValidFlatZinc s := by
-  constructor
-  · rintro ⟨e, herr⟩ ⟨toks, m, htok, hgr⟩
-    rw [parseModel_complete ⟨toks, htok, hgr⟩] at herr
-    simp at herr
-  · intro hinvalid
-    cases hpm : Parser.parseModel s with
-    | error e => exact ⟨e, rfl⟩
-    | ok m => exact absurd (parseModel_ok_iff_valid s |>.mp ⟨m, hpm⟩) hinvalid
-
-/-- A string is a valid FlatZinc *program* if it parses to a model that is
-    also statically well-formed under the signature environment `sig`.
-    Syntactic validity (`ValidFlatZinc`) does not require this. -/
-def ValidProgram (sig : SigEnv) (s : String) : Prop :=
-  ∃ m, Grammar s m ∧ WellFormed sig m
 
 end LeanFzn
