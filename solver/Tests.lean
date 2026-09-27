@@ -682,6 +682,84 @@ def main : IO UInt32 := do
     | .ok _ => false
   st ← st.check "direct: fzn_ globals rejected" ok6
 
+  -- THEOREM-LEVEL nonvacuity: solve_sat_correct applies to a real
+  -- solved model (the kernel checks the composed chain end to end).
+  -- The models are built as terms so the well-formedness proofs
+  -- reduce by native evaluation.
+  let dsat : Model :=
+    { predicates := []
+      parameters := []
+      variables :=
+        [ .basic (.intRange 1 3) (Ident.mk "x") [] none
+        , .basic (.intRange 1 3) (Ident.mk "y") [] none ]
+      constraints :=
+        [ { name := Ident.mk "int_plus"
+          , args := [ .basic (.ident (Ident.mk "x"))
+                    , .basic (.ident (Ident.mk "y"))
+                    , .basic (.lit (.int 5)) ]
+          , anns := [] } ]
+      solve := .satisfy [] }
+  have wsat : WellFormed fullSig dsat :=
+    (LeanFzn.Check.wellFormedFastB_iff dsat).mp (by native_decide)
+  match hsolve : LeanFzn.Solver.Direct.solve dsat with
+  | .sat store =>
+      -- run the certified theorem on the actual verdict
+      have _hsat : Satisfies fullSig fullInterp dsat store :=
+        LeanFzn.Solver.Direct.solve_sat_correct
+          (model := dsat) (store := store) wsat hsolve
+      st ← st.check "direct theorem: solve_sat_correct applies" (true)
+      -- the satisfying store's constraints hold (executable twin)
+      st ← st.check "direct theorem: sat store satisfies constraints"
+        (dsat.constraints.all (fun c =>
+          LeanFzn.Globals.fullInterpB c.name
+            (match c.args.mapM (Expr.eval store) with
+             | some args => args
+             | none => [])))
+  | _ => st ← st.check "direct theorem: solve_sat_correct applies" (false)
+
+  -- THEOREM-LEVEL nonvacuity: solve_unsat_correct applies
+  let dunsat : Model :=
+    { predicates := []
+      parameters := []
+      variables :=
+        [ .basic (.intRange 1 2) (Ident.mk "x") [] none
+        , .basic (.intRange 1 2) (Ident.mk "y") [] none ]
+      constraints :=
+        [ { name := Ident.mk "int_plus"
+          , args := [ .basic (.ident (Ident.mk "x"))
+                    , .basic (.ident (Ident.mk "y"))
+                    , .basic (.lit (.int 10)) ]
+          , anns := [] } ]
+      solve := .satisfy [] }
+  have wunsat : WellFormed fullSig dunsat :=
+    (LeanFzn.Check.wellFormedFastB_iff dunsat).mp (by native_decide)
+  match hunsolve : LeanFzn.Solver.Direct.solve dunsat with
+  | .unsat =>
+      have _hunsat : ¬ ∃ store, Satisfies fullSig fullInterp dunsat store ∧
+          LeanFzn.Solver.Direct.ParamHonest dunsat store :=
+        LeanFzn.Solver.Direct.solve_unsat_correct
+          (model := dunsat) wunsat hunsolve
+      st ← st.check "direct theorem: solve_unsat_correct applies" (true)
+  | _ => st ← st.check "direct theorem: solve_unsat_correct applies" (false)
+
+  -- the fallback shape (parameter argument) also solves + certifies
+  let dpar := parseOrPanic
+    "int: k = 3;\nvar 1..5: x;\nconstraint int_le(x, k);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.compileModel dpar with
+  | .error _ => st ← st.check "direct: parameter fallback compiles" (false)
+  | .ok problem =>
+      st ← st.check "direct: parameter fallback compiles" (true)
+      st ← st.check "direct: parameter fallback has one slot"
+        (problem.domains.length == 1)
+      match LeanFzn.Solver.Direct.solveCompiled problem with
+      | some a =>
+          st ← st.check "direct: parameter fallback finds a value"
+            (a.length == 1)
+          match a[0]! with
+          | .int p => st ← st.check "direct: parameter fallback value ≤ 3" (p ≤ 3)
+          | _ => st ← st.check "direct: parameter fallback value ≤ 3" (false)
+      | none => st ← st.check "direct: parameter fallback finds a value" (false)
+
   if st.failed == 0 then
     IO.println s!"passed {st.passed} solver tests"
     return 0
