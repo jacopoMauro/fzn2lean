@@ -254,13 +254,27 @@ pass; CLI diagnostics and output are unchanged.
 
 ### P4. Final code hygiene
 
-- [ ] Remove unreachable compatibility code and archived development
+- [x] Remove unreachable compatibility code and archived development
   probes only after all imports, test targets, and documentation links
   have been checked. Keep source history in Git instead of live modules.
-- [ ] Run a clean checkout build, all named test suites, proof-hole and
+  (2026-09-27: the 19-file `archive/` directory removed — textual
+  search over all build roots found no import, Lake target, or doc
+  link referencing any archived file; code-structure.md updated to
+  point at Git history. No other unreachable compatibility code
+  found: the "deprecated" mentions in FznStdLib/FznGlobals/Counting
+  refer to MiniZinc's deprecated predicate *names* (supported spec
+  surface), not dead Lean code.)
+- [x] Run a clean checkout build, all named test suites, proof-hole and
   axiom audits, and parser/checker behavior tests before declaring the
   tree clean. Update `code-structure.md` to match actual imports.
-
+  (2026-09-27: full clean rebuild (224 jobs), all 22 suites run and
+  pass — 30 smoke, 64 stdlib, solution, 64 gecode (15 models),
+  52 globals, bench, 465 coverage, 49 wellformed, 39 pretty, prof,
+  12 check, 7 fast, 109 prop, 21 fix, 31 enum, 4 sbench, 73 opt,
+  26 rev, 37 learn, 26 restart, 218 solver, 31 LCG — plus the three
+  audits (no proof holes, no user axioms, all six public certified
+  theorems at [propext, Classical.choice, Quot.sound]) and the CLI
+  SAT flow; code-structure.md and PLAN.md updated.)
 ## Updating this record
 
 For each completed checkbox, add the theorem or command, result, and date. Re-audit this table after substantial code changes. Never infer proof completeness from test success or a passing build alone.
