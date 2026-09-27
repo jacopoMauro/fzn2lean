@@ -481,7 +481,7 @@ theorem unsat_root_conflict_constructive
     {props : List Propagator}
     (st' : State)
     (hconfEntry : st'.conflict = none)
-    (huniv : PropSafeUniv problem constraintHolds props)
+    (huniv : CoherentSafeUniv problem constraintHolds props)
     (hsolvedBy : SolvedBy problem constraintHolds st')
     (hclauses : st'.clauses = problem.clauses)
     (hlearned : ∀ c ∈ st'.learned,
@@ -489,8 +489,10 @@ theorem unsat_root_conflict_constructive
     (hdb0 : ∀ c ∈ problem.clauses,
       ∀ a, ProblemSolution problem constraintHolds a →
         ∃ l ∈ c, l.eval a = some true)
+    (hcohEntry : DomainCoherent problem st')
     (hisolvable : ∃ b, ProblemSolution problem constraintHolds b)
-    (hentFam : ∀ (st : State) (p : Propagator), p ∈ props → ∀ (c : Clause),
+    (hentFam : ∀ (st : State), DomainCoherent problem st →
+      ∀ (p : Propagator), p ∈ props → ∀ (c : Clause),
       p.run st = .conflict c →
         SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
@@ -517,14 +519,14 @@ theorem unsat_root_conflict_constructive
     (props := props) hisolvable huniv hentFam st'.clauses st'.learned
     hentO hentL
     (32 + 8 * st'.domains.length + 4 * st'.trail.length) st'
-    hconfEntry hsolvedBy rfl rfl
+    hconfEntry hsolvedBy hcohEntry rfl rfl
   -- the master exclusion: the reported clause is satisfied at no solution
   obtain ⟨cc, hrepC, hexc⟩ := propagateLoop_excludes
     (problem := problem) (constraintHolds := constraintHolds)
     (props := props) huniv hisolvable st'.clauses st'.learned
     hentO hentL
     (32 + 8 * st'.domains.length + 4 * st'.trail.length) st'
-    hconfEntry hsolvedBy rfl rfl hrep
+    hconfEntry hsolvedBy hcohEntry rfl rfl hrep
   -- the two theorems speak of the same reported clause:
   have hentCla : ∀ a, ProblemSolution problem constraintHolds a →
       ∃ l ∈ cc, l.eval a = some true := hentRun cc hrepC
@@ -683,6 +685,7 @@ structure UnsatRun (problem : Problem Constraint Objective)
       st'.decisionLevel = 0 ∧
       st'.conflict = none ∧
       SolvedBy problem constraintHolds st' ∧
+      DomainCoherent problem st' ∧
       st'.clauses = problem.clauses ∧
       (∀ c ∈ st'.learned, c.EntailedBy problem constraintHolds) ∧
       ((propagateLoop (engineFuel st') props st').conflict.isSome = true
@@ -713,8 +716,9 @@ theorem solve_unsat_correct
     (hdb0 : ∀ c ∈ problem.clauses,
       ∀ a, ProblemSolution problem constraintHolds a →
         ∃ l ∈ c, l.eval a = some true)
-    (huniv : PropSafeUniv problem constraintHolds propagators)
-    (hentFam : ∀ (st : State) (p : Propagator), p ∈ propagators →
+    (huniv : CoherentSafeUniv problem constraintHolds propagators)
+    (hentFam : ∀ (st : State), DomainCoherent problem st →
+      ∀ (p : Propagator), p ∈ propagators →
       ∀ (c : Clause), p.run st = .conflict c →
         SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
@@ -728,7 +732,8 @@ theorem solve_unsat_correct
   by_cases hsolv : ∃ b, ProblemSolution problem constraintHolds b
   · -- solutions exist: derive False from the terminal report
     unfold solve at hsolve
-    obtain ⟨st', hlevel, hconf, hsolvedBy, hclauses, hlearned, hdisj⟩ :=
+    obtain ⟨st', hlevel, hconf, hsolvedBy, hcohst, hclauses, hlearned,
+        hdisj⟩ :=
       hsafe.unsat_entry defaultFuel (initialStateWithRoots problem) hsolve
     rcases hdisj with hisSome | ⟨hclear, hsingle, a, hassign, hfail⟩
     · -- CONFLICT arm: the entry facts + the report refute every
@@ -736,8 +741,8 @@ theorem solve_unsat_correct
       -- hentFam via the proved loop-origin theorem)
       exact unsat_root_conflict_constructive (problem := problem)
         (constraintHolds := constraintHolds) (props := propagators)
-        st' hconf huniv hsolvedBy hclauses hlearned hdb0 hsolv hentFam
-        hisSome
+        st' hconf huniv hsolvedBy hclauses hlearned hdb0 hcohst hsolv
+        hentFam hisSome
     · -- LEAF arm: the conflict-free transfer gives SolvedBy at the
       -- post-propagation state; the leaf constructive refutes
       have hsolvedBy1 : SolvedBy problem constraintHolds
@@ -756,7 +761,7 @@ theorem solve_unsat_correct
         exact propagateLoop_solvedBy (problem := problem)
           (constraintHolds := constraintHolds) (props := propagators)
           huniv hsolv st'.clauses st'.learned hentO hentL
-          (engineFuel st') st' hconf hsolvedBy rfl rfl hclear
+          (engineFuel st') st' hconf hsolvedBy hcohst rfl rfl hclear
       -- the leaf state's level: propagation preserves the entry's 0
       have hlevel1 :
           (propagateLoop (engineFuel st') propagators st').decisionLevel
@@ -802,11 +807,13 @@ theorem unsat_entry_fragment
       st.clauses = problem.clauses →
       (∀ c ∈ st.learned, c.EntailedBy problem constraintHolds) →
       (∀ s : Nat, (st.domains.getD s []).length ≤ 1) →
+      DomainCoherent problem st →
       lcgSearch.go problem constraintHoldsB props fuel st = .unsat →
         ∃ st' : State,
           st'.decisionLevel = 0 ∧
           st'.conflict = none ∧
           SolvedBy problem constraintHolds st' ∧
+          DomainCoherent problem st' ∧
           st'.clauses = problem.clauses ∧
           (∀ c ∈ st'.learned, c.EntailedBy problem constraintHolds) ∧
           ((propagateLoop (engineFuel st') props st').conflict.isSome = true
@@ -817,9 +824,9 @@ theorem unsat_entry_fragment
               = some a ∧
             ¬ (fitsB problem a &&
                 problem.constraints.all (fun c => constraintHoldsB c a)))) := by
-  intro fuel st hlev hconf hsolvedBy hclauses hlearned hdisc hgo
-  refine ⟨st, hlev, hconf, hsolvedBy, hclauses, hlearned, ?_⟩
-  exact go_fragment_no_decide fuel st hlev hdisc hgo
+  intro fuel st hlev hconf hsolvedBy hclauses hlearned hdisc hcoh hgo
+  exact ⟨st, hlev, hconf, hsolvedBy, hcoh, hclauses, hlearned,
+    go_fragment_no_decide fuel st hlev hdisc hgo⟩
 
 /-! ### The fragment's certified solve -/
 
@@ -844,8 +851,9 @@ theorem solve_certified_fragment
     (hdb0 : ∀ c ∈ problem.clauses,
       ∀ a, ProblemSolution problem constraintHolds a →
         ∃ l ∈ c, l.eval a = some true)
-    (huniv : PropSafeUniv problem constraintHolds propagators)
-    (hentFam : ∀ (st : State) (p : Propagator), p ∈ propagators →
+    (huniv : CoherentSafeUniv problem constraintHolds propagators)
+    (hentFam : ∀ (st : State), DomainCoherent problem st →
+      ∀ (p : Propagator), p ∈ propagators →
       ∀ (c : Clause), p.run st = .conflict c →
         SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
@@ -872,8 +880,9 @@ theorem solve_certified_fragment_unsat
     (hdb0 : ∀ c ∈ problem.clauses,
       ∀ a, ProblemSolution problem constraintHolds a →
         ∃ l ∈ c, l.eval a = some true)
-    (huniv : PropSafeUniv problem constraintHolds propagators)
-    (hentFam : ∀ (st : State) (p : Propagator), p ∈ propagators →
+    (huniv : CoherentSafeUniv problem constraintHolds propagators)
+    (hentFam : ∀ (st : State), DomainCoherent problem st →
+      ∀ (p : Propagator), p ∈ propagators →
       ∀ (c : Clause), p.run st = .conflict c →
         SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
@@ -906,20 +915,23 @@ theorem solve_certified_fragment_unsat
       have h2 := (initialWithRoots_fields problem).2
       rw [h2] at hc
       exact absurd hc (by simp)
+    have hcoh0 : DomainCoherent problem (initialStateWithRoots problem) :=
+      initialStateWithRoots_coherent problem
     have hdisc0 : ∀ s : Nat, (List.getD
         (initialStateWithRoots problem).domains s []).length ≤ 1 := by
       intro s
       rw [initialStateWithRoots_domains problem]
       exact problem_fragment_le_one hfrag s
-    obtain ⟨st', hlevel, hconf, hsolvedBy, hclauses, hlearned, hdisj⟩ :=
+    obtain ⟨st', hlevel, hconf, hsolvedBy, hcohst, hclauses, hlearned,
+        hdisj⟩ :=
       unsat_entry_fragment hfrag defaultFuel (initialStateWithRoots problem)
-        hlevel0 hconf0 hsolvedBy0 hclauses0 hlearned0 hdisc0 hunsat
+        hlevel0 hconf0 hsolvedBy0 hclauses0 hlearned0 hdisc0 hcoh0 hunsat
     rcases hdisj with hisSome | ⟨hclear, hsingle, a, hassign, hfail⟩
     · -- CONFLICT arm
       exact unsat_root_conflict_constructive (problem := problem)
         (constraintHolds := constraintHolds) (props := propagators)
-        st' hconf huniv hsolvedBy hclauses hlearned hdb0 hsolv hentFam
-        hisSome
+        st' hconf huniv hsolvedBy hclauses hlearned hdb0 hcohst hsolv
+        hentFam hisSome
     · -- LEAF arm
       have hsolvedBy1 : SolvedBy problem constraintHolds
           (propagateLoop (engineFuel st') propagators st') := by
@@ -936,7 +948,7 @@ theorem solve_certified_fragment_unsat
         exact propagateLoop_solvedBy (problem := problem)
           (constraintHolds := constraintHolds) (props := propagators)
           huniv hsolv st'.clauses st'.learned hentO hentL
-          (engineFuel st') st' hconf hsolvedBy rfl rfl hclear
+          (engineFuel st') st' hconf hsolvedBy hcohst rfl rfl hclear
       have hlevel1 :
           (propagateLoop (engineFuel st') propagators st').decisionLevel
             = 0 := by

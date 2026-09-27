@@ -81,6 +81,26 @@ def PropSafeUniv (problem : Problem Constraint Objective)
     (props : List Propagator) : Prop :=
   ∀ st, PropSafe problem constraintHolds props st
 
+/-- The coherence-relativized universal safety: at every
+    domain-coherent state (the engine's run invariant), the
+    propagators are safe. This is the honest shape for bound
+    propagators whose implied literals read order atoms —
+    non-coherent states are unreachable from the initial state. -/
+def CoherentSafeUniv (problem : Problem Constraint Objective)
+    (constraintHolds : Constraint → Assignment → Prop)
+    (props : List Propagator) : Prop :=
+  ∀ st, DomainCoherent problem st →
+    PropSafe problem constraintHolds props st
+
+/-- Un-relativized safety implies the relativized form. -/
+theorem PropSafeUniv_coherent {problem : Problem Constraint Objective}
+    {constraintHolds : Constraint → Assignment → Prop}
+    {props : List Propagator}
+    (h : PropSafeUniv problem constraintHolds props) :
+    CoherentSafeUniv problem constraintHolds props :=
+  fun st _ => h st
+
+
 /-- NOGOOD ENTITLEMENT: the refutation-grade propagator contract —
     beyond excluding represented solutions, every reported conflict
     clause is ENTITLED at every internal solution (has a true literal).
@@ -550,6 +570,187 @@ theorem enqueueNorm_justified_solvable
   · exact hclear
   · exact absurd hsolvable hnoplex
 
+/-! ## Coherence preservation through the propagation loop -/
+
+/-- The propagator sweep preserves domain coherence (each implied
+    literal goes through `enqueueNorm`, which maintains the
+    domains-equal-fold equation by construction). -/
+theorem runPropagators_go_coherent {problem : Problem Constraint Objective} :
+    ∀ (ps : List Propagator) (st : State),
+      DomainCoherent problem st →
+      DomainCoherent problem (runPropagators.go ps st) := by
+  intro ps
+  induction ps with
+  | nil => intro st h; exact h
+  | cons p rest ih =>
+      intro st h
+      show DomainCoherent problem
+        (if st.conflict.isSome = true then st else
+          match p.run st with
+          | .stable => runPropagators.go rest st
+          | .conflict c => { st with conflict := some c }
+          | .implied l r => runPropagators.go rest (enqueueNorm st l (some r)) )
+      by_cases hconf : st.conflict.isSome = true
+      · rw [if_pos hconf]; exact h
+      · rw [if_neg hconf]
+        cases hr : p.run st with
+        | stable => exact ih st h
+        | conflict c => exact h
+        | implied l r => exact ih (enqueueNorm st l (some r)) (enqueueNorm_coherent h)
+
+/-- The propagator sweep preserves domain coherence. -/
+theorem runPropagators_coherent {problem : Problem Constraint Objective}
+    (props : List Propagator) (st : State)
+    (h : DomainCoherent problem st) :
+    DomainCoherent problem (runPropagators props st) :=
+  runPropagators_go_coherent props st h
+
+/-- The propagation loop preserves domain coherence (each continuing
+    arm is an `enqueueNorm` or a sweep, both coherent). -/
+theorem propagateLoop_coherent {problem : Problem Constraint Objective}
+    {props : List Propagator} :
+    ∀ (fuel : Nat) (st : State),
+      DomainCoherent problem st →
+      DomainCoherent problem (propagateLoop fuel props st) := by
+  intro fuel
+  induction fuel with
+  | zero => intro st h; exact h
+  | succ k ih =>
+      intro st h
+      unfold propagateLoop
+      cases hconf : st.conflict.isSome with
+      | true => exact h
+      | false =>
+          simp only [Bool.false_eq_true, if_false]
+          cases hscan : scanAll st with
+          | none =>
+              simp only [hscan]
+              have hcoh' : DomainCoherent problem (runPropagators props st) :=
+                runPropagators_coherent props st h
+              show DomainCoherent problem
+                (let st' := runPropagators props st
+                if st'.trail.length == st.trail.length then st'
+                else propagateLoop k props st')
+              by_cases hlen : (runPropagators props st).trail.length
+                  == st.trail.length
+              · rw [if_pos hlen]; exact hcoh'
+              · rw [if_neg hlen]; exact ih _ hcoh'
+          | some verdict =>
+              cases verdict with
+              | inl c => exact h
+              | inr w =>
+                  obtain ⟨l, r⟩ := w
+                  exact ih _ (enqueueNorm_coherent h)
+
+/-! ## The conflict-origin entitlement chain (per-solution form)
+
+Both halves of the terminal refutation are per-solution: exclusion
+("no literal of `c` is true at `a`") and entitlement ("some literal of
+`c` is true at `a`") apply at the SAME solution, so no uniform witness
+is needed. The sweep-level theorem closes the opposing-fact pair arm
+through the JUSTIFIED implied literal; the loop-level theorem assembles
+the scan arm (database membership), the unit-enqueue arm, and the sweep
+arm (quiesce / extend / the conflict fixpoint). -/
+
+/-! ## 1. the sweep origin entitlement (per-a) -/
+
+/-- A sweep conflict clause carries a true literal at every internal
+    solution, given per-family entitlement for propagator reports and
+    universal soundness for implied literals. -/
+theorem runPropagators_conflict_entitled
+    {problem : Problem Constraint Objective}
+    {constraintHolds : Constraint → Assignment → Prop}
+    {props : List Propagator}
+    (hsolvable : ∃ b, ProblemSolution problem constraintHolds b)
+    (hsafe : CoherentSafeUniv problem constraintHolds props)
+    (hent : ∀ (st : State), DomainCoherent problem st →
+      ∀ (p : Propagator), p ∈ props → ∀ (c : Clause),
+      p.run st = .conflict c →
+        SolvedBy problem constraintHolds st →
+        ∀ a, ProblemSolution problem constraintHolds a →
+          ∃ l ∈ c, l.eval a = some true)
+    (st0 : State) (hnone : st0.conflict = none)
+    (hsol : SolvedBy problem constraintHolds st0)
+    (hcoh : DomainCoherent problem st0)
+    (c : Clause) (hrep : (runPropagators props st0).conflict = some c)
+    (a : Assignment) (ha : ProblemSolution problem constraintHolds a) :
+    ∃ l ∈ c, l.eval a = some true := by
+  have goInv : ∀ (ps : List Propagator) (acc : State),
+      (∀ q ∈ ps, q ∈ props) →
+      acc.conflict = none →
+      SolvedBy problem constraintHolds acc →
+      DomainCoherent problem acc →
+      ∀ d, (runPropagators.go ps acc).conflict = some d →
+        ∃ l ∈ d, l.eval a = some true := by
+    intro ps
+    induction ps with
+    | nil =>
+        intro acc _ hacnone _ _ d hgo
+        have h1 : (runPropagators.go [] acc).conflict = acc.conflict := rfl
+        rw [h1, hacnone] at hgo
+        exact absurd hgo (by simp)
+    | cons p rest ih =>
+        intro acc hmem hacnone hacc hcohacc d hgo
+        have hp : p ∈ props := hmem p (List.mem_cons_self)
+        have hrest : ∀ q ∈ rest, q ∈ props := fun q hq =>
+          hmem q (List.mem_cons_of_mem _ hq)
+        simp only [runPropagators.go] at hgo
+        split at hgo
+        · rename_i his
+          rw [hacnone] at his
+          exact absurd his (by simp)
+        · split at hgo
+          · exact ih acc hrest hacnone hacc hcohacc d hgo
+          · rename_i c2 heq
+            have hc2d : c2 = d := by injection hgo
+            rw [hc2d] at heq
+            exact hent acc hcohacc p hp d heq hacc a ha
+          · rename_i lig rsn hres
+            have hjust : ∀ a2, ProblemSolution problem constraintHolds a2 →
+                lig.norm.eval a2 = some true := by
+              intro a2 ha2
+              rw [Literal.norm_eval lig a2]
+              exact (hsafe acc hcohacc).impliedTrueAt p hp lig rsn
+                hres a2 ⟨ha2, hacc a2 ha2⟩
+            cases hb1 : acc.litOnTrail lig.norm with
+            | true =>
+                have hstate : enqueueNorm acc lig (some rsn) = acc := by
+                  simp only [enqueueNorm, hb1, if_true]
+                rw [hstate] at hgo
+                exact ih acc hrest hacnone hacc hcohacc d hgo
+            | false =>
+                cases hb2 : acc.negOnTrail lig.norm with
+                | true =>
+                    have hpair : (enqueueNorm acc lig (some rsn)).conflict
+                        = some [lig.norm, lig.norm.negate] := by
+                      simp only [enqueueNorm, hb1, Bool.false_eq_true,
+                        if_false, hb2, if_true]
+                    have hpass : (runPropagators.go rest
+                        (enqueueNorm acc lig (some rsn))).conflict
+                        = some [lig.norm, lig.norm.negate] :=
+                      runPropagators_go_conflict_fixed props rest
+                        (enqueueNorm acc lig (some rsn))
+                        [lig.norm, lig.norm.negate] hpair
+                    rw [hpass] at hgo
+                    injection hgo with hgo4
+                    refine ⟨lig.norm, ?_, hjust a ha⟩
+                    rw [← hgo4]
+                    exact List.mem_cons_self
+                | false =>
+                    have hstate2 : (enqueueNorm acc lig (some rsn)).conflict
+                        = none := by
+                      simp only [enqueueNorm, hb1, hb2,
+                        Bool.false_eq_true, if_false]
+                      exact hacnone
+                    obtain ⟨_, hsol2⟩ := enqueueNorm_solvedBy
+                      (problem := problem) (constraintHolds := constraintHolds)
+                      (st := acc) (l0 := lig) (reason := some rsn)
+                      hacnone hacc hjust
+                    exact ih (enqueueNorm acc lig (some rsn)) hrest
+                      hstate2 hsol2 (enqueueNorm_coherent hcohacc) d hgo
+  exact goInv props st0 (fun _ hq => hq) hnone hsol hcoh c hrep
+
+
 /-- THE SWEEP TRANSFER: folding state-universally-sound propagators over
     a solved-by conflict-free state yields either (i) a conflict-free
     state that still solves-by, or (ii) the first reported conflict
@@ -558,10 +759,11 @@ theorem sweep_solvedBy
     {problem : Problem Constraint Objective}
     {constraintHolds : Constraint → Assignment → Prop}
     {props : List Propagator}
-    (hsafe : PropSafeUniv problem constraintHolds props)
+    (hsafe : CoherentSafeUniv problem constraintHolds props)
     (hsolvable : ∃ b, ProblemSolution problem constraintHolds b)
     (st0 : State)
     (hsol : SolvedBy problem constraintHolds st0)
+    (hcoh0 : DomainCoherent problem st0)
     (hnone : st0.conflict = none) :
     ((runPropagators props st0).conflict = none ∧
       SolvedBy problem constraintHolds (runPropagators props st0)) ∨
@@ -571,6 +773,7 @@ theorem sweep_solvedBy
   have goInv : ∀ (ps : List Propagator) (acc : State),
       (∀ q ∈ ps, q ∈ props) →
       acc.conflict = none →
+      DomainCoherent problem acc →
       SolvedBy problem constraintHolds acc →
         ((runPropagators.go ps acc).conflict = none ∧
           SolvedBy problem constraintHolds (runPropagators.go ps acc)) ∨
@@ -580,12 +783,12 @@ theorem sweep_solvedBy
     intro ps
     induction ps with
     | nil =>
-        intro _ acc hacnone hacc
+        intro _ acc hacnone _ hacc
         exact Or.inl ⟨hacnone, hacc⟩
     | cons p rest ih =>
-        intro acc hmem hacnone hacc
+        intro acc hmem hacnone hcohacc hacc
         have hp : p ∈ props := hmem p (List.mem_cons_self)
-        have hsafep := hsafe acc
+        have hsafep := hsafe acc hcohacc
         have hrest : ∀ q ∈ rest, q ∈ props := fun q hq =>
           hmem q (List.mem_cons_of_mem _ hq)
         simp only [runPropagators.go]
@@ -598,7 +801,7 @@ theorem sweep_solvedBy
           · -- stable: recurse with acc
             rename_i hres
             rename_i _ _ _
-            exact ih acc hrest hacnone hacc
+            exact ih acc hrest hacnone hcohacc hacc
           · -- conflict: p's own report wrote it
             rename_i c heq
             refine Or.inr ⟨c, ?_, ?_⟩
@@ -620,8 +823,9 @@ theorem sweep_solvedBy
             have hsol2 := (enqueueNorm_solvedBy (problem := problem)
               (constraintHolds := constraintHolds) (st := acc) (l0 := l)
               (reason := some rsn) hacnone hacc hlita).2
-            exact ih (enqueueNorm acc l (some rsn)) hrest hconf' hsol2
-  exact goInv props st0 (fun _ hq => hq) hnone hsol
+            exact ih (enqueueNorm acc l (some rsn)) hrest hconf'
+              (enqueueNorm_coherent hcohacc) hsol2
+  exact goInv props st0 (fun _ hq => hq) hnone hcoh0 hsol
 
 /-- The scan-unit justification over all internal solutions: the
     reported unit literal is true at every internal solution, given the
@@ -791,20 +995,11 @@ theorem runPropagators_go_learned : ∀ (props : List Propagator) (s : State),
         · rename_i l r heq
           rw [ih (enqueueNorm s l (some r)), enqueueNorm_learned]
 
-/-- MASTER RESULT (item 6, constructive UNSAT half): a conflict reported
-    by a propagation run over state-universally sound propagators and a
-    sound clause database excludes every internal solution of the
-    problem. No artificial terminal-report premise. Neither database
-    ever changes during a run (`enqueueNorm` and the sweep preserve
-    both lists), so entitlement is stated ONCE over the entry's FIXED
-    databases (replacing the earlier universal-over-all-states form,
-    which was unprovable for arbitrary states carrying arbitrary
-    databases). -/
 theorem propagateLoop_excludes
     {problem : Problem Constraint Objective}
     {constraintHolds : Constraint → Assignment → Prop}
     {props : List Propagator}
-    (hsafe : PropSafeUniv problem constraintHolds props)
+    (hsafe : CoherentSafeUniv problem constraintHolds props)
     (hsolvable : ∃ b, ProblemSolution problem constraintHolds b)
     (orig lnd : List Clause)
     (hdb : ∀ c ∈ orig,
@@ -817,6 +1012,7 @@ theorem propagateLoop_excludes
     ∀ (fuel : Nat) (st : State),
       st.conflict = none →
       SolvedBy problem constraintHolds st →
+      DomainCoherent problem st →
       st.clauses = orig →
       st.learned = lnd →
       (propagateLoop fuel props st).conflict.isSome = true →
@@ -826,12 +1022,12 @@ theorem propagateLoop_excludes
   intro fuel
   induction fuel with
   | zero =>
-      intro st hc _ _ _ hisSome
+      intro st hc _ _ _ _ hisSome
       simp only [propagateLoop] at hisSome
       rw [hc] at hisSome
       exact absurd hisSome (by simp)
   | succ fuel ih =>
-      intro st hc hsol hclfix hlnfix hisSome
+      intro st hc hsol hcoh hclfix hlnfix hisSome
       cases hscan : scanAll st with
       | none =>
           -- the sweep branch: uniform fold transfer + one-step verdict
@@ -841,7 +1037,7 @@ theorem propagateLoop_excludes
               else propagateLoop fuel props (runPropagators props st)) := by
             simp [propagateLoop, hc, hscan, Option.isSome_none]
           rw [hUnf] at hisSome ⊢
-          rcases sweep_solvedBy hsafe hsolvable st hsol hc with
+          rcases sweep_solvedBy hsafe hsolvable st hsol hcoh hc with
             ⟨hnone2, hsol2⟩ | ⟨c, hcc, hexc⟩
           · -- fold quiesced conflict-free: refute or recurse
             split at hisSome
@@ -858,6 +1054,7 @@ theorem propagateLoop_excludes
                 unfold runPropagators
                 exact runPropagators_go_learned props st
               exact ih (runPropagators props st) hnone2 hsol2
+                (runPropagators_coherent props st hcoh)
                 (by rw [hcl2]; exact hclfix)
                 (by rw [hln2]; exact hlnfix) hisSome
           · -- the fold reported c: it IS the driver's verdict
@@ -910,6 +1107,7 @@ theorem propagateLoop_excludes
               have hln2 : (enqueueNorm st l (some r)).learned = st.learned :=
                 enqueueNorm_learned
               exact ih (enqueueNorm st l (some r)) hconf2 hsol2
+                (enqueueNorm_coherent hcoh)
                 (by rw [hcl2]; exact hclfix)
                 (by rw [hln2]; exact hlnfix) hisSome
 
@@ -950,7 +1148,7 @@ theorem propagateLoop_solvedBy
     {problem : Problem Constraint Objective}
     {constraintHolds : Constraint → Assignment → Prop}
     {props : List Propagator}
-    (hsafe : PropSafeUniv problem constraintHolds props)
+    (hsafe : CoherentSafeUniv problem constraintHolds props)
     (hsolvable : ∃ b, ProblemSolution problem constraintHolds b)
     (orig lnd : List Clause)
     (hdb : ∀ c ∈ orig,
@@ -962,15 +1160,16 @@ theorem propagateLoop_solvedBy
     ∀ (fuel : Nat) (st : State),
       st.conflict = none →
       SolvedBy problem constraintHolds st →
+      DomainCoherent problem st →
       st.clauses = orig →
       st.learned = lnd →
       (propagateLoop fuel props st).conflict = none →
       SolvedBy problem constraintHolds (propagateLoop fuel props st) := by
   intro fuel
   induction fuel with
-  | zero => intro st _ hsol _ _ _; exact hsol
+  | zero => intro st _ hsol _ _ _ _; exact hsol
   | succ fuel ih =>
-      intro st hc hsol hclfix hlnfix hclear
+      intro st hc hsol hcoh hclfix hlnfix hclear
       cases hscan : scanAll st with
       | none =>
           have hUnf : propagateLoop (fuel + 1) props st =
@@ -984,13 +1183,13 @@ theorem propagateLoop_solvedBy
               st.trail.length) = true
           · -- quiesced: the swept state is the loop's answer
             rw [if_pos hlen] at hclear ⊢
-            rcases sweep_solvedBy hsafe hsolvable st hsol hc with
+            rcases sweep_solvedBy hsafe hsolvable st hsol hcoh hc with
               ⟨hnone2, hsol2⟩ | ⟨c, hcc, _⟩
             · exact hsol2
             · rw [hcc] at hclear; exact absurd hclear (by simp)
           · -- extended: recurse at the swept state
             rw [if_neg hlen] at hclear ⊢
-            rcases sweep_solvedBy hsafe hsolvable st hsol hc with
+            rcases sweep_solvedBy hsafe hsolvable st hsol hcoh hc with
               ⟨hnone2, hsol2⟩ | ⟨c, hcc, _⟩
             · have hcl2 : (runPropagators props st).clauses = st.clauses := by
                 unfold runPropagators
@@ -999,6 +1198,7 @@ theorem propagateLoop_solvedBy
                 unfold runPropagators
                 exact runPropagators_go_learned props st
               exact ih (runPropagators props st) hnone2 hsol2
+                (runPropagators_coherent props st hcoh)
                 (by rw [hcl2]; exact hclfix)
                 (by rw [hln2]; exact hlnfix) hclear
             · -- the swept conflict is final: the recursion passes it through
@@ -1039,6 +1239,7 @@ theorem propagateLoop_solvedBy
               have hln2 : (enqueueNorm st l (some r)).learned = st.learned :=
                 enqueueNorm_learned
               exact ih (enqueueNorm st l (some r)) hconf2 hsol2
+                (enqueueNorm_coherent hcoh)
                 (by rw [hcl2]; exact hclfix)
                 (by rw [hln2]; exact hlnfix) hclear
 
@@ -1217,112 +1418,6 @@ theorem go_zero_unknown {problem : Problem Constraint Objective}
     lcgSearch.go problem constraintHoldsB props 0 st = .unknown := rfl
 
 
-/-! ## The conflict-origin entitlement chain (per-solution form)
-
-Both halves of the terminal refutation are per-solution: exclusion
-("no literal of `c` is true at `a`") and entitlement ("some literal of
-`c` is true at `a`") apply at the SAME solution, so no uniform witness
-is needed. The sweep-level theorem closes the opposing-fact pair arm
-through the JUSTIFIED implied literal; the loop-level theorem assembles
-the scan arm (database membership), the unit-enqueue arm, and the sweep
-arm (quiesce / extend / the conflict fixpoint). -/
-
-/-! ## 1. the sweep origin entitlement (per-a) -/
-
-/-- A sweep conflict clause carries a true literal at every internal
-    solution, given per-family entitlement for propagator reports and
-    universal soundness for implied literals. -/
-theorem runPropagators_conflict_entitled
-    {problem : Problem Constraint Objective}
-    {constraintHolds : Constraint → Assignment → Prop}
-    {props : List Propagator}
-    (hsolvable : ∃ b, ProblemSolution problem constraintHolds b)
-    (hsafe : PropSafeUniv problem constraintHolds props)
-    (hent : ∀ (st : State) (p : Propagator), p ∈ props → ∀ (c : Clause),
-      p.run st = .conflict c →
-        SolvedBy problem constraintHolds st →
-        ∀ a, ProblemSolution problem constraintHolds a →
-          ∃ l ∈ c, l.eval a = some true)
-    (st0 : State) (hnone : st0.conflict = none)
-    (hsol : SolvedBy problem constraintHolds st0)
-    (c : Clause) (hrep : (runPropagators props st0).conflict = some c)
-    (a : Assignment) (ha : ProblemSolution problem constraintHolds a) :
-    ∃ l ∈ c, l.eval a = some true := by
-  have goInv : ∀ (ps : List Propagator) (acc : State),
-      (∀ q ∈ ps, q ∈ props) →
-      acc.conflict = none →
-      SolvedBy problem constraintHolds acc →
-      ∀ d, (runPropagators.go ps acc).conflict = some d →
-        ∃ l ∈ d, l.eval a = some true := by
-    intro ps
-    induction ps with
-    | nil =>
-        intro acc _ hacnone _ d hgo
-        have h1 : (runPropagators.go [] acc).conflict = acc.conflict := rfl
-        rw [h1, hacnone] at hgo
-        exact absurd hgo (by simp)
-    | cons p rest ih =>
-        intro acc hmem hacnone hacc d hgo
-        have hp : p ∈ props := hmem p (List.mem_cons_self)
-        have hrest : ∀ q ∈ rest, q ∈ props := fun q hq =>
-          hmem q (List.mem_cons_of_mem _ hq)
-        simp only [runPropagators.go] at hgo
-        split at hgo
-        · rename_i his
-          rw [hacnone] at his
-          exact absurd his (by simp)
-        · split at hgo
-          · exact ih acc hrest hacnone hacc d hgo
-          · rename_i c2 heq
-            have hc2d : c2 = d := by injection hgo
-            rw [hc2d] at heq
-            exact hent acc p hp d heq hacc a ha
-          · rename_i lig rsn hres
-            have hjust : ∀ a2, ProblemSolution problem constraintHolds a2 →
-                lig.norm.eval a2 = some true := by
-              intro a2 ha2
-              rw [Literal.norm_eval lig a2]
-              exact (hsafe acc).impliedTrueAt p hp lig rsn
-                hres a2 ⟨ha2, hacc a2 ha2⟩
-            cases hb1 : acc.litOnTrail lig.norm with
-            | true =>
-                have hstate : enqueueNorm acc lig (some rsn) = acc := by
-                  simp only [enqueueNorm, hb1, if_true]
-                rw [hstate] at hgo
-                exact ih acc hrest hacnone hacc d hgo
-            | false =>
-                cases hb2 : acc.negOnTrail lig.norm with
-                | true =>
-                    have hpair : (enqueueNorm acc lig (some rsn)).conflict
-                        = some [lig.norm, lig.norm.negate] := by
-                      simp only [enqueueNorm, hb1, Bool.false_eq_true,
-                        if_false, hb2, if_true]
-                    have hpass : (runPropagators.go rest
-                        (enqueueNorm acc lig (some rsn))).conflict
-                        = some [lig.norm, lig.norm.negate] :=
-                      runPropagators_go_conflict_fixed props rest
-                        (enqueueNorm acc lig (some rsn))
-                        [lig.norm, lig.norm.negate] hpair
-                    rw [hpass] at hgo
-                    injection hgo with hgo4
-                    refine ⟨lig.norm, ?_, hjust a ha⟩
-                    rw [← hgo4]
-                    exact List.mem_cons_self
-                | false =>
-                    have hstate2 : (enqueueNorm acc lig (some rsn)).conflict
-                        = none := by
-                      simp only [enqueueNorm, hb1, hb2,
-                        Bool.false_eq_true, if_false]
-                      exact hacnone
-                    obtain ⟨_, hsol2⟩ := enqueueNorm_solvedBy
-                      (problem := problem) (constraintHolds := constraintHolds)
-                      (st := acc) (l0 := lig) (reason := some rsn)
-                      hacnone hacc hjust
-                    exact ih (enqueueNorm acc lig (some rsn)) hrest
-                      hstate2 hsol2 d hgo
-  exact goInv props st0 (fun _ hq => hq) hnone hsol c hrep
-
-
 /-! ## 2. the loop origin entitlement (per-a) -/
 
 /-- A conflict clause reported by a conflict-free propagation run from
@@ -1337,8 +1432,9 @@ theorem propagateLoop_conflict_entitled
     {constraintHolds : Constraint → Assignment → Prop}
     {props : List Propagator}
     (hsolvable : ∃ b, ProblemSolution problem constraintHolds b)
-    (hsafe : PropSafeUniv problem constraintHolds props)
-    (hent : ∀ (st : State) (p : Propagator), p ∈ props → ∀ (c : Clause),
+    (hsafe : CoherentSafeUniv problem constraintHolds props)
+    (hent : ∀ (st : State), DomainCoherent problem st →
+      ∀ (p : Propagator), p ∈ props → ∀ (c : Clause),
       p.run st = .conflict c →
         SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
@@ -1351,6 +1447,7 @@ theorem propagateLoop_conflict_entitled
     ∀ (fuel : Nat) (st : State),
       st.conflict = none →
       SolvedBy problem constraintHolds st →
+      DomainCoherent problem st →
       st.clauses = orig →
       st.learned = lnd →
       ∀ c, (propagateLoop fuel props st).conflict = some c →
@@ -1359,12 +1456,12 @@ theorem propagateLoop_conflict_entitled
   intro fuel
   induction fuel with
   | zero =>
-      intro st hc _ _ _ c hrep
+      intro st hc _ _ _ _ c hrep
       simp only [propagateLoop] at hrep
       rw [hc] at hrep
       exact absurd hrep (by simp)
   | succ fuel ih =>
-      intro st hc hsol hclfix hlnfix c hrep a ha
+      intro st hc hsol hcoh hclfix hlnfix c hrep a ha
       cases hscan : scanAll st with
       | none =>
           have hUnf : propagateLoop (fuel + 1) props st =
@@ -1378,7 +1475,7 @@ theorem propagateLoop_conflict_entitled
           · -- quiesced: the sweep's own origin entitlement (per-a)
             rw [if_pos hlen] at hrep
             exact runPropagators_conflict_entitled hsolvable hsafe hent
-              st hc hsol c hrep a ha
+              st hc hsol hcoh c hrep a ha
           · -- extended: recurse at the swept state
             rw [if_neg hlen] at hrep
             have hcl2 : (runPropagators props st).clauses = st.clauses := by
@@ -1387,9 +1484,10 @@ theorem propagateLoop_conflict_entitled
             have hln2 : (runPropagators props st).learned = st.learned := by
               unfold runPropagators
               exact runPropagators_go_learned props st
-            rcases sweep_solvedBy hsafe hsolvable st hsol hc with
+            rcases sweep_solvedBy hsafe hsolvable st hsol hcoh hc with
               ⟨hnone2, hsol2⟩ | ⟨c2, hcc, _⟩
             · exact ih (runPropagators props st) hnone2 hsol2
+                (runPropagators_coherent props st hcoh)
                 (by rw [hcl2]; exact hclfix)
                 (by rw [hln2]; exact hlnfix) c hrep a ha
             · -- the swept conflict is final (fixpoint): identify and
@@ -1401,7 +1499,7 @@ theorem propagateLoop_conflict_entitled
                 injection hrep
               subst hc2c
               exact runPropagators_conflict_entitled hsolvable hsafe hent
-                st hc hsol c2 hcc a ha
+                st hc hsol hcoh c2 hcc a ha
       | some verdict =>
           cases verdict with
           | inl c2 =>
@@ -1444,6 +1542,7 @@ theorem propagateLoop_conflict_entitled
               have hln2 : (enqueueNorm st l (some r)).learned = st.learned :=
                 enqueueNorm_learned
               exact ih (enqueueNorm st l (some r)) hconf2 hsol2
+                (enqueueNorm_coherent hcoh)
                 (by rw [hcl2]; exact hclfix)
                 (by rw [hln2]; exact hlnfix) c hrep a ha
 

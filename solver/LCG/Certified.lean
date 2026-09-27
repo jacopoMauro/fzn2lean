@@ -97,16 +97,17 @@ theorem solve_certified_sat
   have hfragP : PropFragment problem := (fragmentOk_iff.mp hfrag)
   have hview : IntViewed problem := intViewed_of_fragment hint
   -- the empty propagator list: both safety premises are vacuous
-  have huniv : PropSafeUniv problem DomConstraint.SatisfiedBy [] := by
-    intro st
+  have huniv : CoherentSafeUniv problem DomConstraint.SatisfiedBy [] := by
+    intro st _
     exact ⟨fun p hp => absurd hp (by simp),
       fun p hp => absurd hp (by simp)⟩
-  have hentFam : ∀ (st : State) (p : Propagator), p ∈ [] →
+  have hentFam : ∀ (st : State), DomainCoherent problem st →
+      ∀ (p : Propagator), p ∈ [] →
       ∀ (c : Clause), p.run st = .conflict c →
         SolvedBy problem DomConstraint.SatisfiedBy st →
         ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
           ∃ l ∈ c, l.eval a = some true := by
-    intro st p hp
+    intro st _ p hp
     exact absurd hp (by simp)
   have hagrees : ∀ constraint assignment,
       DomConstraint.satisfiedB constraint assignment = true ↔
@@ -139,16 +140,17 @@ theorem solve_certified_unsat
     exact LeanFzn.Solver.Direct.domains_intViewed hc
   have hfragP : PropFragment problem := (fragmentOk_iff.mp hfrag)
   have hview : IntViewed problem := intViewed_of_fragment hint
-  have huniv : PropSafeUniv problem DomConstraint.SatisfiedBy [] := by
-    intro st
+  have huniv : CoherentSafeUniv problem DomConstraint.SatisfiedBy [] := by
+    intro st _
     exact ⟨fun p hp => absurd hp (by simp),
       fun p hp => absurd hp (by simp)⟩
-  have hentFam : ∀ (st : State) (p : Propagator), p ∈ [] →
+  have hentFam : ∀ (st : State), DomainCoherent problem st →
+      ∀ (p : Propagator), p ∈ [] →
       ∀ (c : Clause), p.run st = .conflict c →
         SolvedBy problem DomConstraint.SatisfiedBy st →
         ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
           ∃ l ∈ c, l.eval a = some true := by
-    intro st p hp
+    intro st _ p hp
     exact absurd hp (by simp)
   have hagrees : ∀ constraint assignment,
       DomConstraint.satisfiedB constraint assignment = true ↔
@@ -219,7 +221,6 @@ theorem solve_certified_sat_real
     (hcons : problem.constraints = compiled.constraints)
     (hfrag : fragmentOk problem = true)
     (hclauses : problem.clauses = [])
-    (hcoh : ∀ st, DomainCoherent problem st)
     (hsat : solve problem DomConstraint.satisfiedB
         ((compiled.constraints).filterMap propagatorOfProved) = .sat assignment) :
     ProblemSolution problem DomConstraint.SatisfiedBy assignment := by
@@ -253,17 +254,9 @@ theorem solve_certified_sat_real
     (propagators := compiled.constraints.filterMap propagatorOfProved)
     hview hfragP
     (fun c hc a _ => by rw [hclauses] at hc; cases hc)
-    (fun st => by
-      -- in the singleton fragment every state is trivially coherent
-      -- (the run never enqueues: scanAll is none on the empty clause
-      -- database, and the propagators stay stable at ≤1-disciplined
-      -- states), so the safety holds unconditionally via the
-      -- fragment's domain equality
-      exact propagatorsOfProved_safeUniv hint hprops st
-        (hcoh st))
-    (fun st p hp c hrun hsol => by
-      exact propagatorsOfProved_entitled hint hprops st hsol
-        (hcoh st) p hp c hrun)
+    (fun st hcoh => propagatorsOfProved_safeUniv hint hprops st hcoh)
+    (fun st hcoh p hp c hrun hsol =>
+      propagatorsOfProved_entitled hint hprops st hsol hcoh p hp c hrun)
     hagrees hsat
 
 
@@ -279,7 +272,6 @@ theorem solve_certified_unsat_real
     (hcons : problem.constraints = compiled.constraints)
     (hfrag : fragmentOk problem = true)
     (hclauses : problem.clauses = [])
-    (hcoh : ∀ st, DomainCoherent problem st)
     (hunsat : solve problem DomConstraint.satisfiedB
         ((compiled.constraints).filterMap propagatorOfProved) = .unsat) :
     ¬ ∃ assignment, ProblemSolution problem DomConstraint.SatisfiedBy
@@ -305,9 +297,9 @@ theorem solve_certified_unsat_real
     (propagators := compiled.constraints.filterMap propagatorOfProved)
     hview hfragP
     (fun c hc a _ => by rw [hclauses] at hc; cases hc)
-    (fun st => propagatorsOfProved_safeUniv hint hprops st (hcoh st))
-    (fun st p hp c hrun hsol =>
-      propagatorsOfProved_entitled hint hprops st hsol (hcoh st) p hp c hrun)
+    (fun st hcoh => propagatorsOfProved_safeUniv hint hprops st hcoh)
+    (fun st hcoh p hp c hrun hsol =>
+      propagatorsOfProved_entitled hint hprops st hsol hcoh p hp c hrun)
     hagrees hunsat
 
 end LeanFzn.Solver.LCG
