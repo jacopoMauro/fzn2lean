@@ -7,16 +7,32 @@
 
     "workspaceFolder": "/workspace",
 
+    // Mount the directory opened in VS Code as /workspace.
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 
     "containerEnv": {
+        // Keep Codex configuration and credentials in a dedicated mounted directory.
         "CODEX_HOME": "/codex"
     },
 
     "mounts": [
+        // Shared agent skills.
+        // Makes the skills stored on the host available to agents inside the container.
         "source=/home/mauro/onedrive/sync/software/utilities/agent-skills,target=/home/vscode/.agents/skills,type=bind",
+
+        // Codex credentials.
+        // Keeps authentication credentials outside the container image so they persist
+        // across container rebuilds.
         "source=/home/mauro/Desktop/software/utilities/devcontainer/codex-credentials-for-devcontainer,target=/codex,type=bind",
-        "source=/home/mauro/onedrive/sync/software/utilities/devcontainer/copilot-instructions,target=/workspace/.github/instructions,type=bind"
+
+        // GitHub Copilot custom instructions.
+        // Makes the shared Copilot instructions available as workspace instructions.
+        "source=/home/mauro/onedrive/sync/software/utilities/devcontainer/copilot-instructions,target=/workspace/.github/instructions,type=bind",
+
+        // OpenCode configuration.
+        // Mounts the shared opencode.json directly into OpenCode's configuration directory,
+        // allowing configuration changes on the host to be immediately visible in the container.
+        "source=/home/mauro/onedrive/sync/software/utilities/opencode/standalone/opencode.json,target=/home/vscode/.config/opencode/opencode.json,type=bind"
     ],
 
     "customizations": {

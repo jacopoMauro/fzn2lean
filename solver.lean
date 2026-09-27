@@ -2,24 +2,29 @@
 File: solver.lean
 
 Purpose:
-  Library root for the verified constraint solver: re-exports the core
-  solver modules so clients depend on the solver as one library.
+  Core root for the direct-solver redevelopment: exports the semantic result
+  contract and reusable finite search/domain machinery.
 
 Dependencies:
-  solver.Search (exhaustive search), solver.Domain (domain extraction),
-  solver.Emit.Basic (solution emission), solver.Solve (FlatZinc-facing solver).
+  solver.Core (shared semantic problem representation), solver.Tree
+  (classical tree-search state), solver.LCG (lazy-clause-generation scaffold), solver.Direct
+  (checker-independent correctness contract), solver.Search (finite exhaustive
+  search), and solver.Domain (domain extraction).
 
 Why:
-  `solveModel` and `SolveResult` in `solver/Solve.lean` are the solver's
-  public face against the LeanFzn semantics; the root file groups the
-  import set. The full solver (heuristics, learning, restarts, config)
-  lives behind `solver/Solver.lean`.
+  The old checker-mediated adapter is intentionally absent from this root.
+  Existing optimized components remain available through their own modules
+  while they are audited for reuse by the direct solver.
 
 DAG:
-  solver.Search/Domain/Emit.Basic -> solver.Solve -> solver.lean -> Main
+  LeanFzn semantics -> solver.Core -> solver.Tree / solver.LCG / solver.Direct
+  solver.Search + solver.Domain + solver.Core + solver.Tree + solver.LCG
+    + solver.Direct -> solver.lean
 -/
 
 import solver.Search
 import solver.Domain
-import solver.Emit.Basic
-import solver.Solve
+import solver.Core
+import solver.Tree
+import solver.LCG
+import solver.Direct

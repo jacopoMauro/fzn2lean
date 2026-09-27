@@ -1,5 +1,15 @@
 # LeanFzn dependency structure
 
+The solver portion below records the current migration state. `solver/Solve`
+and its higher adapters still implement the retired checker-mediated entry
+points; `PLAN.md` specifies their direct-proof replacement.
+
+The new intended dependency root is `solver.Core`, which contains only shared
+problem and assignment semantics. Operational state is layered: `solver.Tree`
+for classical CP tree search and `solver.LCG` for the top-priority lazy clause
+generation solver. Other approaches receive their own state layer and prove a
+connection to the common problem semantics.
+
 This file records the current module dependency graph for LeanFzn.
 Arrows written as `A ← B` mean that `A` directly imports `B`.  The numbered
 layers are explanatory groupings, not enforced package boundaries; the direct
@@ -21,6 +31,50 @@ Layer 0 — Foundation (no project imports)
 ├── LeanFzn/FznAST.lean ★         AST types (Ident, Value, BaseType, VDecl, ConstraintItem, Model)
 ├── LeanFzn/FznLexer.lean ★       Tokenizer (Token type, tokenize)
 └── solver/Search.lean ★          Generic exhaustive search (allAssigns, search_some/none)
+
+Solver core — new shared foundation
+├── solver/Core/Types.lean         Generic Problem; Slot/Domain/Assignment;
+│                                  SearchResult
+│   └── ← FznSemantics
+├── solver/Core/Semantics.lean     Architecture-independent assignment semantics
+│   └── ← Core/Types
+└── solver/Core.lean               Shared-core umbrella
+    └── ← Core/Types, Core/Semantics
+
+Classical tree-search layer
+├── solver/Tree/Types.lean         Decision/NoGood/TrailEntry/reference State
+│   └── ← Core/Types
+├── solver/Tree/Operations.lean    Reference state operations
+├── solver/Tree/Invariants.lean    Tree representation/preservation contracts
+├── solver/Tree/Proofs.lean        Tree foundational proof scaffolds
+└── solver/Tree.lean               Tree-layer umbrella
+
+Lazy clause generation layer (top-priority solver)
+├── solver/LCG/Types.lean          Atoms, literals, clauses, reasons, LCG State
+├── solver/LCG/TrailEval.lean      Trail queries, norm literals, 1-UIP analysis
+├── solver/LCG/Operations.lean     Evaluation (intView), trail, learning, API
+├── solver/LCG/Encoding.lean       L0.1 foundation: literal laws, order encoding,
+│                                  WellFormed, assignment↔valuation carving
+│   └── ← LCG/Operations, LCG/Invariants
+├── solver/LCG/Invariants.lean     Entailment, representation, conflict meaning
+├── solver/LCG/Propagate.lean      Explanation-carrying bound propagators
+├── solver/LCG/Engine.lean         Clause scanning, propagation, search loop
+├── solver/LCG/Search.lean          Executable entry points (solve/solveDom)
+├── solver/LCG/Proofs/Transitions.lean  Local transition obligations
+├── solver/LCG/Proofs/Search.lean  Internal SAT/UNSAT obligations
+│   (go_sat_leaf, strengthened go_unsat_shape with retained leaf facts,
+│    EngineSafe over terminal states, unsat_root_leaf_constructive;
+│    item 7 scaffold: initialWithRoots_fields,
+│    unsat_root_conflict_constructive)
+├── solver/LCG/Proofs/Singleton.lean  Singleton characterization
+│   (Step 2.E item 1: fits_allSingleton_eq)
+├── solver/LCG/Proofs/Theory.lean  Constructive no-excluded-solution theory
+│   (SolvedBy invariant threads, enqueueNorm branch algebra, opposing-fact
+│    branch unreachable for justified enqueues, scan-arm exclusion
+│    scanConflict_excludes, per-gate inverses, coherence bridges, leSlot
+│    kernel, PropSafe packaging bridge; item 6: sweep_solvedBy fold and
+│    the MASTER RESULT propagateLoop_excludes)
+└── solver/LCG.lean                LCG-layer umbrella
 
 Layer 1 — Grammar, Parser, Semantics
 ├── LeanFzn/FznGrammar.lean        Derivability relation (GrModel, GrSepList, …)
@@ -57,12 +111,23 @@ Layer 3 — Completeness, Solution, Extraction
 │   └── ← LeanFzn*, solver/Search, solver/Domain, solver/Propagators
 ├── solver/Domain.lean ★           Finite-domain extraction from parsed models (modelSlots)
 │   └── ← LeanFzn*
+├── solver/Direct/Types.lean       Source wrapper over Core.Problem + result
+│   └── ← Core/Types, FznGlobals
+├── solver/Direct/Compile.lean     Executable compiler and leaf evaluation
+│   └── ← Direct/Types
+├── solver/Direct/Search.lean      Executable exhaustive direct solver
+│   └── ← solver/Search, Direct/Compile
+├── solver/Direct/Proofs/Compile.lean  Exact compilation proof obligations
+│   └── ← solver/Search, Direct/Compile
+├── solver/Direct/Proofs/Search.lean   Search proof obligations
+│   └── ← Direct/Search
+├── solver/Direct/Correctness.lean Public direct SAT/UNSAT theorem obligations
+│   └── ← Direct/Proofs/Compile, Direct/Proofs/Search
+├── solver/Direct.lean             Direct-solver public umbrella
+│   └── ← all solver/Direct modules
 ├── solver/Emit/Basic.lean         Stable executable solution emission
 │   └── ← Lean, solver/Domain
-├── solver/Emit/Roundtrip.lean     Buildable emitted-solution proof branch;
-│                                  entry parsing/master round trip still open
-│   └── ← solver/Emit/Basic
-├── solver/Emit.lean               Stable public emission re-export
+├── solver/Emit.lean               Output-only public emission re-export
 │   └── ← solver/Emit/Basic
 ├── solver/Enum.lean               All-solutions enumeration (enumerateAll)
 │   └── ← solver/Solve
@@ -125,7 +190,7 @@ Layer 8 — Top-Level Modules
 
 Layer 9 — Library Roots
 ├── LeanFzn.lean ★                 Library root: imports all 14 LeanFzn modules
-└── solver.lean                    Core solver root: imports Search, Domain, Emit/Basic, Solve
+└── solver.lean                    New root: imports Core, Direct, Search, Domain
 
 Layer 10 — Executable
 └── Main.lean                      CLI entry point (check/solve/enum/optimize)
@@ -142,11 +207,11 @@ Layer 10 — Executable
 - `solver/Domain.lean` and `solver/Search.lean` are the solver's foundational modules.
 - The dependency chain from `FznAST` to `FznGlobals.lean` is 7 layers deep.
 - `solver.lean` and `solver/Solver.lean` are currently different roots; the
-  former is core-only and the latter exposes the complete stack.  Consolidating
-  or renaming them is tracked in `PLAN.md` P4.
-- Several solver modules directly import the broad `LeanFzn` umbrella.  The
-  graph above records that as `LeanFzn*`; narrowing those imports is also
-  tracked in P4.
+  former is core-only and the latter exposes the legacy complete stack. Their
+  replacement is sequenced in `PLAN.md` D0–D3.
+- Several solver modules directly import the broad `LeanFzn` umbrella. The
+  graph above records that as `LeanFzn*`; imports will be narrowed as the new
+  semantic and compiled-problem foundations are introduced.
 
 ## Test Executables
 
@@ -173,6 +238,7 @@ solver/TestsOpt.lean      → solver/Optimize
 solver/TestsRev.lean      → solver/Solver
 solver/TestsLearn.lean    → solver/Solver
 solver/TestsRestart.lean  → solver/Restarts
+solver/TestsLCG.lean     → solver/LCG
 ```
 
 ## Dependency fan-out (qualitative)

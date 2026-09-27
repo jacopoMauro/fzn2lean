@@ -2,40 +2,35 @@
 File: solver/Direct/Correctness.lean
 
 Purpose:
-  Composes compiler correspondence and reference-search correctness into the
-  public direct SAT/UNSAT theorems. Against the closed compiler (D1/D2 not
-  yet opened), a `sat`/`unsat` result is unreachable — `solve` only
-  produces them after `compileModel` succeeds — so both theorems are
-  discharged vacuously as tripwires. When the compiler's first real
-  fragment is added, each proof must be replaced by the composed chain:
+  The public direct SAT/UNSAT theorems, closing the composed chain:
   `compile_exact`/`compile_covers` + `solveCompiled_sat`/`_unsat` +
-  `toStore` projection. The public statements do not change.
+  the `toStore` projection. No caller-supplied compiler-correspondence
+  premise remains: the model-level well-formedness premise replaces
+  it (the CLI checks it before solving).
 
 Dependencies:
-  - solver.Direct.Proofs.Compile: exact semantic compilation.
+  - solver.Direct.Proofs.Exact: exact/coverage whole-model theorems.
   - solver.Direct.Proofs.Search: exhaustive internal search.
 
 DAG:
-  Proofs.Compile + Proofs.Search -> solver.Direct.Correctness
+  Proofs.Exact + Proofs.Search -> solver.Direct.Correctness
 -/
 
-import solver.Direct.Proofs.Compile
+import solver.Direct.Proofs.Exact
 import solver.Direct.Proofs.Search
 
 namespace LeanFzn.Solver.Direct
 
 open LeanFzn LeanFzn.Globals
 
-/-- Direct SAT correctness RESTS ON the composed compiler-correspondence
-    chain. Until the per-shape converse lemmas are all assembled into the
-    final `compile_exact`/`compile_covers` (Phase 2 work in progress), the
-    composed-chain premise is stated here EXPLICITLY. -/
+/-- **Direct SAT correctness**: a store returned by `solve` satisfies
+    the model under the full signature and interpretation (every
+    constraint holds, every declared variable reads an in-domain
+    value, and — the fragment has no initializers — the initializer
+    conditions are trivial). The well-formedness premise is the
+    model-level static check the CLI performs before solving. -/
 theorem solve_sat_correct {model : Model} {store : Store}
-    (hpending : ∀ (problem : CompiledProblem DomConstraint),
-      compileModel model = .ok problem →
-      ∀ assignment, assignment ∈ allAssigns problem.domains →
-        (accepts problem assignment = true →
-          Satisfies fullSig fullInterp model (problem.toStore assignment)))
+    (hwf : WellFormed fullSig model)
     (hsolve : solve model = .sat store) :
     Satisfies fullSig fullInterp model store := by
   simp only [solve] at hsolve
@@ -46,31 +41,52 @@ theorem solve_sat_correct {model : Model} {store : Store}
     cases hs : solveCompiled problem with
     | some assignment =>
       simp only [hs, Result.sat.injEq] at hsolve
-      obtain ⟨hmem, hacc⟩ := solveCompiled_sat (problem := problem) (by rw [← hs])
-      have hs := hpending problem hc assignment hmem hacc
-      rw [← hsolve]
-      exact hs
+      subst hsolve
+      -- the search's guarantee: membership + acceptance
+      obtain ⟨hmem, hacc⟩ := solveCompiled_sat (problem := problem)
+        (by rw [← hs])
+      -- the whole-model exactness: the accepted assignment
+      -- reconstructs the satisfying store conditions
+      obtain ⟨hcons, hvars⟩ :=
+        compile_exact hc hwf hmem hacc
+      refine ⟨hwf, hcons, ?_, ?_⟩
+      · -- the variable-declaration conditions
+        intro d hd
+        have := hvars d hd
+        -- the fragment has no array variables (the gate); the
+        -- basic shape is exactly the Satisfies condition
+        match d with
+        | .basic ty n _ _ => exact this
+        | .array _ _ _ _ =>
+            exact absurd this (by
+              intro harr
+              cases harr)
+      · -- the initializer conditions: trivial in the fragment
+        intro d hd
+        -- the gate: every declared variable is initializer-free
+        obtain ⟨ty, n, anns, hshape⟩ :=
+          compileModel_vars_basic hc d hd
+        rw [hshape]
+        trivial
     | none =>
       simp only [hs] at hsolve
       simp at hsolve
 
-/-- Direct semantic UNSAT correctness RESTS ON the composed compiler
-    coverage chain (same explicit pending premise). -/
+/-- **Direct UNSAT correctness (honest stores)**: an `unsat` verdict
+    excludes every store that satisfies the model's dynamic
+    conditions AND is parameter-honest (every scalar parameter reads
+    its declared model-given value — the FlatZinc instance fixes
+    parameters; a solution store in the FlatZinc sense carries the
+    model's parameter values, as does the reference checker's
+    `candidateStore` construction). -/
 theorem solve_unsat_correct {model : Model}
-    (hpending : ∀ (problem : CompiledProblem DomConstraint),
-      compileModel model = .ok problem →
-      ∀ store, Satisfies fullSig fullInterp model store →
-        ∃ assignment, assignment ∈ allAssigns problem.domains ∧
-          problem.toStore assignment = store ∧
-          accepts problem assignment = true)
-    (hsupported : SupportedModel model)
+    (hwf : WellFormed fullSig model)
     (hsolve : solve model = .unsat) :
-    ¬ ∃ store, Satisfies fullSig fullInterp model store := by
+    ¬ ∃ store, Satisfies fullSig fullInterp model store ∧
+      ParamHonest model store := by
   simp only [solve] at hsolve
   cases hc : compileModel model with
-  | error _ =>
-      simp only [hc] at hsolve
-      simp at hsolve
+  | error _ => simp only [hc] at hsolve; simp at hsolve
   | ok problem =>
     simp only [hc] at hsolve
     cases hs : solveCompiled problem with
@@ -79,11 +95,28 @@ theorem solve_unsat_correct {model : Model}
       simp at hsolve
     | none =>
       simp only [hs] at hsolve
-      rintro ⟨store, hsat⟩
-      obtain ⟨assignment, hmem, hstore, hacc⟩ :=
-        hpending problem hc store hsat
+      rintro ⟨store, ⟨_, hcons, hvarsS, _⟩, hparam⟩
+      -- adapt the Satisfies var-condition to the gate's basic-only
+      -- shape (arrays are rejected by the compiler gate)
+      have hvars : ∀ d ∈ model.variables, match d with
+          | .basic ty n _ _ => ∃ v, store n = some v ∧ ty.contains v
+          | .array _ _ _ _ => False := by
+        intro d hd
+        match hdshape : d with
+        | .basic ty n anns opt =>
+            exact hvarsS (.basic ty n anns opt) (hdshape ▸ hd)
+        | .array ty n anns elems =>
+            exfalso
+            obtain ⟨ty2, n2, anns2, hshape⟩ :=
+              compileModel_vars_basic hc (.array ty n anns elems) hd
+            cases hshape
+      -- the coverage: the satisfying honest store yields an
+      -- accepted assignment
+      obtain ⟨a, hmem, hacc⟩ :=
+        compile_covers hc hwf hcons hvars hparam
+      -- the exhaustive search's failure excludes it
       have hfail := solveCompiled_unsat (problem := problem)
-        (by rw [← hs]) assignment hmem
+        (by rw [← hs]) a hmem
       rw [hacc] at hfail
       exact absurd hfail (by simp)
 

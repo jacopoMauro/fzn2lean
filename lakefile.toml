@@ -99,3 +99,7 @@ root = "solver.TestsLearn"
 [[lean_exe]]
 name = "tests_restart"
 root = "solver.TestsRestart"
+
+[[lean_exe]]
+name = "tests_lcg"
+root = "solver.TestsLCG"

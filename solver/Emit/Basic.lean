@@ -9,12 +9,11 @@ Dependencies:
   - solver.Domain: scalar `Value` and the solver's assignment vocabulary.
 
 Why:
-  Search and checking need emission, but do not need the much larger
-  lexer/parser round-trip proof stack.
+  Emission is an output concern after direct solver correctness is proved; it
+  is not part of the solver's semantic correctness argument.
 
 DAG:
-  solver.Domain -> solver.Emit.Basic -> solver.Solve
-                                  \-> solver.Emit.Roundtrip
+  solver.Domain -> solver.Emit.Basic -> solver.Emit -> CLI output
 -/
 
 import Lean

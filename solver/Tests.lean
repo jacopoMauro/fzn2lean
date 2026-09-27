@@ -1,4 +1,5 @@
 import solver.Solver
+import solver.Direct
 
 /-!
 # Solver test executable (PLAN.md 6.1, 6.2, 6.3, 6.5, 6.7)
@@ -601,6 +602,85 @@ def main : IO UInt32 := do
           (r.contains "not supported")
     | _ => st ← st.check s!"config unsupported: {bName} refused with reason" (false)
 
+
+
+  -- ## Phase 2: the DIRECT certified-fragment compiler (nonvacuous tests)
+
+  -- SAT: int_plus on two 1..3 slots (accepted fragment, solved by search)
+  let d1 := parseOrPanic
+    "var 1..3: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 5);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.compileModel d1 with
+  | .error e => st ← st.check "direct: int_plus model compiles" (false)
+  | .ok problem =>
+      st ← st.check "direct: int_plus model compiles" (true)
+      st ← st.check "direct: problem has two slots"
+        (problem.domains.length == 2)
+      st ← st.check "direct: problem has one constraint"
+        (problem.constraints.length == 1)
+      match LeanFzn.Solver.Direct.solveCompiled problem with
+      | some a =>
+          st ← st.check "direct: int_plus finds a summing pair" (a.length == 2)
+          match a[0]!, a[1]! with
+          | .int p, .int q =>
+              st ← st.check "direct: found pair sums to 5" (p + q == 5)
+          | _, _ => st ← st.check "direct: found pair sums to 5" (false)
+      | none => st ← st.check "direct: int_plus finds a summing pair" (false)
+
+  -- SAT verification standalone re-check
+  match LeanFzn.Solver.Direct.compileModel d1 with
+  | .ok problem =>
+      match LeanFzn.Solver.Direct.solveCompiled problem with
+      | some a =>
+          match a[0]!, a[1]! with
+          | .int p, .int q =>
+              st ← st.check "direct: found pair sums to 5 (recheck)" (p + q == 5)
+          | _, _ => st ← st.check "direct: found pair sums to 5 (recheck)" (false)
+      | none => st ← st.check "direct: found pair sums to 5 (recheck)" (false)
+  | .error _ => st ← st.check "direct: found pair sums to 5 (recheck)" (false)
+
+  -- UNSAT: int_plus on two 1..2 slots with sum 10 (impossible)
+  let d2 := parseOrPanic
+    "var 1..2: x;\nvar 1..2: y;\nconstraint int_plus(x, y, 10);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.compileModel d2 with
+  | .error _ => st ← st.check "direct: impossible sum compiles" (false)
+  | .ok problem =>
+      st ← st.check "direct: impossible sum compiles" (true)
+      st ← st.check "direct: impossible sum yields no assignment"
+        (LeanFzn.Solver.Direct.solveCompiled problem == none)
+
+  -- UNSAT: contradictory bounds (int_le and int_gt on one slot)
+  let d3 := parseOrPanic
+    "var 1..3: x;\nconstraint int_le(x, 1);\nconstraint int_gt(x, 2);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.compileModel d3 with
+  | .error _ => st ← st.check "direct: contradictory bounds compiles" (false)
+  | .ok problem =>
+      st ← st.check "direct: contradictory bounds compiles" (true)
+      st ← st.check "direct: contradictory bounds yields no assignment"
+        (LeanFzn.Solver.Direct.solveCompiled problem == none)
+
+  -- unsupported: unbounded var int is rejected with a reason
+  let d4 := parseOrPanic
+    "var int: x;\nconstraint int_eq(x, 5);\nsolve satisfy;"
+  let ok4 := match LeanFzn.Solver.Direct.compileModel d4 with
+    | .error e => e.contains "unbounded" || e.contains "outside"
+    | .ok _ => false
+  st ← st.check "direct: unbounded var rejected" ok4
+
+  -- unsupported: predicate items are outside the certified fragment
+  let d5 := parseOrPanic
+    "predicate p(int: a);\nvar 1..3: x;\nsolve satisfy;"
+  let ok5 := match LeanFzn.Solver.Direct.compileModel d5 with
+    | .error e => e.contains "predicate"
+    | .ok _ => false
+  st ← st.check "direct: predicate items rejected" ok5
+
+  -- unsupported: globals not in the extractable set
+  let d6 := parseOrPanic
+    "var 1..3: x;\nconstraint fzn_all_different_int([x]);\nsolve satisfy;"
+  let ok6 := match LeanFzn.Solver.Direct.compileModel d6 with
+    | .error e => e.contains "unsupported"
+    | .ok _ => false
+  st ← st.check "direct: fzn_ globals rejected" ok6
 
   if st.failed == 0 then
     IO.println s!"passed {st.passed} solver tests"

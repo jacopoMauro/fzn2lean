@@ -60,7 +60,7 @@ theorem nameIndex_some : ∀ (names : List String) (s : String) (i : Nat),
 
 /-- From an in-bounds successful option lookup, the bang read
     returns the same value (the bridge `hvals`-style premises need). -/
-private theorem getElem_of_getElem? {α : Type} [Inhabited α] {l : List α}
+theorem getElem_of_getElem? {α : Type} [Inhabited α] {l : List α}
     {i : Nat} {x : α} (_hlt : i < l.length) (hget : l[i]? = some x) :
     l[i]! = x := by
   rw [List.getElem!_eq_getElem?_getD, hget]
@@ -321,7 +321,7 @@ section HoldsBridge
 
 /-- `fullInterp` delegates to `stdInterp` on the three names of the
     first extraction round. -/
-private theorem fullInterp_of_extracted (n : String)
+theorem fullInterp_of_extracted (n : String)
     (hn : n = "int_eq" ∨ n = "int_ne" ∨ n = "int_le") :
     fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
   rcases hn with rfl | rfl | rfl
@@ -331,7 +331,7 @@ private theorem fullInterp_of_extracted (n : String)
 
 /-- The same bridge for the two further standard names extracted in
     this round (`int_plus`, `all_different`). -/
-private theorem fullInterp_of_extracted' (n : String)
+theorem fullInterp_of_extracted' (n : String)
     (hn : n = "int_plus" ∨ n = "all_different" ∨ n = "int_lin_eq"
       ∨ n = "int_lin_le") :
     fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
@@ -343,7 +343,7 @@ private theorem fullInterp_of_extracted' (n : String)
 /-- The same bridge for the names of the propagator-extension round
     (`int_times`, `int_min`, `int_max`, `int_abs`, `int_lt`,
     `bool_not`, `bool_and`, `bool_or`). -/
-private theorem fullInterp_of_extracted'' (n : String)
+theorem fullInterp_of_extracted'' (n : String)
     (hn : n = "int_times" ∨ n = "int_min" ∨ n = "int_max" ∨ n = "int_abs"
       ∨ n = "int_lt" ∨ n = "bool_not" ∨ n = "bool_and" ∨ n = "bool_or") :
     fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
@@ -354,7 +354,7 @@ private theorem fullInterp_of_extracted'' (n : String)
 
 /-- The interpretation of a holding constraint is about its own
     name: transport `hinterp` to the spelled-out name. -/
-private theorem interp_of_hname {c : ConstraintItem}
+theorem interp_of_hname {c : ConstraintItem}
     {n : String} (hname : c.name.name = n) {args : List Value}
     (hinterp : fullInterp c.name args) :
     fullInterp (Ident.mk n) args := by
@@ -369,7 +369,7 @@ private theorem interp_of_hname {c : ConstraintItem}
 
 /-- Inversion of argument evaluation for two identifier arguments: both
     store lookups succeed and the evaluated list is the two values. -/
-private theorem mapM_two_ident {store : Store} {c : ConstraintItem}
+theorem mapM_two_ident {store : Store} {c : ConstraintItem}
     {x y : Ident} {args : List Value}
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y)])
     (hmap : c.args.mapM (Expr.eval store) = some args) :
@@ -387,7 +387,7 @@ private theorem mapM_two_ident {store : Store} {c : ConstraintItem}
           exact ⟨vx, vy, rfl, rfl, by simpa using hmap.symm⟩
 
 /-- Inversion of argument evaluation for three identifier arguments. -/
-private theorem mapM_three_ident {store : Store} {c : ConstraintItem}
+theorem mapM_three_ident {store : Store} {c : ConstraintItem}
     {x y z : Ident} {args : List Value}
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y),
         Expr.basic (.ident z)])
@@ -412,7 +412,7 @@ private theorem mapM_three_ident {store : Store} {c : ConstraintItem}
 
 /-- Inversion of argument evaluation for an identifier and an integer
     literal. -/
-private theorem mapM_two_const {store : Store} {c : ConstraintItem}
+theorem mapM_two_const {store : Store} {c : ConstraintItem}
     {x : Ident} {k : Int} {args : List Value}
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k))])
     (hmap : c.args.mapM (Expr.eval store) = some args) :
@@ -428,7 +428,7 @@ private theorem mapM_two_const {store : Store} {c : ConstraintItem}
 
 /-- Inversion of argument evaluation for an integer literal and an
     identifier. -/
-private theorem mapM_two_const' {store : Store} {c : ConstraintItem}
+theorem mapM_two_const' {store : Store} {c : ConstraintItem}
     {y : Ident} {k : Int} {args : List Value}
     (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident y)])
     (hmap : c.args.mapM (Expr.eval store) = some args) :
@@ -444,7 +444,7 @@ private theorem mapM_two_const' {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_eq(slot, slot)`: the store's values
     at the two names are equal. -/
-private theorem holds_int_eq_slot {store : Store} {c : ConstraintItem}
+theorem holds_int_eq_slot {store : Store} {c : ConstraintItem}
     {x y : Ident}
     (hname : c.name.name = "int_eq")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y)])
@@ -472,7 +472,7 @@ private theorem holds_int_eq_slot {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_eq(slot, literal)`: the store's
     value at the name is the literal. -/
-private theorem holds_int_eq_const {store : Store} {c : ConstraintItem}
+theorem holds_int_eq_const {store : Store} {c : ConstraintItem}
     {x : Ident} {k : Int}
     (hname : c.name.name = "int_eq")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k))])
@@ -498,7 +498,7 @@ private theorem holds_int_eq_const {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_eq(literal, slot)`: symmetric to
     `holds_int_eq_const`. -/
-private theorem holds_int_eq_const' {store : Store} {c : ConstraintItem}
+theorem holds_int_eq_const' {store : Store} {c : ConstraintItem}
     {y : Ident} {k : Int}
     (hname : c.name.name = "int_eq")
     (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident y)])
@@ -524,7 +524,7 @@ private theorem holds_int_eq_const' {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_ne(slot, slot)`: the store's values
     at the two names differ. -/
-private theorem holds_int_ne_slot {store : Store} {c : ConstraintItem}
+theorem holds_int_ne_slot {store : Store} {c : ConstraintItem}
     {x y : Ident}
     (hname : c.name.name = "int_ne")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y)])
@@ -552,7 +552,7 @@ private theorem holds_int_ne_slot {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_le(slot, slot)`: the store's values
     at the two names are ordered. -/
-private theorem holds_int_le_slot {store : Store} {c : ConstraintItem}
+theorem holds_int_le_slot {store : Store} {c : ConstraintItem}
     {x y : Ident}
     (hname : c.name.name = "int_le")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y)])
@@ -580,7 +580,7 @@ private theorem holds_int_le_slot {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_le(slot, literal)`: the store's
     value at the name is an integer at most the literal. -/
-private theorem holds_int_le_const {store : Store} {c : ConstraintItem}
+theorem holds_int_le_const {store : Store} {c : ConstraintItem}
     {x : Ident} {k : Int}
     (hname : c.name.name = "int_le")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k))])
@@ -603,7 +603,7 @@ private theorem holds_int_le_const {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_le(literal, slot)`: the store's
     value at the name is an integer at least the literal. -/
-private theorem holds_int_le_const' {store : Store} {c : ConstraintItem}
+theorem holds_int_le_const' {store : Store} {c : ConstraintItem}
     {y : Ident} {k : Int}
     (hname : c.name.name = "int_le")
     (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident y)])
@@ -627,7 +627,7 @@ private theorem holds_int_le_const' {store : Store} {c : ConstraintItem}
 /-- Inversion of `Holds` for a three-slot `int_plus`: the store's
     values at the three names are integers with the first two
     summing to the third. -/
-private theorem holds_int_plus_slot {store : Store} {c : ConstraintItem}
+theorem holds_int_plus_slot {store : Store} {c : ConstraintItem}
     {x y z : Ident}
     (hname : c.name.name = "int_plus")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y),
@@ -664,7 +664,7 @@ private theorem holds_int_plus_slot {store : Store} {c : ConstraintItem}
 /-- Inversion of `Holds` for a three-slot arithmetic constraint
     (`int_times` / `int_min` / `int_max`): the store's values at the
     three names are integers combined by the operation. -/
-private theorem holds_int_ternary_slot
+theorem holds_int_ternary_slot
     (op : String)
     (hop : Int → Int → Int)
     (hop8 : op = "int_times" ∨ op = "int_min" ∨ op = "int_max" ∨ op = "int_abs"
@@ -717,7 +717,7 @@ private theorem holds_int_ternary_slot
 /-- Inversion of `Holds` for a two-slot `int_abs`: the store's values
     at the two names are integers with the second the absolute value
     of the first. -/
-private theorem holds_int_abs_slot {store : Store} {c : ConstraintItem}
+theorem holds_int_abs_slot {store : Store} {c : ConstraintItem}
     {x y : Ident}
     (hname : c.name.name = "int_abs")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y)])
@@ -752,7 +752,7 @@ private theorem holds_int_abs_slot {store : Store} {c : ConstraintItem}
 /-- Inversion of `Holds` for a two-slot `int_lt`: the store's values at
     the two names are integers with the first strictly below the
     second. -/
-private theorem holds_int_lt_slot {store : Store} {c : ConstraintItem}
+theorem holds_int_lt_slot {store : Store} {c : ConstraintItem}
     {x y : Ident}
     (hname : c.name.name = "int_lt")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y)])
@@ -781,7 +781,7 @@ private theorem holds_int_lt_slot {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_lt(slot, literal)`: the store's
     value at the name is an integer strictly below the literal. -/
-private theorem holds_int_lt_const {store : Store} {c : ConstraintItem}
+theorem holds_int_lt_const {store : Store} {c : ConstraintItem}
     {x : Ident} {k : Int}
     (hname : c.name.name = "int_lt")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k))])
@@ -805,7 +805,7 @@ private theorem holds_int_lt_const {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for `int_lt(literal, slot)`: the store's
     value at the name is an integer strictly above the literal. -/
-private theorem holds_int_lt_const' {store : Store} {c : ConstraintItem}
+theorem holds_int_lt_const' {store : Store} {c : ConstraintItem}
     {y : Ident} {k : Int}
     (hname : c.name.name = "int_lt")
     (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident y)])
@@ -829,7 +829,7 @@ private theorem holds_int_lt_const' {store : Store} {c : ConstraintItem}
 
 /-- Inversion of `Holds` for a two-slot `bool_not`: the store's values
     at the two names are opposite Booleans. -/
-private theorem holds_bool_not_slot {store : Store} {c : ConstraintItem}
+theorem holds_bool_not_slot {store : Store} {c : ConstraintItem}
     {x y : Ident}
     (hname : c.name.name = "bool_not")
     (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y)])
@@ -860,7 +860,7 @@ private theorem holds_bool_not_slot {store : Store} {c : ConstraintItem}
 /-- Inversion of `Holds` for a three-slot Boolean connective
     (`bool_and` / `bool_or`): the store's values at the three names
     are Booleans combined by the operation. -/
-private theorem holds_bool_ternary_slot
+theorem holds_bool_ternary_slot
     (op : String) (f : Bool → Bool → Bool)
     (hop8 : op = "int_times" ∨ op = "int_min" ∨ op = "int_max" ∨ op = "int_abs"
       ∨ op = "int_lt" ∨ op = "bool_not" ∨ op = "bool_and" ∨ op = "bool_or")
@@ -912,7 +912,7 @@ private theorem holds_bool_ternary_slot
 /-- Inversion of argument evaluation for the linear shape: two array
     arguments evaluate to their element-value lists and the literal to
     its integer. -/
-private theorem mapM_lin {store : Store} {c : ConstraintItem}
+theorem mapM_lin {store : Store} {c : ConstraintItem}
     {ks elems : ArrayLiteral} {k : Int} {args : List Value}
     (hargs : c.args = [Expr.array ks, Expr.array elems,
         Expr.basic (.lit (.int k))])
@@ -934,7 +934,7 @@ private theorem mapM_lin {store : Store} {c : ConstraintItem}
           exact ⟨vs1, vs2, rfl, rfl, by simpa using hmap.symm⟩
 
 /-- Inversion of `Holds` for an `int_lin_eq` on slots. -/
-private theorem holds_int_lin_eq {store : Store} {c : ConstraintItem}
+theorem holds_int_lin_eq {store : Store} {c : ConstraintItem}
     {ks elems : ArrayLiteral} {k : Int}
     (hname : c.name.name = "int_lin_eq")
     (hargs : c.args = [Expr.array ks, Expr.array elems,
@@ -952,7 +952,7 @@ private theorem holds_int_lin_eq {store : Store} {c : ConstraintItem}
   exact ⟨vs1, vs2, hvs1, hvs2, h1⟩
 
 /-- Inversion of `Holds` for an `int_lin_le` on slots. -/
-private theorem holds_int_lin_le {store : Store} {c : ConstraintItem}
+theorem holds_int_lin_le {store : Store} {c : ConstraintItem}
     {ks elems : ArrayLiteral} {k : Int}
     (hname : c.name.name = "int_lin_le")
     (hargs : c.args = [Expr.array ks, Expr.array elems,
@@ -972,7 +972,7 @@ private theorem holds_int_lin_le {store : Store} {c : ConstraintItem}
 /-- Inversion of `Holds` for an explicit-array `all_different`: the
     array's elements all evaluate, and the values are pairwise
     different. -/
-private theorem holds_all_different {store : Store} {c : ConstraintItem}
+theorem holds_all_different {store : Store} {c : ConstraintItem}
     {elems : ArrayLiteral}
     (hname : c.name.name = "all_different")
     (hargs : c.args = [Expr.array elems])
@@ -997,7 +997,7 @@ end HoldsBridge
 
 /-- The evaluated values of a coefficient array that produced
     `coeffs` via `linCoeffs` are exactly `intVals coeffs`. -/
-private theorem linCoeffs_eval {store : Store} :
+theorem linCoeffs_eval {store : Store} :
     ∀ (ks : ArrayLiteral) (coeffs : List Int),
     linCoeffs ks = some coeffs →
     ks.mapM (BasicExpr.eval store) = some (intVals coeffs) := by
@@ -1039,7 +1039,7 @@ private theorem linCoeffs_eval {store : Store} :
 
 /-- Every position produced by `linIndices` is in bounds for
     `names` (the slot-name list it indexes). -/
-private theorem linIndices_lt {names : List String} :
+theorem linIndices_lt {names : List String} :
     ∀ (elems : ArrayLiteral) (is : List Nat),
     linIndices names elems = some is →
     ∀ i, i ∈ is → i < names.length := by
@@ -1080,7 +1080,7 @@ private theorem linIndices_lt {names : List String} :
     `linIndices` are exactly the assignment's values at those
     positions (when the store pins each slot name to the
     assignment's value and every index is in range). -/
-private theorem linIndices_eval {names : List String} {store : Store}
+theorem linIndices_eval {names : List String} {store : Store}
     {a : List Value}
     (hvals : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
       store (Ident.mk names[i]!) = some v) :
@@ -1140,7 +1140,7 @@ private theorem linIndices_eval {names : List String} {store : Store}
     the values an `all_different` array's elements evaluate to (the
     store's reads) are exactly `a`'s reads at the extracted
     positions, in order. -/
-private theorem allDiff_map_eq {names : List String} {store : Store} {a : List Value}
+theorem allDiff_map_eq {names : List String} {store : Store} {a : List Value}
     (hvals : ∀ (i : Nat), i < names.length →
       ∃ v, a[i]? = some v ∧ store (Ident.mk names[i]!) = some v) :
     ∀ (elems : ArrayLiteral) (vs : List Value) (is : List Nat),
@@ -1231,7 +1231,7 @@ private theorem allDiff_map_eq {names : List String} {store : Store} {a : List V
     extracted shapes — the name is one of the extracted predicates,
     the arguments are the corresponding identifier/literal/array
     pattern, and the slot names resolve. -/
-private theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
+theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
     {dc : DomConstraint} (hdc : extractConstraint names c = some dc) :
     (∃ x y i j, c.name.name = "int_eq" ∧
         c.args = [.basic (.ident x), .basic (.ident y)] ∧
@@ -1519,7 +1519,7 @@ private theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
     whose slot values agree with the store at the slot names
     (`hvals`: position `i` of `a` is the store's value at the
     slot-`i` name, whenever `i` is in bounds). -/
-private theorem extractConstraint_holds {names : List String} {c : ConstraintItem}
+theorem extractConstraint_holds {names : List String} {c : ConstraintItem}
     {dc : DomConstraint} {store : Store} {a : List Value}
     (hh : c.Holds fullInterp store)
     (hdc : extractConstraint names c = some dc)

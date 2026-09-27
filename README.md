@@ -17,6 +17,11 @@ solver correctness argument will instead connect compiled constraints, solver
 states, propagation, branching, and terminal results directly to
 `Satisfies fullSig fullInterp`; output rendering happens only afterward.
 
+**Top priority:** restore the current build, finish exact source compilation,
+discharge the LCG fragment's remaining premises, and connect the CLI to that
+proved path. The current working-tree audit is dated 2026-09-26.
+See [PLAN.md](PLAN.md).
+
 The normative reference is **MiniZinc 2.10.0**, pinned to immutable commit
 `c9f9b649b2a251a40aa427a84d7cce73a8807fea` (see
 `specification/minizinc-2.10.0/README.md`). Float syntax and semantics are
@@ -57,10 +62,15 @@ The replacement is scaffolded with a strict algorithm/proof split:
 - `solver/Direct/Proofs/Compile.lean`, `Proofs/Search.lean`, and
   `Correctness.lean` contain the semantic theorem statements.
 
-The direct proof modules compile without `sorry` or `admit`, but their
-source-level SAT/UNSAT results are vacuous while `compileModel` rejects every
-model. Opening the first supported fragment requires exact compilation and
-coverage proofs.
+`Direct.compileModel` now accepts a finite scalar int/bool fragment and
+produces `Core.Problem DomConstraint`. `solver/Direct/Proofs/Compile.lean`
+contains a converse theorem for the 21 extracted constraint shapes, with
+integer-valued reads as a premise. Its new typing proof does not compile and
+contains two `sorry`s. Whole-model exactness and coverage are unfinished;
+`Direct.solve_sat_correct` and `Direct.solve_unsat_correct` still take an
+explicit `hpending` correspondence premise. The direct exhaustive search is
+a reference path for proof development and testing, not the intended public
+LCG backend.
 
 The solver foundation is layered. `solver/Core` defines only shared compiled
 problems, slots, domains, assignments, results, and assignment semantics.
@@ -70,46 +80,44 @@ implements a CP-SAT-style lazy clause generation architecture: signed Boolean
 and integer-bound literals, clauses, implication reasons, decision levels,
 learned clauses, propagation queues, and conflicts.
 
-The LCG executable runs the full loop — order-encoding propagation with
-explanations, unit propagation, first-UIP conflict analysis, learning,
-backjumping, bisection decisions — and returns `sat`/`unsat`/`unknown`
-verdicts (fuel exhaustion maps to `unknown`, never `unsat`). Its verdicts
-are validated by differential tests against brute-force enumeration
-(`solver/TestsLCG.lean`). Proof status: `LCG.solve_sat_correct` is proved;
-the propagation soundness lift `propagateLoop_lift` is fully proved
-(`solver/LCG/Proofs/Lift.lean`, sorry-free): any conflict report from a
-conflict-free propagation run originates from (a) a clause-scanning
-verdict on a database clause, (b) an opposing-fact pair, or (c) a
-propagator's own conflict report — pinned by the scanAll inversion, the
-enqueueNorm three-branch analysis, the sweep pass-through guard, and the
-sweep inversion. `LCG.solve_unsat_correct` is proved relative to the
-explicit two-field `EngineSafe` obligation bundle
-(`solver/LCG/Proofs/Search.lean`); dropping that bundle constructively is
-the registered `PLAN.md` Step 2 execution order (7 items, each ending in
-a compiling theorem). **Conflict analysis is
-now fully proved**: `analyzeConflict_correct` establishes both the
-learned-clause entailment and the strict-backjump conjunct from the
-`AnalysisReady` reachability premise, via the tracked-disjunction
-worklist lift (`analyzeStep_tracked`) in
-`solver/LCG/Proofs/Analyze.lean` — no `sorry` or `admit` remains
-anywhere in `solver/`, `LeanFzn/`, or `Tests/`, and the theorem depends
-only on `[propext, Quot.sound]`. The engine-safety layer (Step 2) is
-under construction in `solver/LCG/Proofs/Engine.lean`: domain-extrema
-bounds, trail↔domain coherence (`fits_domOfLit_sat_pos/neg/bool`), and
-Boolean clause-scanning soundness
-(`scanClause_conflict_falsified`, `scanClause_unit_justified`) are
-proved, all axiom-clean, as are the root-fact validity and membership
-characterization plus the full domain-coherence layer
-(`DomainCoherent` preserved by `enqueueNorm` and
-`repairAfterBackjump`, established at `initialStateWithRoots`);
-`PLAN.md` is the authoritative order for the remaining reachability
-obligations, redressed as the 7-item premise-drop order above.
-Existing solver approaches have not all been ported to the layered core
-yet.
+The LCG executable implements propagation, decisions, first-UIP analysis,
+learning, backjumping, and bounded search. Fuel exhaustion returns `unknown`.
+All 31 internal LCG tests passed in an earlier run. `LCG.solve_sat_correct` proves the internal
+SAT leaf result when Boolean and declarative constraint evaluations agree.
 
-The checker-mediated entry points still present in the source are migration
-code, not the intended public correctness boundary. `PLAN.md` gives the
-authoritative replacement order and theorem targets.
+**Internal UNSAT has a proved decision-free fragment.** The LCG proof files
+have no active `sorry`. `LCG.solve_unsat_correct` still takes the `UnsatRun`
+premise: every `.unsat` outcome of the engine loop arises from a generating
+ENTRY iterate (level 0, conflict-free, representing every internal
+solution, holding the problem's original clauses and entailed learned
+clauses) whose propagation run reports either a conflict or a failed
+level-0 all-singleton leaf. Both terminal arms are closed by fully proved
+constructive theorems (`unsat_root_conflict_constructive`,
+`unsat_root_leaf_constructive`), using the entry-relative loop results
+(`propagateLoop_excludes`, `propagateLoop_solvedBy`,
+`propagateLoop_decisionLevel`, `propagateLoop_conflict_entitled` — the
+reported clause's origin entitlement, opposing-pair arm included), the
+repair transfer at level 0 (`repair_solvedBy0` via the iterated-firing
+`fold_fits` and `Level0TrailSound`), and the initial representation base
+(`initialWithRoots_solvedBy` under the int/bool fragment invariant). Fuel
+exhaustion is proved (`go_zero_unknown`). The retired `EngineSafe`
+(obligations over arbitrary terminal states) is deleted. What remains
+before the general UNSAT claim is premise-free: discharging `UnsatRun` itself —
+the positive-level analysis-arm transfer (the asserting enqueue
+re-justifies via the entailed learned clause, with `AnalysisReady`
+established at the actual analysis call) and the decision descent — plus
+per-family propagator soundness (`PropSafeUniv`/entitlement; the
+`int_le` kernel is proved) for the families the first fragment admits.
+For all-singleton initial domains, `solve_certified_fragment_unsat`
+discharges `UnsatRun` internally, but still takes `IntViewed`, original
+database entitlement, propagator safety and conflict entitlement, evaluator
+agreement, and `PropFragment` as premises. These must be derived for the
+actual compiled problem before making a public certified claim.
+
+**Source-level solving is not certified yet.** The compiler accepts models,
+but its exactness/coverage proof is unfinished and the current tree fails to
+build. `leanfzn solve` still calls the legacy `Solver.solveModelWith` path,
+not LCG. [PLAN.md](PLAN.md) gives the ordered proof and integration gates.
 
 ### Exact parser recognition
 
@@ -285,7 +293,7 @@ leanfzn/
 │   ├── Solver.lean            #   complete solver umbrella used by CLI/tests
 │   └── Tests*.lean            #   test executables (unit + integration + bench)
 │
-├── solver.lean                # Core-only solver root (Search/Domain/Emit/Solve)
+├── solver.lean                # Solver library root (Search/Domain/Core/Tree/LCG/Direct)
 │
 └── specification/
     ├── minizinc-2.10.0/        # The pinned normative reference
@@ -381,7 +389,7 @@ lake env tests_prof      # profiling driver (parser timing analysis)
 lake env tests_fast      # 7 fast-path differential tests
 
 # Solver suites
-lake env tests_solver    # 198 solver tests (unit + e2e + config-matrix integration)
+lake env tests_solver    # solver unit and integration tests; current count awaits a passing build
 lake env tests_prop      # 109 propagator tests
 lake env tests_heur      # 93 heuristic tests
 lake env tests_fix       # 21 fixpoint tests
@@ -445,14 +453,26 @@ Exit codes of `leanfzn`:
 
 `Tests/WellFormed.lean` and `Tests/Pretty.lean` can also be run directly
 with `lake env lean`; their `#eval`-based checks are compiled by the
-corresponding executable targets above. The listed build targets are the intended aggregate check; a plain
-`lake build` currently has no default target. The LCG proof modules and direct
-correctness module build, and all 31 LCG tests pass. A full clean build and all
-functional suites have not been rechecked for this status update. Lean emits
-some unused simp argument and unused variable warnings in the LCG proof stack.
+corresponding executable targets above. The listed build targets are the
+intended aggregate check; a plain `lake build` currently has no default
+target. On 2026-09-26, `lake build LeanFzn solver leanfzn tests_solver
+tests_lcg` failed in `solver/Direct/Proofs/Compile.lean` at
+`int_read_of_checkArg_slot` (type errors around lines 1964–1978 and two
+active `sorry`s). The current tree's test suites were not run because the
+build failed. The earlier 31 LCG and 211 solver checks are historical
+results, not current verification. A clean build and proof-hole/axiom
+audit remain open.
 
 ## Project status and roadmap
 
-See [`PLAN.md`](PLAN.md) for the active certification steps and completion
-criteria. See [`code-structure.md`](code-structure.md) for the module dependency
-map.
+The immediate milestone is restoring the compiler proof build and removing
+its two `sorry`s. Next come whole-model compiler exactness/coverage,
+discharge of the LCG fragment's remaining premises for the compiled
+configuration, and CLI integration. A separate parser/checker cleanup
+track preserves their public theorems and behavior while reducing unused
+code and broad imports. See [`PLAN.md`](PLAN.md) for both tracks and gates
+and [`code-structure.md`](code-structure.md) for module dependencies.
+On 2026-09-26, the separate parser/checker build (78 jobs) and its eight
+smoke, solution, check, fast, pretty, well-formedness, globals, and coverage
+executables passed; the direct compiler build remains blocked as described
+above.
