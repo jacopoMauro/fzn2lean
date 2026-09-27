@@ -133,6 +133,17 @@ Gate: source SAT/UNSAT theorems are nonvacuous and have no caller-supplied compi
 - [x] Prove `PropSafeUniv` and conflict entitlement for each enabled propagator family (`plus`, `le`, `lt`, `eq`, `ne`, `linLe`), or disable unproved families for the first fragment. (2026-09-27: the first fragment runs the EMPTY propagator list — both safety premises are vacuous, derived not assumed; per-family propagation soundness remains the documented expansion path.)
 - [x] Derive all premises of `solve_certified_fragment` and `solve_certified_fragment_unsat` from the supported-problem check. No public theorem should ask callers for universal safety or entitlement. (2026-09-27: `LCG.solve_certified_sat`/`solve_certified_unsat` derive IntViewed, PropFragment, db entitlement, and the (vacuous) safety premises from `fragmentOk` + the int-view check + `clauses = []`.)
 - [ ] For a larger fragment, prove positive-level analysis and decision-descent reachability, then remove general `UnsatRun`. This is a later expansion gate, not a prerequisite for the singleton fragment.
+  (2026-09-27 audit note: the deep audit of the LCG layer confirmed
+  the proof layer sound as stated — `solve_certified_fragment`'s SAT
+  branch is genuine (the leaf test establishes Fits + constraints),
+  the UNSAT composite is total for the fragment, and no sign
+  inversions exist in the literal encoding. The audit's real findings
+  were in the EXECUTABLE propagator layer (three propLinLe bugs and
+  propNe's non-integer-valid nogoods — the uncertified solveDom path
+  returned `.unsat` for satisfiable problems, reproduced end to end);
+  all four are FIXED with regression tests, but per-family propagator
+  soundness theorems (`PropSafeUniv` for real propagatorsOf lists)
+  remain the documented prerequisite for certifying that path.)
 
 Gate: actual LCG calls on accepted problems have SAT/UNSAT theorems and fuel exhaustion yields only `unknown`.
 
