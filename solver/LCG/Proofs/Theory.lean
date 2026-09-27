@@ -1240,6 +1240,7 @@ theorem runPropagators_conflict_entitled
     (hsafe : PropSafeUniv problem constraintHolds props)
     (hent : ∀ (st : State) (p : Propagator), p ∈ props → ∀ (c : Clause),
       p.run st = .conflict c →
+        SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
           ∃ l ∈ c, l.eval a = some true)
     (st0 : State) (hnone : st0.conflict = none)
@@ -1275,7 +1276,7 @@ theorem runPropagators_conflict_entitled
           · rename_i c2 heq
             have hc2d : c2 = d := by injection hgo
             rw [hc2d] at heq
-            exact hent acc p hp d heq a ha
+            exact hent acc p hp d heq hacc a ha
           · rename_i lig rsn hres
             have hjust : ∀ a2, ProblemSolution problem constraintHolds a2 →
                 lig.norm.eval a2 = some true := by
@@ -1339,6 +1340,7 @@ theorem propagateLoop_conflict_entitled
     (hsafe : PropSafeUniv problem constraintHolds props)
     (hent : ∀ (st : State) (p : Propagator), p ∈ props → ∀ (c : Clause),
       p.run st = .conflict c →
+        SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
           ∃ l ∈ c, l.eval a = some true)
     (orig lnd : List Clause)

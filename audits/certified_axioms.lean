@@ -20,3 +20,7 @@ open LeanFzn LeanFzn.Solver.Direct LeanFzn.Solver.LCG
 #print axioms solveCertified_unsat_correct
 #print axioms solve_certified_sat
 #print axioms solve_certified_unsat
+#print axioms solve_certified_sat_real
+#print axioms solve_certified_unsat_real
+#print axioms propagatorsOfProved_safeUniv
+#print axioms propagatorsOfProved_entitled

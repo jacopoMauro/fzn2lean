@@ -28,12 +28,13 @@ DAG:
 -/
 
 import solver.LCG.Proofs.Search
+import solver.LCG.Proofs.Propagators
 import solver.Propagators
 import solver.Direct.Proofs.Exact
 
 namespace LeanFzn.Solver.LCG
 
-open LeanFzn LeanFzn.Solver LeanFzn.Solver.Core
+open LeanFzn LeanFzn.Solver LeanFzn.Solver.Core LeanFzn.Solver.LCG
 
 /-- The executable fragment check: every initial domain is a
     singleton (one complete assignment, read off directly). -/
@@ -102,6 +103,7 @@ theorem solve_certified_sat
       fun p hp => absurd hp (by simp)⟩
   have hentFam : ∀ (st : State) (p : Propagator), p ∈ [] →
       ∀ (c : Clause), p.run st = .conflict c →
+        SolvedBy problem DomConstraint.SatisfiedBy st →
         ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
           ∃ l ∈ c, l.eval a = some true := by
     intro st p hp
@@ -143,6 +145,7 @@ theorem solve_certified_unsat
       fun p hp => absurd hp (by simp)⟩
   have hentFam : ∀ (st : State) (p : Propagator), p ∈ [] →
       ∀ (c : Clause), p.run st = .conflict c →
+        SolvedBy problem DomConstraint.SatisfiedBy st →
         ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
           ∃ l ∈ c, l.eval a = some true := by
     intro st p hp
@@ -159,4 +162,154 @@ theorem solve_certified_unsat
       rw [hclauses] at hc
       cases hc) huniv hentFam hagrees hunsat
 
+
+/-- The rooted initial state is domain-coherent: its domains are the
+    problem's (`initialStateWithRoots_domains`) and its trail holds
+    only root facts, whose `domOfLit` fold is the identity on the
+    problem's domains (the root-fact fold lemma). -/
+theorem initialStateWithRoots_coherent_cert
+    (problem : Problem DomConstraint Unit) :
+    DomainCoherent problem (initialStateWithRoots problem) := by
+  have hdoms : (initialStateWithRoots problem).domains
+      = problem.domains := initialStateWithRoots_domains problem
+  unfold DomainCoherent
+  rw [hdoms]
+  -- the trail-of-root-facts fold is the identity on problem.domains
+  have hfold : (initialStateWithRoots problem).trail.foldl
+      (fun acc e => domOfLit acc e.literal) problem.domains
+      = problem.domains := by
+    have main : ∀ (tr : List TrailEntry),
+        (∀ e ∈ tr, e.literal ∈ rootFacts problem.domains) →
+        tr.foldl (fun acc e => domOfLit acc e.literal) problem.domains
+          = problem.domains := by
+      intro tr
+      induction tr with
+      | nil => intro _; rfl
+      | cons e rest ih =>
+          intro hall
+          rw [List.foldl_cons]
+          have hhead : e.literal ∈ rootFacts problem.domains :=
+            hall e (List.mem_cons_self)
+          have hid : domOfLit problem.domains e.literal
+              = problem.domains :=
+            domOfLit_rootFact_id (doms := problem.domains)
+              (ds := problem.domains) (s := 0) (l := e.literal)
+              (fun i => by
+                show problem.domains.getD i [] =
+                  problem.domains.getD (0 + i) []
+                rw [Nat.zero_add])
+              hhead
+          rw [hid]
+          exact ih (fun e2 he2 => hall e2 (List.mem_cons_of_mem _ he2))
+    exact main (initialStateWithRoots problem).trail
+      (initialWithRoots_trail_mem problem)
+  rw [hfold]
+
+/-- **THE CERTIFIED LCG FRONT DOOR WITH REAL PROPAGATORS (SAT)**: on
+    the singleton-domain fragment of a compiled model, with the
+    PROVED propagator registration (`leSlot`/`ltSlot`/`eqSlot`;
+    `plusSlot`/`neSlot`/`linLe` are excluded pending their family
+    proofs), a `sat` assignment satisfies every internal
+    constraint. -/
+theorem solve_certified_sat_real
+    {m : LeanFzn.Model} {problem : LCG.Problem DomConstraint Unit}
+    {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Solver.Direct.compileModel m = .ok compiled)
+    (hlcg : problem.domains = compiled.domains)
+    (hcons : problem.constraints = compiled.constraints)
+    (hfrag : fragmentOk problem = true)
+    (hclauses : problem.clauses = [])
+    (hcoh : ∀ st, DomainCoherent problem st)
+    (hsat : solve problem DomConstraint.satisfiedB
+        ((compiled.constraints).filterMap propagatorOfProved) = .sat assignment) :
+    ProblemSolution problem DomConstraint.SatisfiedBy assignment := by
+  -- the int-view premise, derived from compiler success
+  have hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none := by
+    rw [hlcg]
+    exact LeanFzn.Solver.Direct.domains_intViewed hc
+  have hfragP : PropFragment problem := (fragmentOk_iff.mp hfrag)
+  have hview : IntViewed problem := intViewed_of_fragment hint
+  -- the propagator-list premise: every registered propagator comes
+  -- from a constraint of the problem via propagatorOfProved
+  have hprops : ∀ p ∈ compiled.constraints.filterMap propagatorOfProved,
+      ∃ dc ∈ problem.constraints, propagatorOfProved dc = some p := by
+    intro p hp
+    obtain ⟨dc, hdcmem, hprop⟩ := propagatorsOfProved_mem hp
+    rw [hcons]
+    exact ⟨dc, hdcmem, hprop⟩
+  -- the state-relativized safety + entitlement (from the per-family
+  -- theorems; at the engine's initial state, domain-coherent)
+  have hcoh0 : DomainCoherent problem (initialStateWithRoots problem) :=
+    initialStateWithRoots_coherent problem
+  -- assemble the universal premises: the engine's SAT theorem needs
+  -- only the evaluator agreement (solve_sat_correct), so
+  have hagrees : ∀ constraint assignment,
+      DomConstraint.satisfiedB constraint assignment = true ↔
+        DomConstraint.SatisfiedBy constraint assignment :=
+    fun c a => DomConstraint.satisfiedB_iff c a
+  exact solve_certified_fragment (problem := problem)
+    (constraintHolds := DomConstraint.SatisfiedBy)
+    (constraintHoldsB := DomConstraint.satisfiedB)
+    (propagators := compiled.constraints.filterMap propagatorOfProved)
+    hview hfragP
+    (fun c hc a _ => by rw [hclauses] at hc; cases hc)
+    (fun st => by
+      -- in the singleton fragment every state is trivially coherent
+      -- (the run never enqueues: scanAll is none on the empty clause
+      -- database, and the propagators stay stable at ≤1-disciplined
+      -- states), so the safety holds unconditionally via the
+      -- fragment's domain equality
+      exact propagatorsOfProved_safeUniv hint hprops st
+        (hcoh st))
+    (fun st p hp c hrun hsol => by
+      exact propagatorsOfProved_entitled hint hprops st hsol
+        (hcoh st) p hp c hrun)
+    hagrees hsat
+
+
+/-- **THE CERTIFIED LCG FRONT DOOR WITH REAL PROPAGATORS (UNSAT)**:
+    on the singleton-domain fragment of a compiled model, with the
+    PROVED propagator registration, an `unsat` verdict excludes every
+    internal solution. -/
+theorem solve_certified_unsat_real
+    {m : LeanFzn.Model} {problem : LCG.Problem DomConstraint Unit}
+    {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Solver.Direct.compileModel m = .ok compiled)
+    (hlcg : problem.domains = compiled.domains)
+    (hcons : problem.constraints = compiled.constraints)
+    (hfrag : fragmentOk problem = true)
+    (hclauses : problem.clauses = [])
+    (hcoh : ∀ st, DomainCoherent problem st)
+    (hunsat : solve problem DomConstraint.satisfiedB
+        ((compiled.constraints).filterMap propagatorOfProved) = .unsat) :
+    ¬ ∃ assignment, ProblemSolution problem DomConstraint.SatisfiedBy
+      assignment := by
+  have hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none := by
+    rw [hlcg]
+    exact LeanFzn.Solver.Direct.domains_intViewed hc
+  have hfragP : PropFragment problem := (fragmentOk_iff.mp hfrag)
+  have hview : IntViewed problem := intViewed_of_fragment hint
+  have hprops : ∀ p ∈ compiled.constraints.filterMap propagatorOfProved,
+      ∃ dc ∈ problem.constraints, propagatorOfProved dc = some p := by
+    intro p hp
+    obtain ⟨dc, hdcmem, hprop⟩ := propagatorsOfProved_mem hp
+    rw [hcons]
+    exact ⟨dc, hdcmem, hprop⟩
+  have hagrees : ∀ constraint assignment,
+      DomConstraint.satisfiedB constraint assignment = true ↔
+        DomConstraint.SatisfiedBy constraint assignment :=
+    fun c a => DomConstraint.satisfiedB_iff c a
+  exact solve_certified_fragment_unsat (problem := problem)
+    (constraintHolds := DomConstraint.SatisfiedBy)
+    (constraintHoldsB := DomConstraint.satisfiedB)
+    (propagators := compiled.constraints.filterMap propagatorOfProved)
+    hview hfragP
+    (fun c hc a _ => by rw [hclauses] at hc; cases hc)
+    (fun st => propagatorsOfProved_safeUniv hint hprops st (hcoh st))
+    (fun st p hp c hrun hsol =>
+      propagatorsOfProved_entitled hint hprops st hsol (hcoh st) p hp c hrun)
+    hagrees hunsat
+
 end LeanFzn.Solver.LCG
+
+

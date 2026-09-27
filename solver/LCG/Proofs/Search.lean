@@ -492,6 +492,7 @@ theorem unsat_root_conflict_constructive
     (hisolvable : ∃ b, ProblemSolution problem constraintHolds b)
     (hentFam : ∀ (st : State) (p : Propagator), p ∈ props → ∀ (c : Clause),
       p.run st = .conflict c →
+        SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
           ∃ l ∈ c, l.eval a = some true)
     (hrep : (propagateLoop
@@ -715,6 +716,7 @@ theorem solve_unsat_correct
     (huniv : PropSafeUniv problem constraintHolds propagators)
     (hentFam : ∀ (st : State) (p : Propagator), p ∈ propagators →
       ∀ (c : Clause), p.run st = .conflict c →
+        SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
           ∃ l ∈ c, l.eval a = some true)
     (hagrees : ∀ constraint assignment,
@@ -845,6 +847,7 @@ theorem solve_certified_fragment
     (huniv : PropSafeUniv problem constraintHolds propagators)
     (hentFam : ∀ (st : State) (p : Propagator), p ∈ propagators →
       ∀ (c : Clause), p.run st = .conflict c →
+        SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
           ∃ l ∈ c, l.eval a = some true)
     (hagrees : ∀ constraint assignment,
@@ -872,6 +875,7 @@ theorem solve_certified_fragment_unsat
     (huniv : PropSafeUniv problem constraintHolds propagators)
     (hentFam : ∀ (st : State) (p : Propagator), p ∈ propagators →
       ∀ (c : Clause), p.run st = .conflict c →
+        SolvedBy problem constraintHolds st →
         ∀ a, ProblemSolution problem constraintHolds a →
           ∃ l ∈ c, l.eval a = some true)
     (hagrees : ∀ constraint assignment,
