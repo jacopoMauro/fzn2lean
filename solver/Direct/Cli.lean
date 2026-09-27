@@ -72,16 +72,11 @@ def solveCertified (m : Model) : CliResult :=
           "the model's search space is not a singleton-domain fragment \
            (the first certified LCG fragment covers decided models only)"
 
-/-- The int-view premise of the LCG fragment (the fragment's singleton
-    domains carry int/bool values — derived from the domain check;
-    the remaining shapes are int/bool by the compiler's slot
-    extraction, so we state the premise and discharge it at the
-    call site). -/
+/-- **The source-level SAT theorem of the certified command**: a
+    store returned by `solveCertified` satisfies the model (under
+    well-formedness — the CLI checks it before calling). -/
 theorem solveCertified_sat_correct {m : Model}
     (hwf : WellFormed fullSig m)
-    (hint : ∀ problem : CompiledProblem DomConstraint,
-      compileModel m = .ok problem →
-      ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none)
     (hres : solveCertified m = .sat store) :
     Satisfies fullSig fullInterp m store := by
   unfold solveCertified at hres
@@ -100,11 +95,11 @@ theorem solveCertified_sat_correct {m : Model}
               rw [hsolve] at hres
               simp only [CliResult.sat.injEq] at hres
               subst hres
-              -- the LCG-level theorem
+              -- the LCG-level theorem (every premise derived)
               have hinternal := LCG.solve_certified_sat
-                (problem := toLCG problem) (hfrag := hfrag)
-                (hint := hint problem hc) (hclauses := rfl)
-                (by rw [hsolve])
+                (m := m) (problem := toLCG problem) (compiled := problem)
+                (hc := hc) (hlcg := rfl) (hfrag := hfrag)
+                (hclauses := rfl) (by rw [hsolve])
               obtain ⟨hfits, hcholds⟩ := hinternal
               -- the field agreement + acceptance
               have hacc : accepts problem a = true :=
@@ -141,9 +136,6 @@ theorem solveCertified_sat_correct {m : Model}
     store. -/
 theorem solveCertified_unsat_correct {m : Model}
     (hwf : WellFormed fullSig m)
-    (hint : ∀ problem : CompiledProblem DomConstraint,
-      compileModel m = .ok problem →
-      ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none)
     (hres : solveCertified m = .unsat) :
     ¬ ∃ store, Satisfies fullSig fullInterp m store ∧
       ParamHonest m store := by
@@ -161,11 +153,11 @@ theorem solveCertified_unsat_correct {m : Model}
               DomConstraint.satisfiedB [] with
           | sat a => rw [hsolve] at hres; simp at hres
           | unsat =>
-              -- the LCG-level exclusion
+              -- the LCG-level exclusion (every premise derived)
               have hnone := LCG.solve_certified_unsat
-                (problem := toLCG problem) (hfrag := hfrag)
-                (hint := hint problem hc) (hclauses := rfl)
-                (by rw [hsolve])
+                (m := m) (problem := toLCG problem) (compiled := problem)
+                (hc := hc) (hlcg := rfl) (hfrag := hfrag)
+                (hclauses := rfl) (by rw [hsolve])
               rintro ⟨store, ⟨_, hcons, hvarsS, _⟩, hparam⟩
               -- adapt the var-condition to the gate's basic-only shape
               have hvars : ∀ d ∈ m.variables, match d with
@@ -204,13 +196,15 @@ theorem solveCertified_unsat_correct {m : Model}
 
 /-- Emit a solution text for the certified path's satisfying store
     (the FlatZinc convention, ending with the `----------`
-    separator). -/
+    separator). Every declared variable must read a value — the
+    SAT theorem guarantees it; a `none` read is a loud failure. -/
 def emitCertifiedSolution (m : Model) (store : Store) : String :=
   let entries : List (String × Value) :=
     m.variables.filterMap fun d =>
       match store (VarDeclItem.name d) with
       | some v => some ((VarDeclItem.name d).name, v)
-      | none => none
+      | none => panic!
+        s!"internal error: certified store has no value for            '{(VarDeclItem.name d).name}'"
   LeanFzn.Solver.emitSolution entries
 
 end LeanFzn.Solver.Direct

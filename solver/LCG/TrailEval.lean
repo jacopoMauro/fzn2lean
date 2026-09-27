@@ -14,11 +14,6 @@ Purpose:
   truth and falsity for the literals that appear in reason and conflict
   clauses.
 
-  Order-aware falsity (`litOrderFalse`) additionally recognizes when the
-  current bounds semantically falsify a literal whose negating literal was
-  never enqueued; `orderFalseUpgrade` then returns a weaker literal that
-  is exactly falsified by the trail, keeping conflict clauses falsified
-  and resolvable by exact matching.
 
 Dependencies:
   - solver.LCG.Types: trail entries, literals, conflict analyses.
@@ -148,80 +143,6 @@ def hiWitness (st : State) (s : Nat) : Option TrailEntry :=
       match e.literal.atom with
       | .intLe s' k => decide (s' = s) && e.literal.positive && decide (k = hi)
       | _ => false
-
-/-! ## Order-aware truth and falsity -/
-
-/-- Semantic falsity of a literal under trail bounds (without requiring
-    the negating literal to be enqueued). -/
-def State.litOrderFalse (st : State) (l : Literal) : Bool :=
-  match l.atom, l.positive with
-  | .boolEq s b, true =>
-      match st.boolValue s with
-      | some v => decide (v != b)
-      | none => false
-  | .boolEq s b, false =>
-      match st.boolValue s with
-      | some v => decide (v == b)
-      | none => false
-  | .intLe s k, true =>
-      match st.trailLo s with
-      | some lo => decide (lo > k)
-      | none => false
-  | .intLe s k, false =>
-      match st.trailHi s with
-      | some hi => decide (hi ≤ k)
-      | none => false
-
-/-- Three-valued trail status of a literal: satisfied (some trail fact or
-    implied bound makes it true), falsified (some trail fact or implied
-    bound makes it false), or open. -/
-inductive LitStatus where
-  | sat | fals | open
-  deriving Repr
-
-def State.litStatus (st : State) (l : Literal) : LitStatus :=
-  if st.litOnTrail l then .sat
-  else if st.negOnTrail l then .fals
-  else match l.atom, l.positive with
-    | .intLe s k, true =>
-        match st.trailHi s with
-        | some h => if h ≤ k then .sat else .fals
-        | none => .open
-    | .intLe s k, false =>
-        match st.trailLo s with
-        | some lo => if k < lo then .sat else .fals
-        | none => .open
-    | .boolEq s b, true =>
-        match st.boolValue s with
-        | some v => if v == b then .sat else .fals
-        | none => .open
-    | .boolEq s b, false =>
-        match st.boolValue s with
-        | some v => if v != b then .sat else .fals
-        | none => .open
-
-/-- A weaker literal that the trail falsifies exactly: the negation of the
-    trail entry that established the bound or Boolean value semantically
-    falsifying `l`. Replacing `l` by this literal keeps a falsified clause
-    falsified and resolvable by exact matching. -/
-def State.orderFalseUpgrade (st : State) (l0 : Literal) : Option Literal :=
-  let l := l0.norm
-  if !(st.litOrderFalse l) then none
-  else
-    match l.atom with
-    | .intLe s _ =>
-        if l.positive then
-          match st.trailLo s with
-          | some lo => some (posLe s (lo - 1))
-          | none => none
-        else
-          match st.trailHi s with
-          | some hi => some (negLe s hi)
-          | none => none
-    | .boolEq s _ =>
-        match st.boolEntry s with
-        | some e => some e.literal.negate.norm
-        | none => none
 
 /-! ## First-UIP conflict analysis
 

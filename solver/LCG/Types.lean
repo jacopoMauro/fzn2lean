@@ -71,6 +71,12 @@ structure State where
   conflict : Option Clause
   deriving Repr
 
+/-! The `queue` field is reserved for the two-watched-literal
+    propagation schedule (L0.4's wake-up queue). The current engine
+    sweeps the whole propagator list each round and never reads it;
+    it stays a (write-only) placeholder so the future scheduler can
+    drop in without a state-shape change. -/
+
 /-- A compiled problem plus its initial SAT clauses. Constraint-specific
     propagators are registered separately so algorithms and proofs can be
     layered independently. -/

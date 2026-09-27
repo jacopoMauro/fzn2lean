@@ -1,5 +1,6 @@
 import solver.Solver
 import solver.Direct
+import solver.Direct.Cli
 
 /-!
 # Solver test executable (PLAN.md 6.1, 6.2, 6.3, 6.5, 6.7)
@@ -741,6 +742,86 @@ def main : IO UInt32 := do
           (model := dunsat) wunsat hunsolve
       st ← st.check "direct theorem: solve_unsat_correct applies" (true)
   | _ => st ← st.check "direct theorem: solve_unsat_correct applies" (false)
+
+  -- ## Phase 3: the CERTIFIED LCG command path (nonvacuous tests)
+
+  -- the executable command: SAT on the singleton fragment
+  let csat := parseOrPanic
+    "var {3}: x;\nvar {2}: y;\nconstraint int_plus(x, y, 5);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified csat with
+  | .sat store =>
+      st ← st.check "certified: singleton SAT returns a store" (true)
+      -- the store's reads are in the declared domains
+      st ← st.check "certified: x reads 3"
+        (store (Ident.mk "x") == some (Value.int 3))
+      st ← st.check "certified: y reads 2"
+        (store (Ident.mk "y") == some (Value.int 2))
+      -- the emitted text round-trips through the reference checker
+      st ← st.check "certified: emitted text is checker-accepted"
+        (checkModelSolution csat
+          (LeanFzn.Solver.Direct.emitCertifiedSolution csat store)
+          == .accepted)
+  | _ => st ← st.check "certified: singleton SAT returns a store" (false)
+
+  -- the executable command: UNSAT on the singleton fragment
+  let cunsat := parseOrPanic
+    "var {2}: x;\nvar {2}: y;\nconstraint int_plus(x, y, 10);\nsolve satisfy;"
+  st ← st.check "certified: singleton UNSAT"
+    (match LeanFzn.Solver.Direct.solveCertified cunsat with
+     | .unsat => true
+     | _ => false)
+
+  -- outside the fragment (multi-value domains): unsupported
+  let cfrag := parseOrPanic
+    "var 1..3: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 5);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified cfrag with
+  | .unsupported r =>
+      st ← st.check "certified: multi-value domain refused"
+        (r.contains "singleton-domain")
+  | _ => st ← st.check "certified: multi-value domain refused" (false)
+
+  -- compile failure: unsupported
+  let cbad := parseOrPanic
+    "var int: x;\nconstraint int_eq(x, 5);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified cbad with
+  | .unsupported r =>
+      st ← st.check "certified: unbounded var refused"
+        (r.contains "unbounded") 
+  | _ => st ← st.check "certified: unbounded var refused" (false)
+
+  -- THEOREM-LEVEL nonvacuity: solveCertified_sat_correct applies to
+  -- a real command run (the composed chain, kernel-checked)
+  have wcsat : WellFormed fullSig csat :=
+    (LeanFzn.Check.wellFormedFastB_iff csat).mp (by native_decide)
+  match hcres : LeanFzn.Solver.Direct.solveCertified csat with
+  | .sat cstore =>
+      have _hcert : Satisfies fullSig fullInterp csat cstore :=
+        LeanFzn.Solver.Direct.solveCertified_sat_correct
+          (m := csat) (store := cstore) wcsat hcres
+      _ ← st.check "certified theorem: solveCertified_sat_correct applies"
+        true
+      pure ()
+  | _ =>
+      _ ← st.check "certified theorem: solveCertified_sat_correct applies"
+        false
+      pure ()
+
+  -- THEOREM-LEVEL nonvacuity: solveCertified_unsat_correct applies
+  have wcunsat : WellFormed fullSig cunsat :=
+    (LeanFzn.Check.wellFormedFastB_iff cunsat).mp (by native_decide)
+  match hcures : LeanFzn.Solver.Direct.solveCertified cunsat with
+  | .unsat =>
+      have _hcu : ¬ ∃ store, Satisfies fullSig fullInterp cunsat store ∧
+          LeanFzn.Solver.Direct.ParamHonest cunsat store :=
+        LeanFzn.Solver.Direct.solveCertified_unsat_correct
+          (m := cunsat) wcunsat hcures
+      _ ← st.check "certified theorem: solveCertified_unsat_correct applies"
+        true
+      pure ()
+  | _ =>
+      _ ← st.check "certified theorem: solveCertified_unsat_correct applies"
+        false
+      pure ()
 
   -- the fallback shape (parameter argument) also solves + certifies
   let dpar := parseOrPanic

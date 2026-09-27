@@ -852,6 +852,10 @@ theorem solve_certified_fragment
         constraintHolds constraint assignment)
     (hsat : solve problem constraintHoldsB propagators = .sat assignment) :
     ProblemSolution problem constraintHolds assignment := by
+  -- the SAT direction needs only the evaluator agreement (the leaf
+  -- test establishes Fits + every constraint directly); the fragment,
+  -- database, and safety premises are the UNSAT direction's inputs,
+  -- kept here so the two front-door theorems share one shape
   exact solve_sat_correct (problem := problem)
     (constraintHolds := constraintHolds) hagrees hsat
 

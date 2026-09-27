@@ -33,6 +33,7 @@ DAG:
 -/
 
 import solver.Direct.Proofs.Compile
+import solver.LCG.Operations
 
 namespace LeanFzn.Solver.Direct
 
@@ -272,52 +273,6 @@ theorem holds_int_plus_lit_E {m : Model}
 
 /-! ## The fallback-shape source inversion (coverage direction) -/
 
-/-- `int_plus(x, y, k)` with a literal third argument: the store's
-    first two values are integers with `p + q = k` (the
-    `linEq [1,1]` coverage premise). -/
-theorem holds_int_plus_lit_inv {store : Store} {c : ConstraintItem}
-    {x y : Ident} {k : Int}
-    (hname : c.name.name = "int_plus")
-    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y),
-        Expr.basic (.lit (.int k))])
-    (h : c.Holds fullInterp store) :
-    ∃ p q, store x = some (.int p) ∧ store y = some (.int q) ∧
-      p + q = k := by
-  obtain ⟨args, hmap, hinterp⟩ := h
-  rw [hargs] at hmap
-  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval,
-    BasicLiteral.denote] at hmap
-  cases hsx : store x with
-  | none => rw [hsx] at hmap; simp at hmap
-  | some vx =>
-      rw [hsx] at hmap
-      cases hsy : store y with
-      | none => rw [hsy] at hmap; simp at hmap
-      | some vy =>
-          rw [hsy] at hmap
-          have hargsv : args = [vx, vy, .int k] := by
-            simpa using hmap.symm
-          subst hargsv
-          have h1 : fullInterp (Ident.mk "int_plus") [vx, vy, .int k] :=
-            interp_of_hname hname hinterp
-          rw [fullInterp_std (by decide :
-            ¬ "int_plus" ∈ globalsNames)] at h1
-          have hmatch : (match [vx, vy, .int k] with
-            | [Value.int a, Value.int b, Value.int w] => a + b = w
-            | _ => False) := h1
-          cases vx with
-          | int p =>
-              cases vy with
-              | int q =>
-                  have hk : p + q = k := by simpa using hmatch
-                  exact ⟨p, q, rfl, rfl, hk⟩
-              | bool w => exact absurd hmatch (by simp)
-              | setOfInt w => exact absurd hmatch (by simp)
-              | array w => exact absurd hmatch (by simp)
-          | bool w => exact absurd hmatch (by simp)
-          | setOfInt w => exact absurd hmatch (by simp)
-          | array w => exact absurd hmatch (by simp)
-
 /-- Generic three-argument evaluation inversion: the first two
     arguments are the given identifiers, the third arbitrary. -/
 theorem eval_three_inv {store : Store}
@@ -509,77 +464,6 @@ theorem two_of_bang {c : ConstraintItem}
 
 /-! ## The `argOf` inversions (the new Except-valued accessor) -/
 
-/-- If `argOf c k` succeeds with an identifier, the k-th argument is
-    that identifier's basic expression. -/
-theorem argOf_ident_inv {c : ConstraintItem} {k : Nat} {x : Ident}
-    (h : argOf c k = .ok (.ident x)) :
-    c.args[k]! = .basic (.ident x) := by
-  unfold argOf at h
-  cases he : c.args[k]! with
-  | basic b =>
-      rw [he] at h
-      cases hb : b with
-      | ident x2 =>
-          have h2 : (Except.ok (BasicExpr.ident x2) :
-              Except String BasicExpr) = .ok (.ident x) := by
-            rw [← hb]; exact h
-          have hred : BasicExpr.ident x2 = BasicExpr.ident x :=
-            (Except.ok.inj h2)
-          injection hred with hx
-          subst hx
-          rfl
-      | lit l =>
-          exfalso
-          have h2 : (Except.ok (BasicExpr.lit l) :
-              Except String BasicExpr) = .ok (.ident x) := by
-            rw [← hb]; exact h
-          cases l <;> exact absurd h2 (by simp)
-  | array es =>
-      exfalso
-      rw [he] at h
-      exact absurd h (by simp)
-
-/-- If `argOf c k` succeeds with an int literal, the k-th argument is
-    that literal's basic expression or a parameter identifier. -/
-theorem argOf_lit_int_inv {c : ConstraintItem} {k : Nat} {v : Int}
-    (h : argOf c k = .ok (.lit (.int v))) :
-    c.args[k]! = .basic (.lit (.int v)) ∨ ∃ x, c.args[k]! = .basic (.ident x) := by
-  unfold argOf at h
-  cases he : c.args[k]! with
-  | basic b =>
-      rw [he] at h
-      cases hb : b with
-      | ident x2 => exact Or.inr ⟨x2, rfl⟩
-      | lit l =>
-          cases l with
-          | int i2 =>
-              have h2 : (Except.ok (BasicExpr.lit (BasicLiteral.int i2)) :
-                  Except String BasicExpr) = .ok (.lit (.int v)) := by
-                rw [← hb]; exact h
-              have h3 : BasicExpr.lit (BasicLiteral.int i2)
-                  = BasicExpr.lit (.int v) := (Except.ok.inj h2)
-              injection h3 with h4
-              injection h4 with h5
-              subst h5
-              exact Or.inl rfl
-          | bool w =>
-              exfalso
-              have h2 : (Except.ok (BasicExpr.lit (BasicLiteral.bool w)) :
-                  Except String BasicExpr) = .ok (.lit (.int v)) := by
-                rw [← hb]; exact h
-              exact absurd h2 (by simp)
-          | set w =>
-              exfalso
-              have h2 : (Except.ok (BasicExpr.lit (BasicLiteral.set w)) :
-                  Except String BasicExpr) = .ok (.lit (.int v)) := by
-                rw [← hb]; exact h
-              exact absurd h2 (by simp)
-  | array es =>
-      exfalso
-      rw [he] at h
-      exact absurd h (by simp)
-
-
 /-! ## The signature lemmas (int-binary and int_plus) -/
 
 /-- The declared-signature lookup is none for any name in a model
@@ -643,7 +527,7 @@ theorem int_reads_of_mem_int_binary {m : Model}
   intro x i hxarg hxi
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      some [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int))] :=
@@ -694,7 +578,7 @@ theorem int_reads_of_mem_int_plus {m : Model}
   intro x i hxarg hxi
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      some [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
@@ -740,43 +624,6 @@ theorem int_reads_of_mem_int_plus {m : Model}
 
 
 /-! ## The master SAT linker (per-constraint, both shape families) -/
-
-/-- The int-reads dispatch on an extracted constraint's name: every
-    name of the 21 extracted shapes that takes identifier arguments in
-    slot positions either is an int-binary/int_plus name (the typing
-    chain) or never consults the reads premise (its slot arms force
-    the reads through the satisfaction premise itself). This helper
-    covers the names that CAN appear with identifier arguments. -/
-theorem int_reads_of_extracted {m : Model}
-    {slots : List (String × List Value)} {a : List Value}
-    {c : ConstraintItem}
-    (hwf : WellFormed fullSig m)
-    (hslot : slotsChecked m = .ok slots)
-    (hc : c ∈ m.constraints)
-    (hpred : m.predicates = [])
-    (hmem : a ∈ allAssigns (slots.map Prod.snd))
-    (hn : c.name.name = "int_eq" ∨ c.name.name = "int_ne" ∨
-      c.name.name = "int_le" ∨ c.name.name = "int_lt" ∨
-      c.name.name = "int_ge" ∨ c.name.name = "int_gt" ∨
-      c.name.name = "int_plus")
-    (x : Ident) (i : Nat)
-    (hxarg : Expr.basic (.ident x) ∈ c.args)
-    (hxi : nameIndex (slots.map Prod.fst) x.name = some i) :
-    ∃ p, a[i]! = Value.int p := by
-  rcases hn with h | h | h | h | h | h | h
-  · exact int_reads_of_mem_int_binary hwf hslot hc hpred
-      (Or.inl h) hmem x i hxarg hxi
-  · exact int_reads_of_mem_int_binary hwf hslot hc hpred
-      (Or.inr (Or.inl h)) hmem x i hxarg hxi
-  · exact int_reads_of_mem_int_binary hwf hslot hc hpred
-      (Or.inr (Or.inr (Or.inl h))) hmem x i hxarg hxi
-  · exact int_reads_of_mem_int_binary hwf hslot hc hpred
-      (Or.inr (Or.inr (Or.inr (Or.inl h)))) hmem x i hxarg hxi
-  · exact int_reads_of_mem_int_binary hwf hslot hc hpred
-      (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl h))))) hmem x i hxarg hxi
-  · exact int_reads_of_mem_int_binary hwf hslot hc hpred
-      (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr h))))) hmem x i hxarg hxi
-  · exact int_reads_of_mem_int_plus hwf hslot hc hpred h hmem x i hxarg hxi
 
 /-- **THE MASTER SAT LINKER (extracted arm)**: a model constraint that
     compiled through `extractConstraint` into a `DomConstraint`
@@ -1486,8 +1333,6 @@ theorem compile_sat_link_fallback {m : Model}
     {a : List Value} {c : ConstraintItem} {dc : DomConstraint}
     (hwf : WellFormed fullSig m)
     (hslot : slotsChecked m = .ok slots)
-    (hc : c ∈ m.constraints)
-    (hpred : m.predicates = [])
     (hmem : a ∈ allAssigns (slots.map Prod.snd))
     (hcc : compileConstraint (parEnv m) (slots.map Prod.fst) c = .ok dc)
     (hnone : extractConstraint (slots.map Prod.fst) c = none)
@@ -1648,7 +1493,7 @@ theorem compile_sat_link {m : Model}
       subst hcdc
       exact compile_sat_link_extracted hwf hslot hc hpred hmem hex hsat
   | none =>
-      exact compile_sat_link_fallback hwf hslot hc hpred hmem hcc hex hsat
+      exact compile_sat_link_fallback hwf hslot hmem hcc hex hsat
 
 /-- **THE FORWARD COMPILE INVERSION**: every model constraint of a
     successfully compiled constraint list has its own compiled
@@ -2879,6 +2724,65 @@ theorem compile_covers {m : Model}
           rw [h2]
         rw [← hxn] at hxi
         exact absurd hxi (fun hex => hx ⟨i, hex⟩)
+
+/-- Every value of a successfully compiled problem's domains has an
+    integer view: the compiler's slot extraction only produces
+    int/bool values (`varDomain` yields only `.intDom`/`.boolDom`,
+    whose `values` are `.int`/`.bool`), and `assemble` copies the
+    slots' value lists verbatim. -/
+theorem domains_intViewed {m : Model}
+    {problem : CompiledProblem DomConstraint}
+    (hc : compileModel m = .ok problem) :
+    ∀ d ∈ problem.domains, ∀ v ∈ d, LeanFzn.Value.intView v ≠ none := by
+  obtain ⟨_, slots, dcs, hslot, hcomp, hasm⟩ := compileModel_ok_inv hc
+  -- the domains are the slots' value lists
+  have hdoms : problem.domains = slots.map Prod.snd := by
+    show problem.domains = slots.map Prod.snd
+    rw [hasm]
+    rfl
+  rw [hdoms]
+  intro d hd v hv
+  -- the slot pair is a member of the mapped list
+  obtain ⟨p, hpmem, hpget⟩ := List.mem_map.mp hd
+  -- the slot at some position comes from a declared variable
+  obtain ⟨d2, hd2mem, hds⟩ := declSlots_mem m.variables slots
+    (declSlots_of_slotsChecked hslot) p hpmem
+  -- the variable is basic and initializer-free (the gate)
+  obtain ⟨ty, n, anns, hshape⟩ := compileModel_vars_basic hc d2 hd2mem
+  -- the slot pair is (n.name, dom.values) with varDomain ty = .ok dom
+  obtain ⟨dom, hdom, hpair⟩ := declSlot_basic_inv
+    (p := p) (by rw [← hshape]; exact hds)
+  -- v ∈ dom.values (via the pair equality)
+  have hvdom : v ∈ dom.values := by
+    rw [← hpget, hpair] at hv
+    exact hv
+  -- dom is intDom or boolDom; values are int/bool
+  cases hdom2 : dom with
+  | intDom xs =>
+      -- VarDomain.values (.intDom xs) = xs.map Value.int (by defn)
+      have hvals : dom.values = xs.map LeanFzn.Value.int := by
+        show dom.values = xs.map LeanFzn.Value.int
+        rw [hdom2]
+        rfl
+      rw [hvals] at hvdom
+      obtain ⟨x, hxmem, hxv⟩ := List.mem_map.mp hvdom
+      -- hxv : Value.int x = v; the view of an int is some x
+      intro hcon
+      rw [← hxv] at hcon
+      exact absurd hcon (by simp [LeanFzn.Value.intView])
+  | boolDom =>
+      have hvals : dom.values = [LeanFzn.Value.bool false,
+        LeanFzn.Value.bool true] := by
+        show dom.values = _
+        rw [hdom2]
+        rfl
+      rw [hvals] at hvdom
+      rcases List.mem_cons.mp hvdom with rfl | htl
+      · intro hcon; exact absurd hcon (by simp [LeanFzn.Value.intView])
+      · rcases List.mem_cons.mp htl with rfl | hnil
+        · intro hcon
+          exact absurd hcon (by simp [LeanFzn.Value.intView])
+        · exact absurd hnil (by simp)
 
 end LeanFzn.Solver.Direct
 

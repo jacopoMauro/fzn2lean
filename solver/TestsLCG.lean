@@ -107,6 +107,70 @@ def main : IO Unit := do
       | .unsat => !ref
       | _ => true
     st ← st.check s!"{name} unsat-implies-ref-false" v2
+  -- ## Regression tests for the propLinLe/propNe soundness fixes
+  -- (2026-09-27 audit: the -1-arm used the max instead of the min
+  -- sum, the sweep dropped pre-suffix terms, and propNe emitted
+  -- non-integer-valid nogoods while missing equal-singleton conflicts)
+
+  -- linLe with a NEGATIVE coefficient, 2 terms: -x0 + x1 <= 0 means
+  -- x0 >= x1; x0={2}, x1={2,3} is SAT at (2,2)
+  let nprob1 : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [[vi 2], [vi 2, vi 3]],
+      constraints := [DomConstraint.linLe [-1, 1] [0, 1] 0],
+      objective := (), clauses := [] }
+  match solveDom 10_000 nprob1 (propagatorsOf nprob1.constraints) with
+  | .sat a =>
+      st ← st.check "linle-neg-2term sat (regression: max/min bug)"
+        (satOk nprob1.domains nprob1.constraints a)
+  | .unsat =>
+      st ← st.check "linle-neg-2term sat (regression: max/min bug)" (false)
+  | .unknown => st ← st.check "linle-neg-2term sat (regression: max/min bug)" (true)
+
+  -- linLe with a negative coefficient, 3 terms (regression: the sweep
+  -- dropped pre-suffix terms): -x0+x1+x2 <= 0, x0∈[2..9], x1={1},
+  -- x2={1} is SAT at (2,1,1)
+  let nprob2 : LCG.Problem DomConstraint Unit :=
+    { names := [], domains :=
+        [[vi 2, vi 3, vi 4, vi 5, vi 6, vi 7, vi 8, vi 9], [vi 1], [vi 1]],
+      constraints := [DomConstraint.linLe [-1, 1, 1] [0, 1, 2] 0],
+      objective := (), clauses := [] }
+  match solveDom 10_000 nprob2 (propagatorsOf nprob2.constraints) with
+  | .sat a =>
+      st ← st.check "linle-neg-3term sat (regression: suffix-only bug)"
+        (satOk nprob2.domains nprob2.constraints a)
+  | .unsat =>
+      st ← st.check "linle-neg-3term sat (regression: suffix-only bug)" (false)
+  | .unknown => st ← st.check "linle-neg-3term sat (regression: suffix-only bug)" (true)
+
+  -- the same 3-term shape but genuinely UNSAT: -x0+x1+x2 <= -1 with
+  -- x0={2}, x1={1}, x2={1} gives 0 > -1
+  let nprob3 : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [[vi 2], [vi 1], [vi 1]],
+      constraints := [DomConstraint.linLe [-1, 1, 1] [0, 1, 2] (-1 : Int)],
+      objective := (), clauses := [] }
+  st ← st.check "linle-neg-3term unsat (true conflict)"
+    (match solveDom 10_000 nprob3 (propagatorsOf nprob3.constraints) with
+     | .unsat => !bruteSat nprob3.domains nprob3.constraints
+     | _ => false)
+
+  -- propNe on EQUAL singletons reports the conflict (regression: was
+  -- .stable, and the old nogoods were not integer-valid)
+  let stne : State :=
+    { domains := [[vi 3], [vi 3]], trail := [], decisionLevel := 0,
+      clauses := [], learned := [], queue := [], conflict := none }
+  st ← st.check "propNe equal singletons conflict (regression)"
+    (match propNe stne 0 1 with
+     | .conflict _ => true
+     | _ => false)
+  -- and on DIFFERENT singletons: stable (nothing to deduce)
+  let stne2 : State :=
+    { domains := [[vi 3], [vi 4]], trail := [], decisionLevel := 0,
+      clauses := [], learned := [], queue := [], conflict := none }
+  st ← st.check "propNe different singletons stable"
+    (match propNe stne2 0 1 with
+     | .stable => true
+     | _ => false)
+
   -- learned-clause sanity on a learning-intensive model (pigeon 3/2)
   let doms := [[vi 1, vi 2], [vi 1, vi 2], [vi 1, vi 2], [vi 1, vi 2]]
   let cs : List DomConstraint :=

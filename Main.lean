@@ -158,26 +158,41 @@ separator, the FlatZinc convention).  Exit codes:
     refused. -/
 private def parseSolveFlags (args : List String) :
     Except String (Option Solver.SolveConfig × List String) :=
-  let rec go (cfg : Solver.SolveConfig) (certified : Bool) :
+  let rec go (cfg : Solver.SolveConfig) (certified : Bool) (sawFlag : Bool) :
       List String → Except String (Option Solver.SolveConfig × List String)
     | [] => .ok (if certified then none else some cfg, [])
-    | "--certified" :: rest => go cfg true rest
-    | "--prop" :: rest => go { cfg with useProp := true } certified rest
-    | "--mrv" :: rest => go { cfg with useMrv := true } certified rest
-    | "--nogoods" :: rest => go { cfg with nogoods := true } certified rest
+    | "--certified" :: rest =>
+        if sawFlag then
+          .error "--certified cannot be combined with other solver options"
+        else go cfg true sawFlag rest
+    | "--prop" :: rest =>
+        if certified then
+          .error "--certified cannot be combined with other solver options"
+        else go { cfg with useProp := true } certified true rest
+    | "--mrv" :: rest =>
+        if certified then
+          .error "--certified cannot be combined with other solver options"
+        else go { cfg with useMrv := true } certified true rest
+    | "--nogoods" :: rest =>
+        if certified then
+          .error "--certified cannot be combined with other solver options"
+        else go { cfg with nogoods := true } certified true rest
     | "--budget" :: n :: rest =>
-        match n.toNat? with
-        | some b => go { cfg with budget := some b } certified rest
-        | none => .error s!"invalid budget '{n}' (expected a natural number)"
+        if certified then
+          .error "--certified cannot be combined with other solver options"
+        else
+          match n.toNat? with
+          | some b => go { cfg with budget := some b } certified true rest
+          | none => .error s!"invalid budget '{n}' (expected a natural number)"
     | "--budget" :: _ => .error "option --budget requires a natural number argument"
     | arg :: rest =>
         if arg.startsWith "--" then
           .error s!"unknown option '{arg}'"
         else
-          match go cfg certified rest with
+          match go cfg certified sawFlag rest with
           | .ok (cfg', srcArgs) => .ok (cfg', arg :: srcArgs)
           | .error e => .error e
-  go ⟨false, false, none, false⟩ false args
+  go ⟨false, false, none, false⟩ false false args
 
 /-- The `solve` subcommand: parse the model, run the composed front
     door, and report the verdict. `--certified` routes through the

@@ -30,7 +30,7 @@ jobs:
             echo "ERROR: active proof holes found"; exit 1
           fi
       - name: Audit: axiom profiles of the public certified theorems
-        run: lake env lean tmp/audit_axioms.lean
+        run: lake env lean audits/certified_axioms.lean
       - name: Audit: no new user axioms
         run: |
           if grep -rnE '^\s*axiom ' --include='*.lean' LeanFzn/ solver/ Tests/ Main.lean; then

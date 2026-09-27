@@ -258,37 +258,6 @@ theorem toStore_par {m : Model} {slots : List (String × List Value)}
 
 /-! ## Constraint exactness -/
 
-/-- **THE CONSTRAINT CORRESPONDENCE (store → assignment)**: if the
-    source constraint holds at the assembled store under `fullInterp`,
-    the compiled `DomConstraint` is satisfied by the assignment. -/
-theorem compileConstraint_holds_of_store {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {dc : DomConstraint}
-    (hcomp : compileConstraints (parEnv m) (slots.map Prod.fst) m.constraints
-      = .ok dcs)
-    (hmem : c ∈ m.constraints)
-    (hdc : extractConstraint (slots.map Prod.fst) c = some dc)
-    (hnu : (slots.map Prod.fst).Nodup)
-    (halen : a.length = slots.length)
-    (hh : c.Holds fullInterp ((assemble m slots dcs).toStore a)) :
-    dc.SatisfiedBy a := by
-  -- assemble the hvals premise of extractConstraint_holds: for every
-  -- position i, a[i] = the store's read at the slot's name
-  have hvals : ∀ (i : Nat), i < (slots.map Prod.fst).length →
-      ∃ v, a[i]? = some v ∧ ((assemble m slots dcs).toStore a)
-          (Ident.mk (slots.map Prod.fst)[i]!) = some v := by
-    intro i hilt
-    have hlen : (slots.map Prod.fst).length = slots.length := by simp
-    have hislt : i < slots.length := by omega
-    have ha5 : i < a.length := by omega
-    refine ⟨a[i]!, ?_, ?_⟩
-    · rw [List.getElem!_eq_getElem?_getD,
-        List.getElem?_eq_getElem (by omega : i < a.length)]
-      rfl
-    · exact toStore_slot (m := m) (dcs := dcs) hnu hislt ha5
-  exact extractConstraint_holds hh hdc hvals
-
-
 /-! ## The converse (assignment → store) -/
 /-! ## The interpolation bridge for the converse direction -/
 
@@ -523,43 +492,6 @@ theorem holds_name_transport {c : ConstraintItem} {n : String}
   exact hinterp
 
 /-! ## Generic argument-evaluation bridges for the converse direction -/
-
-/-- Evaluation of an identifier-then-constant-valued argument list at
-    the assembled store: the identifier reads the assignment at the
-    slot, the other argument evaluates to the given integer value. -/
-theorem eval_ident_E {m : Model} {slots : List (String × List Value)}
-    {dcs : List DomConstraint} {a : List Value} {x : Ident} {i : Nat}
-    {e2 : Expr} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
-    (he2 : Expr.eval ((assemble m slots dcs).toStore a) e2 = some (.int k)) :
-    ([Expr.basic (.ident x), e2].mapM
-      (Expr.eval ((assemble m slots dcs).toStore a)))
-      = some [a[i]!, .int k] := by
-  show (do
-      let v1 ← (assemble m slots dcs).toStore a x
-      let v2 ← Expr.eval ((assemble m slots dcs).toStore a) e2
-      pure [v1, v2]) = _
-  rw [toStore_read (m := m) hnu hxi halt, he2]
-  rfl
-
-/-- Evaluation of a constant-valued-then-identifier argument list at
-    the assembled store (the mirrored bridge). -/
-theorem eval_E_ident {m : Model} {slots : List (String × List Value)}
-    {dcs : List DomConstraint} {a : List Value} {y : Ident} {j : Nat}
-    {e1 : Expr} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hyi : nameIndex (slots.map Prod.fst) y.name = some j)
-    (he1 : Expr.eval ((assemble m slots dcs).toStore a) e1 = some (.int k)) :
-    ([e1, Expr.basic (.ident y)].mapM
-      (Expr.eval ((assemble m slots dcs).toStore a)))
-      = some [.int k, a[j]!] := by
-  show (do
-      let v1 ← Expr.eval ((assemble m slots dcs).toStore a) e1
-      let v2 ← (assemble m slots dcs).toStore a y
-      pure [v1, v2]) = _
-  rw [he1, toStore_read (m := m) hnu hyi halt]
-  rfl
 
 /-- Evaluation of two-identifiers-then-a-constant-valued argument list
     at the assembled store (the `int_plus(x, y, k)` bridge). -/
@@ -908,7 +840,7 @@ theorem mem_allAssigns_fits : ∀ (doms : List (List Value))
     the int-valued reads of the two `eq/ne` slot shapes supplied —
     then the source constraint holds at the assembled store under
     `fullInterp`.  (The int-reads premise is NAME-CONDITIONED in the
-    NEW linker design: `compileConstraint_sat_link_extracted`
+    new linker design (Exact.lean's compile_sat_link_extracted)
     derives it from the constraint's name via the signature check,
     so callers pass no shape facts.) -/
 theorem extractConstraint_holds_converse {m : Model}
@@ -1649,218 +1581,6 @@ theorem holds_int_ge_const' {store : Store} {c : ConstraintItem}
   | array w => exact absurd hmatch (by simp)
 
 
-/-- int_le(x, k) converse: a bounded read makes `int_le(x, k)` hold at
-    the assembled store. -/
-theorem holds_int_le_const_hi_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {x : Ident} {i : Nat} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_le")
-    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k))])
-    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
-    (hsat : (DomConstraint.leConstHi i k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  obtain ⟨p, hw, hpc⟩ := hsat
-  have hib : a[i]! = Value.int p := bang_of_getElem? hw
-  refine ⟨[a[i]!, .int k], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_ident_int (m := m) hnu halt hxi
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [a[i]!, Value.int k] with
-      | [Value.int p, Value.int q] => p ≤ q
-      | _ => False)
-    rw [hib]
-    exact hpc
-
-/-- int_le(k, x) converse. -/
-theorem holds_int_le_const_lo_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {y : Ident} {i : Nat} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_le")
-    (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident y)])
-    (hyi : nameIndex (slots.map Prod.fst) y.name = some i)
-    (hsat : (DomConstraint.leConstLo i k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  obtain ⟨p, hw, hcp⟩ := hsat
-  have hib : a[i]! = Value.int p := bang_of_getElem? hw
-  refine ⟨[.int k, a[i]!], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_int_ident (m := m) hnu halt hyi
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [Value.int k, a[i]!] with
-      | [Value.int p, Value.int q] => p ≤ q
-      | _ => False)
-    rw [hib]
-    exact hcp
-
-/-- int_lt(x, k) converse. -/
-theorem holds_int_lt_const_hi_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {x : Ident} {i : Nat} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_lt")
-    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k))])
-    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
-    (hsat : (DomConstraint.ltConstHi i k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  obtain ⟨p, hw, hpc⟩ := hsat
-  have hib : a[i]! = Value.int p := bang_of_getElem? hw
-  refine ⟨[a[i]!, .int k], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_ident_int (m := m) hnu halt hxi
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [a[i]!, Value.int k] with
-      | [Value.int p, Value.int q] => p < q
-      | _ => False)
-    rw [hib]
-    exact hpc
-
-/-- int_lt(k, x) converse. -/
-theorem holds_int_lt_const_lo_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {y : Ident} {i : Nat} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_lt")
-    (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident y)])
-    (hyi : nameIndex (slots.map Prod.fst) y.name = some i)
-    (hsat : (DomConstraint.ltConstLo i k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  obtain ⟨p, hw, hcp⟩ := hsat
-  have hib : a[i]! = Value.int p := bang_of_getElem? hw
-  refine ⟨[.int k, a[i]!], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_int_ident (m := m) hnu halt hyi
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [Value.int k, a[i]!] with
-      | [Value.int p, Value.int q] => p < q
-      | _ => False)
-    rw [hib]
-    exact hcp
-
-/-- int_gt(x, k) converse (compiled as `ltConstLo i k`). -/
-theorem holds_int_gt_const_lo_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {x : Ident} {i : Nat} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_gt")
-    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k))])
-    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
-    (hsat : (DomConstraint.ltConstLo i k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  obtain ⟨p, hw, hcp⟩ := hsat
-  have hib : a[i]! = Value.int p := bang_of_getElem? hw
-  refine ⟨[a[i]!, .int k], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_ident_int (m := m) hnu halt hxi
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [a[i]!, Value.int k] with
-      | [Value.int p, Value.int q] => p > q
-      | _ => False)
-    rw [hib]
-    exact hcp
-
-/-- int_gt(k, x) converse (compiled as `ltConstHi j k`). -/
-theorem holds_int_gt_const_hi_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {y : Ident} {j : Nat} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_gt")
-    (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident y)])
-    (hyi : nameIndex (slots.map Prod.fst) y.name = some j)
-    (hsat : (DomConstraint.ltConstHi j k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  obtain ⟨p, hw, hpc⟩ := hsat
-  have hjb : a[j]! = Value.int p := bang_of_getElem? hw
-  refine ⟨[.int k, a[j]!], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_int_ident (m := m) hnu halt hyi
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [Value.int k, a[j]!] with
-      | [Value.int p, Value.int q] => p > q
-      | _ => False)
-    rw [hjb]
-    exact hpc
-
-/-- int_ge(x, k) converse (compiled as `leConstLo i k`). -/
-theorem holds_int_ge_const_lo_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {x : Ident} {i : Nat} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_ge")
-    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k))])
-    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
-    (hsat : (DomConstraint.leConstLo i k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  obtain ⟨p, hw, hcp⟩ := hsat
-  have hib : a[i]! = Value.int p := bang_of_getElem? hw
-  refine ⟨[a[i]!, .int k], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_ident_int (m := m) hnu halt hxi
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [a[i]!, Value.int k] with
-      | [Value.int p, Value.int q] => p ≥ q
-      | _ => False)
-    rw [hib]
-    exact hcp
-
-/-- int_ge(k, x) converse (compiled as `leConstHi j k`). -/
-theorem holds_int_ge_const_hi_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {y : Ident} {j : Nat} {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_ge")
-    (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident y)])
-    (hyi : nameIndex (slots.map Prod.fst) y.name = some j)
-    (hsat : (DomConstraint.leConstHi j k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  obtain ⟨p, hw, hpc⟩ := hsat
-  have hjb : a[j]! = Value.int p := bang_of_getElem? hw
-  refine ⟨[.int k, a[j]!], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_int_ident (m := m) hnu halt hyi
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [Value.int k, a[j]!] with
-      | [Value.int p, Value.int q] => p ≥ q
-      | _ => False)
-    rw [hjb]
-    exact hpc
-
-/-- int_plus(x, y, k) converse (compiled as `linEq [1, 1] [i, j] k`):
-    the unit-coefficient dot product of two INTEGER reads summing to
-    `k` makes the source constraint hold at the assembled store. -/
-theorem holds_int_plus_lit_toStore {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {x y : Ident} {i j : Nat}
-    {k : Int}
-    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
-    (hname : c.name.name = "int_plus")
-    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y),
-      Expr.basic (.lit (.int k))])
-    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
-    (hyi : nameIndex (slots.map Prod.fst) y.name = some j)
-    (hsat : (DomConstraint.linEq [1, 1] [i, j] k).SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  -- the linEq satisfaction is the unit-coefficient dot product
-  have hdot : LeanFzn.dotProduct (intVals [1, 1]) [a[i]!, a[j]!]
-      = some k := hsat
-  have hintvals : intVals [1, 1] = [Value.int 1, Value.int 1] := rfl
-  rw [hintvals] at hdot
-  obtain ⟨p, q, hib, hjb, hpqk⟩ := dotProduct_two_one_inv hdot
-  refine ⟨[a[i]!, a[j]!, .int k], ?_, ?_⟩
-  · rw [hargs]
-    exact eval_ident_ident_E (m := m) hnu halt hxi hyi
-      (by
-        show (Expr.basic (BasicExpr.lit (BasicLiteral.int k))).eval
-            ((assemble m slots dcs).toStore a) = some (Value.int k)
-        rfl)
-  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-    show (match [a[i]!, a[j]!, .int k] with
-      | [Value.int p, Value.int q, Value.int r] => p + q = r
-      | _ => False)
-    rw [hib, hjb]
-    exact hpqk
-
 /-- A fitting assignment is in the candidate space (the bridge the
     UNSAT coverage direction needs). -/
 theorem fits_mem_allAssigns : ∀ (doms : List (List Value))
@@ -2303,72 +2023,6 @@ theorem forall2_checkArg_first {env : StaticEnv} {e1 e2 : Expr}
   rw [Forall2] at h
   exact h.1
 
-/-- A two-argument `Forall2` over the FIXED int-var parameter list:
-    both identifier arguments check against the int signature, so the
-    typing chain applies to each. -/
-theorem int_reads_of_checked_int_eq {m : Model}
-    {slots : List (String × List Value)} {a : List Value}
-    {c : ConstraintItem} {x y : Ident} {i j : Nat}
-    (hwf : WellFormed fullSig m)
-    (hslot : slotsChecked m = .ok slots)
-    (hc : c ∈ m.constraints)
-    (hpred : m.predicates = [])
-    (hname : c.name.name = "int_eq" ∨ c.name.name = "int_ne")
-    (hargs : c.args =
-      [Expr.basic (.ident x), Expr.basic (.ident y)])
-    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
-    (hyi : nameIndex (slots.map Prod.fst) y.name = some j)
-    (hmem : a ∈ allAssigns (slots.map Prod.snd)) :
-    (∃ p, a[i]! = Value.int p) ∧ (∃ q, a[j]! = Value.int q) := by
-  -- the signature check from well-formedness
-  obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
-  -- resolve the signature for this name
-  -- the resolved parameter types (the sigEnv value for this name)
-  have hres : m.sigEnv fullSig (Ident.mk c.name.name) =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.int)),
-       PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.int))] := by
-    rcases hname with h1 | h1
-    · rw [h1]
-      exact sigEnv_int_eq hpred
-    · rw [h1]
-      exact sigEnv_int_ne hpred
-  have hparameq : params =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.int)),
-       PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.int))] := by
-    have h1 : m.sigEnv fullSig c.name = some params := hsig
-    rw [show m.sigEnv fullSig c.name
-        = m.sigEnv fullSig (Ident.mk c.name.name) from rfl] at h1
-    rw [hres] at h1
-    exact (Option.some.inj h1).symm
-  -- the args check against the resolved signature (transport the
-  -- Forall2 along the args equation and the params equation)
-  have hfor2 : Forall2 (Expr.checkArg m.staticEnv) c.args params := hfor
-  rw [hargs, hparameq] at hfor2
-  obtain ⟨hcx, hcyrest⟩ := hfor2
-  obtain ⟨hcy, _⟩ := hcyrest
-  have hcx' : Expr.checkArg m.staticEnv (Expr.basic (.ident x))
-      (PredParamType.basic (.var (.par .int))) := hcx
-  have hcy' : Expr.checkArg m.staticEnv (Expr.basic (.ident y))
-      (PredParamType.basic (.var (.par .int))) := hcy
-  -- apply the typing chain to each argument
-  -- rebuild the full two-list Forall2 for the chain (it takes the
-  -- whole list)
-  have hfor3 : Forall2 (Expr.checkArg m.staticEnv) c.args
-      [PredParamType.basic (.var (.par .int)),
-        PredParamType.basic (.var (.par .int))] := by
-    rw [hargs]
-    rw [Forall2]
-    exact ⟨hcx', ⟨hcy', trivial⟩⟩
-  have hxintsat : ∃ p, a[i]! = Value.int p :=
-    int_read_of_checkArg_slot hwf hslot hfor3 hcx' hxi hmem
-  have hyintsat : ∃ q, a[j]! = Value.int q :=
-    int_read_of_checkArg_slot hwf hslot hfor3 hcy' hyi hmem
-  exact ⟨hxintsat, hyintsat⟩
-
 /-- Membership gives the position: a name in a slot-name list sits at
     some index whose bang-read returns it. -/
 theorem nameIndex_mem : ∀ (names : List String) (s : String),
@@ -2469,41 +2123,6 @@ theorem int_reads_of_mem_eq_ne {m : Model}
       · exact absurd hnil (by simp)
   subst hpt
   exact int_read_of_checkArg_slot hwf hslot hfor hchk0 hxi hmem
-
-/-- **THE SAT LINKER (extracted shapes, two-int-argument form)**: if
-    a model constraint compiled through `extractConstraint` into one
-    of the two-int-slot shapes, its two arguments are the two given
-    identifiers and check against the int-var signature, and the
-    compiled constraint is satisfied by an assignment of the extracted
-    slot domains, then the source constraint holds at the assembled
-    store under `fullInterp`.  The shape facts of the earlier design
-    (`hargs2`/`hchecked`) are REPLACED by the constraint's own name:
-    the name selects the signature, the signature + membership +
-    WellFormed derives the int-reads. -/
-theorem compileConstraint_sat_link_extracted {m : Model}
-    {slots : List (String × List Value)} {dcs : List DomConstraint}
-    {a : List Value} {c : ConstraintItem} {dc : DomConstraint}
-    (hwf : WellFormed fullSig m)
-    (hslot : slotsChecked m = .ok slots)
-    (hc : c ∈ m.constraints)
-    (hpred : m.predicates = [])
-    (hname : c.name.name = "int_eq" ∨ c.name.name = "int_ne")
-    (hmem : a ∈ allAssigns (slots.map Prod.snd))
-    (hex : extractConstraint (slots.map Prod.fst) c = some dc)
-    (hsat : dc.SatisfiedBy a) :
-    c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  have hnu : (slots.map Prod.fst).Nodup := slotNames_nodup hwf hslot
-  have halt : a.length = slots.length := by
-    have h1 := mem_allAssigns_length (slots.map Prod.snd) a hmem
-    rw [List.length_map] at h1
-    exact h1
-  exact extractConstraint_holds_converse hnu halt hex
-    (fun x i hxarg hxi _ =>
-      int_reads_of_mem_eq_ne hwf hslot hc hpred hname hmem x i hxarg hxi)
-    hsat
-
-
-
 
 /-! ## The compile-list inversions (the whole-model assemblies' fuel) -/
 

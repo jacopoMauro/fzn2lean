@@ -4,16 +4,19 @@ File: solver/LCG/Certified.lean
 Purpose:
   The first certified LCG front door: for the singleton-domain
   fragment (every initial domain a singleton — no decisions, no
-  propagation needed), the LCG engine's SAT/UNSAT verdicts carry
-  kernel-checked source-level theorems with every premise DERIVED
-  from executable checks (no caller-supplied safety or entitlement).
+  propagation needed) of a successfully compiled model, the LCG
+  engine's SAT/UNSAT verdicts carry kernel-checked theorems with
+  every premise DERIVED from compiler success and executable checks
+  (no caller-supplied safety, entitlement, or int-view premises).
 
-  The fragment check itself is executable (`fragmentOk`), and the
-  empty propagator list makes the per-family soundness premises
+  The fragment check itself is executable (`fragmentOk`); the empty
+  propagator list makes the per-family soundness premises
   (`PropSafeUniv`, conflict entitlement) vacuous; the evaluator
   agreement is `DomConstraint.satisfiedB_iff`; the empty clause
-  database is trivially entitled; `IntViewed` follows from the
-  singleton-domains check.
+  database is trivially entitled; and `IntViewed` follows from the
+  compiler's domain construction (`domains_intViewed`: `varDomain`
+  produces only `.intDom`/`.boolDom`, so every compiled domain value
+  is `.int`/`.bool`).
 
 Dependencies:
   - solver.LCG.Proofs.Search: `solve_certified_fragment(_unsat)`.
@@ -26,6 +29,7 @@ DAG:
 
 import solver.LCG.Proofs.Search
 import solver.Propagators
+import solver.Direct.Proofs.Exact
 
 namespace LeanFzn.Solver.LCG
 
@@ -51,9 +55,10 @@ theorem fragmentOk_iff {problem : Problem Constraint Objective} :
     intro d hd
     simpa using h d hd
 
-/-- Singleton domains with int/bool values are int-viewed. -/
+/-- A problem whose domain values all have integer views is
+    int-viewed. (The premise holds for every compiled problem by
+    `domains_intViewed`; singleton-ness is not what carries it.) -/
 theorem intViewed_of_fragment {problem : Problem Constraint Objective}
-    (hfrag : PropFragment problem)
     (hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none) :
     IntViewed problem := hint
 
@@ -66,22 +71,30 @@ theorem db0_nil {problem : Problem Constraint Objective}
         ∃ l ∈ c, l.eval a = some true := by
   intro c hc
   rw [hclauses] at hc
-  exact absurd hc (by simp)
+  cases hc
 
-/-- **THE CERTIFIED LCG FRONT DOOR (SAT)**: on a singleton-domain
-    problem (the first certified fragment — every premise derived
-    from executable checks), a `sat` assignment returned by the LCG
-    engine satisfies every internal constraint under the declarative
-    semantics. -/
+/-- **THE CERTIFIED LCG FRONT DOOR (SAT)**: on the LCG problem of a
+    successfully compiled model (singleton-domain fragment — every
+    premise derived from compiler success and executable checks, no
+    caller-supplied premises), a `sat` assignment returned by the
+    LCG engine satisfies every internal constraint under the
+    declarative semantics. -/
 theorem solve_certified_sat
-    {problem : LCG.Problem DomConstraint Unit}
+    {m : LeanFzn.Model} {problem : LCG.Problem DomConstraint Unit}
+    {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Solver.Direct.compileModel m = .ok compiled)
+    (hlcg : problem.domains = compiled.domains)
     (hfrag : fragmentOk problem = true)
-    (hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none)
     (hclauses : problem.clauses = [])
     (hsat : solve problem DomConstraint.satisfiedB [] = .sat assignment) :
     ProblemSolution problem DomConstraint.SatisfiedBy assignment := by
+  -- the int-view premise, DERIVED from compiler success (the
+  -- compiler's slot extraction only produces int/bool values)
+  have hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none := by
+    rw [hlcg]
+    exact LeanFzn.Solver.Direct.domains_intViewed hc
   have hfragP : PropFragment problem := (fragmentOk_iff.mp hfrag)
-  have hview : IntViewed problem := intViewed_of_fragment hfragP hint
+  have hview : IntViewed problem := intViewed_of_fragment hint
   -- the empty propagator list: both safety premises are vacuous
   have huniv : PropSafeUniv problem DomConstraint.SatisfiedBy [] := by
     intro st
@@ -105,18 +118,25 @@ theorem solve_certified_sat
       rw [hclauses] at hc
       cases hc) huniv hentFam hagrees hsat
 
-/-- **THE CERTIFIED LCG FRONT DOOR (UNSAT)**: on a singleton-domain
-    problem, an `unsat` verdict excludes every internal solution. -/
+/-- **THE CERTIFIED LCG FRONT DOOR (UNSAT)**: on the LCG problem of a
+    successfully compiled model (singleton-domain fragment), an
+    `unsat` verdict excludes every internal solution. -/
 theorem solve_certified_unsat
-    {problem : LCG.Problem DomConstraint Unit}
+    {m : LeanFzn.Model} {problem : LCG.Problem DomConstraint Unit}
+    {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Solver.Direct.compileModel m = .ok compiled)
+    (hlcg : problem.domains = compiled.domains)
     (hfrag : fragmentOk problem = true)
-    (hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none)
     (hclauses : problem.clauses = [])
     (hunsat : solve problem DomConstraint.satisfiedB [] = .unsat) :
     ¬ ∃ assignment, ProblemSolution problem DomConstraint.SatisfiedBy
       assignment := by
+  -- the int-view premise, DERIVED from compiler success
+  have hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none := by
+    rw [hlcg]
+    exact LeanFzn.Solver.Direct.domains_intViewed hc
   have hfragP : PropFragment problem := (fragmentOk_iff.mp hfrag)
-  have hview : IntViewed problem := intViewed_of_fragment hfragP hint
+  have hview : IntViewed problem := intViewed_of_fragment hint
   have huniv : PropSafeUniv problem DomConstraint.SatisfiedBy [] := by
     intro st
     exact ⟨fun p hp => absurd hp (by simp),

@@ -209,50 +209,50 @@ def domFilterToMin (k : Int) (d : List Value) : List Value :=
     | .bool b => decide (k ≤ (if b then 1 else 0))
     | _ => true
 
-/-- `int_ne`-style: `x ≠ y` over slots `i j`. When one side is a
-    singleton `c`, the other side excludes the single value `c`:
+/-- `int_ne`-style: `x ≠ y` over slots `i j`. Two sound behaviours:
 
-    * if the other domain lies entirely above `c`, it is forced to
-      `≥ c+1`, nogood `[y > c, x ≤ c]` (under `x ≠ y` with `x = c`:
-      values `≤ c` are excluded, since they'd have to equal `c`);
-    * if it lies entirely below, it is forced to `≤ c−1`, nogood
-      `[y ≤ c−1, x > c−1]` (values `≥ c` are excluded dually);
-    * when the value `c` sits strictly inside, no bound literal
-      expresses the removal — the propagator stays stable and the domain
-      is handled by search (refining this to value-removal literals is
-      L0.6's domain-splitting refinement). -/
+    * when BOTH sides are singletons, a direct conflict is reported
+      if the values are equal (the constraint is violated), else
+      nothing to do;
+    * when one side is a singleton `c` and the other domain lies
+      entirely on one side of `c`, the separation is already pinned by
+      the root facts (the domain bounds), so no deduction is needed —
+      the propagator stays stable.
+
+    The earlier design emitted nogoods like `[y > c, x ≤ c]` for the
+    strictly-separated case, but such a clause is NOT integer-valid
+    under `x ≠ y` alone (it depends on domain facts), violating this
+    module's discipline that reason clauses be constraint-valid.
+    Value removal (excluding exactly `c` from the other side) needs
+    value-removal literals (L0.6), so until then the propagator only
+    reports the both-singleton conflict. -/
 def propNe (st : State) (i j : Nat) : PropagationResult :=
-  match domSingletonI (st.domains.getD i []) with
-  | some c =>
-      let d := st.domains.getD j []
-      if (domFilterToMax c d).isEmpty then
-        narrowLo st j (c + 1) [negLe j c, posLe i c]
-      else if (domFilterToMin c d).isEmpty then
-        narrowHi st j (c - 1) [posLe j (c - 1), negLe i (c - 1)]
-      else .stable
-  | none =>
-      match domSingletonI (st.domains.getD j []) with
-      | some c =>
-          let d := st.domains.getD i []
-          if (domFilterToMax c d).isEmpty then
-            narrowLo st i (c + 1) [negLe i c, posLe j c]
-          else if (domFilterToMin c d).isEmpty then
-            narrowHi st i (c - 1) [posLe i (c - 1), negLe j (c - 1)]
-          else .stable
-      | none => .stable
+  match domSingletonI (st.domains.getD i []),
+        domSingletonI (st.domains.getD j []) with
+  | some c, some d => if c == d then .conflict [] else .stable
+  | _, _ => .stable
 
 /-- `int_lin_le`-style: `Σ cₜ·xₜ ≤ b`. For each slot `m` with a `±1`
-    coefficient, the classic bound deduction over the other terms:
+    coefficient, the classic bound deduction over ALL the other terms:
 
     * `+1` on `x_m`: `x_m ≤ b − min Σ_{t≠m} cₜ·xₜ`, causes are the
       min-contribution events of the other terms;
-    * `−1` on `x_m`: `x_m ≥ max Σ_{t≠m} cₜ·xₜ − b`, dually.
+    * `−1` on `x_m`: `x_m ≥ min Σ_{t≠m} cₜ·xₜ − b`, dually (the MIN
+      sum of the rest, not the max: from `−x_m ≤ b − Σ_{t≠m} cₜxₜ`,
+      the tightest valid lower bound on `x_m` takes the rest's min).
 
-    The first tightening across all `±1` slots is reported. -/
+    The first tightening across all `±1` slots is reported. The cause
+    literals are the falsified bound events of the other terms at
+    their extreme contributions: a term contributing its min `l`
+    (reached at `xₜ`'s min when `cₜ = 1`, at `xₜ`'s max when
+    `cₜ = −1`, so the falsified event is `xₜ < l` resp. `xₜ > −l`);
+    a term contributing its max `h` dually. -/
 def propLinLe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
     PropagationResult :=
   let deduce (m : Nat) (c : Int) (rest : List (Int × Nat)) :
       PropagationResult :=
+    -- the MIN-contribution of each other term: `ct·mn` for positive
+    -- coefficients, `ct·mx` for negative ones (ct < 0: smallest at max)
     let terms : List (Nat × Int × Int) := rest.filterMap fun p =>
       match p with
       | (ct, t) =>
@@ -260,6 +260,7 @@ def propLinLe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
           | some mn, some mx =>
               if ct ≥ 0 then some (t, ct, ct * mn) else some (t, ct, ct * mx)
           | _, _ => none
+    -- the MAX-contribution of each other term: dually
     let termsH : List (Nat × Int × Int) := rest.filterMap fun p =>
       match p with
       | (ct, t) =>
@@ -273,36 +274,46 @@ def propLinLe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
     let hiRest := termsH.foldl (fun acc t => match acc, t with
       | none, (_, _, h) => some h
       | some a, (_, _, h) => some (a + h)) none
-    -- cause literals: the falsified events that a min-riding term
-    -- contributes more than `l` (`xₜ < l` when `cₜ = 1`, `xₜ > l`
-    -- when `cₜ = −1`)
+    -- cause literals: the falsified bound events of the other terms.
+    -- min contribution l: cₜ=1 → reached at xₜ's min (event xₜ < l,
+    -- clause carries xₜ ≥ l, i.e. negation xₜ ≤ l−1); cₜ=−1 →
+    -- l = −mxₜ reached at xₜ's max (event xₜ > mxₜ, clause carries
+    -- xₜ ≤ mxₜ = −l).
     let causeOfMin (t : Nat × Int × Int) : Option Literal :=
       match t with
       | (slot, ct, l) =>
           if ct == 1 then some (posLe slot (l - 1))
-          else if ct == -1 then some (negLe slot l)
+          else if ct == -1 then some (negLe slot (-l))
           else none
     let causeOfMax (t : Nat × Int × Int) : Option Literal :=
       match t with
       | (slot, ct, h) =>
           if ct == 1 then some (negLe slot h)
-          else if ct == -1 then some (posLe slot (h - 1))
+          else if ct == -1 then some (posLe slot (-h - 1))
           else none
     match loRest, hiRest, c with
     | some lr, _, 1 =>
         let hi := b - lr
         narrowHi st m hi ([posLe m hi] ++ terms.filterMap causeOfMin)
-    | _, some hr, -1 =>
-        let lo := hr - b
-        narrowLo st m lo ([negLe m (lo - 1)] ++ termsH.filterMap causeOfMax)
+    | _, _, -1 =>
+        -- the valid lower bound on xₘ: ≥ (min of the rest) − b
+        let lo := loRest.getD 0 - b
+        match loRest with
+        | some _ => narrowLo st m lo ([negLe m (lo - 1)] ++ terms.filterMap causeOfMin)
+        | none => .stable
     | _, _, _ => .stable
   let rec sweep (ps : List (Int × Nat)) : PropagationResult :=
     match ps with
     | [] => .stable
     | (c, m) :: rest =>
-        match deduce m c rest with
+        -- deduce over ALL other slots, not just the suffix
+        let others := (coeffs.zip is).filter (fun p => p.2 != m)
+        match deduce m c others with
         | .stable => sweep rest
         | r => r
+  -- a length mismatch would silently truncate the pairing; the
+  -- compiled shape (linLe coeffs is b from extractConstraint) always
+  -- has equal lengths (the `coeffs.length == is.length` gate)
   match coeffs.zip is with
   | [] => .stable
   | ps => sweep ps
