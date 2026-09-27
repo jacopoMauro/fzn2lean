@@ -18,8 +18,8 @@ imports are the source of truth.
 ## Legend
 
 - `★` marks shared/high-fan-out modules.
-- Untracked development artifacts are now **archived** under `archive/`
-  (see below); none of them is part of any build target.
+- Development scratch artifacts were removed from the live tree in
+  the 2026-09-27 cleanup (history preserved in Git).
 - Test executables are listed separately at the end.
 
 ---
@@ -258,18 +258,12 @@ Exact counts are intentionally omitted because transitive and direct fan-out
 were previously mixed.  A generated direct-import inventory is proposed in
 `PLAN.md` P4.
 
-## Archived Development Artifacts (not part of any build target)
+## Archived Development Artifacts
 
-All former root-level scratch files live under `archive/` since the
-2026-09-18 cleanup (PLAN item 1); the `bench_ab`/`test_enum_tmp` Lake
-targets were removed with them:
-
-```
-probeC.lean, probeF.lean, probeG.lean, probeH.lean,
-probeL.lean, probeL2–6.lean, probeR4–5.lean, probeS.lean, probeS2–4.lean
-BenchAB.lean, TestEnumTmp.lean, axcheck_tmp.lean, mini.lean, testBX.lean
-FznGlobals.lean.orig, probeTmp.lean, probeTmp2.lean
-```
+All former root-level scratch files and the `archive/` directory were
+removed in the 2026-09-27 cleanup (PLAN item P4); their history is in
+Git (the `archive/` tree of any earlier commit) rather than in the
+live module space.
 
 ## The certified solve path (2026-09-27, first certified fragment)
 
