@@ -890,8 +890,3 @@ theorem propagateLoop_lift :
                       exact hcc
 
 end LeanFzn.Solver.LCG
-
-
-
-
-
