@@ -161,10 +161,22 @@ after its executable callers, theorem dependencies, and tests are mapped.
 - [x] Run the corresponding eight `lake env` executables (all passed,
   2026-09-26). Record detailed case counts and `tests_fast` timing before
   changing checker behavior or performance-sensitive code.
-- [ ] Record the public interfaces that must survive: `Parser.parseModel`,
+- [x] Record the public interfaces that must survive: `Parser.parseModel`,
   parser soundness/completeness and `parseModel_ok_iff_valid`,
   `Check.checkModelSolution_correct`, and any selected fast/prepared
-  checker API used by CLI or benchmarks.
+  checker API used by CLI or benchmarks. (2026-09-27, full re-baseline:
+  12 suites re-run and pass — 30 smoke, 64 stdlib, solution, 64 gecode
+  (15 models), 52 globals, bench, 465 coverage, 49 wellformed, 39 pretty,
+  prof, 12 check, 7 fast; `tests_fast` wall time ≈ 0.11 s. The
+  survival list: `Parser.parseModel` (FznParser.lean:905);
+  `parseModel_sound` (FznCorrectness.lean:2579) /
+  `parseModel_complete` (FznAssembled.lean:565) /
+  `parseModel_ok_iff_valid` (FznAssembled.lean:598);
+  `Check.checkModelSolution_correct` (FznCheck.lean:980);
+  `checkModelSolutionFast_eq` (FznCheck.lean:1089),
+  `prepareModel` (FznCheck.lean:1321) and
+  `checkPreparedSolution_eq` (FznCheck.lean, the prepared repeated-check
+  path used by tests/benchmarks and referenced by solver proofs).)
 
 ### P2. Trim the parser by dependency
 
