@@ -265,10 +265,11 @@ def main : IO Unit := do
   match solveDom 10_000 lvr (propagatorsOf lvr.constraints) with
   | .sat a =>
       st ← st.check "lcg value-removal engine (x=0, y≠0)"
-        (match a[0]?, a[1]? with
-         | some (.int x), some (.int y) =>
+        (let p : Option Value × Option Value := (a[0]?, a[1]?)
+         match p with
+         | (some (.int x), some (.int y)) =>
              x == 0 && !(y == 0) && 0 ≤ y && y ≤ 3
-         | _, _ => false)
+         | _ => false)
   | .unsat =>
       st ← st.check "lcg value-removal engine (x=0, y≠0)" (false)
   | .unknown =>

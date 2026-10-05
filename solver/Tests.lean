@@ -344,6 +344,11 @@ def main : IO UInt32 := do
   -- the 4-slots/4-values pigeonhole over 0..2 is UNSAT (pigeonhole:
   -- 4 distinct values cannot fit in 3); the engine refutes it via
   -- fallback-nogood learning and the wide door certifies (no linLe)
+  -- KNOWN-GAP (P3): the fallback-nogood learning for nonempty
+  -- unanalyzable conflicts is not yet implemented (the engine
+  -- retreats without learning and exhausts fuel), so the verdict is
+  -- `unknown` until P3 lands; the checks below expect the P3
+  -- end-state and FAIL meanwhile
   let cph4 := parseOrPanic
     "var 0..2: x;\nvar 0..2: y;\nvar 0..2: z;\nvar 0..2: w;\nconstraint int_ne(x, y);\nconstraint int_ne(x, z);\nconstraint int_ne(y, z);\nconstraint int_ne(x, w);\nconstraint int_ne(y, w);\nconstraint int_ne(z, w);\nsolve satisfy;"
   st ← st.check "certified: int_ne pigeonhole (4 slots/3 vals) UNSAT"
@@ -821,12 +826,18 @@ def main : IO UInt32 := do
          | _, _ => false
      | _ => false)
 
-  -- int_times with TWO literal arguments: honestly unsupported
+  -- int_times with TWO literal arguments: now SUPPORTED (the
+  -- two-literal times shapes timesRKK/KKR/KRR — see the aux-slot
+  -- expansion's CompileAux2* proofs and Exact's coverage arms);
+  -- x·2 = 6 over x ∈ 1..3 solves at x = 3
   let ct12 := parseOrPanic
     "var 1..3: x;\nconstraint int_times(x, 2, 6);\nsolve satisfy;"
-  st ← st.check "aux: int_times(x,2,6) two-literal rejected"
+  st ← st.check "aux: int_times(x,2,6) two-literal SAT"
     (match LeanFzn.Solver.Direct.solveCertified ct12 with
-     | .unsupported r => r.contains "unsupported"
+     | .sat store =>
+         match (store (Ident.mk "x")).get! with
+         | .int a => a * 2 == 6
+         | _ => false
      | _ => false)
 
   -- the aux-slot structure: int_times(x,y,6) has ONE aux slot with
