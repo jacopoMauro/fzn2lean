@@ -3258,7 +3258,7 @@ theorem step_fits_or_false {R D : List (List Value)} {e : TrailEntry}
                     -- k; the negative value-removal literal "s = k" is
                     -- FALSE at a
                     left
-                    have hvi : Value.intView w ≠ some k := by
+                    have hviewne : Value.intView w ≠ some k := by
                       intro hc
                       apply hsurv0
                       rw [domFilterInt, List.mem_filter]
@@ -3288,39 +3288,63 @@ theorem step_fits_or_false {R D : List (List Value)} {e : TrailEntry}
                             | x => true) = true
                           rw [show k = (if bx then 1 else 0) from hc.symm]
                           exact decide_eq_true rfl
-                      | setOfInt j => exact absurd hc (by simp [Value.intView])
-                      | array j => exact absurd hc (by simp [Value.intView])
-                    -- the negative value-removal literal "s = k" is
-                    -- FALSE at a: its atom (the removal "s ≠ k") is
-                    -- TRUE there (a's view at s differs from k)
+                      | setOfInt j =>
+                          rw [hw] at hc
+                      | array j =>
+                          rw [hw] at hc
+                    -- the literal (¬(s ≠ k)) is FALSE iff the atom
+                    -- (s ≠ k) is TRUE iff the view differs from k
                     show Literal.eval
                       (Literal.mk (Atom.intNe s k) false) a = some false
-                    show (Atom.eval (Atom.intNe s k) a).map
-                      (fun value =>
-                        if (Literal.mk (Atom.intNe s k) false).positive
-                        then value else !value) = some false
-                    show (slotInt a s).map
-                      (fun actual => decide (actual ≠ k)) = some true
-                    rw [slotInt, hget]
-                    -- w's view differs from k (hvi), so the removal
-                    -- atom is TRUE at a
-                    have hviewne : (Value.intView w).map
-                        (fun i => decide (i ≠ k)) = some true := by
-                      cases hv : Value.intView w with
-                      | none => exact absurd hv (by
-                          intro hcon
-                          apply hvi
-                          exact hcon)
-                      | some i =>
-                          refine congrArg some ?_
-                          have hik : i ≠ k := by
-                            intro hik2
-                            apply hvi
-                            exact hik2 ▸ hv
-                          exact decide_eq_true hik
-                    show (Value.intView w).map
-                      (fun i => decide (i ≠ k)) = some true
-                    exact hviewne
+                    -- normalized form: negNe s k (the negation of
+                    -- the removal atom is the equality literal)
+                    rw [← Literal.norm_eval
+                      (Literal.mk (Atom.intNe s k) false) a]
+                    show (negNe s k).eval a = some false
+                    rw [eval_negNe]
+                    -- the view at s is some i ≠ k
+                    cases hv : Value.intView w with
+                    | none =>
+                        -- w has an int view unless it is a
+                        -- set/array form — both impossible here
+                        -- (they survive every int filter)
+                        exfalso
+                        apply hsurv0
+                        cases hw : w with
+                        | int i =>
+                            rw [hw] at hv
+                            have hqc : Value.intView (Value.int i)
+                                = some i := rfl
+                            rw [hqc] at hv
+                            exact absurd hv (by simp)
+                        | bool b =>
+                            rw [hw] at hv
+                            have hqc : Value.intView (Value.bool b)
+                                = some (if b = true then 1 else 0) := rfl
+                            rw [hqc] at hv
+                            exact absurd hv (by simp)
+                        | setOfInt j =>
+                            refine (List.mem_filter).mpr ⟨hw ▸ hwR, ?_⟩
+                            rfl
+                        | array j =>
+                            refine (List.mem_filter).mpr ⟨hw ▸ hwR, ?_⟩
+                            rfl
+                    | some i =>
+                        have hik : i ≠ k := by
+                          intro hik2
+                          apply hviewne
+                          exact hik2 ▸ hv
+                        show (slotInt a s).map
+                          (fun i => !decide (i ≠ k)) = some false
+                        rw [slotInt, hget]
+                        -- (some w).bind Value.intView IS
+                        -- Value.intView w: rewrite through hv
+                        show (Value.intView w).map
+                          (fun i => !decide (i ≠ k)) = some false
+                        rw [hv]
+                        show some (!decide (i ≠ k)) = some false
+                        rw [decide_eq_true hik]
+                        rfl
 
 /-! ## The iterated divergence -/
 

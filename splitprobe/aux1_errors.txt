@@ -1,0 +1,34 @@
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:222:18: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:287:53: error: Application type mismatch: The argument
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:381:18: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:405:53: error: Application type mismatch: The argument
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:478:20: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:542:55: error: Application type mismatch: The argument
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:590:19: error: Invalid `⟨...⟩` notation: The expected type
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:592:16: error: Type mismatch
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:605:43: error: Invalid `⟨...⟩` notation: The expected type `List.Mem c' (c :: cs2)` has more than one constructor
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:607:14: error: No goals to be solved
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:616:20: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:632:55: error: Application type mismatch: The argument
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:655:45: error: Invalid `⟨...⟩` notation: The expected type
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:657:16: error: No goals to be solved
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:715:18: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:716:18: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:717:19: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:730:13: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:731:13: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:732:17: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:733:15: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:734:16: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:735:16: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:781:20: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:797:18: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:804:33: error: Type mismatch
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:804:58: error: Type mismatch
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:805:35: error: Application type mismatch: The argument
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:806:66: error: Application type mismatch: The argument
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:890:18: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:958:53: error: Application type mismatch: The argument
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:1016:49: error: Application type mismatch: The argument
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:1016:55: error: unsolved goals
+splitprobe/solver/Direct/Proofs/CompileAux1.lean:1107:63: error: Application type mismatch: The argument

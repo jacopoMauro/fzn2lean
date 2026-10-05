@@ -4051,6 +4051,169 @@ theorem sat_aux_timesKR' {m : Model}
     rw [hib, hjb]
     exact hpqr
 
+/-- The SAT bridge for `int_times(x, k, k')` (timesRKK): the piece's
+    `timesSlot i AUX₁ AUX₂`, satisfied by an accepted assignment
+    whose two aux positions carry the pins `.int k` and `.int k'`,
+    makes the source constraint hold at the extended assembled
+    store. -/
+theorem sat_aux_timesRKK {m : Model}
+    {slots0 auxs : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {c : ConstraintItem} {x : Ident} {k k' : Int}
+    {i n : Nat}
+    (hnu : ((slots0 ++ auxs).map Prod.fst).Nodup)
+    (halt : a.length = (slots0 ++ auxs).length)
+    (hmem : a ∈ allAssigns ((slots0 ++ auxs).map Prod.snd))
+    (hslot1 : auxs[n]? = some (auxName (auxTaken m slots0) n, [.int k]))
+    (hnlt1 : n < auxs.length)
+    (hslot2 : auxs[n + 1]? = some (auxName (auxTaken m slots0) (n + 1), [.int k']))
+    (hnlt2 : n + 1 < auxs.length)
+    (hname : c.name.name = "int_times")
+    (hargs : c.args = [.basic (.ident x), .basic (.lit (.int k)),
+        .basic (.lit (.int k'))])
+    (hxi : nameIndex ((slots0 ++ auxs).map Prod.fst) x.name = some i)
+    (hsat : (DomConstraint.timesSlot i (slots0.length + n)
+        (slots0.length + (n + 1))).SatisfiedBy a) :
+    c.Holds fullInterp ((assemble m (slots0 ++ auxs) dcs).toStore a) := by
+  obtain ⟨p, q, r, hri, hrAUX1, hrAUX2, hpqr⟩ := hsat
+  have hpin1 : a[slots0.length + n]? = some (.int k) :=
+    auxPin_of_mem hmem hnlt1 hslot1
+  have hpin2 : a[slots0.length + (n + 1)]? = some (.int k') :=
+    auxPin_of_mem hmem hnlt2 hslot2
+  rw [hpin1] at hrAUX1
+  rw [hpin2] at hrAUX2
+  have hk : k = q := by
+    have h1 : Value.int k = Value.int q := by injection hrAUX1
+    injection h1
+  subst hk
+  have hk' : k' = r := by
+    have h1 : Value.int k' = Value.int r := by injection hrAUX2
+    injection h1
+  subst hk'
+  have hstorex : ((assemble m (slots0 ++ auxs) dcs).toStore a) x
+      = some a[i]! := toStore_read_model hnu halt hxi
+  have hib : a[i]! = Value.int p := bang_of_getElem? hri
+  refine ⟨[a[i]!, .int k, .int k'], ?_, ?_⟩
+  · rw [hargs]
+    show (do
+        let v1 ← (assemble m (slots0 ++ auxs) dcs).toStore a x
+        let v2 ← pure (Value.int k)
+        let v3 ← pure (Value.int k')
+        pure [v1, v2, v3]) = _
+    rw [toStore_read_model (m := m) hnu halt hxi]
+    rfl
+  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+    show (match [a[i]!, Value.int k, Value.int k'] with
+      | [Value.int p, Value.int q, Value.int r] => p * q = r
+      | _ => False)
+    rw [hib]
+    exact hpqr
+
+/-- The SAT bridge for `int_times(k, x, k')` (timesKRR). -/
+theorem sat_aux_timesKRR {m : Model}
+    {slots0 auxs : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {c : ConstraintItem} {x : Ident} {k k' : Int}
+    {i n : Nat}
+    (hnu : ((slots0 ++ auxs).map Prod.fst).Nodup)
+    (halt : a.length = (slots0 ++ auxs).length)
+    (hmem : a ∈ allAssigns ((slots0 ++ auxs).map Prod.snd))
+    (hslot1 : auxs[n]? = some (auxName (auxTaken m slots0) n, [.int k]))
+    (hnlt1 : n < auxs.length)
+    (hslot2 : auxs[n + 1]? = some (auxName (auxTaken m slots0) (n + 1), [.int k']))
+    (hnlt2 : n + 1 < auxs.length)
+    (hname : c.name.name = "int_times")
+    (hargs : c.args = [.basic (.lit (.int k)), .basic (.ident x),
+        .basic (.lit (.int k'))])
+    (hxi : nameIndex ((slots0 ++ auxs).map Prod.fst) x.name = some i)
+    (hsat : (DomConstraint.timesSlot (slots0.length + n) i
+        (slots0.length + (n + 1))).SatisfiedBy a) :
+    c.Holds fullInterp ((assemble m (slots0 ++ auxs) dcs).toStore a) := by
+  obtain ⟨p, q, r, hrAUX1, hri, hrAUX2, hpqr⟩ := hsat
+  have hpin1 : a[slots0.length + n]? = some (.int k) :=
+    auxPin_of_mem hmem hnlt1 hslot1
+  have hpin2 : a[slots0.length + (n + 1)]? = some (.int k') :=
+    auxPin_of_mem hmem hnlt2 hslot2
+  rw [hpin1] at hrAUX1
+  rw [hpin2] at hrAUX2
+  have hk : k = p := by
+    have h1 : Value.int k = Value.int p := by injection hrAUX1
+    injection h1
+  subst hk
+  have hk' : k' = r := by
+    have h1 : Value.int k' = Value.int r := by injection hrAUX2
+    injection h1
+  subst hk'
+  have hstorex : ((assemble m (slots0 ++ auxs) dcs).toStore a) x
+      = some a[i]! := toStore_read_model hnu halt hxi
+  have hib : a[i]! = Value.int q := bang_of_getElem? hri
+  refine ⟨[.int k, a[i]!, .int k'], ?_, ?_⟩
+  · rw [hargs]
+    show (do
+        let v1 ← pure (Value.int k)
+        let v2 ← (assemble m (slots0 ++ auxs) dcs).toStore a x
+        let v3 ← pure (Value.int k')
+        pure [v1, v2, v3]) = _
+    rw [toStore_read_model (m := m) hnu halt hxi]
+    rfl
+  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+    show (match [Value.int k, a[i]!, Value.int k'] with
+      | [Value.int p, Value.int q, Value.int r] => p * q = r
+      | _ => False)
+    rw [hib]
+    exact hpqr
+
+/-- The SAT bridge for `int_times(k, k', x)` (timesKKR). -/
+theorem sat_aux_timesKKR {m : Model}
+    {slots0 auxs : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {c : ConstraintItem} {x : Ident} {k k' : Int}
+    {i n : Nat}
+    (hnu : ((slots0 ++ auxs).map Prod.fst).Nodup)
+    (halt : a.length = (slots0 ++ auxs).length)
+    (hmem : a ∈ allAssigns ((slots0 ++ auxs).map Prod.snd))
+    (hslot1 : auxs[n]? = some (auxName (auxTaken m slots0) n, [.int k]))
+    (hnlt1 : n < auxs.length)
+    (hslot2 : auxs[n + 1]? = some (auxName (auxTaken m slots0) (n + 1), [.int k']))
+    (hnlt2 : n + 1 < auxs.length)
+    (hname : c.name.name = "int_times")
+    (hargs : c.args = [.basic (.lit (.int k)), .basic (.lit (.int k')),
+        .basic (.ident x)])
+    (hxi : nameIndex ((slots0 ++ auxs).map Prod.fst) x.name = some i)
+    (hsat : (DomConstraint.timesSlot (slots0.length + n)
+        (slots0.length + (n + 1)) i).SatisfiedBy a) :
+    c.Holds fullInterp ((assemble m (slots0 ++ auxs) dcs).toStore a) := by
+  obtain ⟨p, q, r, hrAUX1, hrAUX2, hri, hpqr⟩ := hsat
+  have hpin1 : a[slots0.length + n]? = some (.int k) :=
+    auxPin_of_mem hmem hnlt1 hslot1
+  have hpin2 : a[slots0.length + (n + 1)]? = some (.int k') :=
+    auxPin_of_mem hmem hnlt2 hslot2
+  rw [hpin1] at hrAUX1
+  rw [hpin2] at hrAUX2
+  have hk : k = p := by
+    have h1 : Value.int k = Value.int p := by injection hrAUX1
+    injection h1
+  subst hk
+  have hk' : k' = q := by
+    have h1 : Value.int k' = Value.int q := by injection hrAUX2
+    injection h1
+  subst hk'
+  have hstorex : ((assemble m (slots0 ++ auxs) dcs).toStore a) x
+      = some a[i]! := toStore_read_model hnu halt hxi
+  have hib : a[i]! = Value.int r := bang_of_getElem? hri
+  refine ⟨[.int k, .int k', a[i]!], ?_, ?_⟩
+  · rw [hargs]
+    show (do
+        let v1 ← pure (Value.int k)
+        let v2 ← pure (Value.int k')
+        let v3 ← (assemble m (slots0 ++ auxs) dcs).toStore a x
+        pure [v1, v2, v3]) = _
+    rw [toStore_read_model (m := m) hnu halt hxi]
+    rfl
+  · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+    show (match [Value.int k, Value.int k', a[i]!] with
+      | [Value.int p, Value.int q, Value.int r] => p * q = r
+      | _ => False)
+    rw [hib]
+    exact hpqr
+
 /-- The SAT bridge for `int_ne(x, k)` (neRK). -/
 theorem sat_aux_neRK {m : Model}
     {slots0 auxs : List (String × List Value)} {dcs : List DomConstraint}
@@ -4366,11 +4529,15 @@ theorem compile_exact {m : Model}
           (taken := auxTaken m slots0) m.constraints [] (modelAuxSlots m)
           (modelExpand m) hplan c hc' sh hshape
         obtain ⟨i2, hpieces⟩ := hpieces
-        -- the aux name of this constraint's slot
+        -- the aux name of this constraint's slot (the pieces-mem
+        -- package carries the pin2 disjunct too; project it away)
         have haux : ∀ c' ∈ sh.expand (Ident.mk (auxName (auxTaken m slots0) i2)),
             c' ∈ modelExpand m ∧ (sh.pin = none ∨
               ∃ v, sh.pin = some v ∧ (modelAuxSlots m)[i2]?
-                = some (auxName (auxTaken m slots0) i2, [v])) :=
+                = some (auxName (auxTaken m slots0) i2, [v])) ∧
+              (sh.pin2 = none ∨
+                ∃ v2, sh.pin2 = some v2 ∧ (modelAuxSlots m)[i2 + 1]?
+                  = some (auxName (auxTaken m slots0) (i2 + 1), [v2])) :=
           fun c' hc'mem => hpieces c' hc'mem
         -- each piece's compiled dc is in dcs and satisfied
         have hpieceSat : ∀ c' ∈ sh.expand (Ident.mk (auxName (auxTaken m slots0) i2)), ∃ dc ∈ dcs,
@@ -4389,7 +4556,7 @@ theorem compile_exact {m : Model}
             -- the pieces' pin info: the aux slot at i2 carries [.int k]
             rcases (haux ((AuxShape.expand (.timesRK x y k)
               (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
-              (List.mem_cons_self)).2 with
+              (List.mem_cons_self)).2.1 with
               hpinnone | ⟨v, hpin, hslotget⟩
             · exact absurd hpinnone (by simp [AuxShape.pin])
             · have hvk : v = Value.int k := by
@@ -4399,7 +4566,6 @@ theorem compile_exact {m : Model}
               subst hvk
               have hnlt : i2 < (modelAuxSlots m).length :=
                 (List.getElem?_eq_some_iff.mp hslotget).1
-              -- the piece's dc
               obtain ⟨dc, hdcmem, hcc, hsatdc⟩ :=
                 hpieceSat ((AuxShape.expand (.timesRK x y k)
                   (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!) List.mem_cons_self
@@ -4457,7 +4623,7 @@ theorem compile_exact {m : Model}
             -- the pieces' pin info: the aux slot at i2 carries [.int k]
             rcases (haux ((AuxShape.expand (.timesKR x y k)
               (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
-              (List.mem_cons_self)).2 with
+              (List.mem_cons_self)).2.1 with
               hpinnone | ⟨v, hpin, hslotget⟩
             · exact absurd hpinnone (by simp [AuxShape.pin])
             · have hvk : v = Value.int k := by
@@ -4467,7 +4633,6 @@ theorem compile_exact {m : Model}
               subst hvk
               have hnlt : i2 < (modelAuxSlots m).length :=
                 (List.getElem?_eq_some_iff.mp hslotget).1
-              -- the piece's dc
               obtain ⟨dc, hdcmem, hcc, hsatdc⟩ :=
                 hpieceSat ((AuxShape.expand (.timesKR x y k)
                   (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!) List.mem_cons_self
@@ -4520,7 +4685,7 @@ theorem compile_exact {m : Model}
             -- the pieces' pin info: the aux slot at i2 carries [.int k]
             rcases (haux ((AuxShape.expand (.timesKR' x y k)
               (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
-              (List.mem_cons_self)).2 with
+              (List.mem_cons_self)).2.1 with
               hpinnone | ⟨v, hpin, hslotget⟩
             · exact absurd hpinnone (by simp [AuxShape.pin])
             · have hvk : v = Value.int k := by
@@ -4530,7 +4695,6 @@ theorem compile_exact {m : Model}
               subst hvk
               have hnlt : i2 < (modelAuxSlots m).length :=
                 (List.getElem?_eq_some_iff.mp hslotget).1
-              -- the piece's dc
               obtain ⟨dc, hdcmem, hcc, hsatdc⟩ :=
                 hpieceSat ((AuxShape.expand (.timesKR' x y k)
                   (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!) List.mem_cons_self
@@ -4576,13 +4740,350 @@ theorem compile_exact {m : Model}
                     rw [← auxShapeOf_timesKR'_args hshape] at hargsc
                     exact auxShapeOf_timesKR'_name hshape])
                 hargsc hxi hyi hsatdc
+        | timesRKK x k k' =>
+            -- the args inversion: c's args are [x, lit k, lit k']
+            have hargsc : c.args = [.basic (.ident x), .basic (.lit (.int k)),
+                .basic (.lit (.int k'))] := auxShapeOf_timesRKK_args hshape
+            -- the pieces' pin info: the aux slots at i2 and i2+1
+            -- carry [.int k] and [.int k']
+            have hslots2 : (modelAuxSlots m)[i2]?
+                = some (auxName (auxTaken m slots0) i2, [Value.int k]) ∧
+                (modelAuxSlots m)[i2 + 1]?
+                  = some (auxName (auxTaken m slots0) (i2 + 1), [Value.int k']) := by
+              rcases (haux ((AuxShape.expand (.timesRKK x k k')
+                (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
+                (List.mem_cons_self)).2.1 with
+                hpinnone | ⟨v, hpin, hslotget⟩
+              · exact absurd hpinnone (by simp [AuxShape.pin])
+              · rcases (haux ((AuxShape.expand (.timesRKK x k k')
+                  (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
+                  (List.mem_cons_self)).2.2 with
+                  hpin2none | ⟨v2, hpin2, hslot2get⟩
+                · exact absurd hpin2none (by simp [AuxShape.pin2])
+                · have hvk : v = Value.int k := by
+                    have h2 := hpin
+                    rw [AuxShape.pin] at h2
+                    exact (Option.some.inj h2).symm
+                  have hvk' : v2 = Value.int k' := by
+                    have h2 := hpin2
+                    rw [AuxShape.pin2] at h2
+                    exact (Option.some.inj h2).symm
+                  subst hvk
+                  subst hvk'
+                  exact ⟨hslotget, hslot2get⟩
+            obtain ⟨hslotget, hslot2get⟩ := hslots2
+            have hnlt : i2 < (modelAuxSlots m).length :=
+              (List.getElem?_eq_some_iff.mp hslotget).1
+            have hnlt2 : i2 + 1 < (modelAuxSlots m).length :=
+              (List.getElem?_eq_some_iff.mp hslot2get).1
+            obtain ⟨dc, hdcmem, hcc, hsatdc⟩ :=
+              hpieceSat ((AuxShape.expand (.timesRKK x k k')
+                (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!) List.mem_cons_self
+            -- the dc IS timesSlot i AUX1 AUX2 (the piece's compile
+            -- inversion); the sat_aux_timesRKK bridge then
+            -- concludes c.Holds
+            obtain ⟨i, iAUX1, iAUX2, hxi, hAUX1i, hAUX2i, hdcform⟩ :=
+              compileConstraint_int_times3_inv hcc
+            -- the first aux position is the extended
+            -- slots0.length + i2
+            have hAUX1pos : iAUX1 = slots0.length + i2 := by
+              have hnames : (slots0 ++ modelAuxSlots m).map Prod.fst
+                  = slots.map Prod.fst := by rw [hslots]
+              have hspec : ∀ j2 p, (modelAuxSlots m)[j2]? = some p →
+                  p.1 = auxName (auxTaken m slots0) j2 :=
+                (modelAuxSlots_spec hslots0).1
+              have hres := nameIndex_aux_slot
+                (slots0 := slots0) (auxs := modelAuxSlots m)
+                (taken := auxTaken m slots0) (i := i2)
+                (vs := [Value.int k])
+                (hsub := by
+                  intro s hs
+                  exact List.mem_append.mpr (Or.inl hs))
+                hspec hslotget
+              rw [hnames] at hres
+              -- the piece's AUX identifier name reduces to the
+              -- slot's name string
+              have hAUXname : (Ident.mk (auxName (auxTaken m slots0) i2)).name
+                  = auxName (auxTaken m slots0) i2 := rfl
+              rw [hAUXname] at hAUX1i
+              -- both resolve the same name at a unique position
+              have hsame : iAUX1 = slots0.length + i2 := by
+                have h1 : nameIndex (List.map Prod.fst slots)
+                    (auxName (auxTaken m slots0) i2) = some iAUX1 := hAUX1i
+                rw [hres] at h1
+                exact (Option.some.inj h1).symm
+              exact hsame
+            -- the second aux position is the successor slot's
+            -- extended position slots0.length + (i2 + 1)
+            have hAUX2pos : iAUX2 = slots0.length + (i2 + 1) := by
+              have hnames : (slots0 ++ modelAuxSlots m).map Prod.fst
+                  = slots.map Prod.fst := by rw [hslots]
+              have hspec : ∀ j2 p, (modelAuxSlots m)[j2]? = some p →
+                  p.1 = auxName (auxTaken m slots0) j2 :=
+                (modelAuxSlots_spec hslots0).1
+              have hres := nameIndex_aux_slot
+                (slots0 := slots0) (auxs := modelAuxSlots m)
+                (taken := auxTaken m slots0) (i := i2 + 1)
+                (vs := [Value.int k'])
+                (hsub := by
+                  intro s hs
+                  exact List.mem_append.mpr (Or.inl hs))
+                hspec hslot2get
+              rw [hnames] at hres
+              -- the piece's second AUX identifier name reduces to
+              -- the successor slot's name string
+              have hAUX2name : (nextAuxIdent
+                  (Ident.mk (auxName (auxTaken m slots0) i2))).name
+                  = auxName (auxTaken m slots0) (i2 + 1) :=
+                nextAuxIdent_name (auxTaken m slots0) i2
+              rw [hAUX2name] at hAUX2i
+              -- both resolve the same name at a unique position
+              have hsame : iAUX2 = slots0.length + (i2 + 1) := by
+                have h1 : nameIndex (List.map Prod.fst slots)
+                    (auxName (auxTaken m slots0) (i2 + 1)) = some iAUX2 := hAUX2i
+                rw [hres] at h1
+                exact (Option.some.inj h1).symm
+              exact hsame
+            rw [hdcform, hAUX1pos, hAUX2pos] at hsatdc
+            -- the store reads via the extended slots
+            rw [hslots] at hnu halt hmem hxi ⊢
+            exact sat_aux_timesRKK (m := m) (slots0 := slots0)
+              (auxs := modelAuxSlots m)
+              (dcs := dcs) (c := c) (x := x) (k := k) (k' := k')
+              (i := i) (n := i2)
+              hnu halt hmem hslotget hnlt hslot2get hnlt2
+              (by
+                rw [show c.name.name = "int_times" from by
+                  rw [← auxShapeOf_timesRKK_args hshape] at hargsc
+                  exact auxShapeOf_timesRKK_name hshape])
+              hargsc hxi hsatdc
+        | timesKRR x k k' =>
+            -- the args inversion: c's args are [lit k, x, lit k']
+            have hargsc : c.args = [.basic (.lit (.int k)), .basic (.ident x),
+                .basic (.lit (.int k'))] := auxShapeOf_timesKRR_args hshape
+            -- the pieces' pin info: the aux slots at i2 and i2+1
+            -- carry [.int k] and [.int k']
+            have hslots2 : (modelAuxSlots m)[i2]?
+                = some (auxName (auxTaken m slots0) i2, [Value.int k]) ∧
+                (modelAuxSlots m)[i2 + 1]?
+                  = some (auxName (auxTaken m slots0) (i2 + 1), [Value.int k']) := by
+              rcases (haux ((AuxShape.expand (.timesKRR x k k')
+                (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
+                (List.mem_cons_self)).2.1 with
+                hpinnone | ⟨v, hpin, hslotget⟩
+              · exact absurd hpinnone (by simp [AuxShape.pin])
+              · rcases (haux ((AuxShape.expand (.timesKRR x k k')
+                  (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
+                  (List.mem_cons_self)).2.2 with
+                  hpin2none | ⟨v2, hpin2, hslot2get⟩
+                · exact absurd hpin2none (by simp [AuxShape.pin2])
+                · have hvk : v = Value.int k := by
+                    have h2 := hpin
+                    rw [AuxShape.pin] at h2
+                    exact (Option.some.inj h2).symm
+                  have hvk' : v2 = Value.int k' := by
+                    have h2 := hpin2
+                    rw [AuxShape.pin2] at h2
+                    exact (Option.some.inj h2).symm
+                  subst hvk
+                  subst hvk'
+                  exact ⟨hslotget, hslot2get⟩
+            obtain ⟨hslotget, hslot2get⟩ := hslots2
+            have hnlt : i2 < (modelAuxSlots m).length :=
+              (List.getElem?_eq_some_iff.mp hslotget).1
+            have hnlt2 : i2 + 1 < (modelAuxSlots m).length :=
+              (List.getElem?_eq_some_iff.mp hslot2get).1
+            obtain ⟨dc, hdcmem, hcc, hsatdc⟩ :=
+              hpieceSat ((AuxShape.expand (.timesKRR x k k')
+                (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!) List.mem_cons_self
+            -- the dc IS timesSlot AUX1 i AUX2 (the piece's compile
+            -- inversion); the sat_aux_timesKRR bridge concludes
+            obtain ⟨iAUX1, i, iAUX2, hAUX1i, hxi, hAUX2i, hdcform⟩ :=
+              compileConstraint_int_times3_inv hcc
+            -- the first aux position is the extended
+            -- slots0.length + i2
+            have hAUX1pos : iAUX1 = slots0.length + i2 := by
+              have hnames : (slots0 ++ modelAuxSlots m).map Prod.fst
+                  = slots.map Prod.fst := by rw [hslots]
+              have hspec : ∀ j2 p, (modelAuxSlots m)[j2]? = some p →
+                  p.1 = auxName (auxTaken m slots0) j2 :=
+                (modelAuxSlots_spec hslots0).1
+              have hres := nameIndex_aux_slot
+                (slots0 := slots0) (auxs := modelAuxSlots m)
+                (taken := auxTaken m slots0) (i := i2)
+                (vs := [Value.int k])
+                (hsub := by
+                  intro s hs
+                  exact List.mem_append.mpr (Or.inl hs))
+                hspec hslotget
+              rw [hnames] at hres
+              have hAUXname : (Ident.mk (auxName (auxTaken m slots0) i2)).name
+                  = auxName (auxTaken m slots0) i2 := rfl
+              rw [hAUXname] at hAUX1i
+              have hsame : iAUX1 = slots0.length + i2 := by
+                have h1 : nameIndex (List.map Prod.fst slots)
+                    (auxName (auxTaken m slots0) i2) = some iAUX1 := hAUX1i
+                rw [hres] at h1
+                exact (Option.some.inj h1).symm
+              exact hsame
+            -- the second aux position is the successor slot's
+            -- extended position slots0.length + (i2 + 1)
+            have hAUX2pos : iAUX2 = slots0.length + (i2 + 1) := by
+              have hnames : (slots0 ++ modelAuxSlots m).map Prod.fst
+                  = slots.map Prod.fst := by rw [hslots]
+              have hspec : ∀ j2 p, (modelAuxSlots m)[j2]? = some p →
+                  p.1 = auxName (auxTaken m slots0) j2 :=
+                (modelAuxSlots_spec hslots0).1
+              have hres := nameIndex_aux_slot
+                (slots0 := slots0) (auxs := modelAuxSlots m)
+                (taken := auxTaken m slots0) (i := i2 + 1)
+                (vs := [Value.int k'])
+                (hsub := by
+                  intro s hs
+                  exact List.mem_append.mpr (Or.inl hs))
+                hspec hslot2get
+              rw [hnames] at hres
+              have hAUX2name : (nextAuxIdent
+                  (Ident.mk (auxName (auxTaken m slots0) i2))).name
+                  = auxName (auxTaken m slots0) (i2 + 1) :=
+                nextAuxIdent_name (auxTaken m slots0) i2
+              rw [hAUX2name] at hAUX2i
+              have hsame : iAUX2 = slots0.length + (i2 + 1) := by
+                have h1 : nameIndex (List.map Prod.fst slots)
+                    (auxName (auxTaken m slots0) (i2 + 1)) = some iAUX2 := hAUX2i
+                rw [hres] at h1
+                exact (Option.some.inj h1).symm
+              exact hsame
+            rw [hdcform, hAUX1pos, hAUX2pos] at hsatdc
+            -- the store reads via the extended slots
+            rw [hslots] at hnu halt hmem hxi ⊢
+            exact sat_aux_timesKRR (m := m) (slots0 := slots0)
+              (auxs := modelAuxSlots m)
+              (dcs := dcs) (c := c) (x := x) (k := k) (k' := k')
+              (i := i) (n := i2)
+              hnu halt hmem hslotget hnlt hslot2get hnlt2
+              (by
+                rw [show c.name.name = "int_times" from by
+                  rw [← auxShapeOf_timesKRR_args hshape] at hargsc
+                  exact auxShapeOf_timesKRR_name hshape])
+              hargsc hxi hsatdc
+        | timesKKR x k k' =>
+            -- the args inversion: c's args are [lit k, lit k', x]
+            have hargsc : c.args = [.basic (.lit (.int k)), .basic (.lit (.int k')),
+                .basic (.ident x)] := auxShapeOf_timesKKR_args hshape
+            -- the pieces' pin info: the aux slots at i2 and i2+1
+            -- carry [.int k] and [.int k']
+            have hslots2 : (modelAuxSlots m)[i2]?
+                = some (auxName (auxTaken m slots0) i2, [Value.int k]) ∧
+                (modelAuxSlots m)[i2 + 1]?
+                  = some (auxName (auxTaken m slots0) (i2 + 1), [Value.int k']) := by
+              rcases (haux ((AuxShape.expand (.timesKKR x k k')
+                (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
+                (List.mem_cons_self)).2.1 with
+                hpinnone | ⟨v, hpin, hslotget⟩
+              · exact absurd hpinnone (by simp [AuxShape.pin])
+              · rcases (haux ((AuxShape.expand (.timesKKR x k k')
+                  (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
+                  (List.mem_cons_self)).2.2 with
+                  hpin2none | ⟨v2, hpin2, hslot2get⟩
+                · exact absurd hpin2none (by simp [AuxShape.pin2])
+                · have hvk : v = Value.int k := by
+                    have h2 := hpin
+                    rw [AuxShape.pin] at h2
+                    exact (Option.some.inj h2).symm
+                  have hvk' : v2 = Value.int k' := by
+                    have h2 := hpin2
+                    rw [AuxShape.pin2] at h2
+                    exact (Option.some.inj h2).symm
+                  subst hvk
+                  subst hvk'
+                  exact ⟨hslotget, hslot2get⟩
+            obtain ⟨hslotget, hslot2get⟩ := hslots2
+            have hnlt : i2 < (modelAuxSlots m).length :=
+              (List.getElem?_eq_some_iff.mp hslotget).1
+            have hnlt2 : i2 + 1 < (modelAuxSlots m).length :=
+              (List.getElem?_eq_some_iff.mp hslot2get).1
+            obtain ⟨dc, hdcmem, hcc, hsatdc⟩ :=
+              hpieceSat ((AuxShape.expand (.timesKKR x k k')
+                (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!) List.mem_cons_self
+            -- the dc IS timesSlot AUX1 AUX2 i (the piece's compile
+            -- inversion); the sat_aux_timesKKR bridge concludes
+            obtain ⟨iAUX1, iAUX2, i, hAUX1i, hAUX2i, hxi, hdcform⟩ :=
+              compileConstraint_int_times3_inv hcc
+            -- the first aux position is the extended
+            -- slots0.length + i2
+            have hAUX1pos : iAUX1 = slots0.length + i2 := by
+              have hnames : (slots0 ++ modelAuxSlots m).map Prod.fst
+                  = slots.map Prod.fst := by rw [hslots]
+              have hspec : ∀ j2 p, (modelAuxSlots m)[j2]? = some p →
+                  p.1 = auxName (auxTaken m slots0) j2 :=
+                (modelAuxSlots_spec hslots0).1
+              have hres := nameIndex_aux_slot
+                (slots0 := slots0) (auxs := modelAuxSlots m)
+                (taken := auxTaken m slots0) (i := i2)
+                (vs := [Value.int k])
+                (hsub := by
+                  intro s hs
+                  exact List.mem_append.mpr (Or.inl hs))
+                hspec hslotget
+              rw [hnames] at hres
+              have hAUXname : (Ident.mk (auxName (auxTaken m slots0) i2)).name
+                  = auxName (auxTaken m slots0) i2 := rfl
+              rw [hAUXname] at hAUX1i
+              have hsame : iAUX1 = slots0.length + i2 := by
+                have h1 : nameIndex (List.map Prod.fst slots)
+                    (auxName (auxTaken m slots0) i2) = some iAUX1 := hAUX1i
+                rw [hres] at h1
+                exact (Option.some.inj h1).symm
+              exact hsame
+            -- the second aux position is the successor slot's
+            -- extended position slots0.length + (i2 + 1)
+            have hAUX2pos : iAUX2 = slots0.length + (i2 + 1) := by
+              have hnames : (slots0 ++ modelAuxSlots m).map Prod.fst
+                  = slots.map Prod.fst := by rw [hslots]
+              have hspec : ∀ j2 p, (modelAuxSlots m)[j2]? = some p →
+                  p.1 = auxName (auxTaken m slots0) j2 :=
+                (modelAuxSlots_spec hslots0).1
+              have hres := nameIndex_aux_slot
+                (slots0 := slots0) (auxs := modelAuxSlots m)
+                (taken := auxTaken m slots0) (i := i2 + 1)
+                (vs := [Value.int k'])
+                (hsub := by
+                  intro s hs
+                  exact List.mem_append.mpr (Or.inl hs))
+                hspec hslot2get
+              rw [hnames] at hres
+              have hAUX2name : (nextAuxIdent
+                  (Ident.mk (auxName (auxTaken m slots0) i2))).name
+                  = auxName (auxTaken m slots0) (i2 + 1) :=
+                nextAuxIdent_name (auxTaken m slots0) i2
+              rw [hAUX2name] at hAUX2i
+              have hsame : iAUX2 = slots0.length + (i2 + 1) := by
+                have h1 : nameIndex (List.map Prod.fst slots)
+                    (auxName (auxTaken m slots0) (i2 + 1)) = some iAUX2 := hAUX2i
+                rw [hres] at h1
+                exact (Option.some.inj h1).symm
+              exact hsame
+            rw [hdcform, hAUX1pos, hAUX2pos] at hsatdc
+            -- the store reads via the extended slots
+            rw [hslots] at hnu halt hmem hxi ⊢
+            exact sat_aux_timesKKR (m := m) (slots0 := slots0)
+              (auxs := modelAuxSlots m)
+              (dcs := dcs) (c := c) (x := x) (k := k) (k' := k')
+              (i := i) (n := i2)
+              hnu halt hmem hslotget hnlt hslot2get hnlt2
+              (by
+                rw [show c.name.name = "int_times" from by
+                  rw [← auxShapeOf_timesKKR_args hshape] at hargsc
+                  exact auxShapeOf_timesKKR_name hshape])
+              hargsc hxi hsatdc
         | neRK x k =>
             -- the args + name inversion: c is int_ne(x, lit k)
             obtain ⟨hnamec, hargsc⟩ := auxShapeOf_neRK_inv hshape
             -- the pieces' pin info: the aux slot at i2 carries [.int k]
             rcases (haux ((AuxShape.expand (.neRK x k)
               (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
-              (List.mem_cons_self)).2 with
+              (List.mem_cons_self)).2.1 with
               hpinnone | ⟨v, hpin, hslotget⟩
             · exact absurd hpinnone (by simp [AuxShape.pin])
             · have hvk : v = Value.int k := by
@@ -4592,7 +5093,6 @@ theorem compile_exact {m : Model}
               subst hvk
               have hnlt : i2 < (modelAuxSlots m).length :=
                 (List.getElem?_eq_some_iff.mp hslotget).1
-              -- the piece's dc
               obtain ⟨dc, hdcmem, hcc, hsatdc⟩ :=
                 hpieceSat ((AuxShape.expand (.neRK x k)
                   (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!) List.mem_cons_self
@@ -4684,7 +5184,7 @@ theorem compile_exact {m : Model}
             -- the pieces' pin info: the aux slot at i2 carries [.int k]
             rcases (haux ((AuxShape.expand (.neKR x k)
               (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
-              (List.mem_cons_self)).2 with
+              (List.mem_cons_self)).2.1 with
               hpinnone | ⟨v, hpin, hslotget⟩
             · exact absurd hpinnone (by simp [AuxShape.pin])
             · have hvk : v = Value.int k := by
@@ -4694,7 +5194,6 @@ theorem compile_exact {m : Model}
               subst hvk
               have hnlt : i2 < (modelAuxSlots m).length :=
                 (List.getElem?_eq_some_iff.mp hslotget).1
-              -- the piece's dc
               obtain ⟨dc, hdcmem, hcc, hsatdc⟩ :=
                 hpieceSat ((AuxShape.expand (.neKR x k)
                   (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!) List.mem_cons_self
@@ -4822,7 +5321,7 @@ theorem compile_exact {m : Model}
             -- [.bool false]
             rcases (haux ((AuxShape.expand (.andFalse x y)
               (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
-              (List.mem_cons_self)).2 with
+              (List.mem_cons_self)).2.1 with
               hpinnone | ⟨v, hpin, hslotget⟩
             · exact absurd hpinnone (by simp [AuxShape.pin])
             · have hvk : v = Value.bool false := by
@@ -5088,7 +5587,7 @@ theorem compile_exact {m : Model}
             -- [.bool true]
             rcases (haux ((AuxShape.expand (.orTrue x y)
               (Ident.mk (auxName (auxTaken m slots0) i2)))[0]!)
-              (List.mem_cons_self)).2 with
+              (List.mem_cons_self)).2.1 with
               hpinnone | ⟨v, hpin, hslotget⟩
             · exact absurd hpinnone (by simp [AuxShape.pin])
             · have hvk : v = Value.bool true := by
@@ -7743,6 +8242,478 @@ theorem compile_covers {m : Model}
               exact (DomConstraint.satisfiedB_iff _ _).mpr
                 ⟨k, p, q, hareadaux, hareadi.trans hsx,
                   hareadj.trans hsy, hkpq⟩
+        | timesRKK x k k' =>
+            -- the args inversion: c is int_times(x, lit k, lit k')
+            have hargsc : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k)),
+                Expr.basic (.lit (.int k'))] := auxShapeOf_timesRKK_args hshape
+            have hnamec : c.name.name = "int_times" :=
+              auxShapeOf_timesRKK_name hshape
+            -- the store's semantic facts: store x = .int p, p * k = k'
+            obtain ⟨p, hsx, hpkk'⟩ : ∃ p, store x = some (.int p) ∧ p * k = k' := by
+              obtain ⟨args, hmap, hinterp⟩ := hcons c hcmem
+              rw [hargsc] at hmap
+              have hchain : Option.bind (Expr.eval store (Expr.basic (.ident x)))
+                  (fun v1 => Option.bind (Expr.eval store (Expr.basic (.lit (.int k))))
+                    (fun v2 => Option.bind (Expr.eval store (Expr.basic (.lit (.int k'))))
+                      (fun v3 => some [v1, v2, v3]))) = some args := by
+                simpa [List.mapM_cons, List.mapM_nil, Option.bind_assoc] using hmap
+              have hv2' : Expr.eval store (Expr.basic (.lit (.int k)))
+                  = some (.int k) := rfl
+              have hv3' : Expr.eval store (Expr.basic (.lit (.int k')))
+                  = some (.int k') := rfl
+              have hredx : Expr.eval store (Expr.basic (.ident x))
+                  = store x := rfl
+              rw [hredx, hv2', hv3'] at hchain
+              cases hsx : store x with
+              | none => rw [hsx] at hchain; simp at hchain
+              | some v1 =>
+                  rw [hsx] at hchain
+                  simp only [Option.bind_some] at hchain
+                  have hargsv : args = [v1, .int k, .int k'] := by
+                    simpa using hchain.symm
+                  subst hargsv
+                  have h1 : fullInterp (Ident.mk "int_times") [v1, .int k, .int k'] :=
+                    interp_of_hname hnamec hinterp
+                  rw [fullInterp_std (by decide)] at h1
+                  have hmatch : (match [v1, Value.int k, Value.int k'] with
+                    | [Value.int a, Value.int b, Value.int w] => a * b = w
+                    | _ => False) := h1
+                  cases v1 with
+                  | int p => exact ⟨p, rfl, by simpa using hmatch⟩
+                  | bool w => exact absurd hmatch (by simp)
+                  | setOfInt w => exact absurd hmatch (by simp)
+                  | array w => exact absurd hmatch (by simp)
+            -- the piece IS int_times(x, AUX₁, AUX₂)
+            have hc'eq : c' =
+                { name := Ident.mk "int_times"
+                , args := [Expr.basic (.ident x), Expr.basic (.ident
+                      (Ident.mk (auxName (auxTaken m slots0) i2))),
+                    Expr.basic (.ident
+                      (Ident.mk (auxName (auxTaken m slots0) (i2 + 1))))]
+                , anns := [] } := by
+              simp only [AuxShape.expand, List.mem_cons, List.not_mem_nil]
+                at hpiece
+              rcases hpiece with hpiece | hcontr
+              · exact hpiece
+              · exact absurd hcontr (by simp)
+            subst hc'eq
+            -- the compile inversion: the three names resolve, the form
+            obtain ⟨i, iAUX1, iAUX2, hxi, hAUX1i, hAUX2i, hdcform⟩ :=
+              compileConstraint_int_times3_inv hcc
+            -- the two pins: the aux slots at i2 and i2+1
+            obtain ⟨hp1, hp2⟩ := hpin
+            rcases hp1 with hpinnone | ⟨v, hpinv, hslotget⟩
+            · rw [AuxShape.pin] at hpinnone; exact absurd hpinnone (by simp)
+            · rw [AuxShape.pin] at hpinv
+              have hvk : v = Value.int k :=
+                (Option.some.inj hpinv).symm
+              subst hvk
+              rcases hp2 with hpin2none | ⟨v2, hpin2v, hslot2get⟩
+              · rw [AuxShape.pin2] at hpin2none; exact absurd hpin2none (by simp)
+              · rw [AuxShape.pin2] at hpin2v
+                have hvk' : v2 = Value.int k' :=
+                  (Option.some.inj hpin2v).symm
+                subst hvk'
+                -- the two aux positions
+                have hnlt : i2 < (modelAuxSlots m).length :=
+                  (List.getElem?_eq_some_iff.mp hslotget).1
+                have hnlt2 : i2 + 1 < (modelAuxSlots m).length :=
+                  (List.getElem?_eq_some_iff.mp hslot2get).1
+                have hAUX1pos : iAUX1 = slots0.length + i2 := by
+                  have hres := nameIndex_aux_slot
+                    (slots0 := slots0) (auxs := modelAuxSlots m)
+                    (taken := auxTaken m slots0) (i := i2)
+                    (vs := [Value.int k])
+                    (hsub := by
+                      intro s hs
+                      exact List.mem_append.mpr (Or.inl hs))
+                    hspec hslotget
+                  have hAUXname : (Ident.mk (auxName (auxTaken m slots0) i2)).name
+                      = auxName (auxTaken m slots0) i2 := rfl
+                  rw [hAUXname] at hAUX1i
+                  rw [hres] at hAUX1i
+                  exact (Option.some.inj hAUX1i).symm
+                have hAUX2pos : iAUX2 = slots0.length + (i2 + 1) := by
+                  have hres := nameIndex_aux_slot
+                    (slots0 := slots0) (auxs := modelAuxSlots m)
+                    (taken := auxTaken m slots0) (i := i2 + 1)
+                    (vs := [Value.int k'])
+                    (hsub := by
+                      intro s hs
+                      exact List.mem_append.mpr (Or.inl hs))
+                    hspec hslot2get
+                  have hAUX2name : (Ident.mk
+                      (auxName (auxTaken m slots0) (i2 + 1))).name
+                      = auxName (auxTaken m slots0) (i2 + 1) := rfl
+                  rw [hAUX2name] at hAUX2i
+                  rw [hres] at hAUX2i
+                  exact (Option.some.inj hAUX2i).symm
+                rw [hdcform, hAUX1pos, hAUX2pos]
+                -- x's model position
+                have hxarg : Expr.basic (.ident x) ∈ c.args := by
+                  rw [hargsc]; exact List.mem_cons_self
+                have hxstatic : m.staticEnv x ≠ none :=
+                  staticEnv_of_ident_arg hwf hcmem hxarg
+                have hxilt : i < slots0.length := by
+                  obtain ⟨j2, hj2⟩ := argIdent_model_position (c := c)
+                    hvarsbasic hslots0 hauxfresh hxstatic hxi
+                  have hext : nameIndex ((slots0 ++ modelAuxSlots m).map Prod.fst)
+                      x.name = some j2 := nameIndex_ext_eq_model hj2
+                  have hji : i = j2 := Option.some.inj (hxi.symm.trans hext)
+                  subst hji
+                  have h1 := (nameIndex_some (slots0.map Prod.fst) x.name i hj2).1
+                  have hlen : (slots0.map Prod.fst).length = slots0.length := by simp
+                  omega
+                -- the reads
+                obtain ⟨v1, hv1read, _⟩ := hreads i hxilt
+                have hareadi : (extAssign store slots0 (modelAuxSlots m))[i]?
+                    = store x := extAssign_read_ident hxilt hxi ⟨v1, hv1read⟩
+                have hareadaux1 :
+                    (extAssign store slots0 (modelAuxSlots m))[slots0.length + i2]?
+                      = some (Value.int k) := by
+                  rw [extAssign_aux_read hnlt]
+                  have hpair : (modelAuxSlots m)[i2]
+                      = (auxName (auxTaken m slots0) i2, [Value.int k]) := by
+                    have hplain : (modelAuxSlots m)[i2]?
+                        = some (modelAuxSlots m)[i2] :=
+                      List.getElem?_eq_getElem hnlt
+                    rw [hslotget] at hplain
+                    exact (Option.some.inj hplain).symm
+                  rw [hpair]
+                  rfl
+                have hareadaux2 :
+                    (extAssign store slots0 (modelAuxSlots m))[slots0.length + (i2 + 1)]?
+                      = some (Value.int k') := by
+                  rw [extAssign_aux_read hnlt2]
+                  have hpair : (modelAuxSlots m)[i2 + 1]
+                      = (auxName (auxTaken m slots0) (i2 + 1), [Value.int k']) := by
+                    have hplain : (modelAuxSlots m)[i2 + 1]?
+                        = some (modelAuxSlots m)[i2 + 1] :=
+                      List.getElem?_eq_getElem hnlt2
+                    rw [hslot2get] at hplain
+                    exact (Option.some.inj hplain).symm
+                  rw [hpair]
+                  rfl
+                -- the satisfaction
+                exact (DomConstraint.satisfiedB_iff _ _).mpr
+                  ⟨p, k, k', hareadi.trans hsx, hareadaux1,
+                    hareadaux2, hpkk'⟩
+        | timesKRR x k k' =>
+            -- the args inversion: c is int_times(lit k, x, lit k')
+            have hargsc : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident x),
+                Expr.basic (.lit (.int k'))] := auxShapeOf_timesKRR_args hshape
+            have hnamec : c.name.name = "int_times" :=
+              auxShapeOf_timesKRR_name hshape
+            -- the store's semantic facts: store x = .int p, k * p = k'
+            obtain ⟨p, hsx, hkpk'⟩ : ∃ p, store x = some (.int p) ∧ k * p = k' := by
+              obtain ⟨args, hmap, hinterp⟩ := hcons c hcmem
+              rw [hargsc] at hmap
+              have hchain : Option.bind (Expr.eval store (Expr.basic (.lit (.int k))))
+                  (fun v1 => Option.bind (Expr.eval store (Expr.basic (.ident x)))
+                    (fun v2 => Option.bind (Expr.eval store (Expr.basic (.lit (.int k'))))
+                      (fun v3 => some [v1, v2, v3]))) = some args := by
+                simpa [List.mapM_cons, List.mapM_nil, Option.bind_assoc] using hmap
+              have hv1' : Expr.eval store (Expr.basic (.lit (.int k)))
+                  = some (.int k) := rfl
+              have hv3' : Expr.eval store (Expr.basic (.lit (.int k')))
+                  = some (.int k') := rfl
+              have hredx : Expr.eval store (Expr.basic (.ident x))
+                  = store x := rfl
+              rw [hv1', hredx, hv3'] at hchain
+              cases hsx : store x with
+              | none => rw [hsx] at hchain; simp at hchain
+              | some v2 =>
+                  rw [hsx] at hchain
+                  simp only [Option.bind_some] at hchain
+                  have hargsv : args = [.int k, v2, .int k'] := by
+                    simpa using hchain.symm
+                  subst hargsv
+                  have h1 : fullInterp (Ident.mk "int_times") [.int k, v2, .int k'] :=
+                    interp_of_hname hnamec hinterp
+                  rw [fullInterp_std (by decide)] at h1
+                  have hmatch : (match [Value.int k, v2, Value.int k'] with
+                    | [Value.int a, Value.int b, Value.int w] => a * b = w
+                    | _ => False) := h1
+                  cases v2 with
+                  | int p => exact ⟨p, rfl, by simpa using hmatch⟩
+                  | bool w => exact absurd hmatch (by simp)
+                  | setOfInt w => exact absurd hmatch (by simp)
+                  | array w => exact absurd hmatch (by simp)
+            -- the piece IS int_times(AUX₁, x, AUX₂)
+            have hc'eq : c' =
+                { name := Ident.mk "int_times"
+                , args := [Expr.basic (.ident
+                      (Ident.mk (auxName (auxTaken m slots0) i2))),
+                    Expr.basic (.ident x), Expr.basic (.ident
+                      (Ident.mk (auxName (auxTaken m slots0) (i2 + 1))))]
+                , anns := [] } := by
+              simp only [AuxShape.expand, List.mem_cons, List.not_mem_nil]
+                at hpiece
+              rcases hpiece with hpiece | hcontr
+              · exact hpiece
+              · exact absurd hcontr (by simp)
+            subst hc'eq
+            -- the compile inversion: the three names resolve, the form
+            obtain ⟨iAUX1, i, iAUX2, hAUX1i, hxi, hAUX2i, hdcform⟩ :=
+              compileConstraint_int_times3_inv hcc
+            -- the two pins: the aux slots at i2 and i2+1
+            obtain ⟨hp1, hp2⟩ := hpin
+            rcases hp1 with hpinnone | ⟨v, hpinv, hslotget⟩
+            · rw [AuxShape.pin] at hpinnone; exact absurd hpinnone (by simp)
+            · rw [AuxShape.pin] at hpinv
+              have hvk : v = Value.int k :=
+                (Option.some.inj hpinv).symm
+              subst hvk
+              rcases hp2 with hpin2none | ⟨v2, hpin2v, hslot2get⟩
+              · rw [AuxShape.pin2] at hpin2none; exact absurd hpin2none (by simp)
+              · rw [AuxShape.pin2] at hpin2v
+                have hvk' : v2 = Value.int k' :=
+                  (Option.some.inj hpin2v).symm
+                subst hvk'
+                -- the two aux positions
+                have hnlt : i2 < (modelAuxSlots m).length :=
+                  (List.getElem?_eq_some_iff.mp hslotget).1
+                have hnlt2 : i2 + 1 < (modelAuxSlots m).length :=
+                  (List.getElem?_eq_some_iff.mp hslot2get).1
+                have hAUX1pos : iAUX1 = slots0.length + i2 := by
+                  have hres := nameIndex_aux_slot
+                    (slots0 := slots0) (auxs := modelAuxSlots m)
+                    (taken := auxTaken m slots0) (i := i2)
+                    (vs := [Value.int k])
+                    (hsub := by
+                      intro s hs
+                      exact List.mem_append.mpr (Or.inl hs))
+                    hspec hslotget
+                  have hAUXname : (Ident.mk (auxName (auxTaken m slots0) i2)).name
+                      = auxName (auxTaken m slots0) i2 := rfl
+                  rw [hAUXname] at hAUX1i
+                  rw [hres] at hAUX1i
+                  exact (Option.some.inj hAUX1i).symm
+                have hAUX2pos : iAUX2 = slots0.length + (i2 + 1) := by
+                  have hres := nameIndex_aux_slot
+                    (slots0 := slots0) (auxs := modelAuxSlots m)
+                    (taken := auxTaken m slots0) (i := i2 + 1)
+                    (vs := [Value.int k'])
+                    (hsub := by
+                      intro s hs
+                      exact List.mem_append.mpr (Or.inl hs))
+                    hspec hslot2get
+                  have hAUX2name : (Ident.mk
+                      (auxName (auxTaken m slots0) (i2 + 1))).name
+                      = auxName (auxTaken m slots0) (i2 + 1) := rfl
+                  rw [hAUX2name] at hAUX2i
+                  rw [hres] at hAUX2i
+                  exact (Option.some.inj hAUX2i).symm
+                rw [hdcform, hAUX1pos, hAUX2pos]
+                -- x's model position
+                have hxarg : Expr.basic (.ident x) ∈ c.args := by
+                  rw [hargsc]
+                  exact List.mem_cons_of_mem _ List.mem_cons_self
+                have hxstatic : m.staticEnv x ≠ none :=
+                  staticEnv_of_ident_arg hwf hcmem hxarg
+                have hxilt : i < slots0.length := by
+                  obtain ⟨j2, hj2⟩ := argIdent_model_position (c := c)
+                    hvarsbasic hslots0 hauxfresh hxstatic hxi
+                  have hext : nameIndex ((slots0 ++ modelAuxSlots m).map Prod.fst)
+                      x.name = some j2 := nameIndex_ext_eq_model hj2
+                  have hji : i = j2 := Option.some.inj (hxi.symm.trans hext)
+                  subst hji
+                  have h1 := (nameIndex_some (slots0.map Prod.fst) x.name i hj2).1
+                  have hlen : (slots0.map Prod.fst).length = slots0.length := by simp
+                  omega
+                -- the reads
+                obtain ⟨v1, hv1read, _⟩ := hreads i hxilt
+                have hareadi : (extAssign store slots0 (modelAuxSlots m))[i]?
+                    = store x := extAssign_read_ident hxilt hxi ⟨v1, hv1read⟩
+                have hareadaux1 :
+                    (extAssign store slots0 (modelAuxSlots m))[slots0.length + i2]?
+                      = some (Value.int k) := by
+                  rw [extAssign_aux_read hnlt]
+                  have hpair : (modelAuxSlots m)[i2]
+                      = (auxName (auxTaken m slots0) i2, [Value.int k]) := by
+                    have hplain : (modelAuxSlots m)[i2]?
+                        = some (modelAuxSlots m)[i2] :=
+                      List.getElem?_eq_getElem hnlt
+                    rw [hslotget] at hplain
+                    exact (Option.some.inj hplain).symm
+                  rw [hpair]
+                  rfl
+                have hareadaux2 :
+                    (extAssign store slots0 (modelAuxSlots m))[slots0.length + (i2 + 1)]?
+                      = some (Value.int k') := by
+                  rw [extAssign_aux_read hnlt2]
+                  have hpair : (modelAuxSlots m)[i2 + 1]
+                      = (auxName (auxTaken m slots0) (i2 + 1), [Value.int k']) := by
+                    have hplain : (modelAuxSlots m)[i2 + 1]?
+                        = some (modelAuxSlots m)[i2 + 1] :=
+                      List.getElem?_eq_getElem hnlt2
+                    rw [hslot2get] at hplain
+                    exact (Option.some.inj hplain).symm
+                  rw [hpair]
+                  rfl
+                -- the satisfaction
+                exact (DomConstraint.satisfiedB_iff _ _).mpr
+                  ⟨k, p, k', hareadaux1, hareadi.trans hsx,
+                    hareadaux2, hkpk'⟩
+        | timesKKR x k k' =>
+            -- the args inversion: c is int_times(lit k, lit k', x)
+            have hargsc : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.lit (.int k')),
+                Expr.basic (.ident x)] := auxShapeOf_timesKKR_args hshape
+            have hnamec : c.name.name = "int_times" :=
+              auxShapeOf_timesKKR_name hshape
+            -- the store's semantic facts: store x = .int p, k * k' = p
+            obtain ⟨p, hsx, hkk'p⟩ : ∃ p, store x = some (.int p) ∧ k * k' = p := by
+              obtain ⟨args, hmap, hinterp⟩ := hcons c hcmem
+              rw [hargsc] at hmap
+              have hchain : Option.bind (Expr.eval store (Expr.basic (.lit (.int k))))
+                  (fun v1 => Option.bind (Expr.eval store (Expr.basic (.lit (.int k'))))
+                    (fun v2 => Option.bind (Expr.eval store (Expr.basic (.ident x)))
+                      (fun v3 => some [v1, v2, v3]))) = some args := by
+                simpa [List.mapM_cons, List.mapM_nil, Option.bind_assoc] using hmap
+              have hv1' : Expr.eval store (Expr.basic (.lit (.int k)))
+                  = some (.int k) := rfl
+              have hv2' : Expr.eval store (Expr.basic (.lit (.int k')))
+                  = some (.int k') := rfl
+              have hredx : Expr.eval store (Expr.basic (.ident x))
+                  = store x := rfl
+              rw [hv1', hv2', hredx] at hchain
+              cases hsx : store x with
+              | none => rw [hsx] at hchain; simp at hchain
+              | some v3 =>
+                  rw [hsx] at hchain
+                  simp only [Option.bind_some] at hchain
+                  have hargsv : args = [.int k, .int k', v3] := by
+                    simpa using hchain.symm
+                  subst hargsv
+                  have h1 : fullInterp (Ident.mk "int_times") [.int k, .int k', v3] :=
+                    interp_of_hname hnamec hinterp
+                  rw [fullInterp_std (by decide)] at h1
+                  have hmatch : (match [Value.int k, Value.int k', v3] with
+                    | [Value.int a, Value.int b, Value.int w] => a * b = w
+                    | _ => False) := h1
+                  cases v3 with
+                  | int p => exact ⟨p, rfl, by simpa using hmatch⟩
+                  | bool w => exact absurd hmatch (by simp)
+                  | setOfInt w => exact absurd hmatch (by simp)
+                  | array w => exact absurd hmatch (by simp)
+            -- the piece IS int_times(AUX₁, AUX₂, x)
+            have hc'eq : c' =
+                { name := Ident.mk "int_times"
+                , args := [Expr.basic (.ident
+                      (Ident.mk (auxName (auxTaken m slots0) i2))),
+                    Expr.basic (.ident
+                      (Ident.mk (auxName (auxTaken m slots0) (i2 + 1)))),
+                    Expr.basic (.ident x)]
+                , anns := [] } := by
+              simp only [AuxShape.expand, List.mem_cons, List.not_mem_nil]
+                at hpiece
+              rcases hpiece with hpiece | hcontr
+              · exact hpiece
+              · exact absurd hcontr (by simp)
+            subst hc'eq
+            -- the compile inversion: the three names resolve, the form
+            obtain ⟨iAUX1, iAUX2, i, hAUX1i, hAUX2i, hxi, hdcform⟩ :=
+              compileConstraint_int_times3_inv hcc
+            -- the two pins: the aux slots at i2 and i2+1
+            obtain ⟨hp1, hp2⟩ := hpin
+            rcases hp1 with hpinnone | ⟨v, hpinv, hslotget⟩
+            · rw [AuxShape.pin] at hpinnone; exact absurd hpinnone (by simp)
+            · rw [AuxShape.pin] at hpinv
+              have hvk : v = Value.int k :=
+                (Option.some.inj hpinv).symm
+              subst hvk
+              rcases hp2 with hpin2none | ⟨v2, hpin2v, hslot2get⟩
+              · rw [AuxShape.pin2] at hpin2none; exact absurd hpin2none (by simp)
+              · rw [AuxShape.pin2] at hpin2v
+                have hvk' : v2 = Value.int k' :=
+                  (Option.some.inj hpin2v).symm
+                subst hvk'
+                -- the two aux positions
+                have hnlt : i2 < (modelAuxSlots m).length :=
+                  (List.getElem?_eq_some_iff.mp hslotget).1
+                have hnlt2 : i2 + 1 < (modelAuxSlots m).length :=
+                  (List.getElem?_eq_some_iff.mp hslot2get).1
+                have hAUX1pos : iAUX1 = slots0.length + i2 := by
+                  have hres := nameIndex_aux_slot
+                    (slots0 := slots0) (auxs := modelAuxSlots m)
+                    (taken := auxTaken m slots0) (i := i2)
+                    (vs := [Value.int k])
+                    (hsub := by
+                      intro s hs
+                      exact List.mem_append.mpr (Or.inl hs))
+                    hspec hslotget
+                  have hAUXname : (Ident.mk (auxName (auxTaken m slots0) i2)).name
+                      = auxName (auxTaken m slots0) i2 := rfl
+                  rw [hAUXname] at hAUX1i
+                  rw [hres] at hAUX1i
+                  exact (Option.some.inj hAUX1i).symm
+                have hAUX2pos : iAUX2 = slots0.length + (i2 + 1) := by
+                  have hres := nameIndex_aux_slot
+                    (slots0 := slots0) (auxs := modelAuxSlots m)
+                    (taken := auxTaken m slots0) (i := i2 + 1)
+                    (vs := [Value.int k'])
+                    (hsub := by
+                      intro s hs
+                      exact List.mem_append.mpr (Or.inl hs))
+                    hspec hslot2get
+                  have hAUX2name : (Ident.mk
+                      (auxName (auxTaken m slots0) (i2 + 1))).name
+                      = auxName (auxTaken m slots0) (i2 + 1) := rfl
+                  rw [hAUX2name] at hAUX2i
+                  rw [hres] at hAUX2i
+                  exact (Option.some.inj hAUX2i).symm
+                rw [hdcform, hAUX1pos, hAUX2pos]
+                -- x's model position
+                have hxarg : Expr.basic (.ident x) ∈ c.args := by
+                  rw [hargsc]
+                  exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _
+                    List.mem_cons_self)
+                have hxstatic : m.staticEnv x ≠ none :=
+                  staticEnv_of_ident_arg hwf hcmem hxarg
+                have hxilt : i < slots0.length := by
+                  obtain ⟨j2, hj2⟩ := argIdent_model_position (c := c)
+                    hvarsbasic hslots0 hauxfresh hxstatic hxi
+                  have hext : nameIndex ((slots0 ++ modelAuxSlots m).map Prod.fst)
+                      x.name = some j2 := nameIndex_ext_eq_model hj2
+                  have hji : i = j2 := Option.some.inj (hxi.symm.trans hext)
+                  subst hji
+                  have h1 := (nameIndex_some (slots0.map Prod.fst) x.name i hj2).1
+                  have hlen : (slots0.map Prod.fst).length = slots0.length := by simp
+                  omega
+                -- the reads
+                obtain ⟨v1, hv1read, _⟩ := hreads i hxilt
+                have hareadi : (extAssign store slots0 (modelAuxSlots m))[i]?
+                    = store x := extAssign_read_ident hxilt hxi ⟨v1, hv1read⟩
+                have hareadaux1 :
+                    (extAssign store slots0 (modelAuxSlots m))[slots0.length + i2]?
+                      = some (Value.int k) := by
+                  rw [extAssign_aux_read hnlt]
+                  have hpair : (modelAuxSlots m)[i2]
+                      = (auxName (auxTaken m slots0) i2, [Value.int k]) := by
+                    have hplain : (modelAuxSlots m)[i2]?
+                        = some (modelAuxSlots m)[i2] :=
+                      List.getElem?_eq_getElem hnlt
+                    rw [hslotget] at hplain
+                    exact (Option.some.inj hplain).symm
+                  rw [hpair]
+                  rfl
+                have hareadaux2 :
+                    (extAssign store slots0 (modelAuxSlots m))[slots0.length + (i2 + 1)]?
+                      = some (Value.int k') := by
+                  rw [extAssign_aux_read hnlt2]
+                  have hpair : (modelAuxSlots m)[i2 + 1]
+                      = (auxName (auxTaken m slots0) (i2 + 1), [Value.int k']) := by
+                    have hplain : (modelAuxSlots m)[i2 + 1]?
+                        = some (modelAuxSlots m)[i2 + 1] :=
+                      List.getElem?_eq_getElem hnlt2
+                    rw [hslot2get] at hplain
+                    exact (Option.some.inj hplain).symm
+                  rw [hpair]
+                  rfl
+                -- the satisfaction
+                exact (DomConstraint.satisfiedB_iff _ _).mpr
+                  ⟨k, k', p, hareadaux1, hareadaux2,
+                    hareadi.trans hsx, hkk'p⟩
         | neRK x k =>
             -- the args + name inversion: c is int_ne(x, lit k)
             obtain ⟨hnamec, hargsc⟩ := auxShapeOf_neRK_inv hshape
