@@ -83,6 +83,11 @@ Lazy clause generation layer (the certified solver)
 │   layer (2026-10-01): state-free reason-validity (two-case constraint
 │   disjunctions; linLe excluded — machine-checked obstruction), the
 │   rooted hjust, the cc≠[] conflict entitlement, the initial-state seeds
+├── solver/LCG/Proofs/Obstructions.lean  Machine-checked obstructions and
+│   counterexamples justifying the invariant gates (TrailDistinct,
+│   TrailBoolPins, the run-relativized hconfent); extracted 2026-10-05
+│   from the former tmp/ scratch deliverables; a leaf module with no
+│   importers, kept as maintained regressions
 └── solver/LCG.lean                LCG-layer umbrella
 
 Layer 1 — Grammar, Parser, Semantics
@@ -122,8 +127,29 @@ Layer 3 — Completeness, Solution, Extraction
 │   └── ← Direct/Types, Domain, Extract, Propagators
 ├── solver/Direct/Search.lean      Executable exhaustive direct solver
 │   └── ← solver/Search, Direct/Compile
-├── solver/Direct/Proofs/Compile.lean  Exact compilation proof obligations
+├── solver/Direct/Proofs/CompileCore.lean  Core compilation proof obligations:
+│   lookup, compiler inversion, store bridge, constraint exactness,
+│   slot/typing chains, compile-list inversions, assembly ingredients,
+│   bool typing chain (split from Compile.lean in the 2026-10-05 P1c
+│   memory-driven split; statements unchanged)
 │   └── ← solver/Core, Direct/Compile
+├── solver/Direct/Proofs/CompileAux1.lean  Aux-slot expansion infrastructure:
+│   name freshness, nameIndex append lemmas, expansion pre-pass
+│   spec/membership inversions, emitted-slot properties, per-piece
+│   compile inversions
+│   └── ← Direct/Proofs/CompileCore
+├── solver/Direct/Proofs/CompileAux2a.lean  Per-shape semantic bridges (SAT
+│   and coverage), extended read chains, first argument inversions
+│   └── ← Direct/Proofs/CompileAux1
+├── solver/Direct/Proofs/CompileAux2b.lean  Remaining argument inversions
+│   (two-literal times, and/or shapes), aux-slot linker premises
+│   └── ← Direct/Proofs/CompileAux2a
+├── solver/Direct/Proofs/CompileAux2c.lean  Per-shape name inversions and
+│   per-piece successful-compile inversions
+│   └── ← Direct/Proofs/CompileAux2b
+├── solver/Direct/Proofs/Compile.lean  Re-export shell preserving the
+│   module's public face for Exact/Fam.AllDiff/the reference solver
+│   └── ← CompileCore, CompileAux1, CompileAux2a/2b/2c
 ├── solver/Direct/Proofs/Search.lean   Search proof obligations
 │   └── ← Direct/Search, solver/Propagators
 ├── solver/Direct/Correctness.lean Public direct SAT/UNSAT theorem obligations
