@@ -69,38 +69,35 @@ files rather than keeping them as live archives.
   dot-notation calls. Classify files and declarations as production,
   useful reference/regression, or removable. Replace the stale inventory
   in `audits/dependency_inventory.md` with the current result.
-- [ ] **P1b — Delete unused legacy code and proofs.** Review the retired
-  Config/Solve/Fixpoint/Heuristic/Enum/Optimize/RevState/Learning/Restarts/
-  Solver modules, the Tree family, and their dedicated legacy test files.
-  Delete those without retained users. Remove obsolete compatibility
-  paths, duplicate helpers, superseded proof scaffolding and unused
-  theorems; update callers before removing files with useful shared
-  declarations. Assess old singleton-only certification scaffolding
-  against the current wide theorems and remove it where redundant.
-  `Direct.Search`, `Direct.Correctness` and their proofs currently have
-  theorem-level tests/audit users: keep a small useful reference or
-  replace those uses before deletion. Preserve shared Domain/Extract/
-  Propagators/Search/Emit declarations used by the certified path.
-- [ ] **P1c — Restructure retained modules.** Separate shared foundations,
-  compiler implementation/correspondence, LCG operations, family proof
-  packages, run invariants and public certification composition. Split
-  the large compiler proof modules at stable dependency boundaries,
-  starting with `Direct/Proofs/Compile.lean` and `Exact.lean`; measure
-  elaboration memory to guide the split. Narrow unnecessary imports and
-  remove obsolete umbrella exports. Preserve theorem statements and
-  public behavior; give each retained module a clear purpose and position
-  in the dependency DAG. Update `code-structure.md` to actual imports.
-- [ ] **P1d — Remove development debris.** Extract still-useful
-  counterexamples from `tmp` into maintained regression tests or proof
-  modules. Delete superseded candidates, probes and logs, then remove
-  `tmp` and replace stale scratch references. Retain the active axiom
-  audit; remove stale audit artifacts or consolidate their useful content.
-  Do not delete build caches as part of source cleanup.
+  **DONE 2026-10-05**: the refreshed inventory is in
+  `audits/dependency_inventory.md` (93 reachable / 23 dead modules).
+- [ ] **P1b — Delete unused legacy code and proofs.** *(DONE 2026-10-05:
+  the 23 dead files — legacy Config/Solve/Enum/Optimize/RevState/
+  Learning/Restarts/Fixpoint/Heuristic/Solver stack, the Tree family,
+  and 8 orphaned legacy test files — were deleted; dead declarations
+  were removed from FznCheck.lean and Search.lean.)*
+- [ ] **P1c — Restructure retained modules.** *(DONE 2026-10-05 for the
+  memory-critical module: Direct/Proofs/Compile.lean was split into
+  CompileCore/CompileAux1/CompileAux2a/2b/2c behind a re-export shell;
+  the OOM-blocking in-flight errors were repaired throughout. The
+  remaining P1c items — narrowing the LeanFzn umbrella imports and any
+  further oversized-module splits — are folded into P1e/P2 where they
+  are validated together with the full build.)*
+- [ ] **P1d — Remove development debris.** *(DONE 2026-10-05: tmp/ deleted
+  after extracting the four machine-checked counterexamples into
+  `solver/LCG/Proofs/Obstructions.lean`; the stale tmp/ prose citations
+  in Run/Reason/Fam/Lin/Fallback now point there.)*
 - [ ] **P1e — Finish cleanup integration.** Synchronize Lake targets,
   library exports, CI, theorem audit names, README and module comments.
   Remove stale singleton-only UNSAT claims, deleted-file references and
   historical task-number references. Check every deletion batch with
   scoped compilation; leave the final full validation to P2.
+  REMAINING (as of 2026-10-05): CI (`.github/workflows/ci.yml`) still
+  lists the old test-set shape and must be brought in line with the
+  current 15 test executables plus the fail-on-unexpected-axioms gate
+  from P2; `code-structure.md` needs the new Compile-split module DAG;
+  README run-loop verification. The remaining Exact.lean size (still
+  ~9.8k lines, builds within memory) can be split later if needed.
 
 Completion gate: no unused legacy source retained without a stated
 purpose, no missing imports or orphaned targets, no disposable scratch
@@ -143,3 +140,15 @@ OOM kill. The axiom audit could not run because that module's `.olean`
 was missing. The 89 propagator tests passed, and a static scan found no
 proof-hole tokens or user axiom declarations in 115 Lean files. This is
 not a successful repository-wide certification run.
+
+**UPDATE 2026-10-05 (P1c): RESOLVED.** The OOM was the monolithic
+5,815-line `Direct/Proofs/Compile.lean`. It was split into five
+elaboration-bounded modules (`CompileCore`, `CompileAux1`,
+`CompileAux2a/2b/2c`) behind a re-export shell (`Compile.lean`), with
+theorem statements unchanged. The split also surfaced ~40 in-flight
+elaboration errors in the aux-expansion proofs and ~10 in
+`Exact.lean`/`Reason.lean` that the OOM had masked (never-elaborated
+code); all were repaired. The full certified chain now builds
+(`lake build leanfzn`, 152 jobs), and the axiom audit passes with all
+50 audited theorems depending only on the three standard Lean axioms
+(no `sorryAx`, no user axioms). P2 can proceed on this basis.
