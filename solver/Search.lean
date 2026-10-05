@@ -34,21 +34,9 @@ finite list of candidate values per search position.
 * Termination (PLAN 6.1): the measure is the sum over slots of
   `(domain cardinality + 1)`; each recursive call strictly decreases
   it (moving on consumes a slot, retrying shrinks a domain).
-
-* The compiled `search` runs the reversed-accumulator twin
-  (`searchImpl`, IDEAS 4.1): consing instead of `++ [v]`, with the
-  reversal paid once per leaf.  `searchImpl_eq` proves the twin
-  pointwise equal, so every theorem below holds for the running code
-  unchanged.
 -/
 
 namespace LeanFzn.Solver
-
-/-- The termination measure of `search`: the sum over the remaining
-    slots of their domain cardinality plus one (so that consuming a
-    slot, even one with an empty domain, strictly decreases it). -/
-def slotsMeasure {α : Type} (slots : List (List α)) : Nat :=
-  slots.foldr (fun vs acc => vs.length + 1 + acc) 0
 
 /-- The exhaustive reference search.  `leaf` is the leaf predicate on
     complete assignments; `slots` the remaining (first component) and
@@ -63,106 +51,12 @@ def search {α : Type} (leaf : List α → Bool) :
       match search leaf rest (acc ++ [v]) with
       | some a => some a
       | none => search leaf (vs :: rest) acc
-termination_by slots _ => slotsMeasure slots
+termination_by slots _ =>
+  slots.foldr (fun vs acc => vs.length + 1 + acc) 0
 decreasing_by
   all_goals
-    simp only [slotsMeasure, List.foldr_cons, List.length_cons]
+    simp only [List.foldr_cons, List.length_cons]
     omega
-
-/-! ## The reversed-accumulator fast twin (IDEAS 4.1)
-
-`search` extends its accumulator with `acc ++ [v]` — an O(n) list
-copy per tree node, O(n²) per branch.  The twin below threads the
-accumulator *reversed* (`v :: racc`, O(1) per node) and pays the
-`reverse` back only at the leaves: the leaf predicate is tested on
-`racc.reverse` — exactly the slot-order list the reference `search`
-tests — and a hit is returned in slot order too.  The bridge
-theorem `searchGo_search` below proves the twin *is* the reference
-search pointwise (the equality behind the `implemented_by`
-attribute on `search`), so all master theorems transfer verbatim:
-`implemented_by` only swaps the compiled code. -/
-
-/-- The reversed-accumulator search loop.  `racc` holds the
-    already-fixed values in reverse order (the most recently fixed
-    value first); the leaf predicate and the returned assignment
-    are in slot order (`racc.reverse`). -/
-private def searchGo {α : Type} (leaf : List α → Bool) :
-    List (List α) → List α → Option (List α)
-  | [], racc => if leaf racc.reverse then some racc.reverse else none
-  | [] :: _, _ => none
-  | (v :: vs) :: rest, racc =>
-      match searchGo leaf rest (v :: racc) with
-      | some a => some a
-      | none => searchGo leaf (vs :: rest) racc
-termination_by slots _ => slotsMeasure slots
-decreasing_by
-  all_goals
-    simp only [slotsMeasure, List.foldr_cons, List.length_cons]
-    omega
-
-/-- Same-shape fast twin of `search` (the `implemented_by` target):
-    runs the reversed-accumulator loop from the slot-order
-    accumulator, so the observable signature (and result) is the
-    reference's. -/
-private def searchImpl {α : Type} (leaf : List α → Bool)
-    (slots : List (List α)) (acc : List α) : Option (List α) :=
-  searchGo leaf slots acc.reverse
-
-/-- **The bridge theorem (IDEAS 4.1's proof obligation)**: the
-    reversed-accumulator loop is the reference `search` on the
-    reversed accumulator.  Consing `v` onto `racc` mirrors
-    `racc.reverse ++ [v]` (an O(1) `List.reverse_cons` step in the
-    proof), so the twin tests and returns exactly what `search`
-    would. -/
-theorem searchGo_search {α : Type} (leaf : List α → Bool) :
-    ∀ (slots : List (List α)) (racc : List α),
-      searchGo leaf slots racc = search leaf slots racc.reverse := by
-  intro slots racc
-  induction slots, racc using searchGo.induct (leaf := leaf) with
-  | case1 racc hleaf =>
-      show searchGo leaf [] racc = search leaf [] racc.reverse
-      rw [searchGo, search, if_pos (by simpa using hleaf)]
-  | case2 racc hleaf =>
-      show searchGo leaf [] racc = search leaf [] racc.reverse
-      rw [searchGo, search, if_neg (by simpa using hleaf)]
-  | case3 tail x =>
-      show searchGo leaf ([] :: tail) x = search leaf ([] :: tail) x.reverse
-      rw [searchGo, search]
-  | case4 v vs rest racc a hs ih =>
-      show searchGo leaf ((v :: vs) :: rest) racc
-        = search leaf ((v :: vs) :: rest) racc.reverse
-      rw [searchGo, ih, search, List.reverse_cons]
-      cases hs' : search leaf rest (racc.reverse ++ [v]) with
-      | some b => rfl
-      | none =>
-          exfalso
-          have hc : search leaf rest (racc.reverse ++ [v]) = some a := by
-            rw [← List.reverse_cons, ← ih]; exact hs
-          rw [hs'] at hc
-          exact absurd hc (by simp)
-  | case5 v vs rest racc hnone ih1 ih2 =>
-      show searchGo leaf ((v :: vs) :: rest) racc
-        = search leaf ((v :: vs) :: rest) racc.reverse
-      rw [searchGo, ih1, search, List.reverse_cons]
-      cases hs' : search leaf rest (racc.reverse ++ [v]) with
-      | some b =>
-          exfalso
-          have hc : searchGo leaf rest (v :: racc) = some b := by
-            rw [ih1, List.reverse_cons]; exact hs'
-          rw [hc] at hnone; exact absurd hnone (by simp)
-      | none => rw [ih2]
-
-/-- The fast twin is the reference `search` pointwise (the equality
-    behind the `implemented_by` attribute below). -/
-theorem searchImpl_eq {α : Type} (leaf : List α → Bool)
-    (slots : List (List α)) (acc : List α) :
-    searchImpl leaf slots acc = search leaf slots acc := by
-  unfold searchImpl
-  rw [searchGo_search, List.reverse_reverse]
-
--- IDEAS 4.1: the compiled `search` runs the reversed-accumulator twin
--- (equal by `searchImpl_eq`)
-attribute [implemented_by searchImpl] search
 
 /-- **The specification**: every complete assignment of the slots —
     one value per slot, in slot order.  A slot with an empty domain

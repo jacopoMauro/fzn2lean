@@ -264,6 +264,100 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
                   exact absurd hvi (by simp [Value.intView])
               | array x =>
                   exact absurd hvi (by simp [Value.intView])
+      | intNe s k =>
+          cases pos with
+          | true =>
+              -- keep p ≠ k: the surviving values' views differ from k
+              show value ∈ (updateSlot doms s
+                (fun d => domFilterInt (fun p => decide (p ≠ k)) d)).getD s []
+              refine mem_updateSlot_of_mem doms s _ value (by
+                rw [show (doms.length : Nat) = a.length from hfitlen.symm]; exact hin) ?_
+              rw [domFilterInt, List.mem_filter]
+              refine ⟨hfitmem s value hv, ?_⟩
+              have hsat' : (posNe s k).eval a = some true := hsat
+              rw [eval_posNe_iff] at hsat'
+              obtain ⟨i, hi, hik⟩ := hsat'
+              have hvi : Value.intView value = some i := by
+                unfold slotInt at hi
+                show Value.intView value = some i
+                have hv2 : a[s]? = some value := by
+                  show a[(⟨Atom.intNe s k, true⟩ : Literal).atom.slot]? = some value
+                  exact hv
+                have hv3 : (some value).bind Value.intView = some i := by
+                  rw [← hv2]
+                  exact hi
+                show Value.intView value = some i
+                exact hv3
+              cases value with
+              | int x =>
+                  show decide (x ≠ k) = true
+                  have hvi' : Value.intView (Value.int x) = some i := by
+                    simpa using hvi
+                  rw [Value.intView] at hvi'
+                  rw [Option.some.injEq] at hvi'
+                  exact decide_eq_true (by omega)
+              | bool x =>
+                  show decide ((if x then 1 else 0) ≠ k) = true
+                  have hvi' : Value.intView (Value.bool x) = some i := by
+                    simpa using hvi
+                  have hx : (if x then 1 else 0) = i := by
+                    have hview : Value.intView (Value.bool x)
+                        = some (if x then 1 else 0) := rfl
+                    rw [hview] at hvi'
+                    rw [Option.some.injEq] at hvi'
+                    exact hvi'
+                  exact decide_eq_true (by omega)
+              | setOfInt x =>
+                  exact absurd hvi (by simp [Value.intView])
+              | array x =>
+                  exact absurd hvi (by simp [Value.intView])
+          | false =>
+              -- keep p = k: the slot's view IS k (negNe true)
+              show value ∈ (updateSlot doms s
+                (fun d => domFilterInt (fun p => decide (p = k)) d)).getD s []
+              refine mem_updateSlot_of_mem doms s _ value (by
+                rw [show (doms.length : Nat) = a.length from hfitlen.symm]; exact hin) ?_
+              rw [domFilterInt, List.mem_filter]
+              refine ⟨hfitmem s value hv, ?_⟩
+              have hsat' : (negNe s k).eval a = some true := hsat
+              rw [eval_negNe_iff] at hsat'
+              obtain ⟨i, hi, hik⟩ := hsat'
+              have hvi : Value.intView value = some i := by
+                unfold slotInt at hi
+                show Value.intView value = some i
+                have hv2 : a[s]? = some value := by
+                  show a[(⟨Atom.intNe s k, false⟩ : Literal).atom.slot]? = some value
+                  exact hv
+                have hv3 : (some value).bind Value.intView = some i := by
+                  rw [← hv2]
+                  exact hi
+                show Value.intView value = some i
+                exact hv3
+              cases value with
+              | int x =>
+                  show decide (x = k) = true
+                  have hvi' : Value.intView (Value.int x) = some i := by
+                    simpa using hvi
+                  rw [Value.intView] at hvi'
+                  rw [Option.some.injEq] at hvi'
+                  have : x = k := by omega
+                  exact decide_eq_true this
+              | bool x =>
+                  show decide ((if x then 1 else 0) = k) = true
+                  have hvi' : Value.intView (Value.bool x) = some i := by
+                    simpa using hvi
+                  have hx : (if x then 1 else 0) = i := by
+                    have hview : Value.intView (Value.bool x)
+                        = some (if x then 1 else 0) := rfl
+                    rw [hview] at hvi'
+                    rw [Option.some.injEq] at hvi'
+                    exact hvi'
+                  have : (if x then 1 else 0) = k := by omega
+                  exact decide_eq_true this
+              | setOfInt x =>
+                  exact absurd hvi (by simp [Value.intView])
+              | array x =>
+                  exact absurd hvi (by simp [Value.intView])
       | boolEq s b =>
           -- the pin: domOfLit sets the slot to [bool forced]; the goal
           -- membership needs value to BE the forced Boolean, which the
@@ -333,6 +427,22 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
                 (fun d => domFilterInt (fun q => decide (q ≤ k)) d) slot
                 (fun hcon => hsl hcon)]
               exact hfitmem slot value hv
+      | intNe s' k =>
+          cases pos with
+          | false =>
+              show value ∈ (updateSlot doms s'
+                (fun d => domFilterInt (fun q => decide (q = k)) d)).getD slot []
+              rw [updateSlot_getD_ne doms s'
+                (fun d => domFilterInt (fun q => decide (q = k)) d) slot
+                (fun hcon => hsl hcon)]
+              exact hfitmem slot value hv
+          | true =>
+              show value ∈ (updateSlot doms s'
+                (fun d => domFilterInt (fun q => decide (q ≠ k)) d)).getD slot []
+              rw [updateSlot_getD_ne doms s'
+                (fun d => domFilterInt (fun q => decide (q ≠ k)) d) slot
+                (fun hcon => hsl hcon)]
+              exact hfitmem slot value hv
       | boolEq s' b =>
           show value ∈ (updateSlot doms s'
             (fun _ => [Value.bool (if pos then b else !b)])).getD slot []
@@ -383,6 +493,14 @@ theorem eval_some_slot_lt {atom : Atom} {a : Assignment} {behind : Bool}
       -- h : slotInt a s = some true → the bind's inner value: obtain ⟨x, hx, _⟩
       obtain ⟨w, hw, _⟩ := h
       -- hw : a[s]?.bind Value.intView = some w
+      rw [Option.bind_eq_some_iff] at hw
+      obtain ⟨v, hv, hvw⟩ := hw
+      exact (List.getElem?_eq_some_iff.mp hv).1
+  | intNe s k =>
+      show s < a.length
+      unfold Atom.eval slotInt at h
+      simp only [Option.map_eq_some_iff] at h
+      obtain ⟨w, hw, _⟩ := h
       rw [Option.bind_eq_some_iff] at hw
       obtain ⟨v, hv, hvw⟩ := hw
       exact (List.getElem?_eq_some_iff.mp hv).1

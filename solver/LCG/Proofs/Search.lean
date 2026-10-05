@@ -91,8 +91,16 @@ theorem go_sat_leaf {problem : Problem Constraint Objective}
         cases h
       · -- conflict above 0
         split at h
-        · -- no analysis: chronological fallback
-          exact ih _ _ h
+        · -- no analysis: chronological fallback; the match on the
+          -- conflict clause gates the learning (some [] learns,
+          -- otherwise the plain retreat)
+          split at h
+          · -- the conflict clause is some []: the pins gate decides
+            split at h
+            · exact ih _ _ h
+            · exact ih _ _ h
+          · -- a nonempty conflict: the plain retreat
+            exact ih _ _ h
         · -- analysis: backjump + learn + assert
           exact ih _ _ h
       · -- no conflict: match allSingleton
@@ -111,8 +119,12 @@ theorem go_sat_leaf {problem : Problem Constraint Objective}
               split at h
               · -- level 0: unsat, contradiction
                 cases h
-              · -- level > 0: retreat
-                exact ih _ _ h
+              · -- level > 0: retreat (gated leaf-nogood learning)
+                split at h
+                · -- pins gate false: plain retreat
+                  exact ih _ _ h
+                · -- pins gate true: learn + retreat
+                  exact ih _ _ h
           · -- singletonAssignment none: unknown, contradiction
             cases h
         · -- not allSingleton: match decideLiteral
@@ -159,7 +171,15 @@ theorem go_unsat_shape {problem : Problem Constraint Objective}
           · simpa using hconf
       · -- conflict above 0: the .unsat (if any) comes from the recursion
         split at h
-        · exact ih _ h
+        · -- no analysis: the fallback's sub-arms (the conflict-clause
+          -- match gates the learning)
+          split at h
+          · -- some []: the pins gate decides
+            split at h
+            · exact ih _ h
+            · exact ih _ h
+          · -- nonempty: the plain retreat
+            exact ih _ h
         · exact ih _ h
       · -- no conflict; the outermost match already established none
         rename_i hconfnone
@@ -176,8 +196,13 @@ theorem go_unsat_shape {problem : Problem Constraint Objective}
                     (32 + 8 * st.domains.length + 4 * st.trail.length) props st,
                   Or.inr ⟨a0, hconfnone, by simpa using hlevel, hsingle,
                     hassign, hfail⟩⟩
-              · -- leaf failed above 0: the .unsat comes from the retreat
-                exact ih _ h
+              · -- leaf failed above 0: the .unsat comes from the
+                -- retreat (gated leaf-nogood learning)
+                split at h
+                · -- pins gate false: plain retreat
+                  exact ih _ h
+                · -- pins gate true: learn + retreat
+                  exact ih _ h
           · -- singletonAssignment none: unknown, contradiction
             cases h
         · -- not allSingleton: decide or unknown
@@ -596,9 +621,17 @@ theorem go_unsat_entry
           -- the observed post-propagation conflict is SOME clause
           simp only [Option.isSome_iff_exists]
           exact ⟨w, hw⟩
-      · -- conflict above 0: recursion through both analysis arms
+      · -- conflict above 0: recursion through the analysis arms
         split at h
-        · exact ih _ h
+        · -- no analysis: the fallback's sub-arms (the conflict-clause
+          -- match gates the learning)
+          split at h
+          · -- some []: the pins gate decides
+            split at h
+            · exact ih _ h
+            · exact ih _ h
+          · -- nonempty: the plain retreat
+            exact ih _ h
         · exact ih _ h
       · -- no conflict: leaf or decision arms
         next hnone =>
@@ -620,7 +653,10 @@ theorem go_unsat_entry
                     (32 + 8 * st.domains.length + 4 * st.trail.length) st
                   rw [hpl] at hl0
                   exact ⟨st, hl0, Or.inr ⟨hnone, hsingle, a0, hassign, hfail⟩⟩
-              · exact ih _ h
+              · -- leaf failed above 0: the gated retreat
+                split at h
+                · exact ih _ h
+                · exact ih _ h
           · cases h
         · split at h
           · cases h

@@ -23,6 +23,7 @@ DAG:
 
 import solver.Direct.Proofs.Exact
 import solver.LCG.Certified
+import solver.LCG.Proofs.Propagators
 import LeanFzn.FznCheck
 import solver.Emit
 
@@ -55,26 +56,35 @@ inductive CliResult where
       bound is not exhausted by a decision-free run). -/
   | unknown (reason : String)
 
-/-- The certified solve command: compile, check the LCG fragment
-    (singleton domains, int/bool views, no learned clauses needed),
-    run the engine, and report. -/
+/-- The certified solve command: compile, check the widened LCG gate
+    (nonempty finite int/bool-viewed domains — decisions and
+    backtracking allowed), run the engine over the proved
+    propagators, and report. SAT always carries the source-level
+    theorem (the engine's SAT soundness is decision-free). UNSAT is
+    CLAIMED only inside the singleton fragment, where the
+    decision-free exclusion is proved; outside it an engine
+    `.unsat` is reported as `unknown` (no verdict) until the
+    decision-descent proof (PLAN.md §3) lands. -/
 def solveCertified (m : Model) : CliResult :=
   match compileModel m with
   | .error reason => .unsupported reason
   | .ok problem =>
-      if LCG.fragmentOk (toLCG problem) then
-        match LCG.solve (toLCG problem) DomConstraint.satisfiedB [] with
+      if LCG.gateOk (toLCG problem) then
+        match LCG.solve (toLCG problem) DomConstraint.satisfiedB
+            (problem.constraints.filterMap LCG.propagatorOfProved) with
         | .sat a => .sat (problem.toStore a)
         | .unsat => .unsat
         | .unknown => .unknown "lcg fuel exhausted"
       else
         .unsupported
-          "the model's search space is not a singleton-domain fragment \
-           (the first certified LCG fragment covers decided models only)"
+          "the model's search space is outside the certified gate \
+           (every domain must be a nonempty finite int/bool domain)"
 
 /-- **The source-level SAT theorem of the certified command**: a
     store returned by `solveCertified` satisfies the model (under
-    well-formedness — the CLI checks it before calling). -/
+    well-formedness — the CLI checks it before calling). Holds for
+    every model passing the widened gate: singletons AND multi-value
+    domains (the engine's SAT soundness is decision-free). -/
 theorem solveCertified_sat_correct {m : Model}
     (hwf : WellFormed fullSig m)
     (hres : solveCertified m = .sat store) :
@@ -85,20 +95,23 @@ theorem solveCertified_sat_correct {m : Model}
   | ok problem =>
       rw [hc] at hres
       simp only [reduceIte] at hres
-      cases hfrag : LCG.fragmentOk (toLCG problem) with
+      cases hgate : LCG.gateOk (toLCG problem) with
       | true =>
-          rw [hfrag] at hres
+          rw [hgate] at hres
           simp only [reduceIte] at hres
           cases hsolve : LCG.solve (toLCG problem)
-              DomConstraint.satisfiedB [] with
+              DomConstraint.satisfiedB
+              (problem.constraints.filterMap LCG.propagatorOfProved) with
           | sat a =>
               rw [hsolve] at hres
-              simp only [CliResult.sat.injEq] at hres
+              simp only [CliResult.sat.injEq, reduceIte] at hres
               subst hres
-              -- the LCG-level theorem (every premise derived)
-              have hinternal := LCG.solve_certified_sat
+              -- the LCG-level theorem (every premise derived; the
+              -- widened gate carries multi-value domains)
+              have hinternal := LCG.solve_certified_sat_wide
                 (m := m) (problem := toLCG problem) (compiled := problem)
-                (hc := hc) (hlcg := rfl) (hfrag := hfrag)
+                (hc := hc) (hlcg := rfl) (hcons := rfl)
+                (hgate := hgate)
                 (hclauses := rfl) (by rw [hsolve])
               obtain ⟨hfits, hcholds⟩ := hinternal
               -- the field agreement + acceptance
@@ -125,15 +138,20 @@ theorem solveCertified_sat_correct {m : Model}
                   compileModel_vars_basic hc d hd
                 rw [hshape]
                 trivial
-          | unsat => rw [hsolve] at hres; simp at hres
+          | unsat =>
+              rw [hsolve] at hres
+              simp only [reduceIte] at hres
+              simp at hres
           | unknown => rw [hsolve] at hres; simp at hres
       | false =>
-          rw [hfrag] at hres
+          rw [hgate] at hres
           exact absurd hres (by intro hcon; cases hcon)
 
 /-- **The source-level UNSAT theorem of the certified command**: an
     `unsat` verdict excludes every parameter-honest satisfying
-    store. -/
+    store. The command reports `unsat` only inside the singleton
+    fragment (where the decision-free exclusion is proved), so the
+    theorem's obligation is unchanged. -/
 theorem solveCertified_unsat_correct {m : Model}
     (hwf : WellFormed fullSig m)
     (hres : solveCertified m = .unsat) :
@@ -145,21 +163,30 @@ theorem solveCertified_unsat_correct {m : Model}
   | ok problem =>
       rw [hc] at hres
       simp only [reduceIte] at hres
-      cases hfrag : LCG.fragmentOk (toLCG problem) with
+      cases hgate : LCG.gateOk (toLCG problem) with
       | true =>
-          rw [hfrag] at hres
+          rw [hgate] at hres
           simp only [reduceIte] at hres
           cases hsolve : LCG.solve (toLCG problem)
-              DomConstraint.satisfiedB [] with
+              DomConstraint.satisfiedB
+              (problem.constraints.filterMap LCG.propagatorOfProved) with
           | sat a => rw [hsolve] at hres; simp at hres
           | unsat =>
-              -- the LCG-level exclusion (every premise derived)
-              have hnone := LCG.solve_certified_unsat
-                (m := m) (problem := toLCG problem) (compiled := problem)
-                (hc := hc) (hlcg := rfl) (hfrag := hfrag)
+              -- the WIDE door (the decision-descent master theorem's
+              -- composition over ALL twenty registered families —
+              -- the fixed propLinLe2's reasons are state-free valid,
+              -- so no linLe coverage gate remains) decides the claim
+              rw [hsolve] at hres
+              rintro ⟨store, ⟨_, hcons2, hvarsS, _⟩, hparam⟩
+              -- the LCG-level exclusion (the wide door)
+              have hnone := LCG.solve_certified_unsat_wide
+                (m := m) (problem := toLCG problem)
+                (compiled := problem)
+                (hc := hc) (hlcg := rfl) (hcons := rfl)
+                (hgate := hgate)
                 (hclauses := rfl) (by rw [hsolve])
-              rintro ⟨store, ⟨_, hcons, hvarsS, _⟩, hparam⟩
-              -- adapt the var-condition to the gate's basic-only shape
+              -- the coverage: the store yields an accepted
+              -- assignment (the same chain as the fragment door)
               have hvars : ∀ d ∈ m.variables, match d with
                   | .basic ty n _ _ => ∃ v, store n = some v ∧ ty.contains v
                   | .array _ _ _ _ => False := by
@@ -170,17 +197,17 @@ theorem solveCertified_unsat_correct {m : Model}
                 | .array ty n anns elems =>
                     exfalso
                     obtain ⟨ty2, n2, anns2, hshape⟩ :=
-                      compileModel_vars_basic hc (.array ty n anns elems) hd
+                      compileModel_vars_basic hc
+                        (.array ty n anns elems) hd
                     cases hshape
-              -- the coverage: the store yields an accepted assignment
               obtain ⟨a, hmem, hacc⟩ :=
-                compile_covers (problem := problem) hc hwf hcons hvars hparam
-              -- contradiction with the LCG exclusion
-              -- the ProblemSolution: Fits (via membership) + holds
+                compile_covers (problem := problem) hc hwf hcons2
+                  hvars hparam
               have hfit : Solver.Core.Assignment.Fits
                   (toLCG problem).toProblem.domains a :=
                 ⟨(mem_allAssigns_length problem.domains a hmem),
-                  fun i v hv => mem_allAssigns_fits problem.domains a hmem i v hv⟩
+                  fun i v hv =>
+                    mem_allAssigns_fits problem.domains a hmem i v hv⟩
               have hinternal : ProblemSolution (toLCG problem)
                   DomConstraint.SatisfiedBy a :=
                 ⟨hfit,
@@ -191,7 +218,7 @@ theorem solveCertified_unsat_correct {m : Model}
               exact hnone ⟨a, hinternal⟩
           | unknown => rw [hsolve] at hres; simp at hres
       | false =>
-          rw [hfrag] at hres
+          rw [hgate] at hres
           exact absurd hres (by intro hcon; cases hcon)
 
 /-- Emit a solution text for the certified path's satisfying store

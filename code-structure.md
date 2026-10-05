@@ -1,14 +1,17 @@
 # LeanFzn dependency structure
 
-The solver portion below records the current migration state. `solver/Solve`
-and its higher adapters still implement the retired checker-mediated entry
-points; `PLAN.md` specifies their direct-proof replacement.
+The public solver is the certified LCG path (`leanfzn solve` →
+`Direct.solveCertified`), with kernel-checked source-level SAT/UNSAT
+theorems. The legacy checker-mediated solver stack (Config, Solve,
+Fixpoint, Heuristic, Enum, Optimize, RevState, Learning, Restarts,
+the `solver/Tree` reference layer, and the `solver/Solver` umbrella)
+was retired in the 2026-09-29 cleanup (PLAN.md §1); Git history
+keeps it.
 
-The new intended dependency root is `solver.Core`, which contains only shared
-problem and assignment semantics. Operational state is layered: `solver.Tree`
-for classical CP tree search and `solver.LCG` for the top-priority lazy clause
-generation solver. Other approaches receive their own state layer and prove a
-connection to the common problem semantics.
+The dependency root is `solver.Core`, which contains only shared
+problem and assignment semantics; `solver.LCG` is the certified
+solver layer and `solver.Direct` the compiler + exhaustive
+reference. Operational state lives in `solver.LCG`.
 
 This file records the current module dependency graph for LeanFzn.
 Arrows written as `A ← B` mean that `A` directly imports `B`.  The numbered
@@ -32,7 +35,7 @@ Layer 0 — Foundation (no project imports)
 ├── LeanFzn/FznLexer.lean ★       Tokenizer (Token type, tokenize)
 └── solver/Search.lean ★          Generic exhaustive search (allAssigns, search_some/none)
 
-Solver core — new shared foundation
+Solver core — shared foundation
 ├── solver/Core/Types.lean         Generic Problem; Slot/Domain/Assignment;
 │                                  SearchResult
 │   └── ← FznSemantics
@@ -41,15 +44,7 @@ Solver core — new shared foundation
 └── solver/Core.lean               Shared-core umbrella
     └── ← Core/Types, Core/Semantics
 
-Classical tree-search layer
-├── solver/Tree/Types.lean         Decision/NoGood/TrailEntry/reference State
-│   └── ← Core/Types
-├── solver/Tree/Operations.lean    Reference state operations
-├── solver/Tree/Invariants.lean    Tree representation/preservation contracts
-├── solver/Tree/Proofs.lean        Tree foundational proof scaffolds
-└── solver/Tree.lean               Tree-layer umbrella
-
-Lazy clause generation layer (top-priority solver)
+Lazy clause generation layer (the certified solver)
 ├── solver/LCG/Types.lean          Atoms, literals, clauses, reasons, LCG State
 ├── solver/LCG/TrailEval.lean      Trail queries, norm literals, 1-UIP analysis
 ├── solver/LCG/Operations.lean     Evaluation (intView), trail, learning, API
@@ -74,6 +69,20 @@ Lazy clause generation layer (top-priority solver)
 │    scanConflict_excludes, per-gate inverses, coherence bridges, leSlot
 │    kernel, PropSafe packaging bridge; item 6: sweep_solvedBy fold and
 │    the MASTER RESULT propagateLoop_excludes)
+├── solver/LCG/Proofs/Run.lean   Run-level reachability + the DECISION-DESCENT
+│   MASTER THEOREM go_unsat_entry_invariant (every .unsat arises at a
+│   level-0 conflict-clear SolvedBy entry; both terminal shapes), the
+│   RunInv bundle + per-transition preservation, Level0Solved algebra,
+│   the empty-conflict non-analyzability lemmas
+├── solver/LCG/Proofs/ConstFamilies.lean  The five constant-bound families
+│   (leConstHi/Lo, ltConstHi/Lo, constEq): views, hygiene, safe triples,
+│   entitlement, reason-validity + the shared narrow inversions
+├── solver/LCG/Proofs/Propagators.lean  The eleven-family registration +
+│   propagatorsOfProved_safeUniv/_entitled front doors
+├── solver/LCG/Proofs/Reason.lean  The master theorem's PREMISE-DISCHARGE
+│   layer (2026-10-01): state-free reason-validity (two-case constraint
+│   disjunctions; linLe excluded — machine-checked obstruction), the
+│   rooted hjust, the cc≠[] conflict entitlement, the initial-state seeds
 └── solver/LCG.lean                LCG-layer umbrella
 
 Layer 1 — Grammar, Parser, Semantics
@@ -85,22 +94,18 @@ Layer 1 — Grammar, Parser, Semantics
 │   └── ← FznAST
 ├── LeanFzn/FznSemantics.lean ★    Types, values, stores, signatures, Satisfies
 │   └── ← FznAST
-├── solver/Heuristic.lean          MRV heuristic (mrvOrder, mrvSearch)
-│   └── ← solver/Search
 └── solver/Propagators.lean ★      Propagation contract + propagators (Preserves, propEqSlot, …)
                                    + linear propagators (propLinEq/propLinLe, DomConstraint.linEq/linLe,
                                    dotSum_bounds, term_bound, proved preservation theorems)
     └── ← LeanFzn*, solver/Search
 
-Layer 2 — Correctness, StdLib, Fixpoint
+Layer 2 — Correctness, StdLib
 ├── LeanFzn/FznSuffix.lean         Grammar suffix/consumption bounds
 │   └── ← FznGrammar
 ├── LeanFzn/FznCorrectness.lean    Parser soundness (parseModel → GrModel)
 │   └── ← FznParser, FznGrammar, FznSemantics
-├── LeanFzn/FznStdLib.lean ★       Standard predicate signatures + interpretations (stdSig, stdInterp)
-│   └── ← FznSemantics
-└── solver/Fixpoint.lean           Propagation fixpoint + pruning search
-    └── ← LeanFzn*, solver/Search, solver/Propagators
+└── LeanFzn/FznStdLib.lean ★       Standard predicate signatures + interpretations (stdSig, stdInterp)
+    └── ← FznSemantics
 
 Layer 3 — Completeness, Solution, Extraction
 ├── LeanFzn/FznCompleteness.lean   Parser completeness (GrModel → parseModel)
@@ -114,39 +119,27 @@ Layer 3 — Completeness, Solution, Extraction
 ├── solver/Direct/Types.lean       Source wrapper over Core.Problem + result
 │   └── ← Core/Types, FznGlobals
 ├── solver/Direct/Compile.lean     Executable compiler and leaf evaluation
-│   └── ← Direct/Types
+│   └── ← Direct/Types, Domain, Extract, Propagators
 ├── solver/Direct/Search.lean      Executable exhaustive direct solver
 │   └── ← solver/Search, Direct/Compile
 ├── solver/Direct/Proofs/Compile.lean  Exact compilation proof obligations
-│   └── ← solver/Search, Direct/Compile
+│   └── ← solver/Core, Direct/Compile
 ├── solver/Direct/Proofs/Search.lean   Search proof obligations
-│   └── ← Direct/Search
+│   └── ← Direct/Search, solver/Propagators
 ├── solver/Direct/Correctness.lean Public direct SAT/UNSAT theorem obligations
 │   └── ← Direct/Proofs/Compile, Direct/Proofs/Search
 ├── solver/Direct.lean             Direct-solver public umbrella
 │   └── ← all solver/Direct modules
 ├── solver/Emit/Basic.lean         Stable executable solution emission
 │   └── ← Lean, solver/Domain
-├── solver/Emit.lean               Output-only public emission re-export
-│   └── ← solver/Emit/Basic
-├── solver/Enum.lean               All-solutions enumeration (enumerateAll)
-│   └── ← solver/Solve
-├── solver/Optimize.lean           Branch-and-bound optimization (optimizeModelBb)
-│   └── ← solver/Enum
-├── solver/RevState.lean           Reversible sparse-set state (SparseDom, trail)
-│   └── ← LeanFzn*, solver/Fixpoint
-└── solver/Learning.lean           NoGood learning (learnSearch, EntailedOn)
-    └── ← LeanFzn*, solver/Search, solver/Propagators, solver/Enum
+└── solver/Emit.lean               Output-only public emission re-export
+    └── ← solver/Emit/Basic
 
-Layer 4 — Assembly, Global Common, Solver Core
+Layer 4 — Assembly, Global Common
 ├── LeanFzn/FznAssembled.lean      Top-level recognition theorems (parseModelSpec)
 │   └── ← FznParser, FznGrammar, FznSuffix, FznCompleteness
-├── LeanFzn/FznGlobals/Common.lean ★  Shared global-constraint helpers (setMemB, arraySlice, iff lemmas)
-│   └── ← FznSolution
-└── solver/Solve.lean ★            FlatZinc-facing solver (solveModel, SolveResult,
-                                   domPropagators incl. proved linEq/linLe wiring)
-    └── ← solver/Search, solver/Emit/Basic, solver/Domain, solver/Heuristic,
-         solver/Propagators, solver/Fixpoint, solver/Extract, LeanFzn/FznCheck
+└── LeanFzn/FznGlobals/Common.lean ★  Shared global-constraint helpers (setMemB, arraySlice, iff lemmas)
+    └── ← FznSolution
 
 Layer 5 — Global Constraint Families
 ├── LeanFzn/FznGlobals/AllDiffCounting.lean   8 names (all_different, all_disjoint, …)
@@ -163,38 +156,24 @@ Layer 5 — Global Constraint Families
 │   └── ← FznGlobals/Common
 ├── LeanFzn/FznGlobals/Sched2.lean            10 names (cumulatives, geost, diffn_k, …)
 │   └── ← FznGlobals/Common
-└── solver/Restarts.lean           Restart loop + budget (restartSearch, BoundedResult)
-    └── ← solver/Solve
+└── LeanFzn/FznGlobals/Counting.lean          32 names (nvalue, among, count_*, gcc, …)
+    └── ← FznGlobals/AllDiffCounting
 
-Layer 6 — Global Constraint Family Extensions + Config
-├── LeanFzn/FznGlobals/Counting.lean          32 names (nvalue, among, count_*, gcc, …)
-│   └── ← FznGlobals/AllDiffCounting
-├── LeanFzn/FznGlobals/LexChain.lean          10 names (lex_greater, lex2, orbitope, …)
-│   └── ← FznGlobals/LexSort
-├── LeanFzn/FznGlobals/SetMath.lean           14 names (disjoint, set_member, range, …)
-│   └── ← FznGlobals/AllDiffCounting, FznGlobals/Common
-└── solver/Config.lean ★            Composed front door (SolveConfig, solveModelWith,
-                                   permConstraint incl. linEq/linLe permutation cases)
-    └── ← solver/Solve, solver/Heuristic, solver/Fixpoint, solver/Extract,
-         solver/Learning, solver/Restarts
-
-Layer 7 — Global Aggregation
+Layer 6 — Global Aggregation
 └── LeanFzn/FznGlobals.lean ★       Aggregates all 10 families (globalsInterp, globalsInterpB_iff)
     └── ← all 10 FznGlobals/* family modules, FznStdLib, FznSolution
 
-Layer 8 — Top-Level Modules
-├── LeanFzn/FznCheck.lean ★        Verified front door (checkModelSolution_correct)
-│   └── ← FznGlobals
-└── solver/Solver.lean ★           Complete solver library (all 6.1–6.7)
-    └── ← LeanFzn*, FznCheck, all solver/* modules
+Layer 7 — Top-Level Modules
+└── LeanFzn/FznCheck.lean ★        Verified front door (checkModelSolution_correct)
+    └── ← FznGlobals
 
-Layer 9 — Library Roots
+Layer 8 — Library Roots
 ├── LeanFzn.lean ★                 Library root: imports all 14 LeanFzn modules
-└── solver.lean                    New root: imports Core, Direct, Search, Domain
+└── solver.lean                    Solver root: imports Search, Domain, Core, Direct, LCG
 
-Layer 10 — Executable
-└── Main.lean                      CLI entry point (check/solve/enum/optimize)
-    └── ← LeanFzn, solver/Solver
+Layer 9 — Executable
+└── Main.lean                      CLI entry point (check/solve)
+    └── ← LeanFzn, solver/Direct/Cli
 ```
 
 **Notes:**
@@ -206,12 +185,9 @@ Layer 10 — Executable
   families; `AllDiffCounting` is additionally shared by `Counting` and `SetMath`.
 - `solver/Domain.lean` and `solver/Search.lean` are the solver's foundational modules.
 - The dependency chain from `FznAST` to `FznGlobals.lean` is 7 layers deep.
-- `solver.lean` and `solver/Solver.lean` are currently different roots; the
-  former is core-only and the latter exposes the legacy complete stack. Their
-  replacement is sequenced in `PLAN.md` D0–D3.
-- Several solver modules directly import the broad `LeanFzn` umbrella. The
-  graph above records that as `LeanFzn*`; imports will be narrowed as the new
-  semantic and compiled-problem foundations are introduced.
+- The certified LCG layer (`solver/LCG`) builds on `solver.Core` and
+  `solver/Propagators`; the `solver/LCG/Certified.lean` front door and the
+  `solver/Direct/Cli.lean` composition are the public solve path.
 
 ## Test Executables
 
@@ -228,16 +204,8 @@ Tests/Prof.lean           → LeanFzn
 Tests/Gecode.lean         → LeanFzn, FznGlobals
 Tests/Globals.lean        → FznGlobals, FznParser
 Tests/Coverage.lean       → FznGlobals, FznParser, FznStdLib
-solver/Tests.lean         → solver/Solver
-solver/TestsProp.lean     → solver/Solver
-solver/TestsHeur.lean     → solver/Solver
-solver/TestsFix.lean      → solver/Solver
-solver/TestsEnum.lean     → solver/Solver
-solver/TestsBench.lean    → solver/Solver
-solver/TestsOpt.lean      → solver/Optimize
-solver/TestsRev.lean      → solver/Solver
-solver/TestsLearn.lean    → solver/Solver
-solver/TestsRestart.lean  → solver/Restarts
+solver/Tests.lean         → solver/Direct/Correctness, Direct/Cli, LCG/Certified
+solver/TestsProp.lean     → solver/Propagators, solver/Extract
 solver/TestsLCG.lean     → solver/LCG
 ```
 

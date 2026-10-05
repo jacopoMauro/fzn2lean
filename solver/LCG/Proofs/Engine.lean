@@ -302,6 +302,9 @@ theorem domOfLit_getD_ne : ∀ (doms : List (List Value)) (l : Literal)
           simp only [domOfLit] at hmem
           cases positive <;>
             exact mem_getD_updateSlot_ne doms s' s0 _ v hne hmem
+      | intNe s' k =>
+          cases positive <;>
+            exact mem_getD_updateSlot_ne doms s' s0 _ v hne hmem
 
 /-- `updateSlot` preserves the slot count. -/
 theorem updateSlot_length : ∀ (doms : List (List Value)) (s : Nat)
@@ -330,6 +333,11 @@ theorem domOfLit_length {doms : List (List Value)} (l : Literal) :
             show (updateSlot doms s _).length = doms.length <;>
             exact updateSlot_length doms s _
       | boolEq s b =>
+          unfold domOfLit
+          cases positive <;>
+            show (updateSlot doms s _).length = doms.length <;>
+            exact updateSlot_length doms s _
+      | intNe s k =>
           unfold domOfLit
           cases positive <;>
             show (updateSlot doms s _).length = doms.length <;>
@@ -383,6 +391,26 @@ theorem fits_fold_original : ∀ (trail : List TrailEntry)
                     horig
                   simp only [List.mem_singleton] at himg
                   exact Or.inl ⟨if positive then b else !b, himg⟩
+              | intNe s' k =>
+                  cases positive
+                  · -- negative: keep p = k
+                    have hstep2 : v ∈ (updateSlot doms s'
+                        (fun d => domFilterInt
+                          (fun p => decide (p = k)) d)).getD s' [] := horig
+                    have himg := mem_getD_updateSlot_eq doms s'
+                      (fun d => domFilterInt (fun p => decide (p = k)) d) v
+                      hstep2
+                    rw [domFilterInt, List.mem_filter] at himg
+                    exact Or.inr himg.1
+                  · -- positive: keep p ≠ k
+                    have hstep2 : v ∈ (updateSlot doms s'
+                        (fun d => domFilterInt
+                          (fun p => decide (p ≠ k)) d)).getD s' [] := horig
+                    have himg := mem_getD_updateSlot_eq doms s'
+                      (fun d => domFilterInt (fun p => decide (p ≠ k)) d) v
+                      hstep2
+                    rw [domFilterInt, List.mem_filter] at himg
+                    exact Or.inr himg.1
         · exact Or.inr (domOfLit_getD_ne doms e.literal s0 v
             (fun h => heq h) horig)
 
@@ -555,13 +583,123 @@ theorem fits_domOfLit_sat_bool {doms : List (List Value)} {s : Nat}
   cases b <;> rfl
 
 
+/-- THE SINGLE-STEP COHERENCE (positive value removal): an assignment
+    fitting the value-removal-narrowed domain satisfies the positive
+    value-removal literal. -/
+theorem fits_domOfLit_sat_posNe {doms : List (List Value)} {s : Nat}
+    {k : Int} {a : Assignment} {i : Int}
+    (hfit : a.Fits (domOfLit doms (posNe s k)))
+    (hin : s < a.length)
+    (hslot : slotInt a s = some i) :
+    (posNe s k).eval a = some true := by
+  have hget : a[s]? = some a[s] :=
+    (List.getElem?_eq_some_iff).mpr ⟨hin, rfl⟩
+  obtain ⟨_, hmem⟩ := hfit
+  have hslotmem : a[s] ∈ (domOfLit doms (posNe s k)).getD s [] :=
+    hmem s a[s] hget
+  have himg : a[s] ∈ domFilterInt (fun p => decide (p ≠ k))
+      (doms.getD s []) := by
+    have hstep : a[s] ∈ (updateSlot doms s
+        (fun d => domFilterInt (fun p => decide (p ≠ k)) d)).getD s [] :=
+      hslotmem
+    exact mem_getD_updateSlot_eq doms s _ a[s] hstep
+  have hkeep : (match a[s] with
+      | Value.int p => decide (p ≠ k)
+      | Value.bool b => decide ((if b then 1 else 0) ≠ k)
+      | x => true) = true := by
+    have := himg
+    rw [domFilterInt, List.mem_filter] at this
+    exact this.2
+  cases hva : a[s] with
+  | int p =>
+      rw [hva] at hkeep
+      have hpk : p ≠ k := of_decide_eq_true hkeep
+      show (posNe s k).eval a = some true
+      rw [eval_posNe_iff]
+      refine ⟨p, ?_, hpk⟩
+      show (a[s]?.bind Value.intView) = some p
+      rw [hget, hva]
+      rfl
+  | bool b =>
+      rw [hva] at hkeep
+      have hpk : (if b then 1 else 0) ≠ k := of_decide_eq_true hkeep
+      show (posNe s k).eval a = some true
+      rw [eval_posNe_iff]
+      refine ⟨if b then 1 else 0, ?_, hpk⟩
+      show (a[s]?.bind Value.intView) = some (if b then 1 else 0)
+      rw [hget, hva]
+      rfl
+  | setOfInt x =>
+      exfalso
+      rw [slotInt, hget, hva] at hslot
+      exact absurd hslot (by simp [Value.intView])
+  | array x =>
+      exfalso
+      rw [slotInt, hget, hva] at hslot
+      exact absurd hslot (by simp [Value.intView])
+
+/-- THE SINGLE-STEP COHERENCE (negative value removal): an assignment
+    fitting the value-pinned domain satisfies the negative
+    value-removal literal. -/
+theorem fits_domOfLit_sat_negNe {doms : List (List Value)} {s : Nat}
+    {k : Int} {a : Assignment} {i : Int}
+    (hfit : a.Fits (domOfLit doms (negNe s k)))
+    (hin : s < a.length)
+    (hslot : slotInt a s = some i) :
+    (negNe s k).eval a = some true := by
+  have hget : a[s]? = some a[s] :=
+    (List.getElem?_eq_some_iff).mpr ⟨hin, rfl⟩
+  obtain ⟨_, hmem⟩ := hfit
+  have hslotmem : a[s] ∈ (domOfLit doms (negNe s k)).getD s [] :=
+    hmem s a[s] hget
+  have himg : a[s] ∈ domFilterInt (fun p => decide (p = k))
+      (doms.getD s []) := by
+    have hstep : a[s] ∈ (updateSlot doms s
+        (fun d => domFilterInt (fun p => decide (p = k)) d)).getD s [] :=
+      hslotmem
+    exact mem_getD_updateSlot_eq doms s _ a[s] hstep
+  have hkeep : (match a[s] with
+      | Value.int p => decide (p = k)
+      | Value.bool b => decide ((if b then 1 else 0) = k)
+      | x => true) = true := by
+    have := himg
+    rw [domFilterInt, List.mem_filter] at this
+    exact this.2
+  cases hva : a[s] with
+  | int p =>
+      rw [hva] at hkeep
+      have hpk : p = k := of_decide_eq_true hkeep
+      show (negNe s k).eval a = some true
+      rw [eval_negNe_iff]
+      refine ⟨p, ?_, hpk⟩
+      show (a[s]?.bind Value.intView) = some p
+      rw [hget, hva]
+      rfl
+  | bool b =>
+      rw [hva] at hkeep
+      have hpk : (if b then 1 else 0) = k := of_decide_eq_true hkeep
+      show (negNe s k).eval a = some true
+      rw [eval_negNe_iff]
+      refine ⟨if b then 1 else 0, ?_, hpk⟩
+      show (a[s]?.bind Value.intView) = some (if b then 1 else 0)
+      rw [hget, hva]
+      rfl
+  | setOfInt x =>
+      exfalso
+      rw [slotInt, hget, hva] at hslot
+      exact absurd hslot (by simp [Value.intView])
+  | array x =>
+      exfalso
+      rw [slotInt, hget, hva] at hslot
+      exact absurd hslot (by simp [Value.intView])
+
+
 /-! ## Boolean clause scanning (Step 2.1)
 
 `scanClause` is the reference clause-propagation semantics: a clause
 whose literals are all trail-false is a conflict; a clause with exactly
 one non-false literal is unit. Both reports are sound against
 trail-satisfying assignments. -/
-
 /-! ### Boolean clause scanning (2.1): scanClause correctness -/
 
 /-- If a trail entry matches `l.negate.norm`, then any assignment

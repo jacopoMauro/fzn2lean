@@ -94,7 +94,9 @@ def updateSlot (doms : List (List Value)) (s : Nat)
 
 /-- Apply the domain filter implied by literal `l`: Boolean atoms fix the
     slot to the forced value; positive order literals keep `≤ k`;
-    negative ones keep `> k`. -/
+    negative ones keep `> k`; positive value-removal literals remove
+    exactly `k` (keeping every other value, sets/arrays included);
+    negative ones pin to the singleton `k`. -/
 def domOfLit (doms : List (List Value)) (l : Literal) : List (List Value) :=
   match l.atom with
   | .intLe s k =>
@@ -104,6 +106,11 @@ def domOfLit (doms : List (List Value)) (l : Literal) : List (List Value) :=
         updateSlot doms s (fun d => domFilterInt (fun p => p > k) d)
   | .boolEq s b =>
       updateSlot doms s (fun _ => [.bool (if l.positive then b else !b)])
+  | .intNe s k =>
+      if l.positive then
+        updateSlot doms s (fun d => domFilterInt (fun p => p ≠ k) d)
+      else
+        updateSlot doms s (fun d => domFilterInt (fun p => p = k) d)
 
 /-- Normalize and enqueue a literal with its reason, skipping
     re-assertions of trail facts. Opposite-fact enqueues (asserting the
@@ -248,6 +255,22 @@ def decideLiteral (st : State) : Option Literal :=
 def allSingleton (st : State) : Bool :=
   st.domains.all fun d => d.length == 1
 
+/-- The executable `TrailBoolPins` gate: every Boolean-pin trail
+    entry sits on a slot whose PROBLEM domain is all-Bool. Vacuously
+    true for trails without Boolean pins (compiled models' order-
+    literal trails and the constEq-Bool family's domain-gated
+    pins). -/
+def trailBoolPinsOk (problem : Problem Constraint Objective)
+    (trail : List TrailEntry) : Bool :=
+  trail.all fun e =>
+    match e.literal.atom with
+    | .boolEq s _ =>
+        problem.domains.getD s [] |>.all fun v =>
+          match v with
+          | .bool _ => true
+          | _ => false
+    | _ => true
+
 /-- The complete assignment under all-singleton domains. -/
 def singletonAssignment (st : State) : Option Assignment :=
   st.domains.mapM fun d =>
@@ -274,8 +297,43 @@ def lcgSearch (fuel : Nat)
             match analyzeConflict st1 with
             | none =>
                 -- chronological fallback when analysis cannot resolve;
-                -- domains are rebuilt to the retained trail
-                go fuel (repairAfterBackjump problem (st1.decisionLevel - 1) st1)
+                -- domains are rebuilt to the retained trail. When the
+                -- conflict clause is EMPTY (the propagator-origin
+                -- shape — e.g. propNe's both-singleton report; scan
+                -- and opposing-pair conflicts are never empty), LEARN
+                -- THE TRAIL NOGOOD (the failed branch's positive-level
+                -- literals, negated and normalized — the same shape
+                -- as the leaf nogood below, gated the same way on
+                -- `trailBoolPinsOk`): without it the retreat is
+                -- indistinguishable from an unexplored branch and
+                -- `decideLiteral` re-derives the same decision forever
+                -- (the fuel-exhaustion cycle on `int_ne` pigeonholes,
+                -- PLAN §5 items 4–5). Entitlement
+                -- (`fallbackNogood_entailed`, Proofs/Reason.lean +
+                -- `propagateLoop_conflict_nofit_empty`,
+                -- Proofs/FallbackFit.lean): every internal solution
+                -- either falsifies a positive-level trail literal
+                -- (witnessed in the nogood) or fits the conflicted
+                -- state's domains — and the empty conflict's origin
+                -- excludes every fitting solution from being an
+                -- internal solution. The learning is deliberately NOT
+                -- done for nonempty unanalyzable conflicts (scan-origin
+                -- trail-relative refutations): their fits-exclusion is
+                -- false and the nogood would be unsound — those take
+                -- the plain retreat. This arm is reachable only at a
+                -- POSITIVE decision level (level 0 conflicts terminate
+                -- in the `.unsat` arm above).
+                match st1.conflict with
+                | some [] =>
+                    if trailBoolPinsOk problem st1.trail then
+                      let ng := (st1.trail.filter fun e => e.level > 0).map
+                        fun e => e.literal.negate.norm
+                      go fuel (repairAfterBackjump problem (st1.decisionLevel - 1)
+                        { st1 with learned := ng :: st1.learned })
+                    else
+                      go fuel (repairAfterBackjump problem (st1.decisionLevel - 1) st1)
+                | _ =>
+                    go fuel (repairAfterBackjump problem (st1.decisionLevel - 1) st1)
             | some an =>
                 -- normalize the learned clause: normalization preserves
                 -- evaluation (`Literal.norm_eval`), so search behavior is
@@ -295,11 +353,29 @@ def lcgSearch (fuel : Nat)
                       problem.constraints.all (fun c => constraintHoldsB c a) then
                     .sat a
                   else
-                    -- leaf violation under a complete assignment: retreat
-                    -- chronologically (leaf nogoods are L0.3 work); domains
-                    -- are rebuilt to the retained trail
+                    -- leaf violation under a complete assignment: learn
+                    -- the LEAF NOGOOD (the failed assignment's positive-
+                    -- level trail literals, negated and normalized —
+                    -- entailed because every solution satisfying the
+                    -- trail would equal the failed assignment and pass
+                    -- the leaf check), then retreat chronologically.
+                    -- When the search re-enters the same branch, the
+                    -- scan reports the learned clause as a conflict and
+                    -- the standard 1-UIP analysis takes over.
+                    -- The learning is GATED on `trailBoolPinsOk`: the
+                    -- nogood's entitlement needs every Boolean-pin
+                    -- trail entry to sit on an all-Bool problem slot
+                    -- (vacuous for compiled models — their pins are
+                    -- domain-gated; the gate keeps abstract problems
+                    -- on the plain-retreat path, honestly `unknown`).
                     if st1.decisionLevel == 0 then .unsat
-                    else go fuel (repairAfterBackjump problem (st1.decisionLevel - 1) st1)
+                    else if trailBoolPinsOk problem st1.trail then
+                      let leafNg := (st1.trail.filter fun e => e.level > 0).map
+                        fun e => e.literal.negate.norm
+                      go fuel (repairAfterBackjump problem (st1.decisionLevel - 1)
+                        { st1 with learned := leafNg :: st1.learned })
+                    else
+                      go fuel (repairAfterBackjump problem (st1.decisionLevel - 1) st1)
               | none => .unknown
             else
               match decideLiteral st1 with

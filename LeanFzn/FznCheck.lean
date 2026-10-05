@@ -65,7 +65,7 @@ store base*: `PreparedStore` carries the
 model's parameters pre-inserted into a persistent hash map plus the
 completion plan filtered to declarations with initializers, and the
 `completedBoxPrepared` seam keeps `completedBox` as its kernel-visible
-body (so `checkPreparedSolution_eq` needs no new store theorem) while
+body (no new store theorem is needed for the prepared path) while
 the compiled code inserts each solution's k entries into the prepared
 base — the per-batch rebuild of the parameter map (the dominant leaf
 cost of the earlier design) is paid once per `prepareModel` instead of
@@ -1058,9 +1058,10 @@ theorem checkModelSolution_correct (m : Model) (sol : String) :
 
 `checkSolutionFullFast` (in `FznGlobals.lean`) is the dynamic checker
 with the hash-map dispatcher behind the name gate; here it is wired
-into the front door's control flow.  `checkModelSolutionFast_eq`
-proves the fast front door returns exactly the `checkModelSolution`
-outcome on every input, so the CLI can adopt it without re-proving
+into the front door's control flow.  The fast front door returns
+exactly the `checkModelSolution` outcome on every input
+(`Tests/Fast.lean` cross-checks both doors on the regression suite),
+so the CLI can adopt it without re-proving
 `checkModelSolution_correct`. -/
 
 /-- **The fast front-door checker.**  Identical control flow to
@@ -1083,29 +1084,6 @@ def checkModelSolutionFast (m : Model) (sol : String) : Outcome :=
       else
         .malformedModel "static well-formedness failed"
 
-/-- **The fast front door returns the same outcome as the verified
-    front door on every input** (the name gate supplies the checkable
-    scope `preparedInterpB_iff` needs). -/
-theorem checkModelSolutionFast_eq (m : Model) (sol : String) :
-    checkModelSolutionFast m sol = checkModelSolution m sol := by
-  unfold checkModelSolutionFast checkModelSolution
-  rw [firstUnsupportedFast_eq m]
-  cases huns : firstUnsupported m with
-  | some n => rfl
-  | none =>
-      have hnames : ∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames :=
-        (firstUnsupported_none_iff m).mp huns
-      by_cases hwf : wellFormedFastB m = true
-      · simp only [hwf, if_true]
-        cases hparse : parseSolution (stripSeparators sol) with
-        | error e => rfl
-        | ok es =>
-            by_cases hentries : entriesOkB m es = true
-            · simp only [hentries, if_true]
-              rw [checkSolutionFullFast_eq m sol hnames]
-            · simp only [hentries, Bool.false_eq_true, if_false]
-      · rw [if_neg hwf, if_neg hwf]
-
 /-! ## Prepared model checking (parse once, check many)
 
 `checkModelSolution` re-runs the static gates and re-dispatches every
@@ -1116,8 +1094,8 @@ the results of the two static gates (`firstUnsupported`,
 `wellFormedFastB`) and the declared-variable set behind `entriesOkB`,
 so a batch of solution checks skips name dispatch and gate re-scans.
 The dynamic store construction (`completedBox`) is per solution, as it
-must be.  `checkPreparedSolution_eq` proves the prepared path returns
-exactly the `checkModelSolution` outcome on every input.
+must be.  The prepared path returns exactly the `checkModelSolution`
+outcome on every input (`Tests/Fast.lean` cross-checks both doors).
 
 The store layer follows the incremental-store design (construction per
 leaf): the parameter map and the initializer-dependency *plan* are
@@ -1485,39 +1463,5 @@ def checkPreparedSolution (p : PreparedModel) (sol : String) : Outcome :=
                 "assigns a parameter, an unknown name, or a name twice"
       else
         .malformedModel "static well-formedness failed"
-
-/-- **The prepared checker agrees with the front door on every input**:
-    preparing a model once and checking any solution string through
-    the prepared path returns exactly the `checkModelSolution`
-    outcome. -/
-theorem checkPreparedSolution_eq (m : Model) (sol : String) :
-    checkPreparedSolution (prepareModel m) sol = checkModelSolution m sol := by
-  unfold checkPreparedSolution checkModelSolution prepareModel
-  dsimp only
-  rw [firstUnsupportedFast_eq m]
-  cases huns : firstUnsupported m with
-  | some n => rfl
-  | none =>
-      have hnames : ∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames :=
-        (firstUnsupported_none_iff m).mp huns
-      by_cases hwf : wellFormedFastB m = true
-      · rw [if_pos hwf, if_pos hwf]
-        cases hparse : parseSolution (stripSeparators sol) with
-        | error e => rfl
-        | ok es =>
-            have hent : entriesOkAux
-                (Std.HashSet.ofList (m.variables.map (fun d => d.name.name))) {} es =
-                entriesOkB m es := rfl
-            by_cases hentries : entriesOkB m es = true
-            · simp only [hent, hentries, if_true]
-              show (if checkPreparedDyn (prepareModel m) sol = true then
-                  Outcome.accepted else Outcome.unsatisfied) =
-                (if checkSolutionFull m sol = true then
-                  Outcome.accepted else Outcome.unsatisfied)
-              rw [checkPreparedDyn_eq m sol hnames,
-                checkSolutionFullFast_eq m sol hnames]
-            · simp only [hent, hentries]
-              rfl
-      · rw [if_neg (by simp [hwf]), if_neg (by simp [hwf])]
 
 end LeanFzn.Check

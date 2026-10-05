@@ -17,10 +17,24 @@ solver correctness argument will instead connect compiled constraints, solver
 states, propagation, branching, and terminal results directly to
 `Satisfies fullSig fullInterp`; output rendering happens only afterward.
 
-**Top priority:** restore the current build, finish exact source compilation,
-discharge the LCG fragment's remaining premises, and connect the CLI to that
-proved path. The current working-tree audit is dated 2026-09-26.
-See [PLAN.md](PLAN.md).
+**Status (2026-10-02):** multi-value-domain certified solving is
+SHIPPED for both verdicts — SAT on every gate-passing model, UNSAT on
+every gate-passing model over the twenty registered constraint
+families (le/lt/eq/ne/plus/linLe/const-bound/bool/min/max/abs/
+linEq/times/allDiff). The 2026-09-30 linLe obstruction is DEAD: the
+repaired linear propagator's explanation clauses are state-free
+valid, so the `int_lin_le` coverage gate was removed. The engine now LEARNS
+NOGOODS at both the leaf failure and the chronological fallback (the
+empty-conflict/propagator-origin shape — the `int_ne` pigeonhole
+cycle's fix, certified through the new `hfallbackng` premise of the
+decision-descent master theorem), and SEVENTEEN propagator families
+are registered (le/lt/eq/ne/plus/linLe slots, five constant-bound
+families, bool_not/bool_and/bool_or, int_min/int_max/int_abs) with a
+proved Boolean↔order bridge in conflict analysis (`orderUpgrade`).
+See [PLAN.md](PLAN.md) §5 for the remaining engine-utility items
+(linEq/times/allDiff registration, literal-argument extraction
+fallbacks, the termination measure for nonempty unanalyzable
+conflicts).
 
 The normative reference is **MiniZinc 2.10.0**, pinned to immutable commit
 `c9f9b649b2a251a40aa427a84d7cce73a8807fea` (see
@@ -55,15 +69,19 @@ leanfzn solve --certified MODEL.fzn
 ```
 
 runs the well-formedness gate (`Check.wellFormedFastB`), the fragment
-compiler (`Direct.compileModel`), the LCG fragment gate
-(`LCG.fragmentOk` — singleton domains), and the LCG engine
-(`LCG.solve`), reporting `sat` (with the FlatZinc solution text),
-`unsat`, `unknown`, or `unsupported` with exit codes 0/1/2/3. The
-first certified LCG fragment covers decided models (singleton
-domains); per-family propagation soundness (`PropSafeUniv` for
-`plus`/`le`/`lt`/`eq`/`ne`/`linLe`) is the documented expansion
-path — until then those families run only in the reference search,
-not behind an unproved premise.
+compiler (`Direct.compileModel`), the widened LCG gate
+(`LCG.gateOk` — nonempty finite int/bool domains, decisions and
+backtracking allowed), and the LCG engine (`LCG.solve`), reporting
+`sat` (with the FlatZinc solution text), `unsat`, `unknown`, or
+`unsupported` with exit codes 0/1/2/3. Eleven propagator families
+are registered with proved soundness/entitlement/reason-validity
+(`le`/`lt`/`eq`/`ne`/`plus`/`linLe` slots + the five constant-bound
+families). An engine `unsat` is CLAIMED only when certified: inside
+the singleton fragment (all doors) or through the wide
+decision-descent door on linLe-free registrations
+(`solve_certified_unsat_wide`); a linLe-bearing multi-value
+refutation reports `unknown` (no verdict), never an unproved
+`unsat`.
 
 The architecture keeps a strict algorithm/proof split:
 
@@ -75,8 +93,7 @@ The architecture keeps a strict algorithm/proof split:
 
 The solver foundation is layered. `solver/Core` defines only shared compiled
 problems, slots, domains, assignments, results, and assignment semantics.
-Classical decisions, NoGoods, trails, and domain-narrowing state live in
-`solver/Tree`. The first new solver is the separate `solver/LCG` layer, which
+The certified solver is the `solver/LCG` layer, which
 implements a CP-SAT-style lazy clause generation architecture: signed Boolean
 and integer-bound literals, clauses, implication reasons, decision levels,
 learned clauses, propagation queues, and conflicts.
@@ -86,13 +103,20 @@ learning, backjumping, and bounded search. Fuel exhaustion returns `unknown`.
 All 31 internal LCG tests passed in an earlier run. `LCG.solve_sat_correct` proves the internal
 SAT leaf result when Boolean and declarative constraint evaluations agree.
 
-**Internal UNSAT has a proved decision-free fragment.** The LCG proof files
-have no active `sorry`. `LCG.solve_unsat_correct` still takes the `UnsatRun`
-premise: every `.unsat` outcome of the engine loop arises from a generating
-ENTRY iterate (level 0, conflict-free, representing every internal
-solution, holding the problem's original clauses and entailed learned
-clauses) whose propagation run reports either a conflict or a failed
-level-0 all-singleton leaf. Both terminal arms are closed by fully proved
+**Internal UNSAT is proved through decision descent (2026-10-01).**
+The LCG proof files have no active `sorry`. The master theorem
+`go_unsat_entry_invariant` (Proofs/Run.lean) proves that every
+`.unsat` outcome of the engine loop arises from a generating ENTRY
+iterate (level 0, conflict-free, representing every internal
+solution, holding the problem's original clauses and entailed
+learned clauses) whose propagation run reports either a conflict or
+a failed level-0 all-singleton leaf — through decisions, analysis,
+learning, and backjumping, with all run invariants preserved. Its
+premises are discharged in `Proofs/Reason.lean`: the STATE-FREE
+per-family reason-validity (the two-case disjunction on each
+family's constraint), the rooted level-0 justification, and the
+nonempty-conflict entitlement (neSlot's empty clause never
+analyzes). Both terminal arms are closed by fully proved
 constructive theorems (`unsat_root_conflict_constructive`,
 `unsat_root_leaf_constructive`), using the entry-relative loop results
 (`propagateLoop_excludes`, `propagateLoop_solvedBy`,
@@ -103,22 +127,28 @@ repair transfer at level 0 (`repair_solvedBy0` via the iterated-firing
 (`initialWithRoots_solvedBy` under the int/bool fragment invariant). Fuel
 exhaustion is proved (`go_zero_unknown`). The retired `EngineSafe`
 (obligations over arbitrary terminal states) is deleted. What remains
-before the general UNSAT claim is premise-free: discharging `UnsatRun` itself —
-the positive-level analysis-arm transfer (the asserting enqueue
-re-justifies via the entailed learned clause, with `AnalysisReady`
-established at the actual analysis call) and the decision descent — plus
-per-family propagator soundness (`PropSafeUniv`/entitlement; the
-`int_le` kernel is proved) for the families the first fragment admits.
-For all-singleton initial domains, `solve_certified_fragment_unsat`
-discharges `UnsatRun` internally, but still takes `IntViewed`, original
-database entitlement, propagator safety and conflict entitlement, evaluator
-agreement, and `PropFragment` as premises. These must be derived for the
-actual compiled problem before making a public certified claim.
+The general `LCG.solve_unsat_correct` (with its `UnsatRun` premise)
+is retained as the abstract engine theorem; the two front doors
+discharge everything for the actual compiled problem: the singleton
+door `solve_certified_unsat_real` (fragmentOk) and the WIDE door
+`solve_certified_unsat_wide` (gateOk + linLe-free — the
+decision-descent composition).
 
-**Source-level solving is not certified yet.** The compiler accepts models,
-but its exactness/coverage proof is unfinished and the current tree fails to
-build. `leanfzn solve` still calls the legacy `Solver.solveModelWith` path,
-not LCG. [PLAN.md](PLAN.md) gives the ordered proof and integration gates.
+**Source-level solving is certified.** `leanfzn solve` runs
+`Direct.solveCertified`: the model is compiled (`compileModel`,
+`compile_exact`/`compile_covers` correspondence), gated by the
+executable check `LCG.gateOk` (nonempty finite int/bool domains —
+multi-value domains with decisions and backtracking are admitted),
+and solved by the LCG engine over the eleven proved propagator
+families (`leSlot`, `ltSlot`, `eqSlot`, `neSlot`, `plusSlot`,
+`linLe`, `leConstHi`, `leConstLo`, `ltConstHi`, `ltConstLo`,
+`constEq`). SAT results carry `solveCertified_sat_correct` on every
+gate-passing model; UNSAT is claimed through either the singleton
+door or the wide decision-descent door (linLe-free registrations)
+— both composed into `solveCertified_unsat_correct`. A linLe-bearing
+multi-value refutation is reported as `unknown` (no verdict), never
+an unproved `unsat`. All theorems are kernel-checked end to end
+(standard Lean axioms only; see `audits/certified_axioms.lean`).
 
 ### Exact parser recognition
 
@@ -211,7 +241,7 @@ names. The wrapper consists of:
 leanfzn/
 ├── LeanFzn.lean              # Umbrella module — imports the whole library
 ├── Main.lean                  # CLI: parse a file/stdin, check a solution,
-│                              #   or solve / enumerate / optimize
+│                              #   or solve (certified LCG path)
 ├── PLAN.md                    # Current status and prioritized future work
 ├── code-structure.md          # Direct-import dependency map and module layers
 ├── lakefile.toml              # Lake build configuration
@@ -263,8 +293,6 @@ leanfzn/
 │   ├── Core/                  #   architecture-neutral problem semantics
 │   │   ├── Types.lean         #     problems, slots, domains, assignments
 │   │   └── Semantics.lean     #     assignment/domain agreement
-│   ├── Tree.lean              #   classical CP tree-state umbrella
-│   ├── Tree/                  #   decisions, NoGoods, trails, reference state
 │   ├── LCG.lean               #   lazy-clause-generation umbrella
 │   ├── LCG/                   #   literals, clauses, reasons, LCG state/proofs
 │   ├── Direct.lean            #   direct-solver umbrella
@@ -278,21 +306,11 @@ leanfzn/
 │   ├── Search.lean            #   exhaustive reference search + master theorems
 │   ├── Domain.lean            #   finite-domain extraction from a model
 │   ├── Emit.lean              #   output-only solution-text emission
-│   ├── Solve.lean             #   legacy checker-mediated entry points (being replaced)
 │   ├── Propagators.lean       #   propagation contract + first propagators
-│   ├── Fixpoint.lean          #   propagation fixpoint + pruning search
-│   ├── Heuristic.lean         #   MRV branch ordering (permutation composition)
-│   ├── Enum.lean              #   all-solutions enumeration
 │   ├── Extract.lean           #   constraint extraction for propagation
-│   ├── Optimize.lean          #   optimization (reference + branch and bound)
-│   ├── RevState.lean          #   sparse-set reversible state + trail
-│   ├── Learning.lean          #   decision-trail NoGood learning
-│   ├── Restarts.lean          #   budgeted restarts with the `unknown` verdict
-│   ├── Config.lean            #   composed front door: SolveConfig / solveModelWith
-│   ├── Solver.lean            #   complete solver umbrella used by CLI/tests
-│   └── Tests*.lean            #   test executables (unit + integration + bench)
+│   └── Tests*.lean            #   test executables (unit + integration)
 │
-├── solver.lean                # Solver library root (Search/Domain/Core/Tree/LCG/Direct)
+├── solver.lean                # Solver library root (Search/Domain/Core/LCG/Direct)
 │
 └── specification/
     ├── minizinc-2.10.0/        # The pinned normative reference
@@ -361,15 +379,12 @@ Requires Lean 4.33.1 (see `lean-toolchain`; `elan` installs it automatically).
 lake build leanfzn solver tests_smoke tests_stdlib tests_solution tests_globals \
       tests_gecode tests_coverage tests_check tests_bench tests_wellformed \
       tests_pretty tests_prof tests_fast tests_solver tests_prop \
-      tests_heur tests_fix tests_enum tests_sbench tests_opt tests_rev \
-      tests_learn tests_restart tests_lcg
+      tests_lcg
 
 # Run the listed test and benchmark suites; stop at the first failure:
 for t in tests_smoke tests_stdlib tests_solution tests_globals tests_gecode \
          tests_coverage tests_check tests_bench tests_wellformed tests_pretty \
-         tests_prof tests_fast tests_solver tests_prop tests_heur tests_fix \
-         tests_enum tests_sbench tests_opt tests_rev tests_learn tests_restart \
-         tests_lcg; do
+         tests_prof tests_fast tests_solver tests_prop tests_lcg; do
   lake env $t || exit 1
 done
 
@@ -388,17 +403,9 @@ lake env tests_prof      # profiling driver (parser timing analysis)
 lake env tests_fast      # 7 fast-path differential tests
 
 # Solver suites
-lake env tests_solver    # solver unit and integration tests; current count awaits a passing build
-lake env tests_prop      # 109 propagator tests
-lake env tests_heur      # 93 heuristic tests
-lake env tests_fix       # 21 fixpoint tests
-lake env tests_enum     # 31 enumeration tests
-lake env tests_sbench    # 4 solver benchmark checks
-lake env tests_opt       # 73 optimization tests
-lake env tests_rev       # 26 reversible-state tests
-lake env tests_learn     # 37 learning tests
-lake env tests_restart   # 26 restart tests
-lake env tests_lcg       # 31 LCG engine tests
+lake env tests_solver    # 36 certified-path tests (compiler, theorems, CLI command)
+lake env tests_prop      # 89 propagator tests
+lake env tests_lcg       # 37 LCG engine tests
 
 # Parse a FlatZinc file (prints the AST), or pipe via stdin
 lake env leanfzn model.fzn
@@ -408,22 +415,14 @@ echo 'solve satisfy;' | lake env leanfzn -
 # static validation + predicate checkability + dynamic checking)
 lake env leanfzn check model.fzn solution.txt
 
-# Run the legacy solver while the direct-proof replacement is developed.
-# Flags: --prop (fixpoint propagation), --mrv (MRV branch ordering),
-# --budget N (budgeted restarts, may report `unknown`),
-# --nogoods (NoGood learning); supported combos are each switch
-# alone and --prop with --mrv together. `-` or omitted file reads
-# stdin.
+# Solve with the certified LCG path (source-level SAT/UNSAT theorems;
+# `-` or omitted file reads stdin; --certified is a temporary
+# no-op alias). Multi-value finite domains are admitted: SAT results
+# carry the theorem (decisions + backtracking); UNSAT is claimed only
+# on the singleton fragment — an engine refutation of a multi-value
+# model reports `unknown` (exit 2) until the decision-descent proof
+# lands.
 lake env leanfzn solve model.fzn
-lake env leanfzn solve --prop --mrv model.fzn
-
-# Enumerate all solutions (FlatZinc output convention: each solution
-# text, then a final ========== separator)
-lake env leanfzn enum model.fzn
-
-# Optimize (branch and bound): prints the optimal solution text and
-# the ========== separator, with the objective value on stderr
-lake env leanfzn optimize model.fzn
 ```
 
 Exit codes of `leanfzn`:
@@ -437,30 +436,24 @@ Exit codes of `leanfzn`:
   string (parse failure, parameter/unknown reassignment, duplicate
   assignment);
 * `solve`: 0 = solution found (printed as-is, ending with the
-  `----------` separator); 1 = unsatisfiable
-  (`=====UNSATISFIABLE=====` on stdout); 2 = `unknown` — no verdict
-  (budget exhausted or statically refused; reason on stderr), also
-  usage/IO/parse errors; 3 = unsupported model or configuration
-  (reason on stderr);
-* `enum`: 0 = all solutions enumerated (each text, then `==========`);
-  1 = unsatisfiable (`=====UNSATISFIABLE=====` on stdout); 3 =
-  unsupported model (reason on stderr); usage/IO/parse errors exit 2;
-* `optimize`: 0 = optimal solution found (text + `==========` on
-  stdout, `objective = VALUE` on stderr); 1 = unsatisfiable
-  (`=====UNSATISFIABLE=====` on stdout); 3 = unsupported model or
-  objective (reason on stderr); usage/IO/parse errors exit 2.
+  `----------` separator; multi-value domains included); 1 =
+  unsatisfiable (`=====UNSATISFIABLE=====` on stdout; the singleton
+  fragment); 2 = `unknown`/not well-formed — no verdict (fuel
+  exhausted, an uncertifiable multi-domain engine refutation, or a
+  statically malformed model; reason on stderr), also usage/IO/parse
+  errors; 3 = unsupported model (outside the certified gate; reason
+  on stderr).
 
 `Tests/WellFormed.lean` and `Tests/Pretty.lean` can also be run directly
 with `lake env lean`; their `#eval`-based checks are compiled by the
 corresponding executable targets above. The listed build targets are the
 intended aggregate check; a plain `lake build` currently has no default
-target. On 2026-09-26, `lake build LeanFzn solver leanfzn tests_solver
-tests_lcg` failed in `solver/Direct/Proofs/Compile.lean` at
-`int_read_of_checkArg_slot` (type errors around lines 1964–1978 and two
-active `sorry`s). The current tree's test suites were not run because the
-build failed. The earlier 31 LCG and 211 solver checks are historical
-results, not current verification. A clean build and proof-hole/axiom
-audit remain open.
+target. On 2026-09-29, the aggregate build (179 jobs: LeanFzn, solver,
+leanfzn, all 15 test executables) completed, all suites passed, and the
+10-theorem axiom audit (`audits/certified_axioms.lean`) reported only
+the three standard Lean axioms. The retired legacy suites (heur, fix,
+enum, sbench, opt, rev, learn, restart) and their modules were removed
+in the 2026-09-29 cleanup (PLAN.md §1); Git history keeps them.
 
 ## Project status and roadmap
 
@@ -471,7 +464,5 @@ configuration, and CLI integration. A separate parser/checker cleanup
 track preserves their public theorems and behavior while reducing unused
 code and broad imports. See [`PLAN.md`](PLAN.md) for both tracks and gates
 and [`code-structure.md`](code-structure.md) for module dependencies.
-On 2026-09-26, the separate parser/checker build (78 jobs) and its eight
-smoke, solution, check, fast, pretty, well-formedness, globals, and coverage
-executables passed; the direct compiler build remains blocked as described
-above.
+On 2026-09-29 the full aggregate build (179 jobs) and all 15 suites
+passed, and the axiom audit is clean (see above).

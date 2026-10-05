@@ -1,7 +1,8 @@
-import solver.Solver
+import solver.Propagators
+import solver.Extract
 
 /-!
-# Propagator tests (PLAN.md 6.3)
+# Propagator tests
 
 Unit tests for the propagation contract and the propagators of
 `solver/Propagators.lean`:
@@ -21,13 +22,13 @@ Unit tests for the propagation contract and the propagators of
   narrowing (checked through the spec `allAssigns_spec` / intro
   `allAssigns_intro` pair, i.e. exactly the theorem obligations), and
   the slot-count invariant of narrowing;
-* extraction (`solver/Extract.lean`): the new argument shapes map to
-  the expected `DomConstraint`s and the unsupported shapes are
-  skipped;
-* end-to-end (`solver/Solve.lean`): `solveModelProp` solves int_plus
-  and all_different models (SAT and UNSAT alike), with the extracted
-  propagators pruning — the all-different pigeonhole refutes at the
-  root, so even zero propagation fuel yields the UNSAT verdict.
+* extraction (`solver/Extract.lean`): the recognized argument shapes
+  map to the expected `DomConstraint`s and the unsupported shapes
+  are skipped.
+
+The end-to-end `solveModelProp` sections were retired with the
+legacy solver stack (PLAN.md §1); the propagators themselves stay
+exercised here, and the LCG engine drives them in `tests_lcg`.
 -/
 
 open LeanFzn LeanFzn.Solution LeanFzn.Solver
@@ -487,114 +488,6 @@ def main : IO UInt32 := do
   st ← st.check "extract: int_lin_eq length mismatch skipped"
     (extractsTo (parse "var 1..3: x;\nvar 1..3: y;\n\
        constraint int_lin_eq([1, 2, 3], [x, y], 5);\nsolve satisfy;") [])
-
-  -- ## end-to-end: solveModelProp with the new shapes
-
-  let agree (r1 r2 : SolveResult) : Bool :=
-    match r1, r2 with
-    | .sat _, .sat _ => true
-    | .unsat, .unsat => true
-    | .unsupported _, .unsupported _ => true
-    | _, _ => false
-  -- int_plus model, SAT: the propagating solver's text is accepted
-  let mp1 := parse "var 1..3: x;\nvar 1..3: y;\nvar 1..9: z;\n\
-     constraint int_plus(x, y, z);\nsolve satisfy;"
-  match solveModelProp 50 mp1 with
-  | .sat text =>
-      st ← st.check "e2e: int_plus prop solution accepted"
-        (LeanFzn.Check.checkModelSolution mp1 text == .accepted)
-  | _ => st ← st.check "e2e: int_plus prop solution found" (false)
-  st ← st.check "e2e: int_plus prop agrees with reference"
-    (agree (solveModelProp 50 mp1) (solveModel mp1))
-  -- int_plus model, UNSAT: propagation refutes at the root (1+2 ≤ 4
-  -- misses z ∈ 6..9 entirely), so even zero fuel suffices
-  let mp2 := parse "var 1..2: x;\nvar 1..2: y;\nvar 6..9: z;\n\
-     constraint int_plus(x, y, z);\nsolve satisfy;"
-  st ← st.check "e2e: int_plus unsat by propagation"
-    (agree (solveModelProp 50 mp2) .unsat &&
-      agree (solveModelProp 0 mp2) .unsat)
-  st ← st.check "e2e: int_plus unsat agrees with reference"
-    (agree (solveModelProp 50 mp2) (solveModel mp2))
-  -- all_different model, SAT: pruning finds a checker-accepted
-  -- solution
-  let mp3 := parse "var 1..3: x;\nvar 1..3: y;\nvar 1..3: z;\n\
-     constraint all_different([x, y, z]);\nconstraint int_le(x, 1);\n\
-     solve satisfy;"
-  match solveModelProp 50 mp3 with
-  | .sat text =>
-      st ← st.check "e2e: all_different prop solution accepted"
-        (LeanFzn.Check.checkModelSolution mp3 text == .accepted)
-  | _ => st ← st.check "e2e: all_different prop solution found" (false)
-  st ← st.check "e2e: all_different prop agrees with reference"
-    (agree (solveModelProp 50 mp3) (solveModel mp3))
-  -- all_different pigeonhole, UNSAT: 4 slots over 3 values — the
-  -- allDiff propagator refutes at the root, zero fuel included
-  let mp4 := parse "var 1..3: a;\nvar 1..3: b;\nvar 1..3: c;\n\
-     var 1..3: d;\nconstraint all_different([a, b, c, d]);\n\
-     solve satisfy;"
-  st ← st.check "e2e: all_different pigeonhole unsat by propagation"
-    (agree (solveModelProp 50 mp4) .unsat &&
-      agree (solveModelProp 0 mp4) .unsat)
-  st ← st.check "e2e: all_different pigeonhole agrees with reference"
-    (agree (solveModelProp 50 mp4) (solveModel mp4))
-  -- int_le against a constant, UNSAT: x ≤ 1 and 3 ≤ x cannot both
-  -- hold — the constant bounds refute at the root
-  let mp5 := parse "var 1..3: x;\nconstraint int_le(x, 1);\n\
-     constraint int_le(3, x);\nsolve satisfy;"
-  st ← st.check "e2e: constant bounds conflict unsat by propagation"
-    (agree (solveModelProp 50 mp5) .unsat &&
-      agree (solveModelProp 0 mp5) .unsat)
-  st ← st.check "e2e: constant bounds conflict agrees with reference"
-    (agree (solveModelProp 50 mp5) (solveModel mp5))
-  -- int_times, SAT: 2*3 = 6
-  let mp6 := parse "var 1..3: x;\nvar 1..3: y;\nvar 1..9: z;\n\
-     constraint int_times(x, y, z);\nconstraint int_le(x, 2);\nsolve satisfy;"
-  match solveModelProp 50 mp6 with
-  | .sat text =>
-      st ← st.check "e2e: int_times prop solution accepted"
-        (LeanFzn.Check.checkModelSolution mp6 text == .accepted)
-  | _ => st ← st.check "e2e: int_times prop solution found" (false)
-  st ← st.check "e2e: int_times agrees with reference"
-    (agree (solveModelProp 50 mp6) (solveModel mp6))
-  -- int_min / int_max SAT
-  let mp7 := parse "var 1..3: x;\nvar 1..3: y;\nvar 1..3: z;\n\
-     constraint int_min(x, y, z);\nconstraint int_max(x, y, 3);\nsolve satisfy;"
-  st ← st.check "e2e: int_min/max agrees with reference"
-    (agree (solveModelProp 50 mp7) (solveModel mp7))
-  -- int_abs SAT
-  let mp8 := parse "var -3..3: x;\nvar 0..3: y;\n\
-     constraint int_abs(x, y);\nsolve satisfy;"
-  st ← st.check "e2e: int_abs agrees with reference"
-    (agree (solveModelProp 50 mp8) (solveModel mp8))
-  -- int_lt UNSAT by propagation: x < y over {1} and {1}
-  let mp9 := parse "var 1..1: x;\nvar 1..1: y;\n\
-     constraint int_lt(x, y);\nsolve satisfy;"
-  st ← st.check "e2e: int_lt singleton unsat by propagation"
-    (agree (solveModelProp 50 mp9) .unsat &&
-      agree (solveModelProp 0 mp9) .unsat)
-  st ← st.check "e2e: int_lt unsat agrees with reference"
-    (agree (solveModelProp 50 mp9) (solveModel mp9))
-  -- bool_not UNSAT by propagation: p = true, q = !p = false, but
-  -- q's domain is pinned to true by a constant equality
-  let mp10 := parse "var bool: p;\nvar bool: q;\n\
-     constraint bool_not(p, q);\nconstraint bool_eq(p, true);\n\
-     constraint bool_eq(q, true);\nsolve satisfy;"
-  st ← st.check "e2e: bool_not conflict unsat by propagation"
-    (agree (solveModelProp 50 mp10) .unsat)
-  st ← st.check "e2e: bool_not conflict agrees with reference"
-    (agree (solveModelProp 50 mp10) (solveModel mp10))
-  -- bool_and SAT
-  let mp11 := parse "var bool: p;\nvar bool: q;\nvar bool: r;\n\
-     constraint bool_and(p, q, r);\nconstraint bool_eq(p, true);\n\
-     constraint bool_eq(r, true);\nsolve satisfy;"
-  st ← st.check "e2e: bool_and agrees with reference"
-    (agree (solveModelProp 50 mp11) (solveModel mp11))
-  -- bool_or SAT
-  let mp12 := parse "var bool: p;\nvar bool: q;\nvar bool: r;\n\
-     constraint bool_or(p, q, r);\nconstraint bool_eq(r, true);\nsolve satisfy;"
-  st ← st.check "e2e: bool_or agrees with reference"
-    (agree (solveModelProp 50 mp12) (solveModel mp12))
-
   if st.failed == 0 then
     IO.println s!"passed {st.passed} propagator tests"
     return 0

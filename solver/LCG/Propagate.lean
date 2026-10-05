@@ -39,7 +39,7 @@ import solver.Propagators
 namespace LeanFzn.Solver.LCG
 
 open LeanFzn LeanFzn.Solver.Core
-open LeanFzn.Solver (DomConstraint setSlot)
+open LeanFzn.Solver (DomConstraint setSlot valueMemB)
 
 /-! ## Domain views
 
@@ -209,27 +209,75 @@ def domFilterToMin (k : Int) (d : List Value) : List Value :=
     | .bool b => decide (k ≤ (if b then 1 else 0))
     | _ => true
 
-/-- `int_ne`-style: `x ≠ y` over slots `i j`. Two sound behaviours:
+/-- Does the domain contain a value whose integer view is exactly `k`?
+    (Sets/arrays have no view, so they never contain `k`.) -/
+def domContainsI (k : Int) (d : List Value) : Bool :=
+  d.any fun v =>
+    match v with
+    | .int p => decide (p = k)
+    | .bool b => decide ((if b then 1 else 0) = k)
+    | _ => false
+
+/-- The value-removal gate: every value of `d` whose integer view is
+    `c` is RAW-equal to `x`. When the singleton `x` itself views to
+    `c`, removing `c` from `d` is sound at every fitting solution of
+    the raw disequality: a diverging read at `d`'s slot would view to
+    `c`, hence BE `x` raw — the pinned value — contradicting the
+    raw-`neSlot` disequality. -/
+def domNeGate (x : Value) (c : Int) (d : List Value) : Bool :=
+  d.all fun v =>
+    match Value.intView v with
+    | some p => if p = c then Value.eqB v x else true
+    | none => true
+
+/-- `int_ne`-style: `x ≠ y` over slots `i j` (the RAW disequality).
+    Sound behaviours:
 
     * when BOTH sides are singletons, a direct conflict is reported
-      if the values are equal (the constraint is violated), else
+      if the values are raw-equal (the constraint is violated), else
       nothing to do;
-    * when one side is a singleton `c` and the other domain lies
-      entirely on one side of `c`, the separation is already pinned by
-      the root facts (the domain bounds), so no deduction is needed —
-      the propagator stays stable.
+    * when exactly one side is a singleton `x` with integer view
+      `c` and the other side's domain still CONTAINS `x` (multi-value)
+      while every value of it that views to `c` IS `x` raw (the
+      `domNeGate`), the value-removal literal `posNe` is implied
+      with the nogood `[y ≠ c, x ≤ c−1, x > c, x = B, y = B]` (B
+      the Boolean viewing to `c`).
 
-    The earlier design emitted nogoods like `[y > c, x ≤ c]` for the
-    strictly-separated case, but such a clause is NOT integer-valid
-    under `x ≠ y` alone (it depends on domain facts), violating this
-    module's discipline that reason clauses be constraint-valid.
-    Value removal (excluding exactly `c` from the other side) needs
-    value-removal literals (L0.6), so until then the propagator only
-    reports the both-singleton conflict. -/
+    The nogood is valid under the raw `x ≠ y` at every assignment
+    whose two reads have integer views: if `x`'s view is `c` (the two
+    adjacent-bound causes false), then `x`'s raw value is `.int c`
+    or `.bool B`; in the Boolean case the `x = B` disjunct is true;
+    in the integer case a `y` reading view `c` is `.int c` (raw
+    equal — the disequality excludes it, so `y ≠ c` is true) or
+      `.bool B` (the `y = B` disjunct is true).
+
+    The conflict compares the RAW singleton values (`Value.eqB`):
+    `int_ne` means raw inequality. The VALUE-REMOVAL deduction is
+    view-based but gated on the raw correspondence (`domNeGate`), so
+    it never fires across a raw/view shape mismatch. -/
 def propNe (st : State) (i j : Nat) : PropagationResult :=
-  match domSingletonI (st.domains.getD i []),
-        domSingletonI (st.domains.getD j []) with
-  | some c, some d => if c == d then .conflict [] else .stable
+  match st.domains.getD i [], st.domains.getD j [] with
+  | [x], [y] => if x.eqB y then .conflict [] else .stable
+  | [x], dy =>
+      match domSingletonI [x] with
+      | some c =>
+          if valueMemB x dy && domNeGate x c dy then
+            .implied (posNe j c) { clause :=
+              [posNe j c, posLe i (c - 1), negLe i c,
+                posBool i (decide (c = 1)),
+                posBool j (decide (c = 1))] }
+          else .stable
+      | none => .stable
+  | dx, [y] =>
+      match domSingletonI [y] with
+      | some c =>
+          if valueMemB y dx && domNeGate y c dx then
+            .implied (posNe i c) { clause :=
+              [posNe i c, posLe j (c - 1), negLe j c,
+                posBool j (decide (c = 1)),
+                posBool i (decide (c = 1))] }
+          else .stable
+      | none => .stable
   | _, _ => .stable
 
 /-- `int_lin_le`-style: `Σ cₜ·xₜ ≤ b`. For each slot `m` with a `±1`
@@ -302,21 +350,102 @@ def propLinLe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
         | some _ => narrowLo st m lo ([negLe m (lo - 1)] ++ terms.filterMap causeOfMin)
         | none => .stable
     | _, _, _ => .stable
-  let rec sweep (ps : List (Int × Nat)) : PropagationResult :=
+  let rec sweep (ps : List ((Int × Nat) × Nat)) (idx : Nat) :
+      PropagationResult :=
     match ps with
     | [] => .stable
-    | (c, m) :: rest =>
-        -- deduce over ALL other slots, not just the suffix
-        let others := (coeffs.zip is).filter (fun p => p.2 != m)
+    | ((c, m), i) :: rest =>
+        -- deduce over ALL other entries, not just the suffix: drop
+        -- exactly the CURRENT pair (by position), keeping same-slot
+        -- entries (a duplicated slot's other coefficients belong to
+        -- "the rest" — filtering by slot value would wrongly remove
+        -- them and produce false conflicts on `x − x + y ≤ b` shapes)
+        let others := ((coeffs.zip is).zipIdx.filter
+          (fun p => p.2 != i)).map (·.1)
         match deduce m c others with
-        | .stable => sweep rest
+        | .stable => sweep rest (idx + 1)
         | r => r
   -- a length mismatch would silently truncate the pairing; the
   -- compiled shape (linLe coeffs is b from extractConstraint) always
   -- has equal lengths (the `coeffs.length == is.length` gate)
   match coeffs.zip is with
   | [] => .stable
-  | ps => sweep ps
+  | ps => sweep (ps.zipIdx) 0
+
+/-- `int_le(x, c)` style: slot `i` must be `≤ c`. Conflict when the
+    domain's minimum already exceeds `c` (the unit nogood `x ≤ c` is
+    then violated by every domain value); implied literal `posLe i c`
+    (narrow the upper bound to `c`) when only the maximum exceeds it;
+    `.stable` when the bound is already tight. The reason clause is
+    the unit nogood `[posLe i c]`, entailed by the constraint
+    `.leConstHi i c` alone. -/
+def propLeConstHi (st : State) (i : Nat) (c : Int) : PropagationResult :=
+  narrowHi st i c [posLe i c]
+
+/-- `int_le(c, x)` style: slot `i` must be `≥ c`. Conflict when the
+    domain's maximum is already below `c`; implied literal `negLe i
+    (c−1)` (i.e. `x > c−1`, narrowing the lower bound to `c`) when
+    only the minimum is below it. The reason clause is the unit nogood
+    `[negLe i (c−1)]`, entailed by the constraint `.leConstLo i c`
+    alone. -/
+def propLeConstLo (st : State) (i : Nat) (c : Int) : PropagationResult :=
+  narrowLo st i c [negLe i (c - 1)]
+
+/-- `int_lt(x, c)` style: slot `i` must be `< c`, i.e. `≤ c − 1`.
+    Conflict when the domain's minimum is already `≥ c` (the unit
+    nogood `x ≤ c − 1` is then violated by every domain value);
+    implied literal `posLe i (c − 1)` (narrow the upper bound to
+    `c − 1`) when only the maximum exceeds it; `.stable` when the
+    bound is already tight. The reason clause is the unit nogood
+    `[posLe i (c − 1)]`, entailed by the constraint
+    `.ltConstHi i c` alone. -/
+def propLtConstHi (st : State) (i : Nat) (c : Int) : PropagationResult :=
+  narrowHi st i (c - 1) [posLe i (c - 1)]
+
+/-- `int_lt(c, x)` / `int_gt` style: slot `i` must be `> c`, i.e.
+    `≥ c + 1`. Conflict when the domain's maximum is already `≤ c`;
+    implied literal `negLe i c` (i.e. `x > c`, narrowing the lower
+    bound to `c + 1`) when only the minimum is below it. The reason
+    clause is the unit nogood `[negLe i c]`, entailed by the
+    constraint `.ltConstLo i c` alone. (narrowLo's implied head at
+    `lo = c + 1` is `negLe s (lo − 1) = negLe i (c + 1 − 1)`, the
+    same literal up to integer arithmetic; the pivot-membership
+    proofs discharge `c + 1 − 1 = c` by `omega`.) -/
+def propLtConstLo (st : State) (i : Nat) (c : Int) : PropagationResult :=
+  narrowLo st i (c + 1) [negLe i c]
+
+/-- `int_eq(x, c)` style: slot `i` must carry exactly the value
+    `v`.
+
+    * Integer constant `k`: equality decomposes into the two bound
+      facts `x ≤ k` and `x ≥ k`, each with its constraint-valid
+      unit nogood — `narrowHi` conflicts when `mn > k` (all domain
+      values above `k`) and implies `posLe i k`; `narrowLo`
+      conflicts when `mx < k` and implies `negLe i (k − 1)`;
+      `firstEvent` reports the first non-stable event. `x = k`
+      entails BOTH `x ≤ k` and `x ≥ k`, so each conflict clause is
+      entitled.
+    * Boolean constant `b`: the `boolEq` atom at its normalized
+      positive literal `posBool i b` — implied (with the unit nogood
+      `[posBool i b]`) whenever the domain still contains `.bool b`
+      alongside something else, conflict (same unit clause, then
+      entitled but falsified by the domain) when it contains no
+      `.bool b` at all, stable when the domain is exactly the
+      singleton `[.bool b]`.
+    * Set/array constants: `.stable` (the extractor never emits
+      them; sound, merely incomplete). -/
+def propConstEq (st : State) (i : Nat) (v : Value) : PropagationResult :=
+  match v with
+  | .int k =>
+      firstEvent
+        [ narrowHi st i k [posLe i k]
+        , narrowLo st i k [negLe i (k - 1)] ]
+  | .bool b =>
+      if valueMemB (.bool b) (st.domains.getD i []) then
+        if valuesEqB (st.domains.getD i []) [.bool b] then .stable
+        else .implied (posBool i b) { clause := [posBool i b] }
+      else .conflict [posBool i b]
+  | _ => .stable
 
 /-- Register the standard propagator for a `DomConstraint` (via its
     executable semantics twin `satisfiedB` for leaf checks; the bound

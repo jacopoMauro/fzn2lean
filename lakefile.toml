@@ -1,8 +1,13 @@
 name = "fzn2lean"
 version = "0.1.0"
 
+# Pass an explicit thread count to every Lean invocation. Without it,
+# Lean sizes its worker pool with `nproc` (256 on this host) while the
+# cgroup CPU quota is 8 CPUs; thread creation then fails under load
+# with `lean::exception: failed to create thread`.
 [[lean_lib]]
 name = "LeanFzn"
+moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_exe]]
 name = "tests_smoke"
@@ -55,6 +60,7 @@ root = "Tests.Check"
 
 [[lean_lib]]
 name = "solver"
+moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_exe]]
 name = "tests_solver"
@@ -65,40 +71,8 @@ name = "tests_prop"
 root = "solver.TestsProp"
 
 [[lean_exe]]
-name = "tests_heur"
-root = "solver.TestsHeur"
-
-[[lean_exe]]
 name = "tests_fast"
 root = "Tests.Fast"
-
-[[lean_exe]]
-name = "tests_fix"
-root = "solver.TestsFix"
-
-[[lean_exe]]
-name = "tests_enum"
-root = "solver.TestsEnum"
-
-[[lean_exe]]
-name = "tests_sbench"
-root = "solver.TestsBench"
-
-[[lean_exe]]
-name = "tests_opt"
-root = "solver.TestsOpt"
-
-[[lean_exe]]
-name = "tests_rev"
-root = "solver.TestsRev"
-
-[[lean_exe]]
-name = "tests_learn"
-root = "solver.TestsLearn"
-
-[[lean_exe]]
-name = "tests_restart"
-root = "solver.TestsRestart"
 
 [[lean_exe]]
 name = "tests_lcg"

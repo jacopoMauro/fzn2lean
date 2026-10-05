@@ -90,6 +90,7 @@ theorem Literal.norm_eval (l : Literal) (a : Assignment) :
           | setOfInt x => simp only [h]; rfl
           | array x => simp only [h]; rfl
     | intLe s k => cases positive <;> rfl
+    | intNe s k => cases positive <;> rfl
 
 /-! ## Order-encoding evaluation
 
@@ -161,6 +162,63 @@ theorem eval_negLe_mono (a : Assignment) (s : Nat) {k k' : Int} (hk : k' ≤ k) 
   rintro ⟨i, hi, hik⟩
   exact ⟨i, hi, by omega⟩
 
+/-- Positive value-removal literals evaluate at the integer view. -/
+theorem eval_posNe (a : Assignment) (s : Nat) (k : Int) :
+    (posNe s k).eval a = (slotInt a s).map fun i => decide (i ≠ k) := by
+  simp [Literal.eval, posNe, Atom.eval, Function.comp_def, slotInt]
+
+/-- Negative value-removal literals evaluate at the negated view. -/
+theorem eval_negNe (a : Assignment) (s : Nat) (k : Int) :
+    (negNe s k).eval a = (slotInt a s).map fun i => !(decide (i ≠ k)) := by
+  simp [Literal.eval, negNe, Atom.eval, Function.comp_def, slotInt]
+
+/-- A positive value-removal literal holds iff the slot's integer view
+    differs from the removed value. -/
+theorem eval_posNe_iff (a : Assignment) (s : Nat) (k : Int) :
+    (posNe s k).eval a = some true ↔ ∃ i, slotInt a s = some i ∧ i ≠ k := by
+  rw [eval_posNe, Option.map_eq_some_iff]
+  constructor
+  · rintro ⟨i, hi, hdec⟩
+    exact ⟨i, hi, (of_decide_eq_true hdec)⟩
+  · rintro ⟨i, hi, hik⟩
+    exact ⟨i, hi, decide_eq_true hik⟩
+
+/-- A negative value-removal literal holds iff the slot's integer view
+    equals the removed value. -/
+theorem eval_negNe_iff (a : Assignment) (s : Nat) (k : Int) :
+    (negNe s k).eval a = some true ↔ ∃ i, slotInt a s = some i ∧ i = k := by
+  rw [eval_negNe, Option.map_eq_some_iff]
+  constructor
+  · rintro ⟨i, hi, hdec⟩
+    refine ⟨i, hi, ?_⟩
+    cases hbb : decide (i ≠ k) with
+    | true =>
+        rw [hbb] at hdec
+        simp at hdec
+    | false =>
+        have hnn : ¬ (i ≠ k) := of_decide_eq_false hbb
+        omega
+  · rintro ⟨i, hi, hik⟩
+    refine ⟨i, hi, ?_⟩
+    rw [Bool.not_eq_true']
+    exact decide_eq_false (by omega)
+
+/-- Bridge: a positive value-removal literal evaluates like its atom. -/
+theorem eval_posNe_eq_atom (a : Assignment) (s : Nat) (k : Int) :
+    (posNe s k).eval a = Atom.eval (.intNe s k) a := by
+  simp only [Literal.eval, posNe]
+  cases Atom.eval (.intNe s k) a <;> rfl
+
+/-- A positive value-removal literal is FALSE at a slot whose integer
+    view is exactly the removed value. -/
+theorem posNe_eval_false_of_eq {a : Assignment} {s : Nat} {k i : Int}
+    (hsi : slotInt a s = some i) (hik : i = k) :
+    (posNe s k).eval a = some false := by
+  rw [eval_posNe, hsi]
+  show some (decide (i ≠ k)) = some false
+  have hdi : decide (i ≠ k) = false := decide_eq_false (by omega)
+  rw [hdi]
+
 /-- Equality reconstruction: the adjacent pair pins the integer view. -/
 theorem slotInt_eq_of_adjacent (a : Assignment) (s : Nat) (i : Int)
     (hlo : (negLe s (i - 1)).eval a = some true)
@@ -183,6 +241,7 @@ theorem slotInt_eq_of_adjacent (a : Assignment) (s : Nat) (i : Int)
 def Atom.slot : Atom → Nat
   | .boolEq s _ => s
   | .intLe s _ => s
+  | .intNe s _ => s
 
 /-- Evaluate an atom at a single value — the slot-local meaning of the
     atom, before assignment lookup. -/
@@ -193,6 +252,7 @@ def Atom.evalAtValue (atom : Atom) (val : Value) : Option Bool :=
       | .bool x => some (x == b)
       | _ => none
   | .intLe _ k => (Value.intView val).map fun i => decide (i ≤ k)
+  | .intNe _ k => (Value.intView val).map fun i => decide (i ≠ k)
 
 /-- Boolean atoms hold iff the slot carries the expected Boolean. -/
 theorem eval_posBool_iff (a : Assignment) (s : Nat) (b : Bool) :
@@ -231,6 +291,13 @@ theorem Atom.eval_eq_evalAtValue (atom : Atom) (a : Assignment)
     simp only [Atom.evalAtValue, slotInt]
     rw [List.getElem?_eq_getElem hs]
     rfl
+  | intNe s k =>
+    have hs : s < a.length := hslot
+    show (slotInt a s).map (fun i => decide (i ≠ k))
+        = Atom.evalAtValue (Atom.intNe s k) a[s]
+    simp only [Atom.evalAtValue, slotInt]
+    rw [List.getElem?_eq_getElem hs]
+    rfl
 
 /-! ## Well-formedness of encoded problems -/
 
@@ -242,6 +309,8 @@ def Atom.WellFormedIn (atom : Atom) (domains : List Domain) : Prop :=
   | .boolEq slot _ => slot < domains.length ∧
       ∀ v ∈ domains.getD slot [], ∃ b, v = .bool b
   | .intLe slot _ => slot < domains.length ∧
+      ∀ v ∈ domains.getD slot [], Value.intView v ≠ none
+  | .intNe slot _ => slot < domains.length ∧
       ∀ v ∈ domains.getD slot [], Value.intView v ≠ none
 
 /-- Every literal of a clause fits the domains. -/
@@ -314,6 +383,16 @@ theorem Atom.eval_ne_none_of_fits (atom : Atom) (a : Assignment)
     have hq : a[s]? = some a[s] := (List.getElem?_eq_some_iff).mpr ⟨hs, rfl⟩
     have hin : a[s] ∈ domains.getD s [] := hmem s a[s] hq
     show (slotInt a s).map (fun i => decide (i ≤ k)) ≠ none
+    rw [slotInt, hq]
+    cases hv : Value.intView a[s] with
+    | none => exact absurd hv (hints a[s] hin)
+    | some j => simp [hv]
+  | intNe s k =>
+    obtain ⟨hslot, hints⟩ := hwf
+    have hs : s < a.length := by rw [hlen]; omega
+    have hq : a[s]? = some a[s] := (List.getElem?_eq_some_iff).mpr ⟨hs, rfl⟩
+    have hin : a[s] ∈ domains.getD s [] := hmem s a[s] hq
+    show (slotInt a s).map (fun i => decide (i ≠ k)) ≠ none
     rw [slotInt, hq]
     cases hv : Value.intView a[s] with
     | none => exact absurd hv (hints a[s] hin)
@@ -532,6 +611,7 @@ theorem exists_fitting_of_carves (domains : List Domain) (v : Valuation)
       cases atom with
       | boolEq s b => obtain ⟨h1, _⟩ := hwf; exact h1
       | intLe s k => obtain ⟨h1, _⟩ := hwf; exact h1
+      | intNe s k => obtain ⟨h1, _⟩ := hwf; exact h1
     have hlen : (pickAssignment domains v hcarv).length = domains.length := by
       simp only [pickAssignment, List.length_map, List.length_range]
     have hs' : atom.slot < (pickAssignment domains v hcarv).length := by

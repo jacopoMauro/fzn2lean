@@ -3,8 +3,7 @@ File: solver/Extract.lean
 
 Purpose:
 Extraction of slot-indexed constraints from a FlatZinc model's
-constraint list, for the pruning search of PLAN 6.3
-(`solver/Fixpoint.lean`).  Each recognized predicate-argument shape is
+constraint list.  Each recognized predicate-argument shape is
 translated to a `DomConstraint` over the model's search-slot
 positions, so the propagators of `solver/Propagators.lean` can
 narrow the slot domains during search.
@@ -115,7 +114,7 @@ pruning power, never soundness.
 ## Soundness
 
 `extractConstraints_holds` is the bridge lemma `prunedSearch_none`
-(Fixpoint.lean) needs, stated at the store level: if a store
+(the pruning fixpoint layer) needs, stated at the store level: if a store
 satisfies the model's constraint list under `fullInterp` (the
 `SatisfiesDyn` constraint half, the very thing
 `checkModelSolution_correct` certifies for accepted solutions) and the
@@ -128,9 +127,8 @@ string round trip "the checker accepted the text emitted from `a`,
 therefore the completed store assigns the slot names `a`'s values" —
 is deliberately *not* proven here: `completedStore` is `opaque` by
 design (a compilation safeguard, see `LeanFzn/FznSolution.lean`), so
-no lemma can see its content.  The integrated UNSAT theorem
-(`solveModelProp_unsat_sound` in `solver/Solve.lean`) therefore
-carries that step as an explicit licence. -/
+no lemma can see its content; the integrated UNSAT theorems carry
+that step as an explicit licence. -/
 
 /-- The slot positions of an `all_different` array: every element
     must be a slot name, in order. -/

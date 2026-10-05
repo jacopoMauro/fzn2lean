@@ -153,6 +153,26 @@ def main : IO Unit := do
      | .unsat => !bruteSat nprob3.domains nprob3.constraints
      | _ => false)
 
+  -- propLinLe DUPLICATE-SLOT regression (2026-09-27): the sweep
+  -- filtered `others` by slot VALUE, dropping BOTH entries of a
+  -- duplicated slot — x−x+y ≤ 0 over x∈{1,2}, y∈{0,1} reported a
+  -- FALSE conflict (satisfiable at [1,0]). After the fix: no verdict
+  -- change, but solveDom must find the sat solution.
+  let dup : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [[vi 1, vi 2], [vi 0, vi 1]],
+      constraints := [DomConstraint.linLe [1, -1, 1] [0, 0, 1] 0],
+      objective := (), clauses := [] }
+  match solveDom 10_000 dup (propagatorsOf dup.constraints) with
+  | .sat a =>
+      st ← st.check "linle duplicate-slot sat (regression: false conflict)"
+        (satOk dup.domains dup.constraints a)
+  | .unsat =>
+      st ← st.check "linle duplicate-slot sat (regression: false conflict)"
+        (false)
+  | .unknown =>
+      st ← st.check "linle duplicate-slot sat (regression: false conflict)"
+        (true)
+
   -- propNe on EQUAL singletons reports the conflict (regression: was
   -- .stable, and the old nogoods were not integer-valid)
   let stne : State :=
@@ -183,6 +203,76 @@ def main : IO Unit := do
   -- (structural clause checks would need engine internals; deferred to
   -- the proof layer)
   st ← st.check "smoke-learned-runs" true
+
+  -- ## L0.6 value-removal: the posNe DEDUCTION fires when one side
+  -- is a singleton and the other side still contains the value
+  -- (multi-value): x = 0 pinned, y ∈ 0..3 with int_ne(x, y) — the
+  -- solver must DEDUCE y ≠ 0 (not probe it by decisions)
+  let stne3 : State :=
+    { domains := [[vi 0], [vi 0, vi 1, vi 2, vi 3]], trail := [],
+      decisionLevel := 0, clauses := [], learned := [], queue := [],
+      conflict := none }
+  st ← st.check "propNe value-removal fires (x singleton, y multi)"
+    (match propNe stne3 0 1 with
+     | .implied l _ =>
+         match l.atom with
+         | .intNe s k => s == 1 && k == 0
+         | _ => false
+     | _ => false)
+  -- the symmetric arm: y pinned, x multi
+  let stne4 : State :=
+    { domains := [[vi 0, vi 1, vi 2, vi 3], [vi 0]], trail := [],
+      decisionLevel := 0, clauses := [], learned := [], queue := [],
+      conflict := none }
+  st ← st.check "propNe value-removal fires (y singleton, x multi)"
+    (match propNe stne4 0 1 with
+     | .implied l _ =>
+         match l.atom with
+         | .intNe s k => s == 0 && k == 0
+         | _ => false
+     | _ => false)
+  -- the gate: when the other side no longer CONTAINS the pinned raw
+  -- value, no emission (nothing to remove)
+  let stne5 : State :=
+    { domains := [[vi 0], [vi 1, vi 2]], trail := [],
+      decisionLevel := 0, clauses := [], learned := [], queue := [],
+      conflict := none }
+  st ← st.check "propNe value-removal stable (value absent)"
+    (match propNe stne5 0 1 with
+     | .stable => true
+     | _ => false)
+  -- the raw/view gate: a mixed-shape pair (int singleton vs bool
+  -- domain viewing equal) does NOT emit — the raw disequality does
+  -- not transfer to the view there
+  let stne6 : State :=
+    { domains := [[vi 1], [.bool false, .bool true]], trail := [],
+      decisionLevel := 0, clauses := [], learned := [], queue := [],
+      conflict := none }
+  st ← st.check "propNe value-removal gated (int vs bool shapes)"
+    (match propNe stne6 0 1 with
+     | .stable => true
+     | _ => false)
+
+  -- the engine-level test (the task's acceptance shape): x ∈ 0..3,
+  -- y ∈ 0..3, int_ne(x, y), x ≤ 0: the posNe deduction fires at the
+  -- root (x pinned to 0 by the bound), y's domain loses 0; the leaf
+  -- must be x = 0 with y ∈ 1..3
+  let lvr : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [[vi 0, vi 1, vi 2, vi 3],
+      [vi 0, vi 1, vi 2, vi 3]],
+      constraints := [DomConstraint.neSlot 0 1, DomConstraint.leConstHi 0 0],
+      objective := (), clauses := [] }
+  match solveDom 10_000 lvr (propagatorsOf lvr.constraints) with
+  | .sat a =>
+      st ← st.check "lcg value-removal engine (x=0, y≠0)"
+        (match a[0]?, a[1]? with
+         | some (.int x), some (.int y) =>
+             x == 0 && !(y == 0) && 0 ≤ y && y ≤ 3
+         | _, _ => false)
+  | .unsat =>
+      st ← st.check "lcg value-removal engine (x=0, y≠0)" (false)
+  | .unknown =>
+      st ← st.check "lcg value-removal engine (x=0, y≠0)" (true)
   if st.failed == 0 then
     IO.println s!"ALL {st.passed} LCG TESTS PASSED"
   else

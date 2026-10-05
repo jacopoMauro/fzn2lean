@@ -46,6 +46,8 @@ def Atom.eval (atom : Atom) (assignment : Assignment) : Option Bool :=
       | _ => none
   | .intLe slot upper =>
       (slotInt assignment slot).map fun actual => decide (actual ≤ upper)
+  | .intNe slot value =>
+      (slotInt assignment slot).map fun actual => decide (actual ≠ value)
 
 /-- Evaluate a signed literal on a complete assignment. -/
 def Literal.eval (literal : Literal) (assignment : Assignment) : Option Bool :=

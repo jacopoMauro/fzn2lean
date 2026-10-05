@@ -26,10 +26,9 @@ arrays `ab = [b1, b2, ...]` are completed from the scalars).
 The extraction is faithful to the checker's domain semantics:
 `varDomain_values_iff` proves that the candidate values of an
 extracted domain are exactly the values accepted by
-`BasicVarType.contains` (the relation behind `varDeclsOkB`), so the
-UNSAT soundness of `solver/Solve.lean` — quantified over all
-assignments of the extracted domains — ranges over exactly the values
-the declared domains admit.
+`BasicVarType.contains` (the relation behind `varDeclsOkB`), so any
+UNSAT soundness quantified over all assignments of the extracted
+domains ranges over exactly the values the declared domains admit.
 
 A basic variable named `array1d` cannot be emitted as a solution line
 (`array1d` is FlatZinc's array-value keyword in solution strings, and
@@ -153,10 +152,9 @@ theorem varDomain_ok_length {ty : BasicVarType} {d : VarDomain}
 /-- **Extraction faithfulness**: the candidate values of an extracted
     domain are exactly the values the checker's domain relation
     `BasicVarType.contains` accepts (the relation `varDeclsOkB`
-    enforces on every variable).  This is what makes the UNSAT
-    soundness of `solver/Solve.lean` — quantified over all
-    assignments of the extracted domains — a quantification over
-    exactly the declared finite domains. -/
+    enforces on every variable).  This makes any UNSAT soundness
+    quantified over all assignments of the extracted domains a
+    quantification over exactly the declared finite domains. -/
 theorem varDomain_values_iff {ty : BasicVarType} {d : VarDomain}
     (h : varDomain ty = .ok d) {v : Value} :
     v ∈ d.values ↔ ty.contains v := by
@@ -321,5 +319,24 @@ theorem slotNames_domains_of_modelSlots {m : Model}
   constructor
   · simp only [slotNames, h]
   · simp only [slotDomains, h]
+
+/-! ## Structural value equality (`BEq Value`)
+
+The checker's own structural equality `Value.eqB`
+(`LeanFzn/FznStdLib.lean`), proved reflexive and sound
+(`value_eqB_refl` / `value_eqB_iff`), is exactly the right `BEq`
+instance for the solver layers (the development's established
+pattern: reuse the proved Boolean twin instead of deriving a fresh
+equality).  Moved here from the retired `solver/Enum.lean` so the
+shared slot-domain layer carries it. -/
+
+/-- The checker's structural value equality, as the `BEq` instance. -/
+instance : BEq Value := ⟨Value.eqB⟩
+
+/-- `Value.eqB` is reflexive and sound, so it is a lawful equality. -/
+instance : LawfulBEq Value := {
+  eq_of_beq := fun {_ _} h => value_eqB_iff.mp h
+  rfl := fun {_} => value_eqB_refl _
+}
 
 end LeanFzn.Solver

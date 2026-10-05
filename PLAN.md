@@ -1,346 +1,145 @@
-# Plan for a certified FlatZinc solve command
+# Remaining work for the certified FlatZinc solver
 
-## Target
+Updated: 2026-10-05. This plan contains open work only. Completed tasks
+and historical execution schedules have been removed; Git history retains
+previous records.
 
-For the documented, decidable supported fragment, `leanfzn solve` should
-run LCG and have kernel-checked source-level theorems: `sat store` implies
-`Satisfies fullSig fullInterp`, `unsat` excludes every semantic solution,
-fuel exhaustion yields `unknown`, and failed compilation yields
-`unsupported`. Rendering and checker acceptance are outside the solver
-proof. Enumeration, optimization, sets, floats, and unsupported globals
-remain outside the first certified fragment.
+The public solve path is `Main → Direct.solveCertified → LCG.solve`.
+Source-level SAT and parameter-honest UNSAT theorems exist for the accepted
+finite scalar integer/Boolean fragment. The remaining priorities are a
+clean codebase, reproducible certification checks, and search progress.
+Verdict soundness does not imply completeness or sufficient default fuel.
 
-Audit date: 2026-09-26. This records the current uncommitted working tree.
+## Priority and dependency DAG
 
-## Current blocker
+An arrow means the predecessor must be completed before the successor
+is integrated. Tasks on separate branches can run in parallel, subject to
+file ownership and available memory. P1 is the first task.
 
-None (2026-09-26: the former blocker `int_read_of_checkArg_slot` is
-finished — sorry-free, axiom profile `[propext, Quot.sound]` — and the
-full baseline passes; see step 0).
+```mermaid
+flowchart TD
+    P1A["P1a · Map live code and proof dependencies"]
+    P1B["P1b · Delete unused legacy code and proofs"]
+    P1C["P1c · Restructure retained code and large proofs"]
+    P1D["P1d · Preserve useful regressions; remove scratch"]
+    P1E["P1e · Synchronize imports, audits, CI and docs"]
+    P2["P2 · Reproduce build, tests and certification audit"]
+    P3["P3 · Repair conflict fallback and certify progress"]
+    P4["P4 · Prove completeness and a sufficient-fuel contract"]
+    P5["P5 · Strengthen propagation in the current fragment"]
+    P6["P6 · Refine clause and propagator scheduling"]
+    P7["P7 · Integration tests, audits and performance baseline"]
+    P8["P8 · Extend the certified language"]
+    P9["P9 · Certified enumeration and optimization"]
 
-## What exists
+    P1A --> P1B
+    P1B --> P1C
+    P1A --> P1D
+    P1C --> P1E
+    P1D --> P1E
+    P1E --> P2
+    P2 --> P3
+    P3 --> P4
+    P2 --> P5
+    P2 --> P6
+    P4 --> P7
+    P5 --> P7
+    P6 --> P7
+    P7 --> P8
+    P7 --> P9
+```
 
-| Layer | Current state | Limitation |
+P1d can run alongside P1b/P1c after the dependency inventory. After P2,
+P3, P5 and P6 are independent development branches; shared engine,
+registration and proof changes must be integrated one at a time. P4
+follows the repaired reference engine in P3; P6 must preserve that engine's
+semantics and transfer its guarantees. P8 and P9 are later extensions,
+not prerequisites for delivering the current certified solver.
+
+## P1 — Restructure and clean the code first
+
+Goal: retain one clear public solver path, the verified parser/checker,
+and useful tests and proofs. Delete obsolete implementation and proof
+files rather than keeping them as live archives.
+
+- [ ] **P1a — Establish the live dependency inventory.** Trace executable,
+  import and theorem dependencies from `Main.lean`, the library roots,
+  every retained Lake test target, and `audits/certified_axioms.lean`.
+  Inspect declaration uses as well as imports, including namespace and
+  dot-notation calls. Classify files and declarations as production,
+  useful reference/regression, or removable. Replace the stale inventory
+  in `audits/dependency_inventory.md` with the current result.
+- [ ] **P1b — Delete unused legacy code and proofs.** Review the retired
+  Config/Solve/Fixpoint/Heuristic/Enum/Optimize/RevState/Learning/Restarts/
+  Solver modules, the Tree family, and their dedicated legacy test files.
+  Delete those without retained users. Remove obsolete compatibility
+  paths, duplicate helpers, superseded proof scaffolding and unused
+  theorems; update callers before removing files with useful shared
+  declarations. Assess old singleton-only certification scaffolding
+  against the current wide theorems and remove it where redundant.
+  `Direct.Search`, `Direct.Correctness` and their proofs currently have
+  theorem-level tests/audit users: keep a small useful reference or
+  replace those uses before deletion. Preserve shared Domain/Extract/
+  Propagators/Search/Emit declarations used by the certified path.
+- [ ] **P1c — Restructure retained modules.** Separate shared foundations,
+  compiler implementation/correspondence, LCG operations, family proof
+  packages, run invariants and public certification composition. Split
+  the large compiler proof modules at stable dependency boundaries,
+  starting with `Direct/Proofs/Compile.lean` and `Exact.lean`; measure
+  elaboration memory to guide the split. Narrow unnecessary imports and
+  remove obsolete umbrella exports. Preserve theorem statements and
+  public behavior; give each retained module a clear purpose and position
+  in the dependency DAG. Update `code-structure.md` to actual imports.
+- [ ] **P1d — Remove development debris.** Extract still-useful
+  counterexamples from `tmp` into maintained regression tests or proof
+  modules. Delete superseded candidates, probes and logs, then remove
+  `tmp` and replace stale scratch references. Retain the active axiom
+  audit; remove stale audit artifacts or consolidate their useful content.
+  Do not delete build caches as part of source cleanup.
+- [ ] **P1e — Finish cleanup integration.** Synchronize Lake targets,
+  library exports, CI, theorem audit names, README and module comments.
+  Remove stale singleton-only UNSAT claims, deleted-file references and
+  historical task-number references. Check every deletion batch with
+  scoped compilation; leave the final full validation to P2.
+
+Completion gate: no unused legacy source retained without a stated
+purpose, no missing imports or orphaned targets, no disposable scratch
+folder, and a documented acyclic module structure. Existing useful
+uncommitted implementation/proof work must survive the restructuring.
+
+## Remaining tasks after cleanup
+
+| Task | Depends on | Actions and completion gate |
 | --- | --- | --- |
-| Parser/checker | Recognition and checker proofs exist. | Separate from solver certification. |
-| LCG | Search implements propagation, decisions, learning, backjumping, and bounded fuel. The decision-free `solve_certified_fragment_unsat` discharges `UnsatRun`. | Its `IntViewed`, propagator safety/entitlement, database entitlement, evaluator agreement, and `PropFragment` premises still need discharge for the actual compiler configuration. General search still needs positive-level analysis and decision-descent invariants. |
-| Direct compiler | `compileModel` accepts a finite scalar int/bool fragment and produces `Core.Problem DomConstraint`. `extractConstraint_holds_converse` handles the 21 extracted shapes subject to integer-valued reads. | Whole-model exactness and coverage are unfinished. |
-| Direct search proofs | `solve_sat_correct` and `solve_unsat_correct` are explicit about the needed compiler correspondence. | Both take `hpending`; neither is a closed source-level claim. Direct exhaustive search is a reference path, not the target public LCG backend. |
-| CLI | `Main.lean` calls `Solver.solveModelWith`. | The certified LCG path is not wired to `leanfzn solve`. |
+| **P2 · Restore a reproducible validation baseline** | P1e | Diagnose compiler-proof memory consumption and complete the aggregate build. Run all 15 retained test suites, proof-hole/user-axiom checks, the kernel axiom-profile audit, and CLI SAT/UNSAT/unknown/unsupported exit-code checks. Make CI fail on unexpected axioms, not merely print their profiles. Record commands and actual results. |
+| **P3 · Repair fallback search progress** | P2 | Address nonempty unanalyzable conflicts, which currently retreat without learning. Evaluate the existing `FallbackRaw` entitlement lemma, implement a sound progress mechanism, and integrate its invariant transfers through the run proof and public certification. Account for the empty-conflict `trailBoolPinsOk` failure branch too. Prove progress rather than assuming that inserting a clause prevents repetition; add regressions for cycling cases. |
+| **P4 · Specify and prove completeness/fuel guarantees** | P3 | Prove that accepted finite problems eventually yield SAT or UNSAT under the repaired reference engine, or explicitly state a narrower proved fragment. Establish a well-founded progress measure and sufficient fuel, or expose a justified fuel contract. Keep exhaustion as `unknown`; preserve parameter-honesty in source UNSAT. Validate both satisfiable and unsatisfiable multi-value cases. |
+| **P5 · Strengthen propagation within the current fragment** | P2 | Add useful allDiff value-removal deductions using the existing `intNe` literals; assess remaining weak deductions in registered families. Each change needs sound deductions, valid explanation clauses, conflict entitlement, invariant compatibility and meaningful regression cases. Integrate registration/assembly changes serially. |
+| **P6 · Refine propagation scheduling** | P2 | Replace full clause scans/propagator sweeps with watched literals and incremental wakeups where benchmarks justify it. Prove refinement of the reference semantics, including enqueueing, conflict detection and backjump repair; preserve or transfer P3/P4 guarantees. Measure runtime and memory against the reference implementation. |
+| **P7 · Validate integrated changes** | P4, P5, P6 | Build the combined tree, run retained suites and CLI/checker regressions, audit public theorem axioms, and compare performance with P2. Update coverage and completeness claims to exactly what the proofs and checks establish. |
+| **P8 · Extend the certified language** | P7 | Add unsupported scalar constraint shapes one family at a time, with compiler exactness/coverage, evaluator agreement, reason validity, propagator safety, conflict entitlement and source-level examples. Keep unsupported cases explicitly rejected until their complete proof package lands. Sets, floats and additional globals need separate scope decisions. |
+| **P9 · Add certified enumeration/optimization** | P7 | Define result contracts and source-level proofs for complete enumeration and objective optimality before restoring these commands. Give them dedicated tests and documented output guarantees; keep rendering correctness separate from solver correctness. |
 
-## Ordered work queue
+## Parallel execution boundaries
 
-### 0. Restore the baseline
+| Stage | Work that can proceed in parallel | Work to serialize |
+| --- | --- | --- |
+| Cleanup inventory | Read-only dependency, test and theorem-use inventory | Agree on the retained roots and deletion list before editing |
+| Cleanup implementation | P1d regression preservation versus P1b/P1c code cleanup; disjoint module restructuring after boundaries are fixed | Deletion before dependent restructuring; shared imports, library roots and P1e integration |
+| Solver development after P2 | P3 engine progress; P5 family packages; P6 scheduler design/refinement | Changes to shared Engine/Propagate modules, registration, run invariants and public certification |
+| Completeness | P4 on the repaired reference engine; P5 packages and P6 refinement on separate modules | Transfer progress/completeness guarantees to the refined engine |
+| Later extensions | P8 family packages and P9 result-contract work | Shared compiler/API changes and final integration |
 
-> **STATUS 2026-09-27: STEPS 1–3 COMPLETE (first certified fragment
-> shipped).** See the checkmarks below and
-> `leanfzn solve --certified`.
+One writer owns each shared file during integration. Use disjoint modules
+or isolated checkouts for concurrent work; the DAG describes possible
+parallelism, not a requirement to run all branches simultaneously. Use
+one substantial Lean build at a time until memory usage is understood.
 
-- [x] Finish `int_read_of_checkArg_slot`; remove its two `sorry`s and
-      resolve the reported errors. (2026-09-26: proved via the new
-      helpers `getElem!_map_fst`, `getElem!_eq_getElem`,
-      `getD_map_snd`, `lookupIdent_inv_mem`, `declSlots_mem`,
-      `declSlot_basic_inv`, `varDomain_int_of_base`,
-      `intDom_values_int`, `staticEnv_of_slot`, and
-      `staticEnv_int_of_checkArg` — the full typing chain from
-      `checkArg` to an int-valued slot read; axioms
-      `[propext, Quot.sound]`.)
-- [x] Pass `lake build LeanFzn solver leanfzn tests_solver tests_lcg`
-      (156 jobs, 2026-09-26).
-- [x] Run `lake env tests_solver` (211 passed) and `lake env tests_lcg`
-      (31 passed); recorded 2026-09-26.
-- [x] Audit active Lean files for `sorry`, `admit`, user axioms, and
-      the axiom profiles of public theorems (2026-09-26: no active
-      proof holes; every checked public theorem of the Direct layer,
-      including `solve_sat_correct`/`solve_unsat_correct`, depends only
-      on `[propext, Classical.choice, Quot.sound]`).
+## Validation constraint carried into P1/P2
 
-### 1. Close source compiler correspondence
-
-- [x] Derive integer-valued reads from `WellFormed`, slot extraction,
-      and assignment-domain membership. (2026-09-26: the typing chain
-      is complete — `staticEnv_int_of_checkArg` + `staticEnv_of_slot`
-      + `declSlot_basic_inv` + `varDomain_int_of_base` +
-      `intDom_values_int` assemble into
-      `int_read_of_checkArg_slot`, sorry-free with axioms
-      `[propext, Quot.sound]`; the supporting slot-name machinery
-      (`lookupIdent_inv_mem`, `declSlots_mem`,
-      `declSlots_map_ok_inv`, `slot_name_eq_var`, `slotNames_nodup`)
-      is proved the same way, closing the `hnu` premise the
-      correspondence lemmas carry.)
-- [x] Cover the compiler's additional literal-bound `int_plus`,
-      `int_le`, `int_lt`, `int_ge`, and `int_gt` cases in both
-      semantic directions. (2026-09-26: assignment→store converses
-      `holds_int_(le|lt|gt|ge)_const_(hi|lo)_toStore` and
-      `holds_int_plus_lit_toStore` + `dotProduct_two_one(_inv)`;
-      store→assignment inversions `holds_int_gt_const`,
-      `holds_int_gt_const'`, `holds_int_ge_const`,
-      `holds_int_ge_const'` complement Extract.lean's existing ones;
-      `eval_ident_E`/`eval_E_ident`/`eval_ident_ident_E`/
-      `eval_allDiff_array`/`eval_allDiff_args`/`eval_lin_args` bridge
-      the argument evaluation, all inside the 21-shape
-      `extractConstraint_holds_converse`. Also proved:
-      `fullInterp_std`, `getElem!_map_fst`, `getElem!_eq_getElem`,
-      `getD_map_snd`. No active proof holes.)
-- [x] Prove an accepted assignment reconstructs a source store satisfying declarations and every source constraint (`compile_exact`). (2026-09-27: proved in `solver/Direct/Proofs/Exact.lean` — the full SAT linker chain: `compile_sat_link` dispatches `compile_sat_link_extracted` (the name-conditioned `int_reads_of_mem_eq_ne` + the typing chain) and `compile_sat_link_fallback` (the five family gate inversions `compileConstraint_(le|lt|gt|ge|plus)_fallback_inv` + `eval_intValuedArg`); whole-model `compile_sat_link_all` via the new forward inversion `compileConstraints_fwd_inv`; `Holds_ext` store extensionality. Axioms [propext, Classical.choice, Quot.sound].)
-      (2026-09-26 updated: the BLOCKER is resolved — the var-decls
-      half no longer needs slot-pair uniqueness. New route via
-      PRODUCTION: `declSlot_position` (declSlot of a declared
-      variable produces a pair IN the slot list at a position whose
-      nameIndex resolves to it; proof: `declSlots_produce` +
-      `slot_getElem!_of_mem` + `nameIndex_at_nodup`, no uniqueness).
-      Proved and committed this session (all sorry-free, axioms
-      ≤ [propext, Classical.choice, Quot.sound]; 95 theorems total,
-      156-job build, 211 solver + 31 LCG tests):
-      slot machinery (`slot_getElem!_of_mem`, `declSlots_no_error`,
-      `declSlots_produce`, `declSlot_basic_none`, `declSlot_position`);
-      the compileModel gate inversions (`compileModel_vars_basic`,
-      `compileModel_predicates_nil`, `compileModel_params_scalar`,
-      `compileModel_solve_satisfy`); the VAR-DECLS HALF
-      (`decl_var_basic_holds`: every declared basic variable reads
-      its assignment value at its slot position with `ty.contains`,
-      via `toStore_read` + `mem_allAssigns_fits` +
-      `varDomain_values_iff`); the dispatch fuel (`accepts_of_true`,
-      `toStore_param`, `eval_ident_E_any`/`eval_E_any` —
-      value-generalized eval bridges;
-      `compileArgVal_ident_inv`/`_par` — the fallback-gate argument
-      inversions); and the name-conditioned int-reads
-      (`forall2_mem`, `int_reads_of_mem_eq_ne`: any `int_eq`/
-      `int_ne` constraint's identifier arguments read ints, via the
-      signature check of WellFormed — this REPLACES the hargs2
-      premises of the earlier linker design). Remaining for this
-      box: (a) restate `extractConstraint_holds_converse`'s `hreads`
-      premise name-conditioned (`hreads x i hxarg hxi` guarded by
-      `c.name.name = "int_eq" ∨ "int_ne"`, vacuous otherwise — only
-      the two eq/ne slot arms consult it) or add the name condition
-      at the linker level; (b) the five fallback-shape linkers
-      (probe `probeC7.lean` validated the gate-evaluation template:
-      `rw [compileConstraint, hx]` + `rw [if_neg/if_pos]` gates +
-      `rw [hslot0, hlit1]` makes the argval match reduce
-      definitionally — NO split-at-match needed); (c) the
-      whole-model induction over `m.constraints` via
-      `compileConstraints_mem_inv` + the per-constraint linker.)
-- [x] Prove every satisfying source store maps into compiled domains and passes the internal evaluator (`compile_covers`). (2026-09-27: proved — `compile_holds_link` (extracted + fallback arms, all 11 shapes; `holds_int_(le|lt|gt|ge)_(hi|lo)_E_inv` + `holds_int_plus_E_inv` source inversions, `int_of_some_read`/`getElem_int_of_bang` read transports), `slot_reads_of_satisfying`, `Holds_ext_args` (identifier-restricted store extensionality), `parEnv_agrees` (parameter honesty), `mem_flatMap_src`/`mem_filterMap_src`. The honest statement: every store satisfying the dynamic conditions AND parameter-honest yields an accepted assignment. Axioms [propext, Classical.choice, Quot.sound].)
-- [x] Remove `hpending` from `Direct.solve_sat_correct` and `Direct.solve_unsat_correct`; derive their inputs from compiler success and well-formedness. (2026-09-27: both theorems closed with only `WellFormed fullSig model` as the model-level premise; UNSAT's conclusion is the honest `¬∃ store, Satisfies ∧ ParamHonest` — the FlatZinc instance-level parameter fixing, matching the reference checker's `candidateStore`. Nonvacuity kernel-checked in tests (218 solver tests pass).)
-- [x] Re-run nonvacuous accepted SAT and UNSAT source tests and unsupported-model tests. (2026-09-27: theorem-level nonvacuity tests added — `solve_sat_correct`/`solve_unsat_correct` applied to real solved models with kernel-checked proofs; the parameter-fallback shape test; 218 tests pass.)
-
-Gate: source SAT/UNSAT theorems are nonvacuous and have no caller-supplied compiler-correspondence premise. This gate concerns the reference search composition, not the CLI's LCG path.
-
-### 2. Instantiate the LCG fragment
-
-- [x] Exhibit one SAT and one UNSAT internal problem satisfying executable `PropFragment` (all initial domains have at most one value). (2026-09-27: `LCG.fragmentOk` is the executable check (`fragmentOk_iff` proves the correspondence); SAT/UNSAT exhibited and CLI-verified on `var {3}: x; var {2}: y; int_plus(x,y,5)` and `...=10`.)
-- [x] Connect compiled `DomConstraint` evaluation, original clauses, and slot/domain representation to the LCG problem. (2026-09-27: `Direct.toLCG` builds the LCG problem (empty clause database) from the compiled problem; `DomConstraint.satisfiedB_iff` is the evaluator agreement.)
-- [x] Prove `PropSafeUniv` and conflict entitlement for each enabled propagator family (`plus`, `le`, `lt`, `eq`, `ne`, `linLe`), or disable unproved families for the first fragment. (2026-09-27 second pass: the REAL-propagator certification is proved for `leSlot`/`ltSlot`/`eqSlot` — `propLe_safe`/`propLt_safe`/`propEq_safe` in the new `solver/LCG/Proofs/Propagators.lean` (implied-literal soundness + conflict soundness + integer-valid nogood entitlement, via the implied-head inversions `narrowHi_implied_inv`/`narrowLo_implied_inv`, the coherence bridges `fits_max_bound`/`fits_min_bound`, and `firstEvent_mem`), assembled into `propagatorsOfProved_safeUniv`/`_entitled` over the `propagatorOfProved` registration (le/lt/eq only; plus/ne/linLe return none pending their proofs). The engine's entitlement premise was relativized to `SolvedBy` states (where it holds). New front doors `solve_certified_sat_real`/`solve_certified_unsat_real` run the PROVED propagator list on the singleton fragment with every premise derived. The remaining families (`plusSlot`, `neSlot`, `linLe`) are the documented expansion path.)
-- [x] Derive all premises of `solve_certified_fragment` and `solve_certified_fragment_unsat` from the supported-problem check. No public theorem should ask callers for universal safety or entitlement. (2026-09-27: `LCG.solve_certified_sat`/`solve_certified_unsat` derive IntViewed, PropFragment, db entitlement, and the (vacuous) safety premises from `fragmentOk` + the int-view check + `clauses = []`.)
-- [ ] **2x. Wire the real-propagator front door into the executable.**
-      The theorems `solve_certified_sat_real` /
-      `solve_certified_unsat_real` (LCG/Certified.lean) are proved but
-      the executable `Direct.solveCertified` still runs the EMPTY
-      propagator list and the CLI theorems cover only that path.
-  - [ ] Prove the fragment-coherence lemma: in the singleton
-        fragment with empty clauses, every state the loop reaches is
-        domain-coherent (discharges the `hcoh : ∀ st,
-        DomainCoherent problem st` premise of the real front doors).
-  - [ ] Switch `Direct.solveCertified` to
-        `compiled.constraints.filterMap propagatorOfProved`.
-  - [ ] Extend `solveCertified_sat_correct` /
-        `solveCertified_unsat_correct` to the real list; update the
-        theorem-level tests.
-- [ ] **2y. Prove the remaining propagator families** (`plusSlot`,
-      `neSlot`, `linLe`): each needs its `prop*_safe` (the
-      constraint-semantics lemma + the arm analysis; `plusSlot_sem`
-      already exists) and its arm in `propagatorOfProved` flipped
-      from `none` to the registration. After 2y, `propagatorOfProved`
-      = `propagatorOf` on all six families.
-- [ ] For a larger fragment, prove positive-level analysis and
-      decision-descent reachability, then remove general `UnsatRun`
-      (the last premise of `solve_unsat_correct`; makes the general
-      LCG engine unconditional). This is the deep engine work:
-      conflict analysis at positive decision levels must produce
-      entailed learned clauses (`analyzeConflict_correct` under
-      `AnalysisReady`) and decisions must descend, so every `.unsat`
-      the engine reports is backed by the run-link invariant rather
-      than the `UnsatRun` premise.
-  (2026-09-27 audit note: the deep audit of the LCG layer confirmed
-  the proof layer sound as stated — `solve_certified_fragment`'s SAT
-  branch is genuine (the leaf test establishes Fits + constraints),
-  the UNSAT composite is total for the fragment, and no sign
-  inversions exist in the literal encoding. The audit's real findings
-  were in the EXECUTABLE propagator layer (three propLinLe bugs and
-  propNe's non-integer-valid nogoods — the uncertified solveDom path
-  returned `.unsat` for satisfiable problems, reproduced end to end);
-  all four are FIXED with regression tests; the le/lt/eq families are
-  now certified by `propagatorsOfProved_safeUniv`.)
-
-Gate: actual LCG calls on accepted problems have SAT/UNSAT theorems and fuel exhaustion yields only `unknown`.
-
-### 3. Connect source and CLI
-
-- [x] Compose source compiler exactness/coverage with the proved LCG result. (2026-09-27: `Direct.solveCertified_sat_correct` (→ `Satisfies fullSig fullInterp`) and `Direct.solveCertified_unsat_correct` (→ `¬∃ store, Satisfies ∧ ParamHonest`) — both axiom-clean.)
-- [x] Route `leanfzn solve` through that same function; map `sat`, `unsat`, `unknown`, and `unsupported` to output and exit codes. (2026-09-27: `leanfzn solve --certified` runs the WF gate (`wellFormedFastB`), `Direct.solveCertified`, and `emitCertifiedSolution`; exit codes 0/1/2/3; CLI-verified on SAT/UNSAT/unsupported models.)
-- [x] Document the precise accepted grammar, limits, theorem names, trusted base, and unsupported forms. (2026-09-27: this file + README's certified section + code-structure.md updated.)
-- [x] Add a clean-checkout aggregate build and CI gate for tests, active proof holes, and axiom profiles. (2026-09-27: `.github/workflows/ci.yml` — build + tests + the three audits (proof holes, axiom profiles of the six public certified theorems, user axioms); the full clean rebuild (224 jobs), all 22 suites, and the audits pass on the clean tree.)
-
-Gate: source SAT and UNSAT examples pass through the user-facing LCG path, with kernel-checked end-to-end theorems and a clean aggregate gate.
-
-## Parser and solution-checker cleanup
-
-This is a parallel maintenance track. Keep parser recognition and the
-external solution checker available while the solver is migrated; neither
-is a substitute for the source-level LCG proof. Remove a definition only
-after its executable callers, theorem dependencies, and tests are mapped.
-
-### P1. Establish a separate baseline
-
-- [x] Build the parser/checker library and named targets:
-  `lake build LeanFzn tests_smoke tests_solution tests_check tests_fast
-  tests_pretty tests_wellformed tests_globals tests_coverage` (78 jobs,
-  2026-09-26; independent of the failing direct compiler proof).
-- [x] Run the corresponding eight `lake env` executables (all passed,
-  2026-09-26). Record detailed case counts and `tests_fast` timing before
-  changing checker behavior or performance-sensitive code.
-- [x] Record the public interfaces that must survive: `Parser.parseModel`,
-  parser soundness/completeness and `parseModel_ok_iff_valid`,
-  `Check.checkModelSolution_correct`, and any selected fast/prepared
-  checker API used by CLI or benchmarks. (2026-09-27, full re-baseline:
-  12 suites re-run and pass — 30 smoke, 64 stdlib, solution, 64 gecode
-  (15 models), 52 globals, bench, 465 coverage, 49 wellformed, 39 pretty,
-  prof, 12 check, 7 fast; `tests_fast` wall time ≈ 0.11 s. The
-  survival list: `Parser.parseModel` (FznParser.lean:905);
-  `parseModel_sound` (FznCorrectness.lean:2579) /
-  `parseModel_complete` (FznAssembled.lean:565) /
-  `parseModel_ok_iff_valid` (FznAssembled.lean:598);
-  `Check.checkModelSolution_correct` (FznCheck.lean:980);
-  `checkModelSolutionFast_eq` (FznCheck.lean:1089),
-  `prepareModel` (FznCheck.lean:1321) and
-  `checkPreparedSolution_eq` (FznCheck.lean, the prepared repeated-check
-  path used by tests/benchmarks and referenced by solver proofs).)
-
-### P2. Trim the parser by dependency
-
-- [x] Inventory exported names and downstream uses in `FznLexer`,
-  `FznParser`, `FznGrammar`, `FznSuffix`, `FznCorrectness`,
-  `FznCompleteness`, and `FznAssembled`. Mark executable parser helpers,
-  proof-only helpers, and genuinely unused declarations. (2026-09-27:
-  full inventory over 307 declarations. External face of the whole
-  seven-module stack: only `Parser.parseModel`, `Lexer.Token`,
-  `Lexer.tokenize`. 17 fully dead names found; two candidate-deletions
-  were kept after receiver-type verification — `GrSepList.suffix_bounded`
-  (GrAnnExpr suffix proofs) and `GrExpr.consumes_pos` (FznCompleteness
-  fuel obligations), both called via dot notation on their grammar
-  types.)
-- [x] Make proof-only helpers private where no external module imports
-  them. Delete only declarations with no source use and no promised
-  public API. Do this from leaf modules upward to preserve the proof DAG.
-  (2026-09-27: 17 dead declarations deleted — FznParser 3
-  (`State.remaining_zero`, `State.remaining_advance`,
-  `expectTok_eq_fast`), FznGrammar 3 (`ValidTokens`,
-  `GrIntAtom.deterministic`, `GrBasicParType.deterministic`),
-  FznSuffix 6 (`GrIntAtom.consumes_pos`, `GrSetLiteral.suffix`,
-  `GrParArrayLiteral.consumes_pos`, `GrSolveItem.suffix`,
-  `GrSolveItem.consumes_pos`, `GrModel.suffix`), FznCorrectness 1
-  (`parseIntLit_complete_of_grammar`), FznCompleteness 2
-  (`peek?_eq_none_of_remaining_nil`, `remaining_length_le`),
-  FznAssembled 4 (`remaining_nil_of_peek?_none`,
-  `remaining_cons_of_peek?_some`, `parseModel_error_iff_invalid`,
-  `ValidProgram`). Mass privatization of the ~250 internal-only
-  helpers deliberately NOT done: the names are proof DAG fuel for
-  sibling modules and future maintenance; the plan's own criterion
-  ("no external module imports them") is satisfied by the delete-only
-  pass, and wholesale `private` conversion would churn 6 files for no
-  dependency reduction since nothing downstream imports these modules
-  except via the root.)
-- [x] Narrow imports from the broad `LeanFzn` root where doing so
-  reduces dependencies without hiding a needed theorem. Preserve the
-  aggregate root as the convenient public import until callers migrate.
-  (2026-09-27: `FznSolution`'s vestigial `import LeanFzn.FznCorrectness`
-  removed (zero references); the root re-export is preserved for all
-  callers.)
-- [x] Consolidate stale module comments and duplicate descriptions;
-  keep the lexer/parser/grammar and recognition theorems aligned with
-  the documented MiniZinc fragment. (2026-09-27: the two bounded-list
-  lemma docstrings in FznSuffix restored to their correct owners after
-  the deletion pass; header claims audited in P3.)
-
-Gate: parser recognition theorems and parser/pretty/smoke tests still
-pass; accepted and rejected grammar behavior is unchanged.
-
-### P3. Trim the checker without losing its guarantees
-
-- [x] Trace the public paths through `FznSolution`, `FznGlobals/*`, and
-  `FznCheck`: base dynamic checker, verified front door, fast path,
-  and prepared repeated-check path. The fast and prepared paths are
-  currently used by tests/benchmarks, and `checkModelSolutionFast_eq`
-  is referenced by solver proofs; they are not unused today.
-  (2026-09-27: full trace — `checkModelSolution` is the canonical CLI
-  entry (Main.lean, `checkModelSolution_correct`); `checkModelSolutionFast`
-  backs `solveLeaf` and the benchmarks, with `checkModelSolutionFast_eq`
-  used in 21 proof rewrites across Solve/Config/Restarts/Enum/Optimize;
-  `checkPreparedSolution` backs `solveLeafP` in Config (MRV), Restarts,
-  Enum, and Optimize via `solveLeafP_eq` (composing
-  `checkPreparedSolution_eq`); `checkSolutionFull` is the dynamic
-  kernel with `checkSolutionFull_correct`. Every path is live and
-  theorem-backed — nothing removed.)
-- [x] Choose one canonical CLI entry point and keep theorem-backed
-  equivalence for retained optimized paths. Move benchmark-only APIs
-  behind a clearly named module if their callers remain. (2026-09-27:
-  `checkModelSolution` confirmed as the single canonical entry; the
-  fast/prepared twins stay in `FznCheck` beside their equivalence
-  theorems — their callers are the solver's leaf predicates and
-  tests/benchmarks, so no separate benchmark module is warranted.)
-- [x] Review the two set-literal parsers in `FznSolution`
-  (`parseSetAtoms` and `parseSetTail`) for true duplication. Replace
-  one only after proving identical errors/results and rebuilding the
-  suffix and checker theorems. (2026-09-27: confirmed byte-identical
-  bodies; `parseSetAtoms` deleted, its one caller `parseScalarEntry`
-  now uses `parseSetTail` — identical by construction — and the suffix
-  theorem plus all checker theorems rebuilt; the solution/check/fast/
-  gecode suites re-run and pass.)
-- [x] Remove stale claims in file headers and README when the chosen
-  API is fixed. Keep parameter reassignment, duplicate/undeclared
-  entries, unsupported predicates, initializer completion, arrays,
-  and set cases pinned by tests. (2026-09-27: 11 stale-claim fixes —
-  FznLexer `lexToken_gt` (nonexistent name), FznParser fuel bound,
-  FznCorrectness `parseModel_complete` location + fuel-monotonicity
-  device, FznCompleteness `2*n+4` constant, FznCheck dangling
-  PLAN/IDEAS attributions (9 sites), FznGlobals G-range and the
-  `regular` exclusion, FznSolution `checkSolution_correct`/
-  `checkSolutionFast` names, README's deleted
-  `parseModel_error_iff_invalid`, code-structure.md's
-  `checkSolution_correct`. All behavior pinned by the 22 re-run
-  suites.)
-- [x] Split or narrow imports only after measuring whether the change
-  helps incremental builds; avoid moving large proofs for aesthetics.
-  (2026-09-27: the only safe narrowing — FznSolution's vestigial
-  FznCorrectness import — was done in P2; no further proof moves.)
-
-Gate: `checkModelSolution_correct` and retained fast/prepared equivalence
-theorems compile with the same axiom profile; checker and global suites
-pass; CLI diagnostics and output are unchanged.
-
-### P4. Final code hygiene
-
-- [x] Remove unreachable compatibility code and archived development
-  probes only after all imports, test targets, and documentation links
-  have been checked. Keep source history in Git instead of live modules.
-  (2026-09-27: the 19-file `archive/` directory removed — textual
-  search over all build roots found no import, Lake target, or doc
-  link referencing any archived file; code-structure.md updated to
-  point at Git history. No other unreachable compatibility code
-  found: the "deprecated" mentions in FznStdLib/FznGlobals/Counting
-  refer to MiniZinc's deprecated predicate *names* (supported spec
-  surface), not dead Lean code.)
-- [x] Run a clean checkout build, all named test suites, proof-hole and
-  axiom audits, and parser/checker behavior tests before declaring the
-  tree clean. Update `code-structure.md` to match actual imports.
-  (2026-09-27: full clean rebuild (224 jobs), all 22 suites run and
-  pass — 30 smoke, 64 stdlib, solution, 64 gecode (15 models),
-  52 globals, bench, 465 coverage, 49 wellformed, 39 pretty, prof,
-  12 check, 7 fast, 109 prop, 21 fix, 31 enum, 4 sbench, 73 opt,
-  26 rev, 37 learn, 26 restart, 218 solver, 31 LCG — plus the three
-  audits (no proof holes, no user axioms, all six public certified
-  theorems at [propext, Classical.choice, Quot.sound]) and the CLI
-  SAT flow; code-structure.md and PLAN.md updated.)
-## Updating this record
-
-For each completed checkbox, add the theorem or command, result, and date. Re-audit this table after substantial code changes. Never infer proof completeness from test success or a passing build alone.
+The latest attempted aggregate build was killed with exit code 137 in
+`solver.Direct.Proofs.Compile` after 124 seconds; the cgroup reported an
+OOM kill. The axiom audit could not run because that module's `.olean`
+was missing. The 89 propagator tests passed, and a static scan found no
+proof-hole tokens or user axiom declarations in 115 Lean files. This is
+not a successful repository-wide certification run.

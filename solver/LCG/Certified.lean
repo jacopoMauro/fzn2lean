@@ -29,6 +29,8 @@ DAG:
 
 import solver.LCG.Proofs.Search
 import solver.LCG.Proofs.Propagators
+import solver.LCG.Proofs.Reason
+import solver.LCG.Proofs.FallbackFit
 import solver.Propagators
 import solver.Direct.Proofs.Exact
 
@@ -40,6 +42,20 @@ open LeanFzn LeanFzn.Solver LeanFzn.Solver.Core LeanFzn.Solver.LCG
     singleton (one complete assignment, read off directly). -/
 def fragmentOk (problem : Problem Constraint Objective) : Bool :=
   problem.domains.all (fun d => d.length == 1)
+
+/-- **The widened certified gate**: every initial domain is a
+    NONEMPTY finite list of int/bool-viewed values (the engine's
+    bisection decisions operate on such values; the domains are
+    finite lists by construction, so every slot's search space is
+    bounded and finite). This admits multi-value domains — the
+    engine may then decide and backtrack — while `fragmentOk`
+    (all-singleton) remains the gate under which the engine's
+    `.unsat` verdict carries a proved exclusion (the decision-free
+    `UnsatRun` discharge); outside it, an engine `.unsat` is
+    reported WITHOUT a verdict instead. -/
+def gateOk (problem : Problem Constraint Objective) : Bool :=
+  problem.domains.all (fun d =>
+    d.length ≥ 1 && d.all (fun v => Value.intView v ≠ none))
 
 /-- The executable check implies the fragment predicate. -/
 theorem fragmentOk_iff {problem : Problem Constraint Objective} :
@@ -62,6 +78,54 @@ theorem fragmentOk_iff {problem : Problem Constraint Objective} :
 theorem intViewed_of_fragment {problem : Problem Constraint Objective}
     (hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none) :
     IntViewed problem := hint
+
+/-- The widened gate implies the int-view invariant (the gate checks
+    exactly the int/bool-viewed half, nonemptily). -/
+theorem intViewed_of_gate {problem : Problem Constraint Objective}
+    (hgate : gateOk problem = true) :
+    IntViewed problem := by
+  rw [gateOk, List.all_eq_true] at hgate
+  intro d hd v hv
+  have hpair := hgate d hd
+  rw [Bool.and_eq_true, List.all_eq_true] at hpair
+  exact of_decide_eq_true (hpair.2 v hv)
+
+/-- Every gate-passing domain is nonempty (the SAT search space is
+    nontrivial and the leaf test always has a complete assignment to
+    reach). -/
+theorem gate_nonempty {problem : Problem Constraint Objective}
+    (hgate : gateOk problem = true) :
+    ∀ d ∈ problem.domains, d.length ≥ 1 := by
+  rw [gateOk, List.all_eq_true] at hgate
+  intro d hd
+  have hpair := hgate d hd
+  rw [Bool.and_eq_true] at hpair
+  exact of_decide_eq_true hpair.1
+
+/-- The singleton-fragment check implies the widened gate (a
+    singleton list is nonempty, and its single value's view was
+    already derived for compiled problems by `domains_intViewed`;
+    the gate re-checks it executably). -/
+theorem gateOk_of_fragmentOk {problem : Problem Constraint Objective}
+    (hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none)
+    (hfrag : fragmentOk problem = true) :
+    gateOk problem = true := by
+  rw [gateOk, List.all_eq_true]
+  intro d hd
+  have hlen : d.length = 1 := (fragmentOk_iff.mp hfrag) d hd
+  -- the single value of a length-1 list: its head
+  obtain ⟨v2, rfl⟩ : ∃ v2, d = [v2] := by
+    match d with
+    | [v2] => exact ⟨v2, rfl⟩
+    | v2 :: v3 :: rest =>
+        rw [List.length_cons, List.length_cons] at hlen
+        omega
+    | [] =>
+        rw [List.length_nil] at hlen
+        omega
+  have hmem : [v2] ∈ problem.domains := hd
+  have hvint : Value.intView v2 ≠ none := hint [v2] hmem v2 (List.mem_cons_self)
+  simp [hvint]
 
 /-- The empty clause database is trivially entitled. -/
 theorem db0_nil {problem : Problem Constraint Objective}
@@ -207,12 +271,653 @@ theorem initialStateWithRoots_coherent_cert
       (initialWithRoots_trail_mem problem)
   rw [hfold]
 
+
+set_option maxHeartbeats 1000000 in
+/-- Every `linLe` constraint of a successfully compiled problem
+    has equal-length coefficient/index lists (the extractor's
+    `coeffs.length == is.length` gate). -/
+theorem compiled_linLe_shape
+    {m : LeanFzn.Model} {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Solver.Direct.compileModel m = .ok compiled)
+    {dc : DomConstraint} (hdc : dc ∈ compiled.constraints)
+    {coeffs : List Int} {is : List Nat} {b : Int}
+    (hdc2 : dc = .linLe coeffs is b) :
+    coeffs.length = is.length := by
+  -- the compiler's constraint list comes from `compileConstraints`
+  -- (compileModel_ok_inv), whose membership inversion gives the
+  -- originating model constraint and its successful
+  -- `compileConstraint`; the only `linLe`-producing path is the
+  -- extractor's `int_lin_le` arm, which carries the length gate.
+  obtain ⟨_, slots, dcs, _, hdcs, hasmb⟩ :=
+    LeanFzn.Solver.Direct.compileModel_ok_inv hc
+  rw [hasmb] at hdc
+  have hdc' : dc ∈ dcs := by simpa [LeanFzn.Solver.Direct.assemble] using hdc
+  obtain ⟨c, _, hcc⟩ :=
+    LeanFzn.Solver.Direct.compileConstraints_mem_inv _ _ hdcs _ hdc'
+  subst hdc2
+  -- the one-step compile inversion: only the extractor's linLe arm
+  -- returns a linLe, and it returns it under the length gate
+  unfold LeanFzn.Solver.Direct.compileConstraint at hcc
+  match hex : LeanFzn.Solver.extractConstraint (slots.map Prod.fst) c with
+  | none =>
+      rw [hex] at hcc
+      -- no fallback arm yields `.ok (.linLe ..)`: the int_plus arm
+      -- returns `linEq`, the int_le/int_ge arms return
+      -- `leConstHi`/`leConstLo`, the int_lt/int_gt arms return
+      -- `ltConstHi`/`ltConstLo`, and every other arm is `.error`.
+      -- Each do-block is inverted by casing `argOf` (an error bind
+      -- collapses to `.error` definitionally, closed by `injection`)
+      -- and then `split`ting the stuck `compileArgVal` match.
+      by_cases hplus : c.name.name = "int_plus" ∧ c.args.length = 3
+      · rw [if_pos hplus] at hcc
+        cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+        | error e => rw [ha0] at hcc; injection hcc
+        | ok a0 =>
+            cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+            | error e => rw [ha0, ha1] at hcc; injection hcc
+            | ok a1 =>
+                cases ha2 : LeanFzn.Solver.Direct.argOf c 2 with
+                | error e => rw [ha0, ha1, ha2] at hcc; injection hcc
+                | ok a2 =>
+                    rw [ha0, ha1, ha2] at hcc
+                    have h2 : (match
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1,
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a2 with
+                      | .ok (.slotRef i), .ok (.slotRef j), .ok (.litVal (.int k)) =>
+                          Except.ok (DomConstraint.linEq [1, 1] [i, j] k)
+                      | .error e, _, _ => .error e
+                      | _, .error e, _ => .error e
+                      | _, _, .error e => .error e
+                      | _, _, _ => .error "unsupported int_plus argument shapes")
+                        = .ok (.linLe coeffs is b) := hcc
+                    split at h2
+                    all_goals exact absurd h2 (by simp)
+      · rw [if_neg hplus] at hcc
+        by_cases hle : c.name.name = "int_le" ∧ c.args.length = 2
+        · rw [if_pos hle] at hcc
+          cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+          | error e => rw [ha0] at hcc; injection hcc
+          | ok a0 =>
+              cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+              | error e => rw [ha0, ha1] at hcc; injection hcc
+              | ok a1 =>
+                  rw [ha0, ha1] at hcc
+                  have h2 : (match
+                      LeanFzn.Solver.Direct.compileArgVal
+                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                      LeanFzn.Solver.Direct.compileArgVal
+                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                    | .ok (.slotRef i), .ok (.litVal (.int k)) =>
+                        Except.ok (DomConstraint.leConstHi i k)
+                    | .ok (.litVal (.int k)), .ok (.slotRef j) =>
+                        Except.ok (DomConstraint.leConstLo j k)
+                    | .error e, _ => .error e
+                    | _, .error e => .error e
+                    | _, _ => .error "unsupported int_le argument shapes")
+                      = .ok (.linLe coeffs is b) := hcc
+                  split at h2
+                  all_goals exact absurd h2 (by simp)
+        · rw [if_neg hle] at hcc
+          by_cases hlt : c.name.name = "int_lt" ∧ c.args.length = 2
+          · rw [if_pos hlt] at hcc
+            cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+            | error e => rw [ha0] at hcc; injection hcc
+            | ok a0 =>
+                cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                | error e => rw [ha0, ha1] at hcc; injection hcc
+                | ok a1 =>
+                    rw [ha0, ha1] at hcc
+                    have h2 : (match
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                      | .ok (.slotRef i), .ok (.litVal (.int k)) =>
+                          Except.ok (DomConstraint.ltConstHi i k)
+                      | .ok (.litVal (.int k)), .ok (.slotRef j) =>
+                          Except.ok (DomConstraint.ltConstLo j k)
+                      | .error e, _ => .error e
+                      | _, .error e => .error e
+                      | _, _ => .error "unsupported int_lt argument shapes")
+                        = .ok (.linLe coeffs is b) := hcc
+                    split at h2
+                    all_goals exact absurd h2 (by simp)
+          · rw [if_neg hlt] at hcc
+            by_cases hgt : c.name.name = "int_gt" ∧ c.args.length = 2
+            · rw [if_pos hgt] at hcc
+              cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+              | error e => rw [ha0] at hcc; injection hcc
+              | ok a0 =>
+                  cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                  | error e => rw [ha0, ha1] at hcc; injection hcc
+                  | ok a1 =>
+                      rw [ha0, ha1] at hcc
+                      have h2 : (match
+                          LeanFzn.Solver.Direct.compileArgVal
+                            (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                          LeanFzn.Solver.Direct.compileArgVal
+                            (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                        | .ok (.slotRef i), .ok (.litVal (.int k)) =>
+                            Except.ok (DomConstraint.ltConstLo i k)
+                        | .ok (.litVal (.int k)), .ok (.slotRef j) =>
+                            Except.ok (DomConstraint.ltConstHi j k)
+                        | .error e, _ => .error e
+                        | _, .error e => .error e
+                        | _, _ => .error "unsupported int_gt argument shapes")
+                          = .ok (.linLe coeffs is b) := hcc
+                      split at h2
+                      all_goals exact absurd h2 (by simp)
+            · rw [if_neg hgt] at hcc
+              by_cases hge : c.name.name = "int_ge" ∧ c.args.length = 2
+              · rw [if_pos hge] at hcc
+                cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+                | error e => rw [ha0] at hcc; injection hcc
+                | ok a0 =>
+                    cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                    | error e => rw [ha0, ha1] at hcc; injection hcc
+                    | ok a1 =>
+                        rw [ha0, ha1] at hcc
+                        have h2 : (match
+                            LeanFzn.Solver.Direct.compileArgVal
+                              (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                            LeanFzn.Solver.Direct.compileArgVal
+                              (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                          | .ok (.slotRef i), .ok (.litVal (.int k)) =>
+                              Except.ok (DomConstraint.leConstLo i k)
+                          | .ok (.litVal (.int k)), .ok (.slotRef j) =>
+                              Except.ok (DomConstraint.leConstHi j k)
+                          | .error e, _ => .error e
+                          | _, .error e => .error e
+                          | _, _ => .error "unsupported int_ge argument shapes")
+                            = .ok (.linLe coeffs is b) := hcc
+                        split at h2
+                        all_goals exact absurd h2 (by simp)
+              · rw [if_neg hge] at hcc
+                by_cases hnot : c.name.name = "bool_not" ∧ c.args.length = 2
+                · rw [if_pos hnot] at hcc
+                  cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+                  | error e => rw [ha0] at hcc; injection hcc
+                  | ok a0 =>
+                      cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                      | error e => rw [ha0, ha1] at hcc; injection hcc
+                      | ok a1 =>
+                          rw [ha0, ha1] at hcc
+                          have h2 : (match
+                              LeanFzn.Solver.Direct.compileArgVal
+                                (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                              LeanFzn.Solver.Direct.compileArgVal
+                                (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                            | .ok (.slotRef i), .ok (.litVal (.bool b)) =>
+                                Except.ok (DomConstraint.constEq i (.bool (!b)))
+                            | .ok (.litVal (.bool b)), .ok (.slotRef j) =>
+                                Except.ok (DomConstraint.constEq j (.bool (!b)))
+                            | .error e, _ => .error e
+                            | _, .error e => .error e
+                            | _, _ => .error "unsupported bool_not argument shapes")
+                              = .ok (.linLe coeffs is b) := hcc
+                          split at h2
+                          all_goals exact absurd h2 (by simp)
+                · rw [if_neg hnot] at hcc
+                  by_cases hand : c.name.name = "bool_and" ∧ c.args.length = 3
+                  · rw [if_pos hand] at hcc
+                    cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+                    | error e => rw [ha0] at hcc; injection hcc
+                    | ok a0 =>
+                        cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                        | error e => rw [ha0, ha1] at hcc; injection hcc
+                        | ok a1 =>
+                            cases ha2 : LeanFzn.Solver.Direct.argOf c 2 with
+                            | error e => rw [ha0, ha1, ha2] at hcc; injection hcc
+                            | ok a2 =>
+                                rw [ha0, ha1, ha2] at hcc
+                                have h2 : (match
+                                    LeanFzn.Solver.Direct.compileArgVal
+                                      (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                                    LeanFzn.Solver.Direct.compileArgVal
+                                      (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1,
+                                    LeanFzn.Solver.Direct.compileArgVal
+                                      (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a2 with
+                                  | .ok (.slotRef i), .ok (.litVal (.bool true)), .ok (.slotRef k) =>
+                                      Except.ok (DomConstraint.eqSlot i k)
+                                  | .ok (.slotRef _i), .ok (.litVal (.bool false)), .ok (.slotRef k) =>
+                                      Except.ok (DomConstraint.constEq k (.bool false))
+                                  | .ok (.litVal (.bool true)), .ok (.slotRef j), .ok (.slotRef k) =>
+                                      Except.ok (DomConstraint.eqSlot j k)
+                                  | .ok (.litVal (.bool false)), .ok (.slotRef _j), .ok (.slotRef k) =>
+                                      Except.ok (DomConstraint.constEq k (.bool false))
+                                  | .error e, _, _ => .error e
+                                  | _, .error e, _ => .error e
+                                  | _, _, .error e => .error e
+                                  | _, _, _ => .error "unsupported bool_and argument shapes")
+                                    = .ok (.linLe coeffs is b) := hcc
+                                split at h2
+                                all_goals exact absurd h2 (by simp)
+                  · rw [if_neg hand] at hcc
+                    by_cases hor : c.name.name = "bool_or" ∧ c.args.length = 3
+                    · rw [if_pos hor] at hcc
+                      cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+                      | error e => rw [ha0] at hcc; injection hcc
+                      | ok a0 =>
+                          cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                          | error e => rw [ha0, ha1] at hcc; injection hcc
+                          | ok a1 =>
+                              cases ha2 : LeanFzn.Solver.Direct.argOf c 2 with
+                              | error e => rw [ha0, ha1, ha2] at hcc; injection hcc
+                              | ok a2 =>
+                                  rw [ha0, ha1, ha2] at hcc
+                                  have h2 : (match
+                                      LeanFzn.Solver.Direct.compileArgVal
+                                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                                      LeanFzn.Solver.Direct.compileArgVal
+                                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1,
+                                      LeanFzn.Solver.Direct.compileArgVal
+                                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a2 with
+                                    | .ok (.slotRef _i), .ok (.litVal (.bool true)), .ok (.slotRef k) =>
+                                        Except.ok (DomConstraint.constEq k (.bool true))
+                                    | .ok (.slotRef i), .ok (.litVal (.bool false)), .ok (.slotRef k) =>
+                                        Except.ok (DomConstraint.eqSlot i k)
+                                    | .ok (.litVal (.bool true)), .ok (.slotRef _j), .ok (.slotRef k) =>
+                                        Except.ok (DomConstraint.constEq k (.bool true))
+                                    | .ok (.litVal (.bool false)), .ok (.slotRef j), .ok (.slotRef k) =>
+                                        Except.ok (DomConstraint.eqSlot j k)
+                                    | .error e, _, _ => .error e
+                                    | _, .error e, _ => .error e
+                                    | _, _, .error e => .error e
+                                    | _, _, _ => .error "unsupported bool_or argument shapes")
+                                      = .ok (.linLe coeffs is b) := hcc
+                                  split at h2
+                                  all_goals exact absurd h2 (by simp)
+                    · rw [if_neg hor] at hcc
+                      -- the final else is a plain `.error`
+                      injection hcc
+  | some dc =>
+      rw [hex] at hcc
+      have hdcsome : DomConstraint.linLe coeffs is b = dc :=
+        (Except.ok.inj hcc).symm
+      rcases LeanFzn.Solver.extractConstraint_inv hex with
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, k, i, _, _, _, hdc3⟩ |
+        ⟨k, y, i, _, _, _, hdc3⟩ |
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, k, i, _, _, _, hdc3⟩ |
+        ⟨k, y, i, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨elems, is2, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, _, _, _, _, hlen, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, _, _, _, _, hlen, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, i, k, _, _, _, _, hdc3⟩ |
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, k, i, _, _, _, hdc3⟩ |
+        ⟨k, y, i, _, _, _, hdc3⟩ |
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · -- the int_lin_le disjunct: the extractor's length gate
+        rw [hdc3] at hdcsome
+        injection hdcsome with h1 h2
+        rw [← h1, ← h2] at hlen
+        simpa using hlen
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+
+set_option maxHeartbeats 1000000 in
+/-- Every `linEq` constraint of a successfully compiled problem
+    has equal-length coefficient/index lists (the extractor's
+    `coeffs.length == is.length` gate; the int_plus fallback's
+    `linEq [1, 1] [i, j] k` shape has equal lengths by
+    construction). -/
+theorem compiled_linEq_shape
+    {m : LeanFzn.Model} {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Solver.Direct.compileModel m = .ok compiled)
+    {dc : DomConstraint} (hdc : dc ∈ compiled.constraints)
+    {coeffs : List Int} {is : List Nat} {b : Int}
+    (hdc2 : dc = .linEq coeffs is b) :
+    coeffs.length = is.length := by
+  -- the compiler's constraint list comes from `compileConstraints`
+  -- (compileModel_ok_inv), whose membership inversion gives the
+  -- originating model constraint and its successful
+  -- `compileConstraint`; the only linEq-producing paths are the
+  -- extractor's `int_lin_eq` arm (which carries the length gate)
+  -- and compileConstraint's int_plus fallback (whose
+  -- `linEq [1, 1] [i, j] k` shape has equal lengths trivially).
+  obtain ⟨_, slots, dcs, _, hdcs, hasmb⟩ :=
+    LeanFzn.Solver.Direct.compileModel_ok_inv hc
+  rw [hasmb] at hdc
+  have hdc' : dc ∈ dcs := by simpa [LeanFzn.Solver.Direct.assemble] using hdc
+  obtain ⟨c, _, hcc⟩ :=
+    LeanFzn.Solver.Direct.compileConstraints_mem_inv _ _ hdcs _ hdc'
+  subst hdc2
+  -- the one-step compile inversion: the extractor's int_lin_eq arm
+  -- returns a linEq under the length gate; among the fallback arms
+  -- only int_plus yields a linEq (the fixed [1, 1] over [i, j]
+  -- shape); the int_le/int_ge arms return `leConstHi`/`leConstLo`,
+  -- the int_lt/int_gt arms return `ltConstHi`/`ltConstLo`, and
+  -- every other arm is `.error`. Each do-block is inverted by
+  -- casing `argOf` (an error bind collapses to `.error`
+  -- definitionally, closed by `injection`) and then `split`ting
+  -- the stuck `compileArgVal` match.
+  unfold LeanFzn.Solver.Direct.compileConstraint at hcc
+  match hex : LeanFzn.Solver.extractConstraint (slots.map Prod.fst) c with
+  | none =>
+      rw [hex] at hcc
+      by_cases hplus : c.name.name = "int_plus" ∧ c.args.length = 3
+      · rw [if_pos hplus] at hcc
+        cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+        | error e => rw [ha0] at hcc; injection hcc
+        | ok a0 =>
+            cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+            | error e => rw [ha0, ha1] at hcc; injection hcc
+            | ok a1 =>
+                cases ha2 : LeanFzn.Solver.Direct.argOf c 2 with
+                | error e => rw [ha0, ha1, ha2] at hcc; injection hcc
+                | ok a2 =>
+                    rw [ha0, ha1, ha2] at hcc
+                    have h2 : (match
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1,
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a2 with
+                      | .ok (.slotRef i), .ok (.slotRef j), .ok (.litVal (.int k)) =>
+                          Except.ok (DomConstraint.linEq [1, 1] [i, j] k)
+                      | .error e, _, _ => .error e
+                      | _, .error e, _ => .error e
+                      | _, _, .error e => .error e
+                      | _, _, _ => .error "unsupported int_plus argument shapes")
+                        = .ok (.linEq coeffs is b) := hcc
+                    split at h2
+                    next i j k _ _ _ =>
+                      -- the slot/slot/int-literal arm: the compiled
+                      -- shape is `[1, 1]` over `[i, j]` — the two
+                      -- lengths are equal by evaluation
+                      have h3 : DomConstraint.linEq [1, 1] [i, j] k
+                          = DomConstraint.linEq coeffs is b :=
+                        Except.ok.inj h2
+                      injection h3 with e1 e2
+                      rw [← e1, ← e2]
+                      rfl
+                    all_goals exact absurd h2 (by simp)
+      · rw [if_neg hplus] at hcc
+        by_cases hle : c.name.name = "int_le" ∧ c.args.length = 2
+        · rw [if_pos hle] at hcc
+          cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+          | error e => rw [ha0] at hcc; injection hcc
+          | ok a0 =>
+              cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+              | error e => rw [ha0, ha1] at hcc; injection hcc
+              | ok a1 =>
+                  rw [ha0, ha1] at hcc
+                  have h2 : (match
+                      LeanFzn.Solver.Direct.compileArgVal
+                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                      LeanFzn.Solver.Direct.compileArgVal
+                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                    | .ok (.slotRef i), .ok (.litVal (.int k)) =>
+                        Except.ok (DomConstraint.leConstHi i k)
+                    | .ok (.litVal (.int k)), .ok (.slotRef j) =>
+                        Except.ok (DomConstraint.leConstLo j k)
+                    | .error e, _ => .error e
+                    | _, .error e => .error e
+                    | _, _ => .error "unsupported int_le argument shapes")
+                      = .ok (.linEq coeffs is b) := hcc
+                  split at h2
+                  all_goals exact absurd h2 (by simp)
+        · rw [if_neg hle] at hcc
+          by_cases hlt : c.name.name = "int_lt" ∧ c.args.length = 2
+          · rw [if_pos hlt] at hcc
+            cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+            | error e => rw [ha0] at hcc; injection hcc
+            | ok a0 =>
+                cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                | error e => rw [ha0, ha1] at hcc; injection hcc
+                | ok a1 =>
+                    rw [ha0, ha1] at hcc
+                    have h2 : (match
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                        LeanFzn.Solver.Direct.compileArgVal
+                          (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                      | .ok (.slotRef i), .ok (.litVal (.int k)) =>
+                          Except.ok (DomConstraint.ltConstHi i k)
+                      | .ok (.litVal (.int k)), .ok (.slotRef j) =>
+                          Except.ok (DomConstraint.ltConstLo j k)
+                      | .error e, _ => .error e
+                      | _, .error e => .error e
+                      | _, _ => .error "unsupported int_lt argument shapes")
+                        = .ok (.linEq coeffs is b) := hcc
+                    split at h2
+                    all_goals exact absurd h2 (by simp)
+          · rw [if_neg hlt] at hcc
+            by_cases hgt : c.name.name = "int_gt" ∧ c.args.length = 2
+            · rw [if_pos hgt] at hcc
+              cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+              | error e => rw [ha0] at hcc; injection hcc
+              | ok a0 =>
+                  cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                  | error e => rw [ha0, ha1] at hcc; injection hcc
+                  | ok a1 =>
+                      rw [ha0, ha1] at hcc
+                      have h2 : (match
+                          LeanFzn.Solver.Direct.compileArgVal
+                            (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                          LeanFzn.Solver.Direct.compileArgVal
+                            (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                        | .ok (.slotRef i), .ok (.litVal (.int k)) =>
+                            Except.ok (DomConstraint.ltConstLo i k)
+                        | .ok (.litVal (.int k)), .ok (.slotRef j) =>
+                            Except.ok (DomConstraint.ltConstHi j k)
+                        | .error e, _ => .error e
+                        | _, .error e => .error e
+                        | _, _ => .error "unsupported int_gt argument shapes")
+                          = .ok (.linEq coeffs is b) := hcc
+                      split at h2
+                      all_goals exact absurd h2 (by simp)
+            · rw [if_neg hgt] at hcc
+              by_cases hge : c.name.name = "int_ge" ∧ c.args.length = 2
+              · rw [if_pos hge] at hcc
+                cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+                | error e => rw [ha0] at hcc; injection hcc
+                | ok a0 =>
+                    cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                    | error e => rw [ha0, ha1] at hcc; injection hcc
+                    | ok a1 =>
+                        rw [ha0, ha1] at hcc
+                        have h2 : (match
+                            LeanFzn.Solver.Direct.compileArgVal
+                              (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                            LeanFzn.Solver.Direct.compileArgVal
+                              (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                          | .ok (.slotRef i), .ok (.litVal (.int k)) =>
+                              Except.ok (DomConstraint.leConstLo i k)
+                          | .ok (.litVal (.int k)), .ok (.slotRef j) =>
+                              Except.ok (DomConstraint.leConstHi j k)
+                          | .error e, _ => .error e
+                          | _, .error e => .error e
+                          | _, _ => .error "unsupported int_ge argument shapes")
+                            = .ok (.linEq coeffs is b) := hcc
+                        split at h2
+                        all_goals exact absurd h2 (by simp)
+              · rw [if_neg hge] at hcc
+                by_cases hnot : c.name.name = "bool_not" ∧ c.args.length = 2
+                · rw [if_pos hnot] at hcc
+                  cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+                  | error e => rw [ha0] at hcc; injection hcc
+                  | ok a0 =>
+                      cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                      | error e => rw [ha0, ha1] at hcc; injection hcc
+                      | ok a1 =>
+                          rw [ha0, ha1] at hcc
+                          have h2 : (match
+                              LeanFzn.Solver.Direct.compileArgVal
+                                (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                              LeanFzn.Solver.Direct.compileArgVal
+                                (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1 with
+                            | .ok (.slotRef i), .ok (.litVal (.bool b)) =>
+                                Except.ok (DomConstraint.constEq i (.bool (!b)))
+                            | .ok (.litVal (.bool b)), .ok (.slotRef j) =>
+                                Except.ok (DomConstraint.constEq j (.bool (!b)))
+                            | .error e, _ => .error e
+                            | _, .error e => .error e
+                            | _, _ => .error "unsupported bool_not argument shapes")
+                              = .ok (.linEq coeffs is b) := hcc
+                          split at h2
+                          all_goals exact absurd h2 (by simp)
+                · rw [if_neg hnot] at hcc
+                  by_cases hand : c.name.name = "bool_and" ∧ c.args.length = 3
+                  · rw [if_pos hand] at hcc
+                    cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+                    | error e => rw [ha0] at hcc; injection hcc
+                    | ok a0 =>
+                        cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                        | error e => rw [ha0, ha1] at hcc; injection hcc
+                        | ok a1 =>
+                            cases ha2 : LeanFzn.Solver.Direct.argOf c 2 with
+                            | error e => rw [ha0, ha1, ha2] at hcc; injection hcc
+                            | ok a2 =>
+                                rw [ha0, ha1, ha2] at hcc
+                                have h2 : (match
+                                    LeanFzn.Solver.Direct.compileArgVal
+                                      (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                                    LeanFzn.Solver.Direct.compileArgVal
+                                      (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1,
+                                    LeanFzn.Solver.Direct.compileArgVal
+                                      (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a2 with
+                                  | .ok (.slotRef i), .ok (.litVal (.bool true)), .ok (.slotRef k) =>
+                                      Except.ok (DomConstraint.eqSlot i k)
+                                  | .ok (.slotRef _i), .ok (.litVal (.bool false)), .ok (.slotRef k) =>
+                                      Except.ok (DomConstraint.constEq k (.bool false))
+                                  | .ok (.litVal (.bool true)), .ok (.slotRef j), .ok (.slotRef k) =>
+                                      Except.ok (DomConstraint.eqSlot j k)
+                                  | .ok (.litVal (.bool false)), .ok (.slotRef _j), .ok (.slotRef k) =>
+                                      Except.ok (DomConstraint.constEq k (.bool false))
+                                  | .error e, _, _ => .error e
+                                  | _, .error e, _ => .error e
+                                  | _, _, .error e => .error e
+                                  | _, _, _ => .error "unsupported bool_and argument shapes")
+                                    = .ok (.linEq coeffs is b) := hcc
+                                split at h2
+                                all_goals exact absurd h2 (by simp)
+                  · rw [if_neg hand] at hcc
+                    by_cases hor : c.name.name = "bool_or" ∧ c.args.length = 3
+                    · rw [if_pos hor] at hcc
+                      cases ha0 : LeanFzn.Solver.Direct.argOf c 0 with
+                      | error e => rw [ha0] at hcc; injection hcc
+                      | ok a0 =>
+                          cases ha1 : LeanFzn.Solver.Direct.argOf c 1 with
+                          | error e => rw [ha0, ha1] at hcc; injection hcc
+                          | ok a1 =>
+                              cases ha2 : LeanFzn.Solver.Direct.argOf c 2 with
+                              | error e => rw [ha0, ha1, ha2] at hcc; injection hcc
+                              | ok a2 =>
+                                  rw [ha0, ha1, ha2] at hcc
+                                  have h2 : (match
+                                      LeanFzn.Solver.Direct.compileArgVal
+                                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a0,
+                                      LeanFzn.Solver.Direct.compileArgVal
+                                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a1,
+                                      LeanFzn.Solver.Direct.compileArgVal
+                                        (LeanFzn.Solver.Direct.parEnv m) (slots.map Prod.fst) a2 with
+                                    | .ok (.slotRef _i), .ok (.litVal (.bool true)), .ok (.slotRef k) =>
+                                        Except.ok (DomConstraint.constEq k (.bool true))
+                                    | .ok (.slotRef i), .ok (.litVal (.bool false)), .ok (.slotRef k) =>
+                                        Except.ok (DomConstraint.eqSlot i k)
+                                    | .ok (.litVal (.bool true)), .ok (.slotRef _j), .ok (.slotRef k) =>
+                                        Except.ok (DomConstraint.constEq k (.bool true))
+                                    | .ok (.litVal (.bool false)), .ok (.slotRef j), .ok (.slotRef k) =>
+                                        Except.ok (DomConstraint.eqSlot j k)
+                                    | .error e, _, _ => .error e
+                                    | _, .error e, _ => .error e
+                                    | _, _, .error e => .error e
+                                    | _, _, _ => .error "unsupported bool_or argument shapes")
+                                      = .ok (.linEq coeffs is b) := hcc
+                                  split at h2
+                                  all_goals exact absurd h2 (by simp)
+                    · rw [if_neg hor] at hcc
+                      -- the final else is a plain `.error`
+                      injection hcc
+  | some dc =>
+      rw [hex] at hcc
+      have hdcsome : DomConstraint.linEq coeffs is b = dc :=
+        (Except.ok.inj hcc).symm
+      rcases LeanFzn.Solver.extractConstraint_inv hex with
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, k, i, _, _, _, hdc3⟩ |
+        ⟨k, y, i, _, _, _, hdc3⟩ |
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, k, i, _, _, _, hdc3⟩ |
+        ⟨k, y, i, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨elems, is2, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, _, _, _, _, hlen, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, _, _, _, _, hlen, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, i, k, _, _, _, _, hdc3⟩ |
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, k, i, _, _, _, hdc3⟩ |
+        ⟨k, y, i, _, _, _, hdc3⟩ |
+        ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · -- the int_lin_eq disjunct: the extractor's length gate
+        rw [hdc3] at hdcsome
+        injection hdcsome with h1 h2
+        rw [← h1, ← h2] at hlen
+        simpa using hlen
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+
 /-- **THE CERTIFIED LCG FRONT DOOR WITH REAL PROPAGATORS (SAT)**: on
     the singleton-domain fragment of a compiled model, with the
-    PROVED propagator registration (`leSlot`/`ltSlot`/`eqSlot`;
-    `plusSlot`/`neSlot`/`linLe` are excluded pending their family
-    proofs), a `sat` assignment satisfies every internal
-    constraint. -/
+    PROVED propagator registration (all twenty families), a `sat`
+    assignment satisfies every internal constraint. -/
 theorem solve_certified_sat_real
     {m : LeanFzn.Model} {problem : LCG.Problem DomConstraint Unit}
     {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
@@ -238,6 +943,21 @@ theorem solve_certified_sat_real
     obtain ⟨dc, hdcmem, hprop⟩ := propagatorsOfProved_mem hp
     rw [hcons]
     exact ⟨dc, hdcmem, hprop⟩
+  -- the compiled linLe shape: every linLe of the problem's
+  -- constraints has equal-length lists (the extractor's gate)
+  have hlin : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
+      dc = .linLe coeffs is b2 → coeffs.length = is.length := by
+    intro dc hdcmem coeffs is b2 hdc2
+    rw [hcons] at hdcmem
+    exact compiled_linLe_shape hc hdcmem hdc2
+  -- the compiled linEq shape: every linEq of the problem's
+  -- constraints has equal-length lists (the extractor's gate; the
+  -- int_plus fallback's [1, 1] over [i, j] shape)
+  have hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
+      dc = .linEq coeffs is b2 → coeffs.length = is.length := by
+    intro dc hdcmem coeffs is b2 hdc2
+    rw [hcons] at hdcmem
+    exact compiled_linEq_shape hc hdcmem hdc2
   -- the state-relativized safety + entitlement (from the per-family
   -- theorems; at the engine's initial state, domain-coherent)
   have hcoh0 : DomainCoherent problem (initialStateWithRoots problem) :=
@@ -254,9 +974,58 @@ theorem solve_certified_sat_real
     (propagators := compiled.constraints.filterMap propagatorOfProved)
     hview hfragP
     (fun c hc a _ => by rw [hclauses] at hc; cases hc)
-    (fun st hcoh => propagatorsOfProved_safeUniv hint hprops st hcoh)
+    (fun st hcoh => propagatorsOfProved_safeUniv hint hprops hlin hlinE st hcoh)
     (fun st hcoh p hp c hrun hsol =>
-      propagatorsOfProved_entitled hint hprops st hsol hcoh p hp c hrun)
+      propagatorsOfProved_entitled hint hprops hlin hlinE st hsol hcoh p hp c hrun)
+    hagrees hsat
+
+
+/-- **THE WIDENED CERTIFIED LCG FRONT DOOR (SAT, multi-value
+    domains)**: on ANY gate-passing compiled problem (nonempty
+    finite int/bool-viewed domains — decisions and backtracking
+    allowed), with the proved propagator registration, a `sat`
+    assignment satisfies every internal constraint. The engine's
+    SAT soundness is decision-free (the leaf test establishes Fits
+    + every constraint directly), so the widened gate carries the
+    full proof; no `.unsat` claim is made outside the singleton
+    fragment. -/
+theorem solve_certified_sat_wide
+    {m : LeanFzn.Model} {problem : LCG.Problem DomConstraint Unit}
+    {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Solver.Direct.compileModel m = .ok compiled)
+    (hlcg : problem.domains = compiled.domains)
+    (hcons : problem.constraints = compiled.constraints)
+    (hgate : gateOk problem = true)
+    (hclauses : problem.clauses = [])
+    (hsat : solve problem DomConstraint.satisfiedB
+        ((compiled.constraints).filterMap propagatorOfProved) = .sat assignment) :
+    ProblemSolution problem DomConstraint.SatisfiedBy assignment := by
+  -- the int-view premise, derived from the gate itself
+  have hint : ∀ d ∈ problem.domains, ∀ v ∈ d, Value.intView v ≠ none :=
+    intViewed_of_gate hgate
+  have hview : IntViewed problem := hint
+  -- the propagator-list premise (as in the singleton front door)
+  have hprops : ∀ p ∈ compiled.constraints.filterMap propagatorOfProved,
+      ∃ dc ∈ problem.constraints, propagatorOfProved dc = some p := by
+    intro p hp
+    obtain ⟨dc, hdcmem, hprop⟩ := propagatorsOfProved_mem hp
+    rw [hcons]
+    exact ⟨dc, hdcmem, hprop⟩
+  -- the compiled linLe shape (the extractor's gate)
+  have hlin : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
+      dc = .linLe coeffs is b2 → coeffs.length = is.length := by
+    intro dc hdcmem coeffs is b2 hdc2
+    rw [hcons] at hdcmem
+    exact compiled_linLe_shape hc hdcmem hdc2
+  have hagrees : ∀ constraint assignment,
+      DomConstraint.satisfiedB constraint assignment = true ↔
+        DomConstraint.SatisfiedBy constraint assignment :=
+    fun c a => DomConstraint.satisfiedB_iff c a
+  -- SAT soundness needs only the evaluator agreement
+  exact solve_sat_correct (problem := problem)
+    (constraintHolds := DomConstraint.SatisfiedBy)
+    (constraintHoldsB := DomConstraint.satisfiedB)
+    (propagators := compiled.constraints.filterMap propagatorOfProved)
     hagrees hsat
 
 
@@ -287,6 +1056,19 @@ theorem solve_certified_unsat_real
     obtain ⟨dc, hdcmem, hprop⟩ := propagatorsOfProved_mem hp
     rw [hcons]
     exact ⟨dc, hdcmem, hprop⟩
+  -- the compiled linLe shape (the extractor's gate)
+  have hlin : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
+      dc = .linLe coeffs is b2 → coeffs.length = is.length := by
+    intro dc hdcmem coeffs is b2 hdc2
+    rw [hcons] at hdcmem
+    exact compiled_linLe_shape hc hdcmem hdc2
+  -- the compiled linEq shape (the extractor's gate; the int_plus
+  -- fallback's [1, 1] over [i, j] shape)
+  have hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
+      dc = .linEq coeffs is b2 → coeffs.length = is.length := by
+    intro dc hdcmem coeffs is b2 hdc2
+    rw [hcons] at hdcmem
+    exact compiled_linEq_shape hc hdcmem hdc2
   have hagrees : ∀ constraint assignment,
       DomConstraint.satisfiedB constraint assignment = true ↔
         DomConstraint.SatisfiedBy constraint assignment :=
@@ -297,10 +1079,211 @@ theorem solve_certified_unsat_real
     (propagators := compiled.constraints.filterMap propagatorOfProved)
     hview hfragP
     (fun c hc a _ => by rw [hclauses] at hc; cases hc)
-    (fun st hcoh => propagatorsOfProved_safeUniv hint hprops st hcoh)
+    (fun st hcoh => propagatorsOfProved_safeUniv hint hprops hlin hlinE st hcoh)
     (fun st hcoh p hp c hrun hsol =>
-      propagatorsOfProved_entitled hint hprops st hsol hcoh p hp c hrun)
+      propagatorsOfProved_entitled hint hprops hlin hlinE st hsol hcoh p hp c hrun)
     hagrees hunsat
+
+/-! ### The widened UNSAT front door (multi-value domains)
+
+The decision-descent master theorem's composition with the compiler:
+on ANY gate-passing compiled problem whose registered propagators come
+from the problem's constraints via `propagatorOfProved` (the FIXED
+linLe propagator `propLinLe2` has state-free valid reasons — the old
+linLe obstruction is discharged), an `unsat` verdict excludes every
+internal solution. The three master-theorem premises are discharged
+by the assemblies of `solver/LCG/Proofs/Reason.lean`:
+`propagatorsOfProved_reasonSafeUniv` (hreason),
+`propagatorsOfProved_just` (the rooted hjust), and
+`propagatorsOfProved_conflictEntitled` (the cc ≠ [] hconfent). The
+hleafng/hfallbackng premises are discharged by
+`propagatorsOfProved_fallbackng_discharged` and the leaf-nogood
+assembly at the proved registration. -/
+
+/-- **THE WIDENED CERTIFIED LCG FRONT DOOR (UNSAT, multi-value
+    domains; PLAN.md §5 item 6)**: on ANY gate-passing compiled
+    problem (nonempty finite int/bool-viewed domains — decisions and
+    backtracking allowed), with the proved propagator registration, an
+    `unsat` verdict excludes every internal solution. -/
+theorem solve_certified_unsat_wide
+    {m : LeanFzn.Model} {problem : LCG.Problem DomConstraint Unit}
+    {compiled : LeanFzn.Solver.Direct.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Solver.Direct.compileModel m = .ok compiled)
+    (hlcg : problem.domains = compiled.domains)
+    (hcons : problem.constraints = compiled.constraints)
+    (hgate : gateOk problem = true)
+    (hclauses : problem.clauses = [])
+    (hunsat : solve problem DomConstraint.satisfiedB
+        ((compiled.constraints).filterMap propagatorOfProved) = .unsat) :
+    ¬ ∃ assignment, ProblemSolution problem DomConstraint.SatisfiedBy
+      assignment := by
+  -- the classical split: with no solution the claim is immediate;
+  -- otherwise the master theorem applies at the rooted initial
+  -- state and the two constructive refutations close
+  by_cases hsolv : ∃ b, ProblemSolution problem
+      DomConstraint.SatisfiedBy b
+  · -- solutions exist: the engine's unsat must refute them
+    unfold solve at hunsat
+    -- the int-view premise, derived from the gate itself
+    have hview : IntViewed problem := intViewed_of_gate hgate
+    -- the propagator-list premise (plain: the registration comes
+    -- from the problem's constraints)
+    have hprops : ∀ p ∈ compiled.constraints.filterMap
+        propagatorOfProved,
+        ∃ dc ∈ problem.constraints, propagatorOfProved dc = some p := by
+      intro p hp
+      obtain ⟨dc, hdcmem, hprop⟩ := propagatorsOfProved_mem hp
+      rw [hcons]
+      exact ⟨dc, hdcmem, hprop⟩
+    -- the compiled linLe shape (the extractor's gate)
+    have hlin : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
+        dc = .linLe coeffs is b2 → coeffs.length = is.length := by
+      intro dc hdcmem coeffs is b2 hdc2
+      rw [hcons] at hdcmem
+      exact compiled_linLe_shape hc hdcmem hdc2
+    -- the compiled linEq shape (the extractor's gate; the int_plus
+    -- fallback's [1, 1] over [i, j] shape)
+    have hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
+        dc = .linEq coeffs is b2 → coeffs.length = is.length := by
+      intro dc hdcmem coeffs is b2 hdc2
+      rw [hcons] at hdcmem
+      exact compiled_linEq_shape hc hdcmem hdc2
+    -- the three premise discharges (the Reason assemblies)
+    have hreason : ReasonSafeUniv problem DomConstraint.SatisfiedBy
+        (compiled.constraints.filterMap propagatorOfProved) :=
+      propagatorsOfProved_reasonSafeUniv hview hprops hlin hlinE
+    have hjust := fun (acc : State) (hcoh : DomainCoherent problem acc)
+        (hlv : acc.decisionLevel = 0)
+        (hrootF : RootFacts problem DomConstraint.SatisfiedBy acc.trail)
+        (hrooted : ∀ e ∈ acc.trail, e.level ≤ acc.decisionLevel) =>
+      propagatorsOfProved_just hview hprops hlin hlinE
+        acc hcoh hlv hrooted hrootF
+    have hconfent := propagatorsOfProved_conflictEntitled
+      hview hsolv hprops hlin hlinE
+      (fun c hc a ha => by rw [hclauses] at hc; cases hc)
+    -- the problem's clause entitlement (vacuous: clauses = [])
+    have hdb : ∀ c ∈ problem.clauses, ∀ a,
+        ProblemSolution problem DomConstraint.SatisfiedBy a →
+          ∃ l ∈ c, l.eval a = some true := by
+      intro c hc a _; rw [hclauses] at hc; cases hc
+    -- the state-universal safety (the twenty-family assembly)
+    have hsafe : CoherentSafeUniv problem DomConstraint.SatisfiedBy
+        (compiled.constraints.filterMap propagatorOfProved) := by
+      intro st hcoh
+      exact propagatorsOfProved_safeUniv hview hprops hlin hlinE st hcoh
+    -- apply the master theorem at the rooted initial state
+    obtain ⟨st', hlevel, hconf, hsolvedBy, hcohst, hclauses',
+      hlearned, hdisj⟩ :=
+      go_unsat_entry_invariant (problem := problem)
+        (constraintHolds := DomConstraint.SatisfiedBy)
+        (constraintHoldsB := DomConstraint.satisfiedB)
+        (props := compiled.constraints.filterMap propagatorOfProved)
+        hsafe hjust hreason hsolv hdb hconfent
+        (fun st hnone hinv hdist hgate a0 hsingle hassign hfail => by
+          -- the leaf-nogood entitlement at the proved registration
+          -- (the body of propagatorsOfProved_leafng, inlined at the
+          -- plain hprops shape: the propagated state's run invariant
+          -- from propagateLoop_runInv, then leafNogood_entailed_by)
+          have hinv1 := propagateLoop_runInv hreason hjust
+            (fun c hc => by
+              rw [hclauses] at hc
+              cases hc) (engineFuel st) st hnone hinv
+          exact leafNogood_entailed_by (a0 := a0)
+            (fun c a => DomConstraint.satisfiedB_iff c a)
+            (propagateLoop (engineFuel st)
+              (compiled.constraints.filterMap propagatorOfProved) st)
+            hinv1.coherent hsingle hassign hfail hinv1.rootFacts
+            (trailBoolPinsOk_iff hgate))
+        (propagatorsOfProved_fallbackng_discharged hview hprops
+          hlin hlinE hreason hjust
+          (fun c hc => by
+            rw [hclauses] at hc
+            cases hc))
+        defaultFuel (initialStateWithRoots problem)
+        (initialWithRoots_fields problem).1
+        (initialStateWithRoots_runInv hview
+          (fun c hc l hl => by
+            rw [hclauses] at hc
+            cases hc))
+        (initialStateWithRoots_level0Solved hview
+          (fun c hc a ha => by
+            rw [hclauses] at hc
+            cases hc))
+        (initialStateWithRoots_trailDistinct problem)
+        (by rw [show defaultFuel = 10000 from rfl] at hunsat
+            exact hunsat)
+    -- the two disjuncts: the constructive refutations
+    rcases hdisj with ⟨hconflict, hSolvedBy1⟩ | ⟨hclear, hsingle,
+      a0, hassign, hfail⟩
+    · -- the conflict arm: unsat_root_conflict_constructive
+      -- (the entry's own facts + the internal entitlement chain)
+      have hentFam : ∀ (st : State), DomainCoherent problem st →
+        ∀ (p : Propagator), p ∈
+            compiled.constraints.filterMap propagatorOfProved →
+          ∀ (c : Clause), p.run st = .conflict c →
+            SolvedBy problem DomConstraint.SatisfiedBy st →
+            ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
+              ∃ l ∈ c, l.eval a = some true := by
+        intro st hcoh p hp c hrun hsol a ha
+        exact propagatorsOfProved_entitled hview hprops hlin hlinE
+          st hsol hcoh p hp c hrun a ha
+      exact unsat_root_conflict_constructive (problem := problem)
+        (constraintHolds := DomConstraint.SatisfiedBy)
+        (props := compiled.constraints.filterMap propagatorOfProved)
+        st' hconf hsafe hsolvedBy hclauses' hlearned hdb hcohst
+        hsolv hentFam hconflict
+    · -- the leaf arm: the failed complete assignment refutes
+      have hentFam : ∀ (st : State), DomainCoherent problem st →
+        ∀ (p : Propagator), p ∈
+            compiled.constraints.filterMap propagatorOfProved →
+          ∀ (c : Clause), p.run st = .conflict c →
+            SolvedBy problem DomConstraint.SatisfiedBy st →
+            ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
+              ∃ l ∈ c, l.eval a = some true := by
+        intro st hcoh p hp c hrun hsol a ha
+        exact propagatorsOfProved_entitled hview hprops hlin hlinE
+          st hsol hcoh p hp c hrun a ha
+      -- the leaf's SolvedBy transfer at the level-0 entry
+      have hentO : ∀ c ∈ st'.clauses, ∀ a2, ProblemSolution
+          problem DomConstraint.SatisfiedBy a2 →
+          ∃ l ∈ c, l.eval a2 = some true := by
+        intro c hc a2 ha2
+        rw [hclauses'] at hc
+        exact hdb c hc a2 ha2
+      have hentL : ∀ c ∈ st'.learned, ∀ a2, ProblemSolution
+          problem DomConstraint.SatisfiedBy a2 →
+          ∃ l ∈ c, l.eval a2 = some true := by
+        intro c hc a2 ha2
+        obtain ⟨wl, hwl, hev⟩ := hlearned c hc a2 ha2
+        exact ⟨wl, hwl, hev⟩
+      have hsolvedBy1 : SolvedBy problem DomConstraint.SatisfiedBy
+          (propagateLoop (engineFuel st')
+            (compiled.constraints.filterMap propagatorOfProved) st') :=
+        propagateLoop_solvedBy_any hsafe hsolv st'.clauses st'.learned
+          hentO hentL (engineFuel st') st' hconf hsolvedBy hcohst
+          rfl rfl
+      have hlevel1 :
+          (propagateLoop (engineFuel st')
+            (compiled.constraints.filterMap propagatorOfProved)
+            st').decisionLevel = 0 := by
+        rw [propagateLoop_decisionLevel
+          (compiled.constraints.filterMap propagatorOfProved)
+          (engineFuel st') st']
+        exact hlevel
+      have hagrees : ∀ constraint assignment,
+          DomConstraint.satisfiedB constraint assignment = true ↔
+            DomConstraint.SatisfiedBy constraint assignment :=
+        fun c a => DomConstraint.satisfiedB_iff c a
+      exact unsat_root_leaf_constructive (problem := problem)
+        (constraintHolds := DomConstraint.SatisfiedBy)
+        (constraintHoldsB := DomConstraint.satisfiedB)
+        (props := compiled.constraints.filterMap propagatorOfProved)
+        (propagateLoop (engineFuel st')
+          (compiled.constraints.filterMap propagatorOfProved) st') a0
+        hclear hlevel1 hsingle hassign hfail
+        (fun b hb => hsolvedBy1 b hb) hagrees
+  · -- no solutions exist: the exclusion is immediate
+    exact hsolv
 
 end LeanFzn.Solver.LCG
 

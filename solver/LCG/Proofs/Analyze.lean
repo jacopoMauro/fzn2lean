@@ -688,6 +688,7 @@ theorem negate_norm_square (l : Literal) :
             show (Literal.mk (Atom.boolEq s b) false).negate.norm.negate.norm
                  = (Literal.mk (Atom.boolEq s b) false).norm
             simp [Literal.norm, Literal.negate]
+    | intNe s k => cases positive <;> rfl
 
 /-- Normalization is idempotent. -/
 theorem norm_norm (l : Literal) : l.norm.norm = l.norm := by
@@ -703,6 +704,7 @@ theorem norm_norm (l : Literal) : l.norm.norm = l.norm := by
                  = (Literal.mk (Atom.boolEq s b) false).norm
             simp only [Literal.norm]
             cases b <;> rfl
+    | intNe s k => cases positive <;> rfl
 
 /-- `findEntryOf` returns an entry whose literal is exactly the
     normalized target. -/
@@ -768,6 +770,57 @@ theorem orderUpgrade_weaken (trail : List TrailEntry) (l : Literal)
                 exact ⟨i, hi2, by omega⟩
               · rw [if_neg hfire]; exact hl
     | boolEq s b =>
+        cases positive with
+        | true =>
+            cases b with
+            | true =>
+                cases hhi : trailHiOf trail s with
+                | none =>
+                    simp only [orderUpgrade, posBool, hhi, if_true, reduceIte]
+                    exact hl
+                | some hi =>
+                    simp only [orderUpgrade, posBool, hhi, if_true, reduceIte]
+                    by_cases hfire : hi ≤ 0
+                    · simp only [if_pos hfire, reduceIte]
+                      -- a reads s as true (integer view 1); the
+                      -- weakened literal "s > hi" holds since hi ≤ 0
+                      have hs : a[s]? = some (.bool true) := by
+                        have hl2 : (posBool s true).eval a = some true :=
+                          hl
+                        rw [eval_posBool_iff] at hl2
+                        exact hl2
+                      rw [eval_negLe_iff]
+                      exact ⟨1, by rw [slotInt, hs]; rfl, by omega⟩
+                    · simp only [if_neg hfire]; exact hl
+            | false =>
+                cases hlo : trailLoOf trail s with
+                | none =>
+                    simp only [orderUpgrade, posBool, hlo, if_true, reduceIte]
+                    exact hl
+                | some lo =>
+                    simp only [orderUpgrade, posBool, hlo, if_neg,
+                      Bool.false_eq_true, reduceIte]
+                    by_cases hfire : 1 ≤ lo
+                    · simp only [if_pos hfire, reduceIte]
+                      -- a reads s as false (integer view 0); the
+                      -- weakened literal "s ≤ lo−1" holds since lo ≥ 1
+                      have hs : a[s]? = some (.bool false) := by
+                        have hl2 : (posBool s false).eval a = some true :=
+                          hl
+                        rw [eval_posBool_iff] at hl2
+                        exact hl2
+                      rw [eval_posLe_iff]
+                      exact ⟨0, by rw [slotInt, hs]; rfl, by omega⟩
+                    · simp only [if_neg hfire]; exact hl
+        | false =>
+            -- a NEGATIVE Boolean literal is never the normalized
+            -- upgrade input (markLit norm-normalizes first); the
+            -- hypothesis is preserved unchanged
+            simp only [orderUpgrade]
+            exact hl
+    | intNe s k =>
+        -- value-removal literals have no order upgrade: the exact
+        -- falsifier entry `intNe s k` matches by negation directly
         simp only [orderUpgrade]
         exact hl
 

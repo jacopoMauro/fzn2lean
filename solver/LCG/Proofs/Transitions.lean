@@ -198,7 +198,7 @@ theorem analyzeConflict_correct
   refine ⟨?_, analyzeConflict_level hstate hanalyze, ?_⟩
   · -- entailment: from `AnalysisReady`, the analysis consumes only
     -- entailed antecedents (conflict clause and reasons).
-    obtain ⟨hconf_ent, hreasons, hchrono, hroot, hrnorm⟩ := hready
+    obtain ⟨hconf_ent, hreasons, hroot, hrnorm⟩ := hready
     unfold analyzeConflict at hanalyze
     cases hconf : state.conflict with
     | none => rw [hconf] at hanalyze; simp at hanalyze
@@ -242,7 +242,7 @@ theorem analyzeConflict_correct
     | zero => exact Or.inl rfl
     | succ lvl =>
         refine Or.inr ?_
-        obtain ⟨hconf_ent, hreasons, hchrono, hroot, hrnorm⟩ := hready
+        obtain ⟨hconf_ent, hreasons, hroot, hrnorm⟩ := hready
         unfold analyzeConflict at hanalyze
         cases hconf : state.conflict with
         | none => rw [hconf] at hanalyze; simp at hanalyze

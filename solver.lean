@@ -2,29 +2,38 @@
 File: solver.lean
 
 Purpose:
-  Core root for the direct-solver redevelopment: exports the semantic result
-  contract and reusable finite search/domain machinery.
+  Library root for the certified solver: exports the shared semantic
+  problem representation, the finite slot machinery, and the two
+  solver stacks (direct exhaustive reference and LCG).
 
 Dependencies:
-  solver.Core (shared semantic problem representation), solver.Tree
-  (classical tree-search state), solver.LCG (lazy-clause-generation scaffold), solver.Direct
-  (checker-independent correctness contract), solver.Search (finite exhaustive
-  search), and solver.Domain (domain extraction).
+  solver.Core (shared semantic problem representation),
+  solver.Search + solver.Domain (finite exhaustive search and slot
+  extraction), solver.Propagators (DomConstraint and its Boolean
+  twin), solver.Extract (constraint-shape extraction), solver.Emit
+  (solution-text rendering), solver.Direct (the direct compiler,
+  exhaustive reference solver, and its correctness proofs),
+  solver.LCG (the lazy-clause-generation engine, its proofs, and the
+  certified front door).
 
 Why:
-  The old checker-mediated adapter is intentionally absent from this root.
-  Existing optimized components remain available through their own modules
-  while they are audited for reuse by the direct solver.
+  One import gives library users the full certified stack.  The
+  legacy checker-mediated solver (Config/Solve/Fixpoint/Heuristic/
+  Enum/Optimize/RevState/Learning/Restarts) was retired (PLAN.md §1);
+  Git history keeps it.
 
 DAG:
-  LeanFzn semantics -> solver.Core -> solver.Tree / solver.LCG / solver.Direct
-  solver.Search + solver.Domain + solver.Core + solver.Tree + solver.LCG
-    + solver.Direct -> solver.lean
+  LeanFzn semantics -> solver.Core
+  solver.Search / solver.Domain / solver.Propagators / solver.Extract /
+    solver.Emit (shared support)
+  solver.Core + support -> solver.Direct (compiler, reference search,
+    correctness proofs)
+  solver.Core + support -> solver.LCG (engine, proofs, certified door)
+  all of the above -> solver.lean
 -/
 
 import solver.Search
 import solver.Domain
 import solver.Core
-import solver.Tree
-import solver.LCG
 import solver.Direct
+import solver.LCG

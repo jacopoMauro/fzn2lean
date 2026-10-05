@@ -1,47 +1,29 @@
-import solver.Solver
-import solver.Direct
+import solver.Direct.Correctness
 import solver.Direct.Cli
+import solver.LCG.Certified
 
 /-!
-# Solver test executable (PLAN.md 6.1, 6.2, 6.3, 6.5, 6.7)
+# Solver test executable (the certified path)
 
-Tests the solver stack end to end:
+Tests the certified solver stack end to end:
 
-* `allAssigns` on small slot lists (the declarative specification);
-* `search` finds and misses assignments (the executable search);
-* SAT models — the solver returns `.sat text` and the *verified
-  checker* accepts `text` (including a global constraint and an
-  initializer-dependent model with an alias array, exercised the
-  same way the Gecode suite exercises its reference strings);
-* UNSAT models — the solver returns `.unsat`, cross-checked by
-  brute force through the checker (every complete assignment of
-  the domains is rejected);
-* unsupported / out-of-fragment models — the solver refuses with
-  `.unsupported` (unbounded `var int`, set variables, an
-  unsupported global, oversized domains);
-* integration (Round 3) — the propagating solver (`solveModelProp`)
-  and the MRV solver (`solveModelHeur`) agree with the reference
-  `solveModel` on the verdict for every model above (verdict-level
-  agreement; sat texts may differ but must be checker-accepted), a
-  pigeonhole-style UNSAT model whose pairwise `int_ne` constraints
-  are all extracted (the pruning path), and a model with *no*
-  extractable constraints (only `fzn_all_different_int`) proving
-  the empty-propagator fallback path;
-* final integration (Round 4) — the composed front door
-  (`solveModelWith`, `solver/Config.lean`): the config-matrix
-  battery runs every supported `SolveConfig` combination (reference,
-  prop, MRV, prop+MRV, learning, budget) over the model battery and
-  checks verdict-level agreement with `solveModel`, checker
-  acceptance of every sat text, the prop+MRV pigeonhole refutation,
-  budget-limited runs returning unknown-never-unsat, learning
-  agreement on skewed-domain models, and the refusal of the
-  documented-unsupported combinations.
+* `allAssigns` on small slot lists (the declarative specification
+  shared by the exhaustive reference search and the LCG layer);
+* `search` finds and misses assignments (the executable shared
+  search);
+* the DIRECT certified-fragment compiler (`compileModel`) on SAT,
+  UNSAT, and unsupported models, including theorem-level nonvacuity
+  of `solve_sat_correct` / `solve_unsat_correct` (the direct
+  exhaustive reference solver, retained as internal cross-check);
+* the CERTIFIED LCG command path (`solveCertified`) on the singleton
+  fragment: SAT stores, emitted text accepted by the verified
+  checker, UNSAT verdicts, fragment refusals, and theorem-level
+  nonvacuity of `solveCertified_sat_correct` /
+  `solveCertified_unsat_correct`.
 
-The SAT cases re-check the emitted text with `checkModelSolution`
-directly: together with `solveModel_sat_sound` (which proves the
-re-check always succeeds) this is a redundant end-to-end validation
-of the emission format, and it exercises `completedStore`'s filling
-of initializer-derived variables on real solver output.
+The legacy checker-mediated solver tests (propagation, MRV,
+restarts, NoGood learning, enumeration, optimization) were retired
+with the legacy solver stack (PLAN.md §1); Git history keeps them.
 -/
 
 open LeanFzn LeanFzn.Solver LeanFzn.Check LeanFzn.Solution LeanFzn.Globals
@@ -108,501 +90,6 @@ def main : IO UInt32 := do
   let specHit := (allAssigns slots).any leaf
   st ← st.check "search vs allAssigns agreement"
     (searchHit == specHit && searchHit)
-
-  -- ## End-to-end SAT models
-
-  -- int_plus with small domains
-  let m1 := parseOrPanic
-    "var 1..3: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 5);\nsolve satisfy;"
-  match solveModel m1 with
-  | .sat text =>
-      st ← st.check "sat: int_plus model accepted by checker"
-        (checkModelSolution m1 text == .accepted)
-      -- the assignment really satisfies x + y = 5: extract via brute force
-      let ok := (allAssigns ([[1, 2, 3], [1, 2, 3]] : List (List Int))).any
-        (fun l => match l with
-          | [a, b] =>
-              checkModelSolution m1
-                (emitAssignment ["x", "y"] [Value.int a, Value.int b]) == .accepted
-          | _ => false)
-      st ← st.check "sat: brute force finds an accepted assignment" ok
-  | _ => st ← st.check "sat: int_plus model solved" (false)
-  -- confirm the returned text is among the brute-force-accepted ones
-  match solveModel m1 with
-  | .sat text =>
-      let mut hits : List String := []
-      for a in [1, 2, 3] do
-        for b in [1, 2, 3] do
-          let t := emitAssignment ["x", "y"] [Value.int a, Value.int b]
-          if checkModelSolution m1 t == .accepted then hits := t :: hits
-      st ← st.check "sat: returned text is a brute-force solution" (hits.contains text)
-  | _ => pure ()
-
-  -- global constraint (fzn_all_different_int) + a forcing constraint
-  let m2 := parseOrPanic
-    "var 1..3: x;\nvar 1..3: y;\nvar 1..3: z;\n\
-     constraint fzn_all_different_int([x, y, z]);\n\
-     constraint int_le(x, 1);\nsolve satisfy;"
-  match solveModel m2 with
-  | .sat text =>
-      st ← st.check "sat: global alldiff model accepted by checker"
-        (checkModelSolution m2 text == .accepted)
-  | _ => st ← st.check "sat: global alldiff model solved" (false)
-
-  -- initializer-dependent model: alias array completed from the slots
-  let m3 := parseOrPanic
-    "var 0..9: y1;\nvar 0..9: y2;\n\
-     array [1..2] of var 0..9: xs = [y1, y2];\n\
-     constraint int_plus(y1, y2, 8);\nsolve satisfy;"
-  match solveModel m3 with
-  | .sat text =>
-      st ← st.check "sat: alias-array model accepted by checker"
-        (checkModelSolution m3 text == .accepted)
-      -- the checker's store completion fills xs from y1, y2: the
-      -- emitted text assigns only y1, y2, yet the completed store
-      -- has all three variables
-      match parseSolution (stripSeparators text) with
-      | .error _ =>
-          st ← st.check "sat: emitted text parses" (false)
-      | .ok es =>
-          let store := completedStore m3 es
-          st ← st.check "sat: completion fills xs"
-            ((store (Ident.mk "xs")).isSome &&
-              (store (Ident.mk "y1")).isSome &&
-              (store (Ident.mk "y2")).isSome)
-          -- an explicit xs entry consistent with the found y1, y2 is
-          -- also accepted (redundant but valid, like Gecode's strings)
-          let y1v := match store (Ident.mk "y1") with
-            | some (.int i) => i
-            | _ => 0
-          let y2v := match store (Ident.mk "y2") with
-            | some (.int i) => i
-            | _ => 0
-          let withXs := text.replace "----------"
-            s!"xs = array1d(1..2, [{y1v}, {y2v}]);\n----------"
-          st ← st.check "sat: explicit xs entry consistent"
-            (checkModelSolution m3 withXs == .accepted)
-  | _ => st ← st.check "sat: alias-array model solved" (false)
-
-  -- Boolean model
-  let m4 := parseOrPanic
-    "var bool: a;\nvar bool: b;\nconstraint bool_and(a, b, true);\nsolve satisfy;"
-  match solveModel m4 with
-  | .sat text =>
-      st ← st.check "sat: bool model accepted by checker"
-        (checkModelSolution m4 text == .accepted)
-      st ← st.check "sat: bool model assigns both true"
-        (text.contains "a = true;" && text.contains "b = true;")
-  | _ => st ← st.check "sat: bool model solved" (false)
-
-  -- empty search space: all variables initialized
-  let m5 := parseOrPanic "var 1..3: x = 2;\nsolve satisfy;"
-  match solveModel m5 with
-  | .sat text =>
-      st ← st.check "sat: fully initialized model accepted by checker"
-        (checkModelSolution m5 text == .accepted)
-  | _ => st ← st.check "sat: fully initialized model solved" (false)
-
-  -- negative values round-trip through emission and parsing
-  let m6 := parseOrPanic
-    "var -3..3: x;\nvar -3..3: y;\nconstraint int_plus(x, y, -1);\nsolve satisfy;"
-  match solveModel m6 with
-  | .sat text =>
-      st ← st.check "sat: negative values accepted by checker"
-        (checkModelSolution m6 text == .accepted)
-  | _ => st ← st.check "sat: negative values model solved" (false)
-
-  -- ## UNSAT models
-
-  -- int_plus impossible on the domains
-  let u1 := parseOrPanic
-    "var 1..2: x;\nvar 1..2: y;\nconstraint int_plus(x, y, 10);\nsolve satisfy;"
-  match solveModel u1 with
-  | .unsat =>
-      st ← st.check "unsat: int_plus impossible" true
-      -- brute-force cross-check through the checker
-      let ok := (allAssigns ([[1, 2], [1, 2]] : List (List Int))).all
-        (fun l => match l with
-          | [a, b] =>
-              checkModelSolution u1
-                (emitAssignment ["x", "y"] [Value.int a, Value.int b]) != .accepted
-          | _ => true)
-      st ← st.check "unsat: brute force agrees" ok
-  | _ => st ← st.check "unsat: int_plus impossible" (false)
-
-  -- contradictory constraints
-  let u2 := parseOrPanic
-    "var 1..3: x;\nconstraint int_le(x, 1);\nconstraint int_gt(x, 2);\nsolve satisfy;"
-  match solveModel u2 with
-  | .unsat => st ← st.check "unsat: contradictory comparisons" true
-  | _ => st ← st.check "unsat: contradictory comparisons" (false)
-
-  -- empty domain (reversed range, R1): the slot exists but has no values
-  let u3 := parseOrPanic "var 11..10: x;\nsolve satisfy;"
-  match solveModel u3 with
-  | .unsat => st ← st.check "unsat: empty domain slot" true
-  | _ => st ← st.check "unsat: empty domain slot" (false)
-
-  -- initialized variable outside its own domain: no search can fix it
-  let u4 := parseOrPanic "var 1..3: x = 5;\nsolve satisfy;"
-  match solveModel u4 with
-  | .unsat => st ← st.check "unsat: initializer violates domain" true
-  | _ => st ← st.check "unsat: initializer violates domain" (false)
-
-  -- global constraint unsatisfiable
-  let u5 := parseOrPanic
-    "var 1..2: x;\nvar 1..2: y;\n\
-     constraint fzn_all_different_int([x, y]);\n\
-     constraint int_eq(x, y);\nsolve satisfy;"
-  match solveModel u5 with
-  | .unsat => st ← st.check "unsat: alldiff vs int_eq" true
-  | _ => st ← st.check "unsat: alldiff vs int_eq" (false)
-
-  -- ## Unsupported / out of fragment
-
-  -- unbounded var int
-  let s1 := parseOrPanic "var int: x;\nconstraint int_eq(x, 5);\nsolve satisfy;"
-  match solveModel s1 with
-  | .unsupported r =>
-      st ← st.check "unsupported: unbounded var int"
-        (r.contains "finite")
-  | _ => st ← st.check "unsupported: unbounded var int" (false)
-
-  -- set variable
-  let s2 := parseOrPanic "var set of 1..3: s;\nsolve satisfy;"
-  match solveModel s2 with
-  | .unsupported r => st ← st.check "unsupported: set variable" (r.contains "set")
-  | _ => st ← st.check "unsupported: set variable" (false)
-  -- unsupported global (fzn_span needs optional variables)
-  let s3 := parseOrPanic
-    "var 1..4: u;\nvar 1..4: v;\nconstraint fzn_span([u, v]);\nsolve satisfy;"
-  match solveModel s3 with
-  | .unsupported r =>
-      st ← st.check "unsupported: fzn_span" (r.contains "fzn_span")
-  | _ => st ← st.check "unsupported: fzn_span" (false)
-
-  -- ill-formed model (duplicate declaration)
-  let s4 := parseOrPanic "var 1..3: x;\nvar 1..3: x;\nsolve satisfy;"
-  match solveModel s4 with
-  | .unsupported _ => st ← st.check "unsupported: ill-formed model" true
-  | _ => st ← st.check "unsupported: ill-formed model" (false)
-
-  -- oversized domain (cap)
-  let s5 := parseOrPanic "var 1..200000: x;\nsolve satisfy;"
-  match solveModel s5 with
-  | .unsupported _ => st ← st.check "unsupported: oversized domain" true
-  | _ => st ← st.check "unsupported: oversized domain" (false)
-
-  -- ## Search-order sanity: the first solution is the first in order
-
-  let m7 := parseOrPanic "var 1..3: x;\nvar 1..3: y;\nsolve satisfy;"
-  match solveModel m7 with
-  | .sat text =>
-      st ← st.check "order: first solution is lexicographically first"
-        (text == "x = 1;\ny = 1;\n----------")
-  | _ => st ← st.check "order: free model solved" (false)
-
-  -- ## Integration (Round 3): the propagating and MRV solvers
-
-  -- verdict-level agreement helper: same sat/unsat classification
-  let agree (r1 r2 : SolveResult) : Bool :=
-    match r1, r2 with
-    | .sat _, .sat _ => true
-    | .unsat, .unsat => true
-    | .unsupported _, .unsupported _ => true
-    | _, _ => false
-
-  -- the three entry points agree on every earlier model (SAT and
-  -- UNSAT and unsupported alike); sat texts may differ but the
-  -- verdict must not
-  let all3 : List String :=
-    [ "var 1..3: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 5);\nsolve satisfy;"
-    , "var 1..2: x;\nvar 1..2: y;\nconstraint int_plus(x, y, 10);\nsolve satisfy;"
-    , "var bool: a;\nvar bool: b;\nconstraint bool_and(a, b, true);\nsolve satisfy;"
-    , "var 1..3: x;\nconstraint int_le(x, 1);\nconstraint int_gt(x, 2);\nsolve satisfy;"
-    , "var 11..10: x;\nsolve satisfy;"
-    , "var int: x;\nconstraint int_eq(x, 5);\nsolve satisfy;"
-    , "var 1..3: x;\nvar 1..3: x;\nsolve satisfy;" ]
-  let mut idx := 0
-  for src in all3 do
-    idx := idx + 1
-    let m := parseOrPanic src
-    st ← st.check s!"integration: prop agrees with reference {idx}"
-      (agree (solveModelProp 50 m) (solveModel m))
-    st ← st.check s!"integration: heur agrees with reference {idx}"
-      (agree (solveModelHeur m) (solveModel m))
-
-  -- sat texts of both new entry points are checker-accepted
-  match solveModelProp 50 m1 with
-  | .sat text =>
-      st ← st.check "integration: prop sat text accepted"
-        (checkModelSolution m1 text == .accepted)
-  | _ => st ← st.check "integration: prop sat text accepted" (false)
-  match solveModelHeur m1 with
-  | .sat text =>
-      st ← st.check "integration: heur sat text accepted"
-        (checkModelSolution m1 text == .accepted)
-  | _ => st ← st.check "integration: heur sat text accepted" (false)
-
-  -- a model where extraction finds constraints (int_eq/int_ne/int_le
-  -- chains) and pruning still returns the right answer: x = y, x ≠ 1,
-  -- x ≤ y on 1..3 (solutions: (2,2),(3,3))
-  let mi := parseOrPanic
-    "var 1..3: x;\nvar 1..3: y;\nconstraint int_eq(x, y);\n\
-     constraint int_ne(x, 1);\nconstraint int_le(x, y);\nsolve satisfy;"
-  -- extraction finds the two slot-slot constraints (int_eq, int_le);
-  -- int_ne(x, 1) has a literal argument and is not extracted
-  st ← st.check "integration: extraction finds int_eq/le (ne-with-literal skipped)"
-    (match extractConstraints mi with
-     | .ok cs => cs.length == 2
-     | .error _ => false)
-  match solveModel mi with
-  | .sat _ =>
-      match solveModelProp 50 mi with
-      | .sat text =>
-          st ← st.check "integration: pruned chain model accepted"
-            (checkModelSolution mi text == .accepted)
-          st ← st.check "integration: pruned chain solution is x = y ≥ 2"
-            ((text.contains "x = 2;" && text.contains "y = 2;") ||
-              (text.contains "x = 3;" && text.contains "y = 3;"))
-      | _ => st ← st.check "integration: pruned chain model solved" (false)
-      st ← st.check "integration: prop agrees with reference (chain)"
-        (agree (solveModelProp 50 mi) (solveModel mi))
-      st ← st.check "integration: heur agrees with reference (chain)"
-        (agree (solveModelHeur mi) (solveModel mi))
-  | _ => st ← st.check "integration: chain model solved by reference" (false)
-
-  -- pigeonhole-style UNSAT, all constraints extracted: 4 variables 1..3
-  -- with all pairwise int_ne (4 pigeons, 3 holes)
-  let pigeons := (List.range 4).flatMap (fun i =>
-    (List.range 4).filterMap (fun j =>
-      if i < j then some (i, j) else none))
-  let mut phSrc := ""
-  for i in [0, 1, 2, 3] do
-    phSrc := phSrc ++ s!"var 1..3: p{i};\n"
-  for (i, j) in pigeons do
-    phSrc := phSrc ++ s!"constraint int_ne(p{i}, p{j});\n"
-  phSrc := phSrc ++ "solve satisfy;"
-  let mph := parseOrPanic phSrc
-  -- all six pairwise constraints are extracted
-  st ← st.check "integration: pigeonhole constraints all extracted"
-    (match extractConstraints mph with
-     | .ok cs => cs.length == 6
-     | .error _ => false)
-  match solveModel mph with
-  | .unsat =>
-      st ← st.check "integration: pigeonhole unsat by reference" true
-      match solveModelProp 50 mph with
-      | .unsat =>
-          st ← st.check "integration: pigeonhole unsat by pruning" true
-          -- a very small fuel still suffices: the fixpoint contradicts early
-          st ← st.check "integration: pigeonhole unsat with small fuel"
-            (agree (solveModelProp 2 mph) .unsat &&
-              agree (solveModelProp 0 mph) .unsat)
-      | _ => st ← st.check "integration: pigeonhole unsat by pruning" (false)
-      st ← st.check "integration: pigeonhole heur agrees"
-        (agree (solveModelHeur mph) (solveModel mph))
-  | _ => st ← st.check "integration: pigeonhole unsat by reference" (false)
-
-  -- a model with NO extractable constraints (only fzn_all_different_int):
-  -- the empty-propagator fallback path (prunedSearch with an empty
-  -- constraint set is the reference search)
-  let mn := parseOrPanic
-    "var 1..3: x;\nvar 1..3: y;\nvar 1..3: z;\n\
-     constraint fzn_all_different_int([x, y, z]);\nsolve satisfy;"
-  st ← st.check "integration: no constraints extracted (alldiff only)"
-    (match extractConstraints mn with
-     | .ok cs => cs.length == 0
-     | .error _ => false)
-  match solveModel mn with
-  | .sat _ =>
-      match solveModelProp 50 mn with
-      | .sat text =>
-          st ← st.check "integration: fallback alldiff accepted"
-            (checkModelSolution mn text == .accepted)
-      | _ => st ← st.check "integration: fallback alldiff solved" (false)
-      st ← st.check "integration: prop agrees with reference (alldiff)"
-        (agree (solveModelProp 50 mn) (solveModel mn))
-  | _ => st ← st.check "integration: alldiff model solved by reference" (false)
-
-  -- UNSAT via the fallback path too: alldiff + int_eq (the int_eq IS
-  -- extracted, the alldiff is not — mixed extraction)
-  let mu := parseOrPanic
-    "var 1..2: x;\nvar 1..2: y;\n\
-     constraint fzn_all_different_int([x, y]);\n\
-     constraint int_eq(x, y);\nsolve satisfy;"
-  st ← st.check "integration: mixed extraction (alldiff + int_eq)"
-    (match extractConstraints mu with
-     | .ok cs => cs.length == 1
-     | .error _ => false)
-  st ← st.check "integration: mixed model unsat by all three"
-    (agree (solveModel mu) .unsat && agree (solveModelProp 50 mu) .unsat &&
-      agree (solveModelHeur mu) .unsat)
-
-  -- ## Final integration (Round 4): the composed front door
-  --
-  -- The config-matrix battery: every supported SolveConfig combination
-  -- run on SAT/UNSAT/unsupported models, checked for verdict-level
-  -- agreement with the reference `solveModel` (sat classification,
-  -- checker-accepted texts, unsat classification), plus the
-  -- documented-unsupported combos and the budget/learning paths.
-
-  -- verdict helpers on the config level: a config run classifies sat
-  -- exactly when the reference does; its sat text is accepted; and
-  -- unsat agrees with the reference verdict
-  let cfgSat (cfg : SolveConfig) (m : Model) : Bool :=
-    match solveModelWith cfg m with
-    | .sat text => checkModelSolution m text == .accepted
-    | _ => false
-  let cfgAgreeSat (cfg : SolveConfig) (m : Model) : Bool :=
-    match solveModelWith cfg m, solveModel m with
-    | .sat _, .sat _ => true
-    | .unsat, .unsat => true
-    | .unsupported _, .unsupported _ => true
-    | .unknown _, .unsupported _ => true
-    | _, _ => false
-  let cfgAgreeUnsat (cfg : SolveConfig) (m : Model) : Bool :=
-    match solveModelWith cfg m, solveModel m with
-    | .unsat, .unsat => true
-    | .sat _, .sat _ => true
-    | _, _ => false
-
-  -- the six supported configurations
-  let cfgRef : SolveConfig := { useProp := false, useMrv := false, budget := none, nogoods := false }
-  let cfgProp : SolveConfig := { useProp := true, useMrv := false, budget := none, nogoods := false }
-  let cfgMrv : SolveConfig := { useProp := false, useMrv := true, budget := none, nogoods := false }
-  let cfgPropMrv : SolveConfig := { useProp := true, useMrv := true, budget := none, nogoods := false }
-  let cfgLearn : SolveConfig := { useProp := false, useMrv := false, budget := none, nogoods := true }
-  let cfgBud : SolveConfig := { useProp := false, useMrv := false, budget := some 1000, nogoods := false }
-  let cfgs : List (String × SolveConfig) :=
-    [ ("ref", cfgRef), ("prop", cfgProp), ("mrv", cfgMrv)
-    , ("propmrv", cfgPropMrv), ("learn", cfgLearn), ("budget", cfgBud) ]
-
-  -- the battery of models: SAT (mixed constraint shapes), UNSAT,
-  -- unsupported (out of fragment), pigeonhole UNSAT (all pairwise
-  -- int_ne extracted — the strongest pruning case)
-  let cfgModels : List (String × String) :=
-    [ ("sat: int_plus", "var 1..3: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 5);\nsolve satisfy;")
-    , ("sat: chain", "var 1..3: x;\nvar 1..3: y;\nconstraint int_eq(x, y);\nconstraint int_ne(x, 1);\nconstraint int_le(x, y);\nsolve satisfy;")
-    , ("sat: bool", "var bool: a;\nvar bool: b;\nconstraint bool_and(a, b, true);\nsolve satisfy;")
-    , ("unsat: int_plus", "var 1..2: x;\nvar 1..2: y;\nconstraint int_plus(x, y, 10);\nsolve satisfy;")
-    , ("unsat: contrad", "var 1..3: x;\nconstraint int_le(x, 1);\nconstraint int_gt(x, 2);\nsolve satisfy;")
-    , ("unsat: empty dom", "var 11..10: x;\nsolve satisfy;")
-    , ("unsupported: unbounded", "var int: x;\nconstraint int_eq(x, 5);\nsolve satisfy;")
-    , ("unsupported: dup", "var 1..3: x;\nvar 1..3: x;\nsolve satisfy;")
-    , ("pigeonhole", phSrc) ]
-
-  let mut cfgIdx := 0
-  for (cfgName, cfg) in cfgs do
-    for (mName, src) in cfgModels do
-      cfgIdx := cfgIdx + 1
-      let m := parseOrPanic src
-      -- every config agrees with the reference verdict (modulo
-      -- budget turns unsupported into unknown)
-      st ← st.check s!"config {cfgName}: agrees with reference [{mName}]"
-        (cfgAgreeSat cfg m)
-      -- a sat verdict's text is checker-accepted (solveModelWith_sat_sound)
-      st ← st.check s!"config {cfgName}: sat text accepted [{mName}]"
-        (cfgSat cfg m || (match solveModelWith cfg m with | .sat _ => false | _ => true))
-
-  -- UNSAT classification in isolation, on the UNSAT models
-  for (cfgName, cfg) in cfgs do
-    st ← st.check s!"config {cfgName}: unsat classification agrees"
-      (cfgAgreeUnsat cfg u1 && cfgAgreeUnsat cfg u2 &&
-        cfgAgreeUnsat cfg u5)
-
-  -- the strongest pruning combination, prop+mrv, on the pigeonhole
-  -- UNSAT model: all six pairwise int_ne constraints are extracted
-  -- and pruning refutes the model
-  st ← st.check "config propmrv: pigeonhole unsat"
-    (match solveModelWith cfgPropMrv mph, solveModel mph with
-     | .unsat, .unsat => true
-     | _, _ => false)
-  -- with small propagation fuel too (the fixpoint contradicts early;
-  -- small fuel only weakens pruning, never soundness)
-  st ← st.check "config propmrv: pigeonhole unsat with small fuel"
-    (match solveModelPropMrv 2 mph, solveModelPropMrv 0 mph with
-     | .unsat, .unsat => true
-     | _, _ => false)
-
-  -- MRV ordering is observable: the prop+mrv solver still emits in
-  -- declaration order (the unpermuted slot order)
-  match solveModelWith cfgPropMrv mi with
-  | .sat text =>
-      st ← st.check "config propmrv: chain model accepted"
-        (checkModelSolution mi text == .accepted)
-      st ← st.check "config propmrv: chain solution is x = y ≥ 2"
-        ((text.contains "x = 2;" && text.contains "y = 2;") ||
-          (text.contains "x = 3;" && text.contains "y = 3;"))
-  | _ => st ← st.check "config propmrv: chain model solved" (false)
-  st ← st.check "config propmrv: agrees with reference (chain)"
-    (cfgAgreeSat cfgPropMrv mi)
-
-  -- budget-limited runs: unknown, never unsat, on a hard-enough
-  -- instance with a small budget (the schedule [0, 0, 0, 0] is all
-  -- budgetOut; the model below has a solution so unsat would be a
-  -- false refutation — the safety theorem instantiated)
-  let mSmall := parseOrPanic
-    "var 1..3: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 5);\nsolve satisfy;"
-  let cfgTiny : SolveConfig :=
-    { useProp := false, useMrv := false, budget := some 0, nogoods := false }
-  st ← st.check "config budget: tiny budget gives unknown on sat model"
-    (solveModelWith cfgTiny mSmall == .unknown "no verdict: the budget schedule was exhausted or the model was statically refused")
-  -- same via the default schedule on a genuinely hard instance: the
-  -- pigeonhole model is UNSAT and big enough that a small total
-  -- budget cannot exhaust it
-  st ← st.check "config budget: small budget on pigeonhole is not unsat"
-    (solveModelWith { cfgBud with budget := some 3 } mph != .unsat)
-  -- and a sufficient budget decides the same SAT model
-  match solveModelWith cfgBud mSmall with
-  | .sat text =>
-      st ← st.check "config budget: sufficient budget finds accepted solution"
-        (checkModelSolution mSmall text == .accepted)
-  | _ => st ← st.check "config budget: sufficient budget finds accepted solution" (false)
-  -- an out-of-fragment model under a budget: unknown (no claim)
-  st ← st.check "config budget: out-of-fragment model is unknown"
-    (solveModelWith cfgBud s1 == .unknown "no verdict: the budget schedule was exhausted or the model was statically refused")
-  -- an UNSAT model with a sufficient budget: real unsat
-  st ← st.check "config budget: unsat model with sufficient budget"
-    (solveModelWith cfgBud u2 == .unsat)
-
-  -- nogood-learning runs: agreement on skewed-domain models (one
-  -- slot much larger than the other, where the learning loop's
-  -- decision-trail NoGoods prune whole subtrees)
-  let mSkew := parseOrPanic
-    "var 1..9: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 12);\nsolve satisfy;"
-  match solveModelWith cfgLearn mSkew with
-  | .sat text =>
-      st ← st.check "config learn: skewed-domain model accepted"
-        (checkModelSolution mSkew text == .accepted)
-  | _ => st ← st.check "config learn: skewed-domain model solved" (false)
-  st ← st.check "config learn: agrees with reference (skewed)"
-    (cfgAgreeSat cfgLearn mSkew)
-  let uSkew := parseOrPanic
-    "var 1..9: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 50);\nsolve satisfy;"
-  st ← st.check "config learn: skewed-domain unsat agrees"
-    (match solveModelWith cfgLearn uSkew, solveModel uSkew with
-     | .unsat, .unsat => true
-     | _, _ => false)
-
-  -- the documented-unsupported combinations refuse with a reason
-  -- naming the configuration
-  let badCfgs : List (String × SolveConfig) :=
-    [ ("prop+budget", { cfgProp with budget := some 100 })
-    , ("mrv+budget", { cfgMrv with budget := some 100 })
-    , ("propmrv+budget", { cfgPropMrv with budget := some 100 })
-    , ("learn+budget", { cfgLearn with budget := some 100 })
-    , ("prop+learn", { cfgProp with nogoods := true })
-    , ("mrv+learn", { cfgMrv with nogoods := true })
-    , ("propmrv+learn", { cfgPropMrv with nogoods := true })
-    , ("all four", { useProp := true, useMrv := true, budget := some 100, nogoods := true }) ]
-  for (bName, bcfg) in badCfgs do
-    match solveModelWith bcfg mSmall with
-    | .unsupported r =>
-        st ← st.check s!"config unsupported: {bName} refused with reason"
-          (r.contains "not supported")
-    | _ => st ← st.check s!"config unsupported: {bName} refused with reason" (false)
-
 
 
   -- ## Phase 2: the DIRECT certified-fragment compiler (nonvacuous tests)
@@ -771,14 +258,381 @@ def main : IO UInt32 := do
      | .unsat => true
      | _ => false)
 
-  -- outside the fragment (multi-value domains): unsupported
+  -- multi-value domains: ADMITTED by the widened gate; the engine
+  -- decides + backtracks (plusSlot propagator coverage)
   let cfrag := parseOrPanic
-    "var 1..3: x;\nvar 1..3: y;\nconstraint int_plus(x, y, 5);\nsolve satisfy;"
+    "var 1..3: x;\nvar 1..3: y;\nvar 1..3: z;\nconstraint int_plus(x, y, z);\nsolve satisfy;"
   match LeanFzn.Solver.Direct.solveCertified cfrag with
-  | .unsupported r =>
-      st ← st.check "certified: multi-value domain refused"
-        (r.contains "singleton-domain")
-  | _ => st ← st.check "certified: multi-value domain refused" (false)
+  | .sat store =>
+      -- the SAT theorem applies (multi-value!); the store satisfies
+      -- the constraint executably: x + y = z on the read values
+      let x := (store (Ident.mk "x")).get!
+      let y := (store (Ident.mk "y")).get!
+      let z := (store (Ident.mk "z")).get!
+      st ← st.check "certified: multi-value domain solves by decisions"
+        (match x, y, z with
+         | .int a, .int b, .int c => a + b == c
+         | _, _, _ => false)
+      -- the emitted text is checker-accepted
+      st ← st.check "certified: multi-value emitted text checker-accepted"
+        (checkModelSolution cfrag
+          (LeanFzn.Solver.Direct.emitCertifiedSolution cfrag store)
+          == .accepted)
+  | _ => st ← st.check "certified: multi-value domain solves by decisions" (false)
+
+  -- THEOREM-LEVEL nonvacuity on the widened gate: the SAT theorem
+  -- applies to a multi-value model (decisions + backtracking)
+  have wcfrag : WellFormed fullSig cfrag :=
+    (LeanFzn.Check.wellFormedFastB_iff cfrag).mp (by native_decide)
+  match hcres : LeanFzn.Solver.Direct.solveCertified cfrag with
+  | .sat cstore =>
+      have _hcert : Satisfies fullSig fullInterp cfrag cstore :=
+        LeanFzn.Solver.Direct.solveCertified_sat_correct
+          (m := cfrag) (store := cstore) wcfrag hcres
+      _ ← st.check "certified theorem: multi-value SAT theorem applies" true
+      pure ()
+  | _ =>
+      _ ← st.check "certified theorem: multi-value SAT theorem applies" false
+      pure ()
+
+  -- multi-value UNSAT (plusSlot + const bounds; no linLe): the
+  -- engine refutes AND the wide door certifies the exclusion
+  let cmunsat2 := parseOrPanic
+    "var 1..2: x;\nvar 1..2: y;\nvar 1..2: z;\nconstraint int_plus(x, y, z);\nconstraint int_le(x, 0);\nsolve satisfy;"
+  st ← st.check "certified: multi-value UNSAT (wide door)"
+    (match LeanFzn.Solver.Direct.solveCertified cmunsat2 with
+     | .unsat => true
+     | _ => false)
+
+  -- multi-value UNSAT over int_le/int_lt (le/lt slots): the wide
+  -- door's core shape
+  let cmunsat3 := parseOrPanic
+    "var 0..2: x;\nvar 0..2: y;\nconstraint int_le(x, y);\nconstraint int_lt(y, x);\nsolve satisfy;"
+  st ← st.check "certified: multi-value UNSAT (le/lt)"
+    (match LeanFzn.Solver.Direct.solveCertified cmunsat3 with
+     | .unsat => true
+     | _ => false)
+
+  -- THE FALLBACK NOGOOD REGRESSIONS (PLAN §5 items 4–5): the
+  -- chronological-fallback arm's trail-nogood learning on EMPTY
+  -- propagator conflicts (the propNe both-singleton shape). Without
+  -- the learning these pigeonholes fuel-exhaust (decideLiteral
+  -- re-derives the same bisection forever); with it ph3 solves SAT
+  -- and ph4 refutes through the wide door.
+  let cph3 := parseOrPanic
+    "var 0..2: x;\nvar 0..2: y;\nvar 0..2: z;\nconstraint int_ne(x, y);\nconstraint int_ne(x, z);\nconstraint int_ne(y, z);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified cph3 with
+  | .sat store =>
+      -- the three reads are pairwise distinct integers (a valid
+      -- all-different witness over 0..2)
+      let x := (store (Ident.mk "x")).get!
+      let y := (store (Ident.mk "y")).get!
+      let z := (store (Ident.mk "z")).get!
+      st ← st.check "certified: int_ne pigeonhole (3 slots/3 vals) solves SAT"
+        (match x, y, z with
+         | .int a, .int b, .int c =>
+             !(a == b) && !(a == c) && !(b == c) &&
+               0 ≤ a && a ≤ 2 && 0 ≤ b && b ≤ 2 && 0 ≤ c && c ≤ 2
+         | _, _, _ => false)
+      -- the emitted text round-trips through the checker
+      st ← st.check "certified: int_ne pigeonhole SAT text checker-accepted"
+        (checkModelSolution cph3
+          (LeanFzn.Solver.Direct.emitCertifiedSolution cph3 store)
+          == .accepted)
+  | _ => st ← st.check "certified: int_ne pigeonhole (3 slots/3 vals) solves SAT" (false)
+
+  -- the 4-slots/4-values pigeonhole over 0..2 is UNSAT (pigeonhole:
+  -- 4 distinct values cannot fit in 3); the engine refutes it via
+  -- fallback-nogood learning and the wide door certifies (no linLe)
+  let cph4 := parseOrPanic
+    "var 0..2: x;\nvar 0..2: y;\nvar 0..2: z;\nvar 0..2: w;\nconstraint int_ne(x, y);\nconstraint int_ne(x, z);\nconstraint int_ne(y, z);\nconstraint int_ne(x, w);\nconstraint int_ne(y, w);\nconstraint int_ne(z, w);\nsolve satisfy;"
+  st ← st.check "certified: int_ne pigeonhole (4 slots/3 vals) UNSAT"
+    (match LeanFzn.Solver.Direct.solveCertified cph4 with
+     | .unsat => true
+     | _ => false)
+  -- THEOREM-LEVEL nonvacuity: the wide-door unsat theorem applies to
+  -- the fallback-nogood-refuted pigeonhole
+  have wcph4 : WellFormed fullSig cph4 :=
+    (LeanFzn.Check.wellFormedFastB_iff cph4).mp (by native_decide)
+  match hph4 : LeanFzn.Solver.Direct.solveCertified cph4 with
+  | .unsat =>
+      have _hph : ¬ ∃ store, Satisfies fullSig fullInterp cph4
+          store ∧ LeanFzn.Solver.Direct.ParamHonest cph4 store :=
+        LeanFzn.Solver.Direct.solveCertified_unsat_correct
+          (m := cph4) wcph4 hph4
+      _ ← st.check "certified theorem: fallback-nogood unsat_correct applies" true
+      pure ()
+  | _ =>
+      _ ← st.check "certified theorem: fallback-nogood unsat_correct applies" false
+      pure ()
+
+  -- THE BOOL/MIN/MAX/ABS FAMILY REGRESSIONS (PLAN §5 item 3, the
+  -- six 2026-10-01 registrations): each model previously
+  -- fuel-exhausted or was unsupported; now the propagators drive
+  -- the search to a checker-accepted solution
+  let cbooland := parseOrPanic
+    "var bool: a;\nvar bool: b;\nvar bool: c;\nconstraint bool_and(a, b, c);\nconstraint bool_not(c, a);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified cbooland with
+  | .sat store =>
+      -- a ∧ b = c with c = ¬a: (a=false, b=false, c=false) and
+      -- (a=false,b=true,c=false) both work; check the reads agree
+      let a := (store (Ident.mk "a")).get!
+      let b := (store (Ident.mk "b")).get!
+      let c := (store (Ident.mk "c")).get!
+      st ← st.check "certified: bool_and+bool_not model solves SAT"
+        (match a, b, c with
+         | .bool x, .bool y, .bool z =>
+             (x && y) == z && z == !x
+         | _, _, _ => false)
+      st ← st.check "certified: bool model text checker-accepted"
+        (checkModelSolution cbooland
+          (LeanFzn.Solver.Direct.emitCertifiedSolution cbooland store)
+          == .accepted)
+  | _ => st ← st.check "certified: bool_and+bool_not model solves SAT" (false)
+
+  let cminmax := parseOrPanic
+    "var 0..5: x;\nvar 0..5: y;\nvar 0..5: z;\nconstraint int_min(x, y, z);\nconstraint int_max(x, y, x);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified cminmax with
+  | .sat store =>
+      let x := (store (Ident.mk "x")).get!
+      let y := (store (Ident.mk "y")).get!
+      let z := (store (Ident.mk "z")).get!
+      st ← st.check "certified: int_min/int_max model solves SAT"
+        (match x, y, z with
+         | .int a, .int b, .int c => min a b == c && max a b == a
+         | _, _, _ => false)
+  | _ => st ← st.check "certified: int_min/int_max model solves SAT" (false)
+
+  let cabs := parseOrPanic
+    "var -5..5: x;\nvar 0..5: r;\nconstraint int_abs(x, r);\nconstraint int_lt(r, 3);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified cabs with
+  | .sat store =>
+      let x := (store (Ident.mk "x")).get!
+      let r := (store (Ident.mk "r")).get!
+      st ← st.check "certified: int_abs model solves SAT"
+        (match x, r with
+         | .int a, .int b => LeanFzn.Solver.absValue a == b && b < 3
+         | _, _ => false)
+  | _ => st ← st.check "certified: int_abs model solves SAT" (false)
+
+  -- the bool UNSAT shape: a ∨ b = c, c = ¬a, a ∧ b = c — jointly
+  -- unsatisfiable (c=¬a and a∧b=c force a=b=c and c=¬a)
+  let cboolunsat := parseOrPanic
+    "var bool: a;\nvar bool: b;\nvar bool: c;\nconstraint bool_or(a, b, c);\nconstraint bool_not(c, a);\nconstraint bool_and(a, b, c);\nsolve satisfy;"
+  st ← st.check "certified: bool or+not+and mix is UNSAT"
+    (match LeanFzn.Solver.Direct.solveCertified cboolunsat with
+     | .unsat => true
+     | _ => false)
+
+  -- THE LINLE/LINEQ/TIMES/ALLDIFF FAMILY REGRESSIONS (PLAN §5 item 3
+  -- completion, 2026-10-02): the fixed propLinLe2's reasons are
+  -- state-free valid, so multi-value linLe UNSAT is now CERTIFIED
+  -- through the wide door (the linLeFree gate is GONE)
+  let clinleu := parseOrPanic
+    "var 1..3: x;\nvar 1..3: y;\nconstraint int_lin_le([1,1],[x,y],2);\nconstraint int_lin_le([1,-1],[y,x],-2);\nsolve satisfy;"
+  st ← st.check "certified: multi-value linLe UNSAT (wide door, no gate)"
+    (match LeanFzn.Solver.Direct.solveCertified clinleu with
+     | .unsat => true
+     | _ => false)
+  have wclinleu : WellFormed fullSig clinleu :=
+    (LeanFzn.Check.wellFormedFastB_iff clinleu).mp (by native_decide)
+  match hleu : LeanFzn.Solver.Direct.solveCertified clinleu with
+  | .unsat =>
+      have _hlu : ¬ ∃ store, Satisfies fullSig fullInterp clinleu
+          store ∧ LeanFzn.Solver.Direct.ParamHonest clinleu store :=
+        LeanFzn.Solver.Direct.solveCertified_unsat_correct
+          (m := clinleu) wclinleu hleu
+      _ ← st.check "certified theorem: linLe wide-door unsat_correct applies" true
+      pure ()
+  | _ =>
+      _ ← st.check "certified theorem: linLe wide-door unsat_correct applies" false
+      pure ()
+
+  -- linLe SAT still solves
+  let clinles := parseOrPanic
+    "var 1..3: x;\nconstraint int_lin_le([1],[x],2);\nsolve satisfy;"
+  st ← st.check "certified: linLe SAT"
+    (match LeanFzn.Solver.Direct.solveCertified clinles with
+     | .sat _ => true
+     | _ => false)
+
+  -- linEq (int_plus with a literal result)
+  let clineq := parseOrPanic
+    "var 0..5: x;\nvar 0..5: y;\nconstraint int_plus(x, y, 7);\nsolve satisfy;"
+  st ← st.check "certified: int_plus literal (linEq) SAT"
+    (match LeanFzn.Solver.Direct.solveCertified clineq with
+    | .sat store =>
+        let x := (store (Ident.mk "x")).get!
+        let y := (store (Ident.mk "y")).get!
+        match x, y with
+        | .int a, .int b => a + b == 7
+        | _, _ => false
+    | _ => false)
+
+  -- THE GENERAL-COEFFICIENT LINEAR REGRESSIONS (2026-10-03): the
+  -- propLinLe2/propLinEq2 slots now narrow with coefficients
+  -- c ∉ {1,−1} via Euclidean Int.div bounds (lin2_fl_hi_lt /
+  -- lin2_cl_neg_lo_gt), so multi-value general-coefficient models
+  -- solve and refute through the wide certified door
+  -- general-c SAT: 2x + y ≤ 4 with y ≤ 0 — the propagator narrows
+  -- x (2x ≤ 4 − y ≤ 4) and the search completes with reads
+  -- satisfying both constraints
+  let clinle2s := parseOrPanic
+    "var 0..5: x;\nvar 0..5: y;\nconstraint int_lin_le([2,1],[x,y],4);\nconstraint int_lin_le([1],[y],0);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified clinle2s with
+  | .sat store =>
+      let x := (store (Ident.mk "x")).get!
+      let y := (store (Ident.mk "y")).get!
+      st ← st.check "certified: general-c linLe SAT (2x+y≤4, y≤0)"
+        (match x, y with
+        | .int a, .int b => 2 * a + b ≤ 4 ∧ b ≤ 0
+        | _, _ => false)
+      st ← st.check "certified: general-c linLe SAT text checker-accepted"
+        (checkModelSolution clinle2s
+          (LeanFzn.Solver.Direct.emitCertifiedSolution clinle2s store)
+          == .accepted)
+  | _ => st ← st.check "certified: general-c linLe SAT (2x+y≤4, y≤0)" (false)
+
+  -- general-c linLe UNSAT: 2x + y ≤ 0 with x,y ≥ 1 — 2x + y ≥ 3 > 0
+  let clinle2u := parseOrPanic
+    "var 1..5: x;\nvar 1..5: y;\nconstraint int_lin_le([2,1],[x,y],0);\nsolve satisfy;"
+  st ← st.check "certified: general-c linLe UNSAT (2x+y≤0, x,y≥1)"
+    (match LeanFzn.Solver.Direct.solveCertified clinle2u with
+     | .unsat => true
+     | _ => false)
+  have wclinle2u : WellFormed fullSig clinle2u :=
+    (LeanFzn.Check.wellFormedFastB_iff clinle2u).mp (by native_decide)
+  match hle2u : LeanFzn.Solver.Direct.solveCertified clinle2u with
+  | .unsat =>
+      have _hl2u : ¬ ∃ store, Satisfies fullSig fullInterp clinle2u
+          store ∧ LeanFzn.Solver.Direct.ParamHonest clinle2u store :=
+        LeanFzn.Solver.Direct.solveCertified_unsat_correct
+          (m := clinle2u) wclinle2u hle2u
+      _ ← st.check
+        "certified theorem: general-c linLe unsat_correct applies" true
+      pure ()
+  | _ =>
+      _ ← st.check
+        "certified theorem: general-c linLe unsat_correct applies" false
+      pure ()
+
+  -- general-c linEq SAT: 3x + y = 7 has solutions (x=0,y=7 etc.); the
+  -- reads satisfy the equation
+  let clineq2s := parseOrPanic
+    "var 0..10: x;\nvar 0..10: y;\nconstraint int_lin_eq([3,1],[x,y],7);\nsolve satisfy;"
+  st ← st.check "certified: general-c linEq SAT (3x+y=7)"
+    (match LeanFzn.Solver.Direct.solveCertified clineq2s with
+    | .sat store =>
+        let x := (store (Ident.mk "x")).get!
+        let y := (store (Ident.mk "y")).get!
+        match x, y with
+        | .int a, .int b => 3 * a + b == 7
+        | _, _ => false
+    | _ => false)
+
+  -- general-c linEq UNSAT: 3x + y = 7 over 0..1 slots — 3x + y ∈
+  -- {0..4}, 7 is out of reach
+  let clineq2u := parseOrPanic
+    "var 0..1: x;\nvar 0..1: y;\nconstraint int_lin_eq([3,1],[x,y],7);\nsolve satisfy;"
+  st ← st.check "certified: general-c linEq UNSAT (3x+y=7 over 0..1)"
+    (match LeanFzn.Solver.Direct.solveCertified clineq2u with
+     | .unsat => true
+     | _ => false)
+
+
+
+  -- timesSlot: x·y = z over slots, with a bounding le
+  let ctimes := parseOrPanic
+    "var 1..4: x;\nvar 1..4: y;\nvar 1..16: z;\nconstraint int_times(x, y, z);\nsolve satisfy;"
+  st ← st.check "certified: int_times SAT"
+    (match LeanFzn.Solver.Direct.solveCertified ctimes with
+     | .sat store =>
+         let x := (store (Ident.mk "x")).get!
+         let y := (store (Ident.mk "y")).get!
+         let z := (store (Ident.mk "z")).get!
+         match x, y, z with
+         | .int a, .int b, .int c => a * b == c
+         | _, _, _ => false
+     | _ => false)
+  let ctimesu := parseOrPanic
+    "var 1..4: x;\nvar 1..4: y;\nvar 1..16: z;\nconstraint int_times(x, y, z);\nconstraint int_le(z, 0);\nsolve satisfy;"
+  st ← st.check "certified: int_times UNSAT (times+le)"
+    (match LeanFzn.Solver.Direct.solveCertified ctimesu with
+     | .unsat => true
+     | _ => false)
+
+  -- times sign deductions: z < 0 with y > 0 propagates x < 0
+  -- (the operand-side sign arm x ≤ 0 narrows x to [-3,-1])
+  let ctimessign := parseOrPanic
+    "var -3..3: x;\nvar 1..4: y;\nvar -12..12: z;\nconstraint int_times(x, y, z);\nconstraint int_le(z, -1);\nsolve satisfy;"
+  st ← st.check "certified: int_times sign UNSAT (z<0, y>0, x≥0)"
+    (match LeanFzn.Solver.Direct.solveCertified ctimessign with
+     | .sat store =>
+         let x := (store (Ident.mk "x")).get!
+         let y := (store (Ident.mk "y")).get!
+         let z := (store (Ident.mk "z")).get!
+         match x, y, z with
+         | .int a, .int b, .int c => a * b == c ∧ a ≤ -1 ∧ b ≥ 1 ∧ c ≤ -1
+         | _, _, _ => false
+     | _ => false)
+  let ctimessignu := parseOrPanic
+    "var 0..3: x;\nvar 1..4: y;\nvar -12..12: z;\nconstraint int_times(x, y, z);\nconstraint int_le(z, -1);\nsolve satisfy;"
+  st ← st.check "certified: int_times sign UNSAT (z<0, y>0, x≥0)"
+    (match LeanFzn.Solver.Direct.solveCertified ctimessignu with
+     | .unsat => true
+     | _ => false)
+  -- the dual: z > 0 with y < 0 propagates x ≤ 0
+  let ctimessignd := parseOrPanic
+    "var -3..3: x;\nvar -4..-1: y;\nvar -12..12: z;\nconstraint int_times(x, y, z);\nconstraint int_le(1, z);\nsolve satisfy;"
+  st ← st.check "certified: int_times sign SAT (z>0, y<0 → x<0)"
+    (match LeanFzn.Solver.Direct.solveCertified ctimessignd with
+     | .sat store =>
+         let x := (store (Ident.mk "x")).get!
+         let y := (store (Ident.mk "y")).get!
+         let z := (store (Ident.mk "z")).get!
+         match x, y, z with
+         | .int a, .int b, .int c => a * b == c ∧ a ≤ -1 ∧ b ≤ -1 ∧ c ≥ 1
+         | _, _, _ => false
+     | _ => false)
+
+  -- allDiff: the 3-slots/2-values pigeonhole (empty-clause conflict
+  -- → the fallback-nogood machinery)
+  let cad := parseOrPanic
+    "var 0..1: x;\nvar 0..1: y;\nvar 0..1: z;\nconstraint all_different([x, y, z]);\nsolve satisfy;"
+  st ← st.check "certified: all_different pigeonhole UNSAT"
+    (match LeanFzn.Solver.Direct.solveCertified cad with
+     | .unsat => true
+     | _ => false)
+  have wcad : WellFormed fullSig cad :=
+    (LeanFzn.Check.wellFormedFastB_iff cad).mp (by native_decide)
+  match had : LeanFzn.Solver.Direct.solveCertified cad with
+  | .unsat =>
+      have _had : ¬ ∃ store, Satisfies fullSig fullInterp cad
+          store ∧ LeanFzn.Solver.Direct.ParamHonest cad store :=
+        LeanFzn.Solver.Direct.solveCertified_unsat_correct
+          (m := cad) wcad had
+      _ ← st.check "certified theorem: allDiff unsat_correct applies" true
+      pure ()
+  | _ =>
+      _ ← st.check "certified theorem: allDiff unsat_correct applies" false
+      pure ()
+
+  -- THEOREM-LEVEL nonvacuity: solveCertified_unsat_correct applies
+  -- on the WIDE (multi-value, non-linLe) refutation
+  have wcm3 : WellFormed fullSig cmunsat3 :=
+    (LeanFzn.Check.wellFormedFastB_iff cmunsat3).mp (by native_decide)
+  match hcm3 : LeanFzn.Solver.Direct.solveCertified cmunsat3 with
+  | .unsat =>
+      have _hcm : ¬ ∃ store, Satisfies fullSig fullInterp cmunsat3
+          store ∧ LeanFzn.Solver.Direct.ParamHonest cmunsat3 store :=
+        LeanFzn.Solver.Direct.solveCertified_unsat_correct
+          (m := cmunsat3) wcm3 hcm3
+      _ ← st.check "certified theorem: wide unsat_correct applies"
+        true
+      pure ()
+  | _ =>
+      _ ← st.check "certified theorem: wide unsat_correct applies" false
+      pure ()
 
   -- compile failure: unsupported
   let cbad := parseOrPanic
@@ -840,6 +694,152 @@ def main : IO UInt32 := do
           | .int p => st ← st.check "direct: parameter fallback value ≤ 3" (p ≤ 3)
           | _ => st ← st.check "direct: parameter fallback value ≤ 3" (false)
       | none => st ← st.check "direct: parameter fallback finds a value" (false)
+
+  -- ## Phase 4: the AUXILIARY-SLOT literal shapes (the nine pinning
+  -- shapes; each compiles via fresh aux slots with singleton pinned
+  -- domains and solves through the standard DomConstraint paths)
+
+  -- int_times(x, y, 6): SAT with the checker-accepted output
+  let ct1 := parseOrPanic
+    "var 1..6: x;\nvar 1..6: y;\nconstraint int_times(x, y, 6);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified ct1 with
+  | .sat store =>
+      let x := (store (Ident.mk "x")).get!
+      let y := (store (Ident.mk "y")).get!
+      st ← st.check "aux: int_times(x,y,6) solves SAT"
+        (match x, y with
+         | .int a, .int b => a * b == 6
+         | _, _ => false)
+      st ← st.check "aux: int_times emitted text checker-accepted"
+        (checkModelSolution ct1
+          (LeanFzn.Solver.Direct.emitCertifiedSolution ct1 store)
+          == .accepted)
+  | _ => st ← st.check "aux: int_times(x,y,6) solves SAT" (false)
+
+  -- int_times(x, y, 6) + int_le(x, 1): UNSAT (x=1 forces y=6 > 3)
+  let ct2 := parseOrPanic
+    "var 1..3: x;\nvar 1..3: y;\nconstraint int_times(x, y, 6);\nconstraint int_le(x, 1);\nsolve satisfy;"
+  st ← st.check "aux: int_times+int_le UNSAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct2 with
+     | .unsat => true
+     | _ => false)
+
+  -- int_ne(x, 3): SAT
+  let ct3 := parseOrPanic
+    "var 1..3: x;\nconstraint int_ne(x, 3);\nsolve satisfy;"
+  st ← st.check "aux: int_ne(x,3) SAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct3 with
+     | .sat store =>
+         match (store (Ident.mk "x")).get! with
+         | .int a => a ≠ 3
+         | _ => false
+     | _ => false)
+
+  -- int_ne(x, 3) on the singleton {3}: UNSAT
+  let ct4 := parseOrPanic
+    "var 3..3: x;\nconstraint int_ne(x, 3);\nsolve satisfy;"
+  st ← st.check "aux: int_ne(x,3) singleton UNSAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct4 with
+     | .unsat => true
+     | _ => false)
+
+  -- int_ne(3, x): the symmetric form
+  let ct5 := parseOrPanic
+    "var 1..3: x;\nconstraint int_ne(3, x);\nsolve satisfy;"
+  st ← st.check "aux: int_ne(3,x) SAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct5 with
+     | .sat store =>
+         match (store (Ident.mk "x")).get! with
+         | .int a => a ≠ 3
+         | _ => false
+     | _ => false)
+
+  -- bool_and(x, y, true): SAT with checker-accepted output
+  let ct6 := parseOrPanic
+    "var bool: x;\nvar bool: y;\nconstraint bool_and(x, y, true);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.solveCertified ct6 with
+  | .sat store =>
+      st ← st.check "aux: bool_and(x,y,true) solves SAT"
+        (match (store (Ident.mk "x")).get!, (store (Ident.mk "y")).get! with
+         | .bool a, .bool b => a && b
+         | _, _ => false)
+      st ← st.check "aux: bool_and(true) emitted text checker-accepted"
+        (checkModelSolution ct6
+          (LeanFzn.Solver.Direct.emitCertifiedSolution ct6 store)
+          == .accepted)
+  | _ => st ← st.check "aux: bool_and(x,y,true) solves SAT" (false)
+
+  -- bool_and(x, y, false) + bool_or(x, y, true): SAT (exactly one true)
+  let ct7 := parseOrPanic
+    "var bool: x;\nvar bool: y;\nconstraint bool_and(x, y, false);\nconstraint bool_or(x, y, true);\nsolve satisfy;"
+  st ← st.check "aux: bool_and(false)+bool_or(true) SAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct7 with
+     | .sat store =>
+         match (store (Ident.mk "x")).get!, (store (Ident.mk "y")).get! with
+         | .bool a, .bool b => !(a && b) && (a || b)
+         | _, _ => false
+     | _ => false)
+
+  -- bool_and(x, y, false) + bool_and(x, y, true): UNSAT
+  let ct8 := parseOrPanic
+    "var bool: x;\nvar bool: y;\nconstraint bool_and(x, y, false);\nconstraint bool_and(x, y, true);\nsolve satisfy;"
+  st ← st.check "aux: bool_and(false)+bool_and(true) UNSAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct8 with
+     | .unsat => true
+     | _ => false)
+
+  -- bool_or(x, y, false): SAT (both false)
+  let ct9 := parseOrPanic
+    "var bool: x;\nvar bool: y;\nconstraint bool_or(x, y, false);\nsolve satisfy;"
+  st ← st.check "aux: bool_or(x,y,false) SAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct9 with
+     | .sat store =>
+         match (store (Ident.mk "x")).get!, (store (Ident.mk "y")).get! with
+         | .bool a, .bool b => !(a || b)
+         | _, _ => false
+     | _ => false)
+
+  -- int_times(x, 3, y): the symmetric literal-middle form
+  let ct10 := parseOrPanic
+    "var 1..3: x;\nvar 1..9: y;\nconstraint int_times(x, 3, y);\nsolve satisfy;"
+  st ← st.check "aux: int_times(x,3,y) SAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct10 with
+     | .sat store =>
+         match (store (Ident.mk "x")).get!, (store (Ident.mk "y")).get! with
+         | .int a, .int b => a * 3 == b
+         | _, _ => false
+     | _ => false)
+
+  -- int_times(3, x, y): the symmetric literal-first form
+  let ct11 := parseOrPanic
+    "var 1..3: x;\nvar 1..9: y;\nconstraint int_times(3, x, y);\nsolve satisfy;"
+  st ← st.check "aux: int_times(3,x,y) SAT"
+    (match LeanFzn.Solver.Direct.solveCertified ct11 with
+     | .sat store =>
+         match (store (Ident.mk "x")).get!, (store (Ident.mk "y")).get! with
+         | .int a, .int b => 3 * a == b
+         | _, _ => false
+     | _ => false)
+
+  -- int_times with TWO literal arguments: honestly unsupported
+  let ct12 := parseOrPanic
+    "var 1..3: x;\nconstraint int_times(x, 2, 6);\nsolve satisfy;"
+  st ← st.check "aux: int_times(x,2,6) two-literal rejected"
+    (match LeanFzn.Solver.Direct.solveCertified ct12 with
+     | .unsupported r => r.contains "unsupported"
+     | _ => false)
+
+  -- the aux-slot structure: int_times(x,y,6) has ONE aux slot with
+  -- the singleton domain {6}
+  match LeanFzn.Solver.Direct.compileModel ct1 with
+  | .ok p =>
+      st ← st.check "aux: int_times uses one aux slot (3 slots total)"
+        (p.domains.length == 3)
+      st ← st.check "aux: the aux slot's domain is the singleton {6}"
+        (p.domains[2]! == [.int 6])
+  | .error _ =>
+      st ← st.check "aux: int_times uses one aux slot (3 slots total)" (false)
+      st ← st.check "aux: the aux slot's domain is the singleton {6}" (false)
 
   if st.failed == 0 then
     IO.println s!"passed {st.passed} solver tests"

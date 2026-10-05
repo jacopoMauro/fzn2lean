@@ -1861,6 +1861,28 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s
+      | intNe sl k =>
+          -- NEGATIVE intNe literal: filter p = k at slot sl (a
+          -- sub-list, so the ≤ 1 discipline carries over)
+          intro s
+          show ((domOfLit doms ⟨.intNe sl k, false⟩).getD s []).length ≤ 1
+          unfold domOfLit
+          simp only [Bool.false_eq_true, if_false]
+          by_cases hs : s = sl
+          · rw [hs]
+            by_cases hrange : sl < doms.length
+            · rw [length_getD_updateSlot_eq doms sl _ hrange]
+              exact domFilterInt_le_one
+                (d := doms.getD sl [])
+                (keep := fun p => decide (p = k))
+                (hall sl)
+            · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
+              unfold updateSlot
+              rw [setSlot_eq_self_of_le doms (domFilterInt
+                (fun p => decide (p = k)) (doms.getD sl [])) sl hge]
+              exact hall sl
+          · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
+            exact hall s
     | true =>
       cases atom with
       | intLe sl k =>
@@ -1898,6 +1920,28 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
               rw [setSlot_eq_self_of_le doms [.bool b] sl hge]
+              exact hall sl
+          · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
+            exact hall s
+      | intNe sl k =>
+          -- POSITIVE intNe literal: filter p ≠ k at slot sl (a
+          -- sub-list, so the ≤ 1 discipline carries over)
+          intro s
+          show ((domOfLit doms ⟨.intNe sl k, true⟩).getD s []).length ≤ 1
+          unfold domOfLit
+          simp only [if_true]
+          by_cases hs : s = sl
+          · rw [hs]
+            by_cases hrange : sl < doms.length
+            · rw [length_getD_updateSlot_eq doms sl _ hrange]
+              exact domFilterInt_le_one
+                (d := doms.getD sl [])
+                (keep := fun p => decide (p ≠ k))
+                (hall sl)
+            · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
+              unfold updateSlot
+              rw [setSlot_eq_self_of_le doms (domFilterInt
+                (fun p => decide (p ≠ k)) (doms.getD sl [])) sl hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s

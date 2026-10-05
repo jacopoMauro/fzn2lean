@@ -3,34 +3,31 @@ File: Main.lean
 
 Purpose:
   CLI entry point (`leanfzn`) exposing the verified front door
-  (`check`), the solver stack (`solve` with --prop, --mrv, --budget,
-  --nogoods), all-solutions enumeration (`enum`), and branch-and-bound
-  optimization (`optimize`).
+  (`check`) and the certified LCG solver (`solve`).
 
 Dependencies:
-  LeanFzn (FznCheck.checkModelSolution, `Outcome` classifications),
-  solver.Solver (solveModelWith, enumModel, optimizeModel).
+  LeanFzn (FznCheck.checkModelSolution, wellFormedFastB),
+  solver.Direct.Cli (solveCertified, emitCertifiedSolution).
 
 Why:
-  Both libraries together give the executable its two faces: model and
-  solution validation for `check`, and sat/unsat/optimal verdicts with
-  emitted solution text for `solve`/`enum`/`optimize`.
+  The executable's two faces are model/solution validation for
+  `check`, and the certified sat/unsat verdicts of `solve` (source
+  level SAT/UNSAT theorems: `solveCertified_sat_correct` /
+  `solveCertified_unsat_correct`), with emitted solution text.
 
 DAG:
-  LeanFzn + solver/Solver -> Main -> leanfzn executable
+  LeanFzn + solver/Direct/Cli -> Main -> leanfzn executable
 -/
 
 import LeanFzn
-import solver.Solver
 import solver.Direct.Cli
 
 open LeanFzn
 
 /-- The one-line usage summary, printed on argument-level errors. -/
 private def usageString : String :=
-"usage: leanfzn [FILE|-] | leanfzn check MODEL.fzn SOLUTION.txt | \
-  leanfzn solve [--certified] [--prop] [--mrv] [--budget N] [--nogoods] FILE|- | \
-  leanfzn enum FILE|- | leanfzn optimize FILE|-"
+  "usage: leanfzn [FILE|-] | leanfzn check MODEL.fzn SOLUTION.txt | \
+  leanfzn solve [--certified] FILE|-"
 
 private def readFileArg (path : String) : IO (Except String String) := do
   try
@@ -125,86 +122,64 @@ private def runCheck (modelPath solPath : String) : IO UInt32 := do
 
 /-! ## The `solve` subcommand
 
-Runs the composed front door `Solver.solveModelWith`
-(`solver/Config.lean`) on the parsed model.  The default
-configuration is all switches off with no budget, which dispatches to
-the reference `solveModel`; the flags select the other verified entry
-points:
+Runs the certified LCG front door `Direct.solveCertified`
+(`solver/Direct/Cli.lean`): the model is compiled to the shared core
+problem, run through the LCG engine (decisions and backtracking on
+nonempty finite int/bool domains) over the registered proved
+propagators, and composed with the compiler correspondence into
+source-level verdicts that are kernel-checked end to end
+(`solveCertified_sat_correct` / `solveCertified_unsat_correct`).
+SAT results carry the theorem on every gate-passing model; UNSAT is
+claimed only when the decision-free exclusion is proved (the
+singleton fragment) — outside it, an engine refutation is reported
+as `unknown` without a verdict until the decision-descent proof
+lands.
 
-* `--prop` — fixpoint propagation with branch pruning;
-* `--mrv` — minimum-remaining-values branch ordering;
-* `--budget N` — budgeted restarts, which may report `unknown`;
-* `--nogoods` — decision-trail NoGood learning.
+`--certified` is a temporary accepted alias (the command is
+certified with or without it); it exists to keep old invocations
+working and will be removed in a later release.  No other solver
+flags are accepted.
 
-The supported combinations are each switch alone and `--prop` with
-`--mrv` together; other combinations are refused by the solver as
-unsupported (exit 3).  A `sat` text is printed exactly as the
-verified emitter produced it (it ends with the `----------`
-separator, the FlatZinc convention).  Exit codes:
+A `sat` text is printed exactly as the verified emitter produced it
+(it ends with the `----------` separator, the FlatZinc convention).
+Exit codes:
 
 * `0` — a solution was found (SAT soundness:
-  `solveModelWith_sat_sound`);
+  `solveCertified_sat_correct`, multi-value domains included);
 * `1` — unsatisfiable: `=====UNSATISFIABLE=====` on stdout (the
-  FlatZinc convention);
-* `2` — `unknown`: no verdict (budget exhausted or statically
-  refused), reason on stderr; also usage/IO/parse errors;
-* `3` — unsupported: model outside the searched fragment or
-  configuration, reason on stderr.
+  FlatZinc convention; singleton fragment only);
+* `2` — `unknown`/not well-formed: no verdict (fuel exhausted, an
+  uncertifiable multi-domain refutation, or a statically malformed
+  model), reason on stderr; also usage/IO/parse errors;
+* `3` — unsupported: model outside the certified gate (empty or
+  non-int/bool-viewed domains, or compilation failure), reason on
+  stderr.
 -/
 
-/-- Parse the `solve` argument list into a configuration plus the
-    remaining source arguments; flags may appear before or after the
-    file argument, and an unrecognized `--`-prefixed argument is
-    refused. -/
+/-- Parse the `solve` argument list: the optional `--certified` alias
+    plus the source argument (file, `-`, or stdin via absence). -/
 private def parseSolveFlags (args : List String) :
-    Except String (Option Solver.SolveConfig × List String) :=
-  let rec go (cfg : Solver.SolveConfig) (certified : Bool) (sawFlag : Bool) :
-      List String → Except String (Option Solver.SolveConfig × List String)
-    | [] => .ok (if certified then none else some cfg, [])
-    | "--certified" :: rest =>
-        if sawFlag then
-          .error "--certified cannot be combined with other solver options"
-        else go cfg true sawFlag rest
-    | "--prop" :: rest =>
-        if certified then
-          .error "--certified cannot be combined with other solver options"
-        else go { cfg with useProp := true } certified true rest
-    | "--mrv" :: rest =>
-        if certified then
-          .error "--certified cannot be combined with other solver options"
-        else go { cfg with useMrv := true } certified true rest
-    | "--nogoods" :: rest =>
-        if certified then
-          .error "--certified cannot be combined with other solver options"
-        else go { cfg with nogoods := true } certified true rest
-    | "--budget" :: n :: rest =>
-        if certified then
-          .error "--certified cannot be combined with other solver options"
-        else
-          match n.toNat? with
-          | some b => go { cfg with budget := some b } certified true rest
-          | none => .error s!"invalid budget '{n}' (expected a natural number)"
-    | "--budget" :: _ => .error "option --budget requires a natural number argument"
+    Except String (List String) :=
+  let rec go : List String → Except String (List String)
+    | [] => .ok []
+    | "--certified" :: rest => go rest
     | arg :: rest =>
         if arg.startsWith "--" then
           .error s!"unknown option '{arg}'"
         else
-          match go cfg certified sawFlag rest with
-          | .ok (cfg', srcArgs) => .ok (cfg', arg :: srcArgs)
+          match go rest with
+          | .ok srcArgs => .ok (arg :: srcArgs)
           | .error e => .error e
-  go ⟨false, false, none, false⟩ false false args
+  go args
 
-/-- The `solve` subcommand: parse the model, run the composed front
-    door, and report the verdict. `--certified` routes through the
-    LCG fragment path whose SAT/UNSAT theorems are kernel-checked
-    end to end (`Direct.solveCertified`). -/
+/-- The `solve` subcommand: parse the model, run the certified front
+    door, and report the verdict. -/
 private def runSolve (args : List String) : IO UInt32 := do
   match parseSolveFlags args with
   | .error e =>
       IO.eprintln s!"leanfzn: {e}"
       return 2
-  | .ok (none, srcArgs) =>
-      -- the certified LCG path
+  | .ok srcArgs =>
       match ← parseModelSource srcArgs with
       | .error e =>
           IO.eprintln s!"leanfzn: {e}"
@@ -229,94 +204,6 @@ private def runSolve (args : List String) : IO UInt32 := do
           else
             IO.eprintln "leanfzn: model is not well-formed"
             return 2
-  | .ok (some cfg, srcArgs) =>
-      match ← parseModelSource srcArgs with
-      | .error e =>
-          IO.eprintln s!"leanfzn: {e}"
-          return 2
-      | .ok model =>
-          match Solver.solveModelWith cfg model with
-          | .sat text =>
-              IO.println text
-              return 0
-          | .unsat =>
-              IO.println "=====UNSATISFIABLE====="
-              return 1
-          | .unknown reason =>
-              IO.eprintln s!"leanfzn: {reason}"
-              return 2
-          | .unsupported reason =>
-              IO.eprintln s!"leanfzn: {reason}"
-              return 3
-
-/-! ## The `enum` subcommand
-
-Runs the all-solutions enumerator `Solver.enumModel`
-(`solver/Enum.lean`): every reported text is checker-accepted
-(`enumModel_sat_sound`) and every accepted assignment is represented
-(`enumModel_complete`).  Output follows the FlatZinc convention: each
-solution text (already ending in `----------`) on its own lines, then
-a final `==========` line.  Exit codes: `0` = enumerated (an empty
-enumeration prints the `==========` line only), `1` =
-`=====UNSATISFIABLE=====` on stdout, `3` = unsupported (model outside
-the searched fragment), reason on stderr; usage/IO/parse errors exit
-2.
--/
-
-/-- The `enum` subcommand: enumerate all solutions of the model. -/
-private def runEnum (args : List String) : IO UInt32 := do
-  match ← parseModelSource args with
-  | .error e =>
-      IO.eprintln s!"leanfzn: {e}"
-      return 2
-  | .ok model =>
-      match Solver.enumModel model with
-      | .sat texts =>
-          for text in texts do
-            IO.println text
-          IO.println "=========="
-          return 0
-      | .unsat =>
-          IO.println "=====UNSATISFIABLE====="
-          return 1
-      | .unsupported reason =>
-          IO.eprintln s!"leanfzn: {reason}"
-          return 3
-
-/-! ## The `optimize` subcommand
-
-Runs the branch-and-bound optimizer `Solver.optimizeModelBb`
-(`solver/Optimize.lean`): improving-bound rounds of the reference
-search, every leaf checked by the verified checker
-(`optimizeModelBb_sat_sound`), optimality certified by a later empty
-round (`optimizeModelBb_optimal`).  Output: the optimal solution
-text, the `==========` separator (FlatZinc convention), and the
-objective value on stderr.  Exit codes: `0` = optimal, `1` =
-`=====UNSATISFIABLE=====` on stdout, `3` = unsupported (satisfaction
-model, objective outside the slot-level scope, or model outside the
-searched fragment), reason on stderr; usage/IO/parse errors exit 2.
--/
-
-/-- The `optimize` subcommand: find and print the optimal
-    solution. -/
-private def runOptimize (args : List String) : IO UInt32 := do
-  match ← parseModelSource args with
-  | .error e =>
-      IO.eprintln s!"leanfzn: {e}"
-      return 2
-  | .ok model =>
-      match Solver.optimizeModelBb model with
-      | .optimal text value =>
-          IO.println text
-          IO.println "=========="
-          IO.eprintln s!"objective = {value}"
-          return 0
-      | .unsat =>
-          IO.println "=====UNSATISFIABLE====="
-          return 1
-      | .unsupported reason =>
-          IO.eprintln s!"leanfzn: {reason}"
-          return 3
 
 def main (args : List String) : IO UInt32 := do
   match args with
@@ -324,10 +211,6 @@ def main (args : List String) : IO UInt32 := do
       runCheck modelPath solPath
   | "solve" :: rest =>
       runSolve rest
-  | "enum" :: rest =>
-      runEnum rest
-  | "optimize" :: rest =>
-      runOptimize rest
   | _ =>
       match ← readSource args with
       | .error e =>

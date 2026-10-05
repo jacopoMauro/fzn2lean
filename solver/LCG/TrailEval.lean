@@ -51,6 +51,14 @@ def posLe (s : Nat) (k : Int) : Literal := ⟨.intLe s k, true⟩
 /-- Negative order literal `¬(s ≤ k)` (i.e. `s > k`). -/
 def negLe (s : Nat) (k : Int) : Literal := ⟨.intLe s k, false⟩
 
+/-- Positive value-removal literal `s ≠ k` (the value `k` is removed
+    from the slot's domain when asserted). -/
+def posNe (s : Nat) (k : Int) : Literal := ⟨.intNe s k, true⟩
+
+/-- Negative value-removal literal `¬(s ≠ k)` (i.e. the slot's integer
+    view equals `k`). -/
+def negNe (s : Nat) (k : Int) : Literal := ⟨.intNe s k, false⟩
+
 /-- Positive Boolean literal `s = b` (in normalized position). -/
 def posBool (s : Nat) (b : Bool) : Literal := ⟨.boolEq s b, true⟩
 
@@ -161,8 +169,15 @@ falsified literal. -/
     weakens to `x ≤ lo−1` (implied, since `k ≤ lo−1`), whose negation
     `x > lo−1` is the witnessing trail entry; `x > k` falsified by the
     trail upper bound `hi ≤ k` weakens to `x > hi` dually. Boolean
-    literals are already normalized-positive, so exact matching applies
-    and the literal is returned unchanged. -/
+    literals are bridged through the 0/1 integer view: `s = true` is
+    the order literal `s > 0`, so a trail upper bound `hi ≤ 0` that
+    falsifies it weakens to `s > hi` (implied, since `hi ≤ 0` makes
+    "s > 0 ⇒ s > hi"); `s = false` is `s ≤ 0`, so a trail lower bound
+    `lo ≥ 1` weakens to `s ≤ lo−1` dually. Without the bridge, any
+    conflict clause that mixes Boolean nogoods with order-encoded
+    decisions (the bool families' nogoods speak `posBool`; bisection
+    decisions speak `negLe`/`posLe`) cannot resolve — markLit finds
+    no falsifier and the analysis aborts to the plain retreat. -/
 def orderUpgrade (trail : List TrailEntry) (l : Literal) : Literal :=
   match l.atom with
   | .intLe s k =>
@@ -174,7 +189,22 @@ def orderUpgrade (trail : List TrailEntry) (l : Literal) : Literal :=
         match trailHiOf trail s with
         | some hi => if hi ≤ k then negLe s hi else l
         | none => l
-  | _ => l
+  | .boolEq s b =>
+      if l.positive then
+        if b then
+          -- "s = true" is "s > 0": falsified by a trail bound hi ≤ 0,
+          -- weakened to the trail's own "s > hi" entry
+          match trailHiOf trail s with
+          | some hi => if hi ≤ 0 then negLe s hi else l
+          | none => l
+        else
+          -- "s = false" is "s ≤ 0": falsified by a trail bound lo ≥ 1,
+          -- weakened to the trail's own "s ≤ lo−1" entry
+          match trailLoOf trail s with
+          | some lo => if 1 ≤ lo then posLe s (lo - 1) else l
+          | none => l
+      else l
+  | .intNe s k => l
 
 /-- Mark the consequences of working-clause literal `q`: the entry that
     falsifies it — by exact negation matching, or through the order

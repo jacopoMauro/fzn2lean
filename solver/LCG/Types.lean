@@ -24,6 +24,7 @@ open LeanFzn LeanFzn.Solver.Core
 inductive Atom where
   | boolEq (slot : Slot) (value : Bool)
   | intLe (slot : Slot) (upper : Int)
+  | intNe (slot : Slot) (value : Int)
   deriving Repr, DecidableEq
 
 /-- A signed atom. Positive literals assert the atom; negative literals assert

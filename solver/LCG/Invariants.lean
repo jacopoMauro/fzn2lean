@@ -121,7 +121,6 @@ def State.AnalysisReady (problem : Problem Constraint Objective)
   (∀ cc ∈ state.conflict, cc.EntailedBy problem constraintHolds) ∧
     (∀ e ∈ state.trail, ∀ r ∈ e.reason, Reason.Valid problem
       constraintHolds r e.literal) ∧
-    (∀ e ∈ state.trail, e.Chronological state.trail) ∧
     RootFacts problem constraintHolds state.trail ∧
     -- reachability premise: reason clauses contain only normalized
     -- literals (the engine builds explanations from trail facts and
