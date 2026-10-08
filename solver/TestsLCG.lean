@@ -84,14 +84,14 @@ private def battery : List (String × List (List Value) × List DomConstraint) :
       [.linLe [1, 1] [0, 1] 3])
   ]
 
-def main : IO Unit := do
+def main : IO UInt32 := do
   let mut st : TestState := { passed := 0, failed := 0 }
   IO.println "-- LCG engine tests --"
   for (name, doms, cs) in battery do
     let problem : LCG.Problem DomConstraint Unit :=
       { names := [], domains := doms, constraints := cs, objective := (),
         clauses := [] }
-    let lcg := solveDom 10_000 problem (propagatorsOf cs)
+    let lcg := solveDom problem (propagatorsOf cs)
     let ref := bruteSat doms cs
     -- verdict agreement + SAT validity
     let v1 : Bool :=
@@ -118,13 +118,14 @@ def main : IO Unit := do
     { names := [], domains := [[vi 2], [vi 2, vi 3]],
       constraints := [DomConstraint.linLe [-1, 1] [0, 1] 0],
       objective := (), clauses := [] }
-  match solveDom 10_000 nprob1 (propagatorsOf nprob1.constraints) with
+  match solveDom nprob1 (propagatorsOf nprob1.constraints) with
   | .sat a =>
       st ← st.check "linle-neg-2term sat (regression: max/min bug)"
         (satOk nprob1.domains nprob1.constraints a)
   | .unsat =>
       st ← st.check "linle-neg-2term sat (regression: max/min bug)" (false)
-  | .unknown => st ← st.check "linle-neg-2term sat (regression: max/min bug)" (true)
+  | .unknown =>
+      st ← st.check "linle-neg-2term sat (regression: max/min bug)" (false)
 
   -- linLe with a negative coefficient, 3 terms (regression: the sweep
   -- dropped pre-suffix terms): -x0+x1+x2 <= 0, x0∈[2..9], x1={1},
@@ -134,13 +135,14 @@ def main : IO Unit := do
         [[vi 2, vi 3, vi 4, vi 5, vi 6, vi 7, vi 8, vi 9], [vi 1], [vi 1]],
       constraints := [DomConstraint.linLe [-1, 1, 1] [0, 1, 2] 0],
       objective := (), clauses := [] }
-  match solveDom 10_000 nprob2 (propagatorsOf nprob2.constraints) with
+  match solveDom nprob2 (propagatorsOf nprob2.constraints) with
   | .sat a =>
       st ← st.check "linle-neg-3term sat (regression: suffix-only bug)"
         (satOk nprob2.domains nprob2.constraints a)
   | .unsat =>
       st ← st.check "linle-neg-3term sat (regression: suffix-only bug)" (false)
-  | .unknown => st ← st.check "linle-neg-3term sat (regression: suffix-only bug)" (true)
+  | .unknown =>
+      st ← st.check "linle-neg-3term sat (regression: suffix-only bug)" (false)
 
   -- the same 3-term shape but genuinely UNSAT: -x0+x1+x2 <= -1 with
   -- x0={2}, x1={1}, x2={1} gives 0 > -1
@@ -149,7 +151,7 @@ def main : IO Unit := do
       constraints := [DomConstraint.linLe [-1, 1, 1] [0, 1, 2] (-1 : Int)],
       objective := (), clauses := [] }
   st ← st.check "linle-neg-3term unsat (true conflict)"
-    (match solveDom 10_000 nprob3 (propagatorsOf nprob3.constraints) with
+    (match solveDom nprob3 (propagatorsOf nprob3.constraints) with
      | .unsat => !bruteSat nprob3.domains nprob3.constraints
      | _ => false)
 
@@ -162,7 +164,7 @@ def main : IO Unit := do
     { names := [], domains := [[vi 1, vi 2], [vi 0, vi 1]],
       constraints := [DomConstraint.linLe [1, -1, 1] [0, 0, 1] 0],
       objective := (), clauses := [] }
-  match solveDom 10_000 dup (propagatorsOf dup.constraints) with
+  match solveDom dup (propagatorsOf dup.constraints) with
   | .sat a =>
       st ← st.check "linle duplicate-slot sat (regression: false conflict)"
         (satOk dup.domains dup.constraints a)
@@ -171,6 +173,8 @@ def main : IO Unit := do
         (false)
   | .unknown =>
       st ← st.check "linle duplicate-slot sat (regression: false conflict)"
+        (false)
+      st ← st.check "linle duplicate-slot honest fuel exhaustion (expects unknown)"
         (true)
 
   -- propNe on EQUAL singletons reports the conflict (regression: was
@@ -199,7 +203,7 @@ def main : IO Unit := do
   let problem : LCG.Problem DomConstraint Unit :=
     { names := [], domains := doms, constraints := cs, objective := (),
       clauses := [] }
-  let _ := solveDom 10_000 problem (propagatorsOf cs)
+  let _ := solveDom problem (propagatorsOf cs)
   -- (structural clause checks would need engine internals; deferred to
   -- the proof layer)
   st ← st.check "smoke-learned-runs" true
@@ -254,15 +258,15 @@ def main : IO Unit := do
      | _ => false)
 
   -- the engine-level test (the task's acceptance shape): x ∈ 0..3,
-  -- y ∈ 0..3, int_ne(x, y), x ≤ 0: the posNe deduction fires at the
-  -- root (x pinned to 0 by the bound), y's domain loses 0; the leaf
-  -- must be x = 0 with y ∈ 1..3
+  -- End-to-end value-removal constraint shape: the returned assignment
+  -- must be x=0 and y∈1..3. Direct propNe checks above verify propagation
+  -- separately; the current frontier driver checks complete leaves.
   let lvr : LCG.Problem DomConstraint Unit :=
     { names := [], domains := [[vi 0, vi 1, vi 2, vi 3],
       [vi 0, vi 1, vi 2, vi 3]],
       constraints := [DomConstraint.neSlot 0 1, DomConstraint.leConstHi 0 0],
       objective := (), clauses := [] }
-  match solveDom 10_000 lvr (propagatorsOf lvr.constraints) with
+  match solveDom lvr (propagatorsOf lvr.constraints) with
   | .sat a =>
       st ← st.check "lcg value-removal engine (x=0, y≠0)"
         (let p : Option Value × Option Value := (a[0]?, a[1]?)
@@ -270,11 +274,94 @@ def main : IO Unit := do
          | (some (.int x), some (.int y)) =>
              x == 0 && !(y == 0) && 0 ≤ y && y ≤ 3
          | _ => false)
+      st ← st.check "lcg value-removal engine decides (fuel-free)"
+        (true)
   | .unsat =>
       st ← st.check "lcg value-removal engine (x=0, y≠0)" (false)
+      st ← st.check "lcg value-removal engine decides (fuel-free)"
+        (true)
   | .unknown =>
-      st ← st.check "lcg value-removal engine (x=0, y≠0)" (true)
+      -- FUEL-FREE: the driver can no longer return `unknown`; this
+      -- arm is unreachable and must fail loudly if ever hit
+      st ← st.check "lcg value-removal engine (x=0, y≠0)" (false)
+      st ← st.check "lcg value-removal engine never unknown (fuel-free)"
+        (false)
+
+  -- Explicit frontier regression: both branches survive parent retreats.
+  -- The K4 disequality model over three values is UNSAT; budget boundary
+  -- checks distinguish exhausted work from merely exhausted fuel.
+  let edges : List (Nat × Nat) := [(0,1),(0,2),(1,2),(0,3),(1,3),(2,3)]
+  let ph4 : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := List.replicate 4 [vi 0,vi 1,vi 2],
+      constraints := edges.map (fun (i,j) => DomConstraint.neSlot i j),
+      objective := (), clauses := [] }
+  st ← st.check "frontier pigeonhole sufficient budget is 241"
+    (branchCost ph4.domains == 241)
+  st ← st.check "frontier pigeonhole exhausts all branches (fuel-free)"
+    (match solveDom ph4 (propagatorsOf ph4.constraints) with | .unsat => true | _ => false)
+  st ← st.check "frontier pigeonhole bounded diagnostic: low fuel remains unknown"
+    (match solveBounded 240 ph4 DomConstraint.satisfiedB (propagatorsOf ph4.constraints) with | .unknown => true | _ => false)
+  -- All 64 edge subsets check that remembering exhaustion never drops
+  -- unexplored SAT alternatives. Compare independently with bruteSat.
+  for mask in [0:64] do
+    let cs := edges.zipIdx.filterMap fun ((i,j),bit) =>
+      if (mask / 2^bit) % 2 == 1 then some (DomConstraint.neSlot i j) else none
+    let p := { ph4 with constraints := cs }
+    let expected := bruteSat p.domains cs
+    st ← st.check s!"frontier graph mask {mask} agrees with exhaustive oracle"
+      (match solveDom p (propagatorsOf cs) with
+       | .sat a => expected && satOk p.domains cs a
+       | .unsat => !expected
+       | .unknown => false)
+  -- Original clauses are still respected by the chronological driver.
+  let cp : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [[vi 0,vi 1]], constraints := [],
+      objective := (), clauses := [[negLe 0 0]] }
+  st ← st.check "frontier respects original clauses"
+    (match solveDom cp [] with | .sat a => a == [vi 1] | _ => false)
+  -- FUEL-FREE ACCEPTANCE: an accepted finite UNSAT model whose frontier
+  -- cost (22,221) exceeds the old 10,000-step default budget. It must
+  -- now finish UNSAT, where the fuel-bounded driver returned `unknown`.
+  let bigdom : List Value := (List.range 10).map (fun n : Nat => vi (Int.ofNat n))
+  let big : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := List.replicate 4 bigdom,
+      constraints := [DomConstraint.leConstHi 3 (-1 : Int)],
+      objective := (), clauses := [] }
+  st ← st.check "frontier cost exceeds the old 10k default"
+    (10000 < frontierCost [(List.replicate 4 bigdom, [])]
+      && frontierCost [(List.replicate 4 bigdom, [])] == 22221)
+  st ← st.check "beyond-budget UNSAT finishes (fuel-free)"
+    (match solveDom big [] with | .unsat => true | _ => false)
+  -- Edge cases: zero variables, empty domains, Boolean domains,
+  -- duplicate values. (A zero-variable problem is vacuously SAT: the
+  -- empty assignment passes the leaf; an empty pending stack per se
+  -- is the frontierSolve-level UNSAT, exercised by the empty-domain
+  -- case below.)
+  let empty : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [], constraints := [],
+      objective := (), clauses := [] }
+  st ← st.check "zero-variable problem is vacuously sat (fuel-free)"
+    (match solveDom empty [] with | .sat a => a.isEmpty | _ => false)
+  let emptydom : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [[]], constraints := [],
+      objective := (), clauses := [] }
+  st ← st.check "empty-domain slot is unsat (fuel-free)"
+    (match solveDom emptydom [] with | .unsat => true | _ => false)
+  let dupdom : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [[vi 1, vi 1, vi 2]],
+      constraints := [], objective := (), clauses := [] }
+  st ← st.check "duplicate domain values find sat (fuel-free)"
+    (match solveDom dupdom []
+     with | .sat a => a.length == 1 | _ => false)
+  let booldom : LCG.Problem DomConstraint Unit :=
+    { names := [], domains := [[Value.bool true, Value.bool false]],
+      constraints := [], objective := (), clauses := [] }
+  st ← st.check "boolean domain finds sat (fuel-free)"
+    (match solveDom booldom [] with | .sat _ => true | _ => false)
+
   if st.failed == 0 then
     IO.println s!"ALL {st.passed} LCG TESTS PASSED"
+    return 0
   else
-    IO.println s!"{st.failed} FAILURES of {st.passed + st.failed}"
+    IO.eprintln s!"{st.failed} LCG TESTS FAILED ({st.passed} passed)"
+    return 1

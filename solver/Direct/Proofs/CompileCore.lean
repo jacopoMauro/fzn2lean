@@ -1323,15 +1323,9 @@ theorem varDomain_int_of_base {ty : BasicVarType} {dom : VarDomain}
           simp at h
       | setOfInt => rw [BasicVarType.base] at hbase; exact absurd hbase (by intro h2; cases h2)
   | intRange lo hi =>
-      simp only [varDomain] at h
-      split at h
-      · simp at h
-      · exact ⟨_, by simpa using (Except.ok.inj h).symm⟩
+      exact ⟨_, by simpa using (Except.ok.inj h).symm⟩
   | intSet xs =>
-      simp only [varDomain] at h
-      split at h
-      · simp at h
-      · exact ⟨_, by simpa using (Except.ok.inj h).symm⟩
+      exact ⟨_, by simpa using (Except.ok.inj h).symm⟩
   | setOfIntRange lo hi => simp [BasicVarType.base] at hbase
   | setOfIntSet xs => simp [BasicVarType.base] at hbase
 
@@ -1344,45 +1338,13 @@ theorem intDom_values_int {xs : List Int} :
   exact ⟨p, rfl⟩
 
 /-- The slot-list inversion of `slotsChecked`: a successful slot
-    extraction comes from the declarations. -/
+    extraction comes from the declarations.  (With the leaves cap
+    removed, `slotsChecked` is exactly `declSlots`.) -/
 theorem declSlots_of_slotsChecked {m : Model}
     {slots : List (String × List Value)}
     (h : slotsChecked m = .ok slots) :
     declSlots m.variables = .ok slots := by
-  unfold slotsChecked at h
-  match hd : declSlots m.variables with
-  | .error e =>
-      rw [hd] at h
-      exact absurd h (by
-        have hred : (do
-            let slots ← (Except.error e :
-              Except String (List (String × List Value)))
-            if leavesProduct (List.map Prod.snd slots) ≤ leavesCap then
-              pure slots
-            else
-              throw s!"search space of {leavesProduct (List.map Prod.snd slots)} complete assignments exceeds the cap {leavesCap}") = .error e := rfl
-        rw [hred] at h
-        cases h)
-  | .ok slots0 =>
-      rw [hd] at h
-      have hred : (do
-          let slots ← (Except.ok slots0 :
-            Except String (List (String × List Value)))
-          if leavesProduct (List.map Prod.snd slots) ≤ leavesCap then
-            pure slots
-          else
-            throw s!"search space of {leavesProduct (List.map Prod.snd slots)} complete assignments exceeds the cap {leavesCap}") =
-          (if leavesProduct (List.map Prod.snd slots0) ≤ leavesCap
-            then (Except.ok slots0 : Except String (List (String × List Value)))
-            else
-              (throw s!"search space of {leavesProduct (List.map Prod.snd slots0)} complete assignments exceeds the cap {leavesCap}" :
-                Except String (List (String × List Value)))) := rfl
-      rw [hred] at h
-      by_cases hcond : leavesProduct (List.map Prod.snd slots0) ≤ leavesCap
-      · rw [if_pos hcond] at h
-        rw [show slots0 = slots from Except.ok.inj h]
-      · rw [if_neg hcond] at h
-        cases h
+  exact h
 
 /-- The second half of a distinct concatenation is itself
     distinct. -/
@@ -1728,53 +1690,8 @@ theorem slotNames_nodup {m : Model}
     (hslot : slotsChecked m = .ok slots) :
     (slots.map Prod.fst).Nodup := by
   -- the slot list comes from declSlots over the variables
-  have hdecls : declSlots m.variables = .ok slots := by
-    rw [slotsChecked] at hslot
-    match hslots2 : declSlots m.variables with
-    | .error e =>
-        rw [hslots2] at hslot
-        -- the bind on a concrete .error ignores its continuation
-        have hbind : ((Except.error e : Except String
-            (List (String × List Value))) >>= fun slots =>
-            if leavesProduct (List.map Prod.snd slots) ≤ leavesCap
-            then pure slots
-            else
-              throw (toString "search space of " ++
-                toString (leavesProduct (List.map Prod.snd slots)) ++
-                toString " complete assignments exceeds the cap " ++
-                toString leavesCap)) = .error e := rfl
-        rw [hbind] at hslot
-        exact absurd hslot (by simp)
-    | .ok slots0 =>
-        rw [hslots2] at hslot
-        have hbound : (Except.ok slots0 >>= fun s =>
-            if leavesProduct (s.map Prod.snd) ≤ leavesCap then
-              pure s
-            else
-              throw (toString "search space of " ++
-                toString (leavesProduct (s.map Prod.snd)) ++
-                toString " complete assignments exceeds the cap " ++
-                toString leavesCap)) = .ok slots :=
-          hslot
-        rw [show (Except.ok slots0 >>= fun s =>
-            if leavesProduct (s.map Prod.snd) ≤ leavesCap then
-              pure s
-            else
-              throw (toString "search space of " ++
-                toString (leavesProduct (s.map Prod.snd)) ++
-                toString " complete assignments exceeds the cap " ++
-                toString leavesCap)) =
-            (if leavesProduct (slots0.map Prod.snd) ≤ leavesCap then
-              Except.ok slots0
-            else
-              .error ("search space of " ++
-                toString (leavesProduct (slots0.map Prod.snd)) ++
-                " complete assignments exceeds the cap " ++
-                toString leavesCap)) from rfl] at hbound
-        split at hbound
-        · have hids : slots0 = slots := Except.ok.inj hbound
-          rw [hids]
-        · simp at hbound
+  -- (with the leaves cap removed, slotsChecked IS declSlots)
+  have hdecls : declSlots m.variables = .ok slots := hslot
   -- the variables' names are pairwise distinct: names are preserved
   -- pairwise-distinct under the injective name projection
   have hnu : (m.variables.map (fun d => d.name.name)).Nodup := by

@@ -3,12 +3,10 @@ File: solver/Direct/Cli.lean
 
 Purpose:
   The user-facing certified solve command: compile the model to the
-  shared core problem, run the certified LCG fragment path (singleton
-  domains, empty clause database, empty propagator list), and compose
-  the LCG-level theorems with the Direct compiler correspondence into
-  source-level SAT/UNSAT theorems. Outside the fragment (or on
-  compilation failure) the command reports `unsupported`/`unknown`
-  with a reason — never an uncertified verdict.
+  shared core problem, run the certified chronological finite-domain
+  frontier, and compose the internal verdict theorems with the Direct
+  compiler correspondence. Fuel exhaustion reports unknown; unsupported
+  compilation/domain shapes remain unsupported.
 
 Dependencies:
   - solver.Direct.Compile: the fragment compiler.
@@ -52,19 +50,15 @@ inductive CliResult where
   | unsat
   /-- The model is outside the certified fragment. -/
   | unsupported (reason : String)
-  /-- No verdict (not reachable in the first fragment; the fuel
-      bound is not exhausted by a decision-free run). -/
+  /-- No verdict because the finite search budget was exhausted. -/
   | unknown (reason : String)
 
-/-- The certified solve command: compile, check the widened LCG gate
-    (nonempty finite int/bool-viewed domains — decisions and
-    backtracking allowed), run the engine over the proved
-    propagators, and report. SAT always carries the source-level
-    theorem (the engine's SAT soundness is decision-free). UNSAT is
-    CLAIMED only inside the singleton fragment, where the
-    decision-free exclusion is proved; outside it an engine
-    `.unsat` is reported as `unknown` (no verdict) until the
-    decision-descent proof (PLAN.md §3) lands. -/
+/-- Compile, gate nonempty finite int/bool domains and run the FUEL-FREE
+    chronological frontier. SAT and parameter-honest UNSAT have source-level
+    proofs; the traversal terminates by the kernel-checked frontier-cost
+    measure, so there is no budget-exhaustion outcome. The registered
+    propagator argument is retained by the search API for future
+    coverage-preserving refinement. -/
 def solveCertified (m : Model) : CliResult :=
   match compileModel m with
   | .error reason => .unsupported reason
@@ -74,7 +68,7 @@ def solveCertified (m : Model) : CliResult :=
             (problem.constraints.filterMap LCG.propagatorOfProved) with
         | .sat a => .sat (problem.toStore a)
         | .unsat => .unsat
-        | .unknown => .unknown "lcg fuel exhausted"
+        | .unknown => .unknown "internal: fuel-free driver returned unknown"
       else
         .unsupported
           "the model's search space is outside the certified gate \
@@ -233,5 +227,28 @@ def emitCertifiedSolution (m : Model) (store : Store) : String :=
       | none => panic!
         s!"internal error: certified store has no value for            '{(VarDeclItem.name d).name}'"
   LeanFzn.Solver.emitSolution entries
+
+/-- **The source-level total-verdict theorem**: for a model that
+    compiles successfully and passes the certified gate, the
+    `solve` command returns SAT or UNSAT — never `unknown`. The
+    traversal is fuel-free (kernel-checked termination by the
+    frontier-cost measure), so no accepted finite model can end
+    without a verdict. -/
+theorem solveCertified_total {m : Model} {problem : CompiledProblem DomConstraint}
+    (hc : compileModel m = .ok problem)
+    (hgate : LCG.gateOk (toLCG problem) = true) :
+    ∃ store, solveCertified m = .sat store ∨ solveCertified m = .unsat := by
+  unfold solveCertified
+  rw [hc]
+  simp only [reduceIte, hgate]
+  -- the fuel-free driver never returns unknown
+  have hnotu : LCG.solve (toLCG problem) DomConstraint.satisfiedB
+      (problem.constraints.filterMap LCG.propagatorOfProved) ≠ .unknown := by
+    exact LCG.chronological_total (toLCG problem) DomConstraint.satisfiedB
+  cases hsolve : LCG.solve (toLCG problem) DomConstraint.satisfiedB
+      (problem.constraints.filterMap LCG.propagatorOfProved) with
+  | sat a => exact ⟨problem.toStore a, Or.inl (by simp [hsolve])⟩
+  | unsat => exact ⟨fun _ => none, Or.inr (by simp [hsolve])⟩
+  | unknown => exact absurd hsolve hnotu
 
 end LeanFzn.Solver.Direct

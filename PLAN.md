@@ -1,154 +1,171 @@
-# Remaining work for the certified FlatZinc solver
+# Remaining work for the finite-domain solver
 
-Updated: 2026-10-05. This plan contains open work only. Completed tasks
-and historical execution schedules have been removed; Git history retains
-previous records.
+Updated: 2026-10-08. This plan lists remaining work; completed implementation
+steps and historical task descriptions have been removed.
 
-The public solve path is `Main → Direct.solveCertified → LCG.solve`.
-Source-level SAT and parameter-honest UNSAT theorems exist for the accepted
-finite scalar integer/Boolean fragment. The remaining priorities are a
-clean codebase, reproducible certification checks, and search progress.
-Verdict soundness does not imply completeness or sufficient default fuel.
+## Verified current basis
 
-## Priority and dependency DAG
+The public path is `Main → Direct.solveCertified → LCG.solve → lcgSearch →
+chronologicalSearch → frontierSolve`. The frontier consumes pending alternatives
+permanently and checks complete assignments against domains, constraints and
+original clauses. `frontierSolve` has a two-constructor SAT/UNSAT result and
+kernel-checked well-founded recursion using `frontierCost`. There is no runtime
+search fuel. Coverage, SAT/UNSAT soundness, completeness and the source-entry
+total-verdict theorem are present. Bounded APIs remain diagnostic references;
+propagation and learning do not prune the public search.
 
-An arrow means the predecessor must be completed before the successor
-is integrated. Tasks on separate branches can run in parallel, subject to
-file ownership and available memory. P1 is the first task.
+The compiler no longer enforces `domainCap` or `leavesCap`. Integer ranges and
+enumerated domains are extracted directly; `slotsChecked` delegates to
+`declSlots`. Extraction faithfulness and compiler correspondence proofs remain
+in place. Unsupported types and constraint shapes remain outside the accepted
+fragment. Source correctness retains its well-formedness assumptions and
+parameter honesty for UNSAT. Mathematical termination does not bound elapsed
+time or machine memory; domains are still materialized as lists.
 
-```mermaid
-flowchart TD
-    P1A["P1a · Map live code and proof dependencies"]
-    P1B["P1b · Delete unused legacy code and proofs"]
-    P1C["P1c · Restructure retained code and large proofs"]
-    P1D["P1d · Preserve useful regressions; remove scratch"]
-    P1E["P1e · Synchronize imports, audits, CI and docs"]
-    P2["P2 · Reproduce build, tests and certification audit"]
-    P3["P3 · Repair conflict fallback and certify progress"]
-    P4["P4 · Prove completeness and a sufficient-fuel contract"]
-    P5["P5 · Strengthen propagation in the current fragment"]
-    P6["P6 · Refine clause and propagator scheduling"]
-    P7["P7 · Integration tests, audits and performance baseline"]
-    P8["P8 · Extend the certified language"]
-    P9["P9 · Certified enumeration and optimization"]
+Fresh validation on 2026-10-08: aggregate build passed (213 jobs), the
+identity-checked axiom audit passed all 66 profiles with standard axioms only,
+and comment-aware proof-hole/user-axiom scans were clean. All 15 retained test
+suites passed, including 93 solver tests, 117 LCG tests and 89 propagator tests.
+The axiom queries were run with explicit `-j2` and their captured output checked
+by the audit script; normal-invocation hardening is deferred below.
 
-    P1A --> P1B
-    P1B --> P1C
-    P1A --> P1D
-    P1C --> P1E
-    P1D --> P1E
-    P1E --> P2
-    P2 --> P3
-    P3 --> P4
-    P2 --> P5
-    P2 --> P6
-    P4 --> P7
-    P5 --> P7
-    P6 --> P7
-    P7 --> P8
-    P7 --> P9
-```
+The top priority is an active lazy clause generation (LCG) solver that reduces
+search through propagation and learned clauses. Full enumeration is a checked
+reference implementation, not the intended final public algorithm. Former cap
+thresholds are no longer meaningful development targets.
 
-P1d can run alongside P1b/P1c after the dependency inventory. After P2,
-P3, P5 and P6 are independent development branches; shared engine,
-registration and proof changes must be integrated one at a time. P4
-follows the repaired reference engine in P3; P6 must preserve that engine's
-semantics and transfer its guarantees. P8 and P9 are later extensions,
-not prerequisites for delivering the current certified solver.
+## Priority 1 — Put propagation and clause learning into the public solver
 
-## P1 — Restructure and clean the code first
+Files: `solver/LCG/Engine.lean`, `Propagate.lean`, `TrailEval.lean`,
+`Frontier.lean`, their proof modules, `Search.lean`, `Certified.lean`, and
+`solver/Direct/Cli.lean`.
 
-Goal: retain one clear public solver path, the verified parser/checker,
-and useful tests and proofs. Delete obsolete implementation and proof
-files rather than keeping them as live archives.
+### 1. Define the search state and coverage invariant
 
-- [ ] **P1a — Establish the live dependency inventory.** Trace executable,
-  import and theorem dependencies from `Main.lean`, the library roots,
-  every retained Lake test target, and `audits/certified_axioms.lean`.
-  Inspect declaration uses as well as imports, including namespace and
-  dot-notation calls. Classify files and declarations as production,
-  useful reference/regression, or removable. Replace the stale inventory
-  in `audits/dependency_inventory.md` with the current result.
-  **DONE 2026-10-05**: the refreshed inventory is in
-  `audits/dependency_inventory.md` (93 reachable / 23 dead modules).
-- [ ] **P1b — Delete unused legacy code and proofs.** *(DONE 2026-10-05:
-  the 23 dead files — legacy Config/Solve/Enum/Optimize/RevState/
-  Learning/Restarts/Fixpoint/Heuristic/Solver stack, the Tree family,
-  and 8 orphaned legacy test files — were deleted; dead declarations
-  were removed from FznCheck.lean and Search.lean.)*
-- [ ] **P1c — Restructure retained modules.** *(DONE 2026-10-05 for the
-  memory-critical module: Direct/Proofs/Compile.lean was split into
-  CompileCore/CompileAux1/CompileAux2a/2b/2c behind a re-export shell;
-  the OOM-blocking in-flight errors were repaired throughout. The
-  remaining P1c items — narrowing the LeanFzn umbrella imports and any
-  further oversized-module splits — are folded into P1e/P2 where they
-  are validated together with the full build.)*
-- [ ] **P1d — Remove development debris.** *(DONE 2026-10-05: tmp/ deleted
-  after extracting the four machine-checked counterexamples into
-  `solver/LCG/Proofs/Obstructions.lean`; the stale tmp/ prose citations
-  in Run/Reason/Fam/Lin/Fallback now point there.)*
-- [ ] **P1e — Finish cleanup integration.** Synchronize Lake targets,
-  library exports, CI, theorem audit names, README and module comments.
-  Remove stale singleton-only UNSAT claims, deleted-file references and
-  historical task-number references. Check every deletion batch with
-  scoped compilation; leave the final full validation to P2.
-  REMAINING (as of 2026-10-05): CI (`.github/workflows/ci.yml`) still
-  lists the old test-set shape and must be brought in line with the
-  current 15 test executables plus the fail-on-unexpected-axioms gate
-  from P2; `code-structure.md` needs the new Compile-split module DAG;
-  README run-loop verification. The remaining Exact.lean size (still
-  ~9.8k lines, builds within memory) can be split later if needed.
+- Retain explicit bookkeeping for exhausted alternatives: an explored branch
+  must never become pending again merely because a conflict causes a backtrack.
+- Relate the trail, narrowed domains, original/learned clauses and pending
+  alternatives to the original problem's solutions. Every possible solution
+  must remain represented until a proved conflict excludes its branch.
+- Use the existing fuel-free exhaustive traversal as reference semantics and
+  a small-instance oracle. Do not make enumeration the normal public fallback.
 
-Completion gate: no unused legacy source retained without a stated
-purpose, no missing imports or orphaned targets, no disposable scratch
-folder, and a documented acyclic module structure. Existing useful
-uncommitted implementation/proof work must survive the restructuring.
+### 2. Propagate before branching and prove safe pruning
 
-## Remaining tasks after cleanup
+- Run constraint and clause propagation on partial assignments, before choosing
+  another decision. Preserve every solution compatible with the current frame
+  when narrowing domains or enqueuing a consequence.
+- Prove that reported conflicts exclude the affected branch before removing it.
+  Reuse existing propagator proofs where their hypotheses match the new state
+  invariant; identify and discharge missing refinement obligations explicitly.
+- Define a terminating propagation closure using finite domain/trail progress
+  and a worklist or equivalent checked mechanism. Repeated deductions must not
+  produce an endless loop; no fuel cutoff may stand in for convergence.
 
-| Task | Depends on | Actions and completion gate |
-| --- | --- | --- |
-| **P2 · Restore a reproducible validation baseline** | P1e | Diagnose compiler-proof memory consumption and complete the aggregate build. Run all 15 retained test suites, proof-hole/user-axiom checks, the kernel axiom-profile audit, and CLI SAT/UNSAT/unknown/unsupported exit-code checks. Make CI fail on unexpected axioms, not merely print their profiles. Record commands and actual results. **STATUS 2026-10-05: DONE.** The memory diagnosis and aggregate build are resolved (see the P1c UPDATE above). Recorded results (all commands run from the repo root, single-process, ≤550 s timeouts): `lake build LeanFzn solver leanfzn` + all 16 `lean_exe` targets — success (152+166 jobs); all 15 test suites — 14 pass fully (`tests_smoke` 30, `tests_stdlib` 64, `tests_solution` all, `tests_gecode` 64/15 models, `tests_globals` 52, `tests_coverage` 465 (218/218 names), `tests_wellformed` 49, `tests_pretty` 39, `tests_prof`, `tests_check` 12, `tests_fast` 7, `tests_prop` 89, `tests_lcg` 42, `tests_solver` 76/78); `lake env lean audits/certified_axioms.lean` — all 50 audited theorems depend only on [propext, Classical.choice, Quot.sound] (no sorryAx, no user axioms); proof-hole and user-axiom greps clean. CI now builds and runs all 15 suites and FAILS on unexpected axioms. CLI exit codes: SAT=0, UNSAT=1, unknown=2, unsupported=3 — verified. The two `tests_solver` failures are the pigeonhole pair explicitly marked KNOWN-GAP for P3 (fallback-nogood learning); they are that task's acceptance tests. One stale test was corrected: `int_times(x,2,6)` is now SUPPORTED (the two-literal times shapes landed) and passes as SAT. |
-| **P3 · Repair fallback search progress** | P2 | Address nonempty unanalyzable conflicts, which currently retreat without learning. Evaluate the existing `FallbackRaw` entitlement lemma, implement a sound progress mechanism, and integrate its invariant transfers through the run proof and public certification. Account for the empty-conflict `trailBoolPinsOk` failure branch too. Prove progress rather than assuming that inserting a clause prevents repetition; add regressions for cycling cases. |
-| **P4 · Specify and prove completeness/fuel guarantees** | P3 | Prove that accepted finite problems eventually yield SAT or UNSAT under the repaired reference engine, or explicitly state a narrower proved fragment. Establish a well-founded progress measure and sufficient fuel, or expose a justified fuel contract. Keep exhaustion as `unknown`; preserve parameter-honesty in source UNSAT. Validate both satisfiable and unsatisfiable multi-value cases. |
-| **P5 · Strengthen propagation within the current fragment** | P2 | Add useful allDiff value-removal deductions using the existing `intNe` literals; assess remaining weak deductions in registered families. Each change needs sound deductions, valid explanation clauses, conflict entitlement, invariant compatibility and meaningful regression cases. Integrate registration/assembly changes serially. |
-| **P6 · Refine propagation scheduling** | P2 | Replace full clause scans/propagator sweeps with watched literals and incremental wakeups where benchmarks justify it. Prove refinement of the reference semantics, including enqueueing, conflict detection and backjump repair; preserve or transfer P3/P4 guarantees. Measure runtime and memory against the reference implementation. |
-| **P7 · Validate integrated changes** | P4, P5, P6 | Build the combined tree, run retained suites and CLI/checker regressions, audit public theorem axioms, and compare performance with P2. Update coverage and completeness claims to exactly what the proofs and checks establish. |
-| **P8 · Extend the certified language** | P7 | Add unsupported scalar constraint shapes one family at a time, with compiler exactness/coverage, evaluator agreement, reason validity, propagator safety, conflict entitlement and source-level examples. Keep unsupported cases explicitly rejected until their complete proof package lands. Sets, floats and additional globals need separate scope decisions. |
-| **P9 · Add certified enumeration/optimization** | P7 | Define result contracts and source-level proofs for complete enumeration and objective optimality before restoring these commands. Give them dedicated tests and documented output guarantees; keep rendering correctness separate from solver correctness. |
+### 3. Learn explained conflicts and backtrack without losing alternatives
 
-## Parallel execution boundaries
+- Repair explanations for singleton bounds obtained through value removals,
+  using actual trail evidence. Resolve Boolean/int literal distinctions and
+  clause-scan/conflict ordering before relying on first-UIP analysis.
+- Prove learned clauses follow from the original problem. Global entailment
+  and pivot membership alone do not justify enqueuing a non-unit clause member.
+- Use learned clauses to propagate or prune subsequent branches. Prove asserting
+  literal/unit conditions and show backjumps preserve every still-possible
+  alternative while retaining the record of exhausted ones.
+- Treat the historical analysis/flip loop as reusable components requiring
+  repair and integration, not a complete optimized driver ready to reactivate.
 
-| Stage | Work that can proceed in parallel | Work to serialize |
-| --- | --- | --- |
-| Cleanup inventory | Read-only dependency, test and theorem-use inventory | Agree on the retained roots and deletion list before editing |
-| Cleanup implementation | P1d regression preservation versus P1b/P1c code cleanup; disjoint module restructuring after boundaries are fixed | Deletion before dependent restructuring; shared imports, library roots and P1e integration |
-| Solver development after P2 | P3 engine progress; P5 family packages; P6 scheduler design/refinement | Changes to shared Engine/Propagate modules, registration, run invariants and public certification |
-| Completeness | P4 on the repaired reference engine; P5 packages and P6 refinement on separate modules | Transfer progress/completeness guarantees to the refined engine |
-| Later extensions | P8 family packages and P9 result-contract work | Shared compiler/API changes and final integration |
+### 4. Prove termination and connect the public correctness contracts
 
-One writer owns each shared file during integration. Use disjoint modules
-or isolated checkouts for concurrent work; the DAG describes possible
-parallelism, not a requirement to run all branches simultaneously. Use
-one substantial Lean build at a time until memory usage is understood.
+- Supply a well-founded progress argument for propagation, decisions, conflict
+  handling, learning and backtracking. The raw frontier measure does not
+  automatically cover transitions that add or revisit work.
+- Preserve fuel-free termination, SAT soundness, UNSAT exclusion and completeness;
+  transport the existing source-level theorems and parameter-honesty scope.
+- Route `LCG.solve` and `Direct.solveCertified` through the proved pruning driver.
+  No internal budget, arbitrary input cap or unknown-on-exhaustion fallback.
 
-## Validation constraint carried into P1/P2
+### 5. Verify actual search reduction
 
-The latest attempted aggregate build was killed with exit code 137 in
-`solver.Direct.Proofs.Compile` after 124 seconds; the cgroup reported an
-OOM kill. The axiom audit could not run because that module's `.olean`
-was missing. The 89 propagator tests passed, and a static scan found no
-proof-hole tokens or user axiom declarations in 115 Lean files. This is
-not a successful repository-wide certification run.
+- Compare public-driver verdicts and SAT witnesses with the exhaustive oracle
+  on small instances, retaining the 64 graph cases and pigeonhole regression.
+- Collect decision, propagation, conflict, learned-clause and checked-leaf counts
+  without using them to stop search. Require deterministic regressions showing
+  propagation eliminates branches and learned clauses prevent repeated work.
+- Test both SAT and UNSAT, including conflicts after value removals, repeated
+  conflicts, backjumps and exhausted siblings. Validate emitted SAT solutions.
+- Preserve source theorem applications, check the new proof chain's axioms,
+  and measure performance on representative supported constraints.
 
-**UPDATE 2026-10-05 (P1c): RESOLVED.** The OOM was the monolithic
-5,815-line `Direct/Proofs/Compile.lean`. It was split into five
-elaboration-bounded modules (`CompileCore`, `CompileAux1`,
-`CompileAux2a/2b/2c`) behind a re-export shell (`Compile.lean`), with
-theorem statements unchanged. The split also surfaced ~40 in-flight
-elaboration errors in the aux-expansion proofs and ~10 in
-`Exact.lean`/`Reason.lean` that the OOM had masked (never-elaborated
-code); all were repaired. The full certified chain now builds
-(`lake build leanfzn`, 152 jobs), and the axiom audit passes with all
-50 audited theorems depending only on the three standard Lean axioms
-(no `sorryAx`, no user axioms). P2 can proceed on this basis.
+Completion gate: the public solver performs proved propagation and effective
+clause learning, demonstrably explores less than the full assignment product
+on pruning regressions, remembers exhausted branches and remains fuel-free,
+complete and source-correct. Merely retaining unused LCG primitives or renaming
+an exhaustive traversal does not satisfy this objective. Defer watched clauses,
+scheduler tuning and stronger propagators until this foundation is checked.
+
+## Priority 2 — Align regressions with the uncapped LCG public solver
+
+Files: `solver/Tests.lean`, `solver/TestsLCG.lean`, CLI integration checks.
+
+- Replace the misleading 12-value “above-cap” enumerated-domain case. Former
+  10,000-value/1,000,000-product thresholds have no special solver meaning;
+  do not use crossing them as the main acceptance or performance criterion.
+- Use representative large finite range and enumerated domains and large
+  products with constraints that support strong pruning. Test through
+  `Direct.solveCertified` and the CLI, rather than only `Direct.solveCompiled`.
+  Assert the verdict, validate emitted SAT output and verify search reduction
+  with the Priority 1 counters. Avoid enormous unpruned UNSAT products.
+- Keep a small compiler-only check that finite domain extraction is faithful
+  and independent of arbitrary cardinality limits. If retaining an old-threshold
+  case as a historical non-regression, label it accordingly; it is not a new cap.
+- Keep late-witness SAT, beyond-former-budget UNSAT, zero-variable/empty-domain,
+  duplicate-value, Boolean-domain and original-clause cases as correctness
+  regressions. Do not require the optimized solver to enumerate the old number
+  of transitions; effective pruning should change those counts.
+- Correct comments to describe the implemented pruning behavior rather than
+  assuming that equality constraints already bypass enumeration.
+
+Completion gate: tests cover the actual public LCG path, semantic boundaries,
+large supported finite models and measurable pruning; obsolete cap numbers do
+not define the solver's scope or the development priority.
+
+## Priority 3 — Make documentation match the implementation
+
+Files: `README.md`, `code-structure.md`, `solver/LCG/Engine.lean`,
+`audits/dependency_inventory.md`.
+
+- Correct stale claims about fuel budgets, compiler caps and singleton-only gates.
+- Document the active call graph and which propagation/learning features are
+  actually enabled. Until Priority 1 is integrated, describe the current public
+  path accurately as exhaustive and distinguish it from the intended LCG driver.
+- Update test counts, CLI exit descriptions and module/proof dependencies.
+  Keep unsupported-input errors distinct from UNSAT and retain source theorem
+  assumptions. Remove obsolete plan task IDs.
+
+Completion gate: documentation agrees with the executable and checked proofs.
+
+## Local validation and deferred scope
+
+For solver changes, run the relevant Lean build, targeted regressions and axiom
+profiles locally; run the aggregate build and retained suites for integration.
+CI and workflow maintenance are out of scope for now; do not recreate the
+removed workflow. Audit-script hardening is deferred, not a prerequisite for
+solver development. Until its normal invocation is repaired, run axiom queries
+with explicit `-j2` and audit the captured output, as in the latest validation.
+
+
+Lazy/range domains and more efficient prefix/stack representations require
+semantic refinement and profiling; they are not reasons to restore admission
+caps. Measure eager domain construction and exhaustive traversal separately.
+
+Language expansion, enumeration and optimization remain separate projects.
+Arrays, aliases/initializers, reified/element shapes, sets and other globals
+need explicit semantics and compiler correspondence. Enumeration needs
+coverage/uniqueness contracts; optimization needs an optimality contract.
+The checker's predicate coverage is not solver coverage.
+
+Work in order: integrate and prove active LCG pruning → align public-path
+regressions → correct documentation. Preserve unrelated working-tree
+changes and use one substantial Lean build at a time. Remove closed tasks from
+this plan instead of accumulating another completed-task log.

@@ -1,6 +1,6 @@
 # LeanFzn dependency structure
 
-The public solver is the certified LCG path (`leanfzn solve` →
+The public solver uses the certified chronological frontier through the LCG API (`leanfzn solve` →
 `Direct.solveCertified`), with kernel-checked source-level SAT/UNSAT
 theorems. The legacy checker-mediated solver stack (Config, Solve,
 Fixpoint, Heuristic, Enum, Optimize, RevState, Learning, Restarts,
@@ -53,10 +53,15 @@ Lazy clause generation layer (the certified solver)
 │   └── ← LCG/Operations, LCG/Invariants
 ├── solver/LCG/Invariants.lean     Entailment, representation, conflict meaning
 ├── solver/LCG/Propagate.lean      Explanation-carrying bound propagators
-├── solver/LCG/Engine.lean         Clause scanning, propagation, search loop
+├── solver/LCG/Frontier.lean       Pending value alternatives and finite work cost
+│   └── ← Core/Types
+├── solver/LCG/Engine.lean         Clause/propagation primitives + chronological driver
+│   └── ← LCG/Propagate, LCG/Frontier
+├── solver/LCG/Proofs/Frontier.lean  Branch coverage, verdict soundness, sufficient fuel
+│   └── ← LCG/Engine, LCG/Invariants, solver/Search
 ├── solver/LCG/Search.lean          Executable entry points (solve/solveDom)
 ├── solver/LCG/Proofs/Transitions.lean  Local transition obligations
-├── solver/LCG/Proofs/Search.lean  Internal SAT/UNSAT obligations
+├── solver/LCG/Proofs/Search.lean  Public contracts via Proofs/Frontier; historical go obligations
 │   (go_sat_leaf, strengthened go_unsat_shape with retained leaf facts,
 │    EngineSafe over terminal states, unsat_root_leaf_constructive;
 │    item 7 scaffold: initialWithRoots_fields,
@@ -73,7 +78,8 @@ Lazy clause generation layer (the certified solver)
 │   MASTER THEOREM go_unsat_entry_invariant (every .unsat arises at a
 │   level-0 conflict-clear SolvedBy entry; both terminal shapes), the
 │   RunInv bundle + per-transition preservation, Level0Solved algebra,
-│   the empty-conflict non-analyzability lemmas
+│   the empty-conflict non-analyzability lemmas; newDecisionLevel_runInv
+│   and enqueueNorm_runInv_pos preserve fallback flips above level zero
 ├── solver/LCG/Proofs/ConstFamilies.lean  The five constant-bound families
 │   (leConstHi/Lo, ltConstHi/Lo, constEq): views, hygiene, safe triples,
 │   entitlement, reason-validity + the shared narrow inversions
@@ -314,3 +320,25 @@ sat store / unsat / unknown / unsupported
   source-level theorems + the solution emitter;
 - `.github/workflows/ci.yml` — the aggregate CI gate (build, tests,
   proof-hole audit, axiom-profile audit, user-axiom audit).
+
+## Standalone runtime diagnostic
+
+`audits/pigeonhole_trace.lean` imports `solver.Direct.Cli` and
+`solver.Direct.Search` to replay the retained historical LCG pigeonhole failure against
+the compiled public propagators and the exhaustive reference oracle. It is
+a diagnostic leaf, outside production imports and Lake targets. Its copied
+search transition is snapshot-specific; see the embedded engine hash and
+`audits/pigeonhole_runtime.txt`.
+
+The public call chain is `Direct.solveCertified -> LCG.solve -> lcgSearch ->
+chronologicalSearch -> frontierSolve` — the FUEL-FREE traversal whose
+termination is kernel-checked by the `frontierCost` measure (no search
+budget; accepted finite models always receive SAT or UNSAT). The
+historical `lcgSearch.go` (now the top-level `lcgSearchGo`, aliased as
+`lcgSearch.go`) and the bounded `frontierSearch`/`chronologicalSearchBounded`/
+`lcgSearchBounded`/`solveBounded` remain as explicitly named diagnostic
+references for their retained proofs; public search never calls them.
+Propagators and analysis are not currently used to prune frontier frames.
+The source theorem signatures remain unchanged; their active proof chain
+uses frontier coverage, and `solveCertified_total` establishes the
+source-level total-verdict guarantee.

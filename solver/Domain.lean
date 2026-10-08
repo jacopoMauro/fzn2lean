@@ -11,7 +11,7 @@ a parsed FlatZinc model:
   value list, or the two Booleans;
 * `varDomain` — the domain of a basic variable type, rejecting with a
   reason everything not finitely enumerable in this phase (unbounded
-  `var int`, set variables) or larger than `domainCap`;
+  `var int`, set variables);
 * `modelSlots` — the search slots of a model: one `(name, values)`
   pair per *initializer-free* basic variable, in declaration order.
 
@@ -35,12 +35,13 @@ A basic variable named `array1d` cannot be emitted as a solution line
 the entry parser reserves it), so such models are rejected as out of
 fragment.
 
-Domain sizes are capped: `domainCap` per variable (checked *before*
-a range is materialized, so extraction cannot blow up on a huge
-declaration) and `leavesCap` on the product of the slot cardinalities
-(the number of search leaves).  Larger models are reported by
-`solveModel` as `unsupported` (out of phase-1 scope), never silently
-mis-searched.
+There are NO arbitrary size caps: any finite integer range or
+enumerated domain is accepted, however large, and the product of the
+slot cardinalities is not checked. (Eager domain-list construction
+can still be expensive on huge declarations; a later lazy/range
+representation is a separate refinement, not an admission cutoff.)
+Genuinely infinite domains (unbounded `var int`, set variables)
+remain outside the finite fragment and are rejected with a reason.
 -/
 
 namespace LeanFzn.Solver
@@ -64,17 +65,6 @@ def VarDomain.values : VarDomain → List Value
   | .intDom xs => xs.map Value.int
   | .boolDom => [.bool false, .bool true]
 
-/-- The per-variable cap on domain cardinality: a variable whose
-    (finite) domain has more than `domainCap` values is out of the
-    phase-1 fragment. -/
-def domainCap : Nat := 10000
-
-/-- The cap on the total number of complete assignments of the search
-    slots (the product of the slot cardinalities, i.e. the number of
-    search leaves): models whose product exceeds `leavesCap` are out
-    of the phase-1 fragment. -/
-def leavesCap : Nat := 1000000
-
 /-- The number of values of an integer range, computed without
     materializing the value list. -/
 def rangeSize (lo hi : Int) : Nat :=
@@ -88,66 +78,19 @@ private theorem rangeSize_eq (lo hi : Int) :
   · simp only [rangeSize, setElems, if_neg h, List.length_map, List.length_range]
 
 /-- The finite domain of a basic variable type, if it is finitely
-    enumerable within `domainCap`: `var bool` is the two Booleans,
-    `var lo..u` and `var {..}` are their value lists (empty for a
-    reversed range, R1).  Unbounded `var int` and set variables are
-    rejected with a reason — they are outside the finite fragment
-    this phase searches. -/
+    enumerable: `var bool` is the two Booleans, `var lo..u` and
+    `var {..}` are their value lists (empty for a reversed range,
+    R1).  Unbounded `var int` and set variables are rejected with a
+    reason — they are outside the finite fragment this phase searches.
+    There is no cardinality cap: any finite domain is accepted. -/
 def varDomain : BasicVarType → Except String VarDomain
   | .par .bool => .ok .boolDom
   | .par .int => .error "unbounded var int is outside the finite fragment"
   | .par .setOfInt => .error "set variables are outside the finite fragment"
-  | .intRange lo hi =>
-      if domainCap < rangeSize lo hi then
-        .error
-          s!"integer domain of size {rangeSize lo hi} exceeds the per-variable cap {domainCap}"
-      else
-        .ok (.intDom (setElems (.interval lo hi)))
-  | .intSet xs =>
-      if domainCap < xs.length then
-        .error
-          s!"enumerated domain of size {xs.length} exceeds the per-variable cap {domainCap}"
-      else
-        .ok (.intDom xs)
+  | .intRange lo hi => .ok (.intDom (setElems (.interval lo hi)))
+  | .intSet xs => .ok (.intDom xs)
   | .setOfIntRange _ _ => .error "set variables are outside the finite fragment"
   | .setOfIntSet _ => .error "set variables are outside the finite fragment"
-
-/-- `varDomain` succeeds only within the cap, so extraction never
-    materializes an oversized range. -/
-theorem varDomain_ok_length {ty : BasicVarType} {d : VarDomain}
-    (h : varDomain ty = .ok d) : d.values.length ≤ domainCap := by
-  cases ty with
-  | par t =>
-      cases t with
-      | bool =>
-          have hd : d = .boolDom := by
-            simp only [varDomain] at h
-            exact (Except.ok.inj h).symm
-          subst hd
-          simp only [VarDomain.values, List.length_cons, List.length_nil]
-          decide
-      | int => simp only [varDomain] at h; simp at h
-      | setOfInt => simp only [varDomain] at h; simp at h
-  | intRange lo hi =>
-      simp only [varDomain] at h
-      split at h
-      · simp at h
-      · next hcap =>
-          have hd : d = .intDom (setElems (.interval lo hi)) := (Except.ok.inj h).symm
-          subst hd
-          rw [VarDomain.values, List.length_map, ← rangeSize_eq]
-          omega
-  | intSet xs =>
-      simp only [varDomain] at h
-      split at h
-      · simp at h
-      · next hcap =>
-          have hd : d = .intDom xs := (Except.ok.inj h).symm
-          subst hd
-          rw [VarDomain.values, List.length_map]
-          omega
-  | setOfIntRange lo hi => simp only [varDomain] at h; simp at h
-  | setOfIntSet xs => simp only [varDomain] at h; simp at h
 
 /-- **Extraction faithfulness**: the candidate values of an extracted
     domain are exactly the values the checker's domain relation
@@ -174,45 +117,37 @@ theorem varDomain_values_iff {ty : BasicVarType} {d : VarDomain}
       | int => simp only [varDomain] at h; simp at h
       | setOfInt => simp only [varDomain] at h; simp at h
   | intRange lo hi =>
-      simp only [varDomain] at h
-      split at h
-      · simp at h
-      · next _hcap =>
-          have hd : d = .intDom (setElems (.interval lo hi)) := (Except.ok.inj h).symm
-          subst hd
-          cases v with
-          | int x =>
-              simp only [VarDomain.values, List.mem_map, BasicVarType.contains]
-              constructor
-              · rintro ⟨i, himem, heq⟩
-                injection heq with hix
-                subst hix
-                exact setElems_mem_iff.mpr himem
-              · intro hcont
-                exact ⟨x, setElems_mem_iff.mp hcont, rfl⟩
-          | bool b => simp [VarDomain.values, BasicVarType.contains]
-          | setOfInt s => simp [VarDomain.values, BasicVarType.contains]
-          | array vs => simp [VarDomain.values, BasicVarType.contains]
+      have hd : d = .intDom (setElems (.interval lo hi)) := (Except.ok.inj h).symm
+      subst hd
+      cases v with
+      | int x =>
+          simp only [VarDomain.values, List.mem_map, BasicVarType.contains]
+          constructor
+          · rintro ⟨i, himem, heq⟩
+            injection heq with hix
+            subst hix
+            exact setElems_mem_iff.mpr himem
+          · intro hcont
+            exact ⟨x, setElems_mem_iff.mp hcont, rfl⟩
+      | bool b => simp [VarDomain.values, BasicVarType.contains]
+      | setOfInt s => simp [VarDomain.values, BasicVarType.contains]
+      | array vs => simp [VarDomain.values, BasicVarType.contains]
   | intSet xs =>
-      simp only [varDomain] at h
-      split at h
-      · simp at h
-      · next _hcap =>
-          have hd : d = .intDom xs := (Except.ok.inj h).symm
-          subst hd
-          cases v with
-          | int x =>
-              simp only [VarDomain.values, List.mem_map, BasicVarType.contains]
-              constructor
-              · rintro ⟨i, himem, heq⟩
-                injection heq with hix
-                subst hix
-                exact himem
-              · intro hmem
-                exact ⟨x, hmem, rfl⟩
-          | bool b => simp [VarDomain.values, BasicVarType.contains]
-          | setOfInt s => simp [VarDomain.values, BasicVarType.contains]
-          | array vs => simp [VarDomain.values, BasicVarType.contains]
+      have hd : d = .intDom xs := (Except.ok.inj h).symm
+      subst hd
+      cases v with
+      | int x =>
+          simp only [VarDomain.values, List.mem_map, BasicVarType.contains]
+          constructor
+          · rintro ⟨i, himem, heq⟩
+            injection heq with hix
+            subst hix
+            exact himem
+          · intro hmem
+            exact ⟨x, hmem, rfl⟩
+      | bool b => simp [VarDomain.values, BasicVarType.contains]
+      | setOfInt s => simp [VarDomain.values, BasicVarType.contains]
+      | array vs => simp [VarDomain.values, BasicVarType.contains]
   | setOfIntRange lo hi => simp only [varDomain] at h; simp at h
   | setOfIntSet xs => simp only [varDomain] at h; simp at h
 
@@ -253,22 +188,17 @@ def leavesProduct : List (List Value) → Nat
     for each initializer-free basic variable, its name and its finite
     candidate values, in declaration order.  Fails when a variable
     is outside the finite fragment (unbounded or set variables,
-    unemittable names, capped domains) or the number of leaves
-    exceeds `leavesCap`.  A model whose every variable has an
+    unemittable names).  There is no leaves-product cap: any finite
+    product is accepted.  A model whose every variable has an
     initializer has the empty slot list (search decides the empty
     assignment). -/
-def slotsChecked (m : Model) : Except String (List (String × List Value)) := do
-  let slots ← declSlots m.variables
-  if leavesProduct (slots.map Prod.snd) ≤ leavesCap then
-    return slots
-  else
-    throw s!"search space of {leavesProduct (slots.map Prod.snd)} complete assignments exceeds the cap {leavesCap}"
+def slotsChecked (m : Model) : Except String (List (String × List Value)) :=
+  declSlots m.variables
 
 /-- **The search slots of a model**: for each initializer-free basic
     variable, its name and its finite candidate values, in
     declaration order.  `none` when a variable is outside the finite
-    fragment (unbounded or set variables, unemittable names, capped
-    domains) or the number of leaves exceeds `leavesCap`.  A model
+    fragment (unbounded or set variables, unemittable names).  A model
     whose every variable has an initializer has the empty slot list
     (search decides the empty assignment). -/
 def modelSlots (m : Model) : Option (List (String × List Value)) :=

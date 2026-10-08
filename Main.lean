@@ -122,18 +122,12 @@ private def runCheck (modelPath solPath : String) : IO UInt32 := do
 
 /-! ## The `solve` subcommand
 
-Runs the certified LCG front door `Direct.solveCertified`
-(`solver/Direct/Cli.lean`): the model is compiled to the shared core
-problem, run through the LCG engine (decisions and backtracking on
-nonempty finite int/bool domains) over the registered proved
-propagators, and composed with the compiler correspondence into
-source-level verdicts that are kernel-checked end to end
-(`solveCertified_sat_correct` / `solveCertified_unsat_correct`).
-SAT results carry the theorem on every gate-passing model; UNSAT is
-claimed only when the decision-free exclusion is proved (the
-singleton fragment) — outside it, an engine refutation is reported
-as `unknown` without a verdict until the decision-descent proof
-lands.
+Runs `Direct.solveCertified`: compile the finite int/bool fragment and
+traverse its explicit chronological frontier. Both SAT and parameter-honest
+UNSAT have kernel-checked source-level proofs. The traversal is FUEL-FREE:
+termination is kernel-checked by the frontier-cost measure, so an accepted
+finite model always receives a verdict — there is no search budget and
+no fuel-exhaustion `unknown` outcome.
 
 `--certified` is a temporary accepted alias (the command is
 certified with or without it); it exists to keep old invocations
@@ -147,9 +141,8 @@ Exit codes:
 * `0` — a solution was found (SAT soundness:
   `solveCertified_sat_correct`, multi-value domains included);
 * `1` — unsatisfiable: `=====UNSATISFIABLE=====` on stdout (the
-  FlatZinc convention; singleton fragment only);
-* `2` — `unknown`/not well-formed: no verdict (fuel exhausted, an
-  uncertifiable multi-domain refutation, or a statically malformed
+  FlatZinc convention; multi-value domains included);
+* `2` — not well-formed: no verdict (a statically malformed
   model), reason on stderr; also usage/IO/parse errors;
 * `3` — unsupported: model outside the certified gate (empty or
   non-int/bool-viewed domains, or compilation failure), reason on
@@ -196,7 +189,10 @@ private def runSolve (args : List String) : IO UInt32 := do
                 IO.println "=====UNSATISFIABLE====="
                 return 1
             | .unknown reason =>
-                IO.eprintln s!"leanfzn: {reason}"
+                -- FUEL-FREE: unreachable on the active path (the
+                -- traversal terminates by the kernel-checked
+                -- measure); retained only for the result type.
+                IO.eprintln s!"leanfzn: internal: {reason}"
                 return 2
             | .unsupported reason =>
                 IO.eprintln s!"leanfzn: {reason}"

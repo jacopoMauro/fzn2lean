@@ -170,6 +170,69 @@ def main : IO UInt32 := do
     | .ok _ => false
   st ← st.check "direct: fzn_ globals rejected" ok6
 
+  -- T1 CAP REMOVAL: a 10,001-value finite domain must COMPILE (the
+  -- old per-variable cap was 10,000). Early-witness SAT: the
+  -- constraint pins x to a single value, so the search does not
+  -- enumerate the huge domain.
+  let d7 := parseOrPanic
+    "var 0..10000: x;\nconstraint int_eq(x, 7);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.compileModel d7 with
+  | .error e =>
+      st ← st.check "direct: 10001-value domain compiles (cap removed)" (false)
+      IO.eprintln s!"unexpected rejection: {e}"
+  | .ok problem =>
+      st ← st.check "direct: 10001-value domain compiles (cap removed)" (true)
+      st ← st.check "direct: 10001-value domain has 10001 values"
+        (problem.domains.length == 1
+          && problem.domains[0]!.length == 10001)
+      match LeanFzn.Solver.Direct.solveCompiled problem with
+      | some a =>
+          st ← st.check "direct: 10001-value domain early-witness SAT"
+            (a.length == 1 && a[0]! == Value.int 7)
+      | none =>
+          st ← st.check "direct: 10001-value domain early-witness SAT" (false)
+
+  -- T1 CAP REMOVAL: an enumerated domain above the old cap must
+  -- COMPILE (the old per-variable cap was 10,000 on intSet too).
+  let d8 := parseOrPanic
+    "var {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}: x;\n\
+     constraint int_eq(x, 3);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.compileModel d8 with
+  | .error _ =>
+      st ← st.check "direct: enumerated domain compiles (cap removed)" (false)
+  | .ok problem =>
+      st ← st.check "direct: enumerated domain compiles (cap removed)" (true)
+      match LeanFzn.Solver.Direct.solveCompiled problem with
+      | some a =>
+          st ← st.check "direct: enumerated domain early-witness SAT"
+            (a.length == 1 && a[0]! == Value.int 3)
+      | none =>
+          st ← st.check "direct: enumerated domain early-witness SAT" (false)
+
+  -- T1 CAP REMOVAL: a domain product above 1,000,000 must COMPILE
+  -- (the old leaves cap was 1,000,000). Early-witness SAT: the
+  -- constraint pins the first variable, so the search descends one
+  -- branch only. 1001 x 1001 = 1,002,001 > 1,000,000.
+  let d9 := parseOrPanic
+    "var 0..1000: x;\nvar 0..1000: y;\nconstraint int_eq(x, 5);\n\
+     constraint int_eq(y, 6);\nsolve satisfy;"
+  match LeanFzn.Solver.Direct.compileModel d9 with
+  | .error e =>
+      st ← st.check "direct: >1M product compiles (cap removed)" (false)
+      IO.eprintln s!"unexpected rejection: {e}"
+  | .ok problem =>
+      st ← st.check "direct: >1M product compiles (cap removed)" (true)
+      st ← st.check "direct: >1M product has 1002001 leaves"
+        (problem.domains.length == 2
+          && problem.domains[0]!.length * problem.domains[1]!.length
+            == 1002001)
+      match LeanFzn.Solver.Direct.solveCompiled problem with
+      | some a =>
+          st ← st.check "direct: >1M product early-witness SAT"
+            (a.length == 2 && a[0]! == Value.int 5 && a[1]! == Value.int 6)
+      | none =>
+          st ← st.check "direct: >1M product early-witness SAT" (false)
+
   -- THEOREM-LEVEL nonvacuity: solve_sat_correct applies to a real
   -- solved model (the kernel checks the composed chain end to end).
   -- The models are built as terms so the well-formedness proofs
@@ -289,10 +352,10 @@ def main : IO UInt32 := do
       have _hcert : Satisfies fullSig fullInterp cfrag cstore :=
         LeanFzn.Solver.Direct.solveCertified_sat_correct
           (m := cfrag) (store := cstore) wcfrag hcres
-      _ ← st.check "certified theorem: multi-value SAT theorem applies" true
+      st ← st.check "certified theorem: multi-value SAT theorem applies" true
       pure ()
   | _ =>
-      _ ← st.check "certified theorem: multi-value SAT theorem applies" false
+      st ← st.check "certified theorem: multi-value SAT theorem applies" false
       pure ()
 
   -- multi-value UNSAT (plusSlot + const bounds; no linLe): the
@@ -313,12 +376,8 @@ def main : IO UInt32 := do
      | .unsat => true
      | _ => false)
 
-  -- THE FALLBACK NOGOOD REGRESSIONS (PLAN §5 items 4–5): the
-  -- chronological-fallback arm's trail-nogood learning on EMPTY
-  -- propagator conflicts (the propNe both-singleton shape). Without
-  -- the learning these pigeonholes fuel-exhaust (decideLiteral
-  -- re-derives the same bisection forever); with it ph3 solves SAT
-  -- and ph4 refutes through the wide door.
+  -- End-to-end frontier regressions: a SAT sibling and the K4 UNSAT
+  -- model must both finish, with checker/source-theorem applications.
   let cph3 := parseOrPanic
     "var 0..2: x;\nvar 0..2: y;\nvar 0..2: z;\nconstraint int_ne(x, y);\nconstraint int_ne(x, z);\nconstraint int_ne(y, z);\nsolve satisfy;"
   match LeanFzn.Solver.Direct.solveCertified cph3 with
@@ -341,14 +400,8 @@ def main : IO UInt32 := do
           == .accepted)
   | _ => st ← st.check "certified: int_ne pigeonhole (3 slots/3 vals) solves SAT" (false)
 
-  -- the 4-slots/4-values pigeonhole over 0..2 is UNSAT (pigeonhole:
-  -- 4 distinct values cannot fit in 3); the engine refutes it via
-  -- fallback-nogood learning and the wide door certifies (no linLe)
-  -- KNOWN-GAP (P3): the fallback-nogood learning for nonempty
-  -- unanalyzable conflicts is not yet implemented (the engine
-  -- retreats without learning and exhausts fuel), so the verdict is
-  -- `unknown` until P3 lands; the checks below expect the P3
-  -- end-state and FAIL meanwhile
+  -- Four slots over three values are UNSAT. The pending frontier must
+  -- remember exhausted siblings instead of restarting the x=2/1/0 cycle.
   let cph4 := parseOrPanic
     "var 0..2: x;\nvar 0..2: y;\nvar 0..2: z;\nvar 0..2: w;\nconstraint int_ne(x, y);\nconstraint int_ne(x, z);\nconstraint int_ne(y, z);\nconstraint int_ne(x, w);\nconstraint int_ne(y, w);\nconstraint int_ne(z, w);\nsolve satisfy;"
   st ← st.check "certified: int_ne pigeonhole (4 slots/3 vals) UNSAT"
@@ -365,12 +418,10 @@ def main : IO UInt32 := do
           store ∧ LeanFzn.Solver.Direct.ParamHonest cph4 store :=
         LeanFzn.Solver.Direct.solveCertified_unsat_correct
           (m := cph4) wcph4 hph4
-      _ ← st.check "certified theorem: fallback-nogood unsat_correct applies" true
+      st ← st.check "certified theorem: fallback-nogood unsat_correct applies" true
       pure ()
   | _ =>
-      _ ← st.check "certified theorem: fallback-nogood unsat_correct applies" false
-      pure ()
-
+      st ← st.check "certified theorem: fallback-nogood unsat_correct applies" false
   -- THE BOOL/MIN/MAX/ABS FAMILY REGRESSIONS (PLAN §5 item 3, the
   -- six 2026-10-01 registrations): each model previously
   -- fuel-exhausted or was unsupported; now the propagators drive
@@ -447,10 +498,10 @@ def main : IO UInt32 := do
           store ∧ LeanFzn.Solver.Direct.ParamHonest clinleu store :=
         LeanFzn.Solver.Direct.solveCertified_unsat_correct
           (m := clinleu) wclinleu hleu
-      _ ← st.check "certified theorem: linLe wide-door unsat_correct applies" true
+      st ← st.check "certified theorem: linLe wide-door unsat_correct applies" true
       pure ()
   | _ =>
-      _ ← st.check "certified theorem: linLe wide-door unsat_correct applies" false
+      st ← st.check "certified theorem: linLe wide-door unsat_correct applies" false
       pure ()
 
   -- linLe SAT still solves
@@ -513,11 +564,11 @@ def main : IO UInt32 := do
           store ∧ LeanFzn.Solver.Direct.ParamHonest clinle2u store :=
         LeanFzn.Solver.Direct.solveCertified_unsat_correct
           (m := clinle2u) wclinle2u hle2u
-      _ ← st.check
+      st ← st.check
         "certified theorem: general-c linLe unsat_correct applies" true
       pure ()
   | _ =>
-      _ ← st.check
+      st ← st.check
         "certified theorem: general-c linLe unsat_correct applies" false
       pure ()
 
@@ -616,10 +667,10 @@ def main : IO UInt32 := do
           store ∧ LeanFzn.Solver.Direct.ParamHonest cad store :=
         LeanFzn.Solver.Direct.solveCertified_unsat_correct
           (m := cad) wcad had
-      _ ← st.check "certified theorem: allDiff unsat_correct applies" true
+      st ← st.check "certified theorem: allDiff unsat_correct applies" true
       pure ()
   | _ =>
-      _ ← st.check "certified theorem: allDiff unsat_correct applies" false
+      st ← st.check "certified theorem: allDiff unsat_correct applies" false
       pure ()
 
   -- THEOREM-LEVEL nonvacuity: solveCertified_unsat_correct applies
@@ -632,11 +683,11 @@ def main : IO UInt32 := do
           store ∧ LeanFzn.Solver.Direct.ParamHonest cmunsat3 store :=
         LeanFzn.Solver.Direct.solveCertified_unsat_correct
           (m := cmunsat3) wcm3 hcm3
-      _ ← st.check "certified theorem: wide unsat_correct applies"
+      st ← st.check "certified theorem: wide unsat_correct applies"
         true
       pure ()
   | _ =>
-      _ ← st.check "certified theorem: wide unsat_correct applies" false
+      st ← st.check "certified theorem: wide unsat_correct applies" false
       pure ()
 
   -- compile failure: unsupported
@@ -645,7 +696,7 @@ def main : IO UInt32 := do
   match LeanFzn.Solver.Direct.solveCertified cbad with
   | .unsupported r =>
       st ← st.check "certified: unbounded var refused"
-        (r.contains "unbounded") 
+        (r.contains "unbounded")
   | _ => st ← st.check "certified: unbounded var refused" (false)
 
   -- THEOREM-LEVEL nonvacuity: solveCertified_sat_correct applies to
@@ -657,11 +708,11 @@ def main : IO UInt32 := do
       have _hcert : Satisfies fullSig fullInterp csat cstore :=
         LeanFzn.Solver.Direct.solveCertified_sat_correct
           (m := csat) (store := cstore) wcsat hcres
-      _ ← st.check "certified theorem: solveCertified_sat_correct applies"
+      st ← st.check "certified theorem: solveCertified_sat_correct applies"
         true
       pure ()
   | _ =>
-      _ ← st.check "certified theorem: solveCertified_sat_correct applies"
+      st ← st.check "certified theorem: solveCertified_sat_correct applies"
         false
       pure ()
 
@@ -674,11 +725,11 @@ def main : IO UInt32 := do
           LeanFzn.Solver.Direct.ParamHonest cunsat store :=
         LeanFzn.Solver.Direct.solveCertified_unsat_correct
           (m := cunsat) wcunsat hcures
-      _ ← st.check "certified theorem: solveCertified_unsat_correct applies"
+      st ← st.check "certified theorem: solveCertified_unsat_correct applies"
         true
       pure ()
   | _ =>
-      _ ← st.check "certified theorem: solveCertified_unsat_correct applies"
+      st ← st.check "certified theorem: solveCertified_unsat_correct applies"
         false
       pure ()
 

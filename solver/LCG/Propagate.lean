@@ -466,6 +466,10 @@ def propagatorOf (dom : DomConstraint) : Option Propagator :=
       some { watches := [], run := fun st => propNe st i j }
   | .linLe coeffs is b =>
       some { watches := [], run := fun st => propLinLe st coeffs is b }
+  | .leConstHi i c =>
+      some { watches := [], run := fun st => propLeConstHi st i c }
+  | .leConstLo i c =>
+      some { watches := [], run := fun st => propLeConstLo st i c }
   | _ => none
 
 /-- All available propagators of a constraint list. -/

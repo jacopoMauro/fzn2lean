@@ -17,24 +17,20 @@ solver correctness argument will instead connect compiled constraints, solver
 states, propagation, branching, and terminal results directly to
 `Satisfies fullSig fullInterp`; output rendering happens only afterward.
 
-**Status (2026-10-02):** multi-value-domain certified solving is
-SHIPPED for both verdicts — SAT on every gate-passing model, UNSAT on
-every gate-passing model over the twenty registered constraint
-families (le/lt/eq/ne/plus/linLe/const-bound/bool/min/max/abs/
-linEq/times/allDiff). The 2026-09-30 linLe obstruction is DEAD: the
-repaired linear propagator's explanation clauses are state-free
-valid, so the `int_lin_le` coverage gate was removed. The engine now LEARNS
-NOGOODS at both the leaf failure and the chronological fallback (the
-empty-conflict/propagator-origin shape — the `int_ne` pigeonhole
-cycle's fix, certified through the new `hfallbackng` premise of the
-decision-descent master theorem), and SEVENTEEN propagator families
-are registered (le/lt/eq/ne/plus/linLe slots, five constant-bound
-families, bool_not/bool_and/bool_or, int_min/int_max/int_abs) with a
-proved Boolean↔order bridge in conflict analysis (`orderUpgrade`).
-See [PLAN.md](PLAN.md) §5 for the remaining engine-utility items
-(linEq/times/allDiff registration, literal-argument extraction
-fallbacks, the termination measure for nonempty unanalyzable
-conflicts).
+**Status (2026-10-06):** the public finite-domain solver uses a certified,
+fuel-bounded chronological frontier. Each pending frame stores a selected
+assignment prefix and its remaining value alternatives. Exhausted alternatives
+are consumed permanently, fixing the pairwise-disequality pigeonhole cycle.
+The 4-variable/3-value UNSAT regression finishes with 241 frontier transitions.
+The public SAT and parameter-honest UNSAT theorem contracts are unchanged.
+
+This driver checks complete assignments against the original domains,
+constraints and clauses. It currently does not prune with propagators or clause
+learning; their executable primitives and proofs remain available for a future
+coverage-preserving refinement. Exhaustive work can be exponential. The default
+10,000-transition budget can still return `unknown` on larger finite models.
+The compiler’s existing 1,000,000-assignment cap also applies.
+See [PLAN.md](PLAN.md) for the current scope and remaining release gates.
 
 The normative reference is **MiniZinc 2.10.0**, pinned to immutable commit
 `c9f9b649b2a251a40aa427a84d7cce73a8807fea` (see
@@ -43,112 +39,45 @@ deliberately excluded; strings remain supported in annotations.
 
 ## Main results
 
-### Directly verified finite-domain solver — FIRST CERTIFIED FRAGMENT SHIPPED
+### Directly verified finite-domain solver
 
-The certified solver returns a source `Store` and proves directly:
+`leanfzn solve MODEL.fzn` (also accepting the `--certified` alias) runs the
+well-formedness check, the fragment compiler, the nonempty finite int/bool gate,
+and the explicit frontier driver. It reports `sat`, `unsat` or
+`unsupported` with exit codes 0/1/3 (a statically malformed model is a
+usage-class exit 2).
 
-- a `sat store` result implies `Satisfies fullSig fullInterp m store`
-  (`Direct.solveCertified_sat_correct`, composed from
-  `LCG.solve_certified_sat` + `Direct.compile_exact`);
-- an `unsat` result excludes every parameter-honest satisfying store
-  (`Direct.solveCertified_unsat_correct`, composed from
-  `LCG.solve_certified_unsat` + `Direct.compile_covers`); and
-- resource exhaustion returns `unknown`, never `unsat`.
+- A `sat store` satisfies the source model (`Direct.solveCertified_sat_correct`,
+  composed with compiler exactness).
+- `unsat` excludes every parameter-honest satisfying source store
+  (`Direct.solveCertified_unsat_correct`, composed with compiler coverage).
+- The traversal is FUEL-FREE: termination is kernel-checked by the
+  frontier-cost measure, so an accepted finite model always receives a
+  verdict (`solveCertified_total`); there is no budget-exhaustion
+  `unknown` outcome.
 
-All public theorems depend only on the three standard Lean axioms
-(`propext`, `Classical.choice`, `Quot.sound`) — no `sorry`, no user
-axioms, no caller-supplied correspondence premises. The reference
-exhaustive-search theorems `Direct.solve_sat_correct` /
-`Direct.solve_unsat_correct` carry the same guarantees for the
-wider multi-value fragment.
+`solver/LCG/Frontier.lean` implements the stack. `Proofs/Frontier.lean` proves
+leaf soundness, coverage of pending alternatives, UNSAT exclusion and
+completeness of the fuel-free `frontierSolve` (`frontierSolve_sat_leaf`,
+`frontierSolve_sat_mem`, `frontierSolve_unsat_excludes`,
+`frontierSolve_complete`, `chronological_total`). Its `branchCost` counts the
+transitions needed to exhaust the original domain product; every expansion
+consumes one unit of pending work, and the measure lives only in the
+termination proof — the compiled executable never computes it.
+This is a guarantee for the chronological driver; no completeness claim is made
+for the retained historical analysis/flip loop (`lcgSearch.go`, now the
+top-level `lcgSearchGo` with a compatibility alias).
 
-The certified path is user-facing:
+The propagation, explanation and conflict-analysis modules are still checked.
+They are not used to prune the current public frontier. Their earlier run-level
+invariant theorems remain available for a later certified search refinement.
+The unbounded exhaustive reference (`Direct.solve`) remains a small-model oracle.
 
-```
-leanfzn solve --certified MODEL.fzn
-```
-
-runs the well-formedness gate (`Check.wellFormedFastB`), the fragment
-compiler (`Direct.compileModel`), the widened LCG gate
-(`LCG.gateOk` — nonempty finite int/bool domains, decisions and
-backtracking allowed), and the LCG engine (`LCG.solve`), reporting
-`sat` (with the FlatZinc solution text), `unsat`, `unknown`, or
-`unsupported` with exit codes 0/1/2/3. Eleven propagator families
-are registered with proved soundness/entitlement/reason-validity
-(`le`/`lt`/`eq`/`ne`/`plus`/`linLe` slots + the five constant-bound
-families). An engine `unsat` is CLAIMED only when certified: inside
-the singleton fragment (all doors) or through the wide
-decision-descent door on linLe-free registrations
-(`solve_certified_unsat_wide`); a linLe-bearing multi-value
-refutation reports `unknown` (no verdict), never an unproved
-`unsat`.
-
-The architecture keeps a strict algorithm/proof split:
-
-- `solver/Direct/Types.lean`, `Compile.lean`, `Search.lean`, and
-  `Cli.lean` contain data and executable definitions only;
-- `solver/Direct/Proofs/Compile.lean`, `Proofs/Exact.lean`,
-  `Proofs/Search.lean`, `Correctness.lean`, and
-  `solver/LCG/Certified.lean` contain the semantic theorems.
-
-The solver foundation is layered. `solver/Core` defines only shared compiled
-problems, slots, domains, assignments, results, and assignment semantics.
-The certified solver is the `solver/LCG` layer, which
-implements a CP-SAT-style lazy clause generation architecture: signed Boolean
-and integer-bound literals, clauses, implication reasons, decision levels,
-learned clauses, propagation queues, and conflicts.
-
-The LCG executable implements propagation, decisions, first-UIP analysis,
-learning, backjumping, and bounded search. Fuel exhaustion returns `unknown`.
-All 31 internal LCG tests passed in an earlier run. `LCG.solve_sat_correct` proves the internal
-SAT leaf result when Boolean and declarative constraint evaluations agree.
-
-**Internal UNSAT is proved through decision descent (2026-10-01).**
-The LCG proof files have no active `sorry`. The master theorem
-`go_unsat_entry_invariant` (Proofs/Run.lean) proves that every
-`.unsat` outcome of the engine loop arises from a generating ENTRY
-iterate (level 0, conflict-free, representing every internal
-solution, holding the problem's original clauses and entailed
-learned clauses) whose propagation run reports either a conflict or
-a failed level-0 all-singleton leaf — through decisions, analysis,
-learning, and backjumping, with all run invariants preserved. Its
-premises are discharged in `Proofs/Reason.lean`: the STATE-FREE
-per-family reason-validity (the two-case disjunction on each
-family's constraint), the rooted level-0 justification, and the
-nonempty-conflict entitlement (neSlot's empty clause never
-analyzes). Both terminal arms are closed by fully proved
-constructive theorems (`unsat_root_conflict_constructive`,
-`unsat_root_leaf_constructive`), using the entry-relative loop results
-(`propagateLoop_excludes`, `propagateLoop_solvedBy`,
-`propagateLoop_decisionLevel`, `propagateLoop_conflict_entitled` — the
-reported clause's origin entitlement, opposing-pair arm included), the
-repair transfer at level 0 (`repair_solvedBy0` via the iterated-firing
-`fold_fits` and `Level0TrailSound`), and the initial representation base
-(`initialWithRoots_solvedBy` under the int/bool fragment invariant). Fuel
-exhaustion is proved (`go_zero_unknown`). The retired `EngineSafe`
-(obligations over arbitrary terminal states) is deleted. What remains
-The general `LCG.solve_unsat_correct` (with its `UnsatRun` premise)
-is retained as the abstract engine theorem; the two front doors
-discharge everything for the actual compiled problem: the singleton
-door `solve_certified_unsat_real` (fragmentOk) and the WIDE door
-`solve_certified_unsat_wide` (gateOk + linLe-free — the
-decision-descent composition).
-
-**Source-level solving is certified.** `leanfzn solve` runs
-`Direct.solveCertified`: the model is compiled (`compileModel`,
-`compile_exact`/`compile_covers` correspondence), gated by the
-executable check `LCG.gateOk` (nonempty finite int/bool domains —
-multi-value domains with decisions and backtracking are admitted),
-and solved by the LCG engine over the eleven proved propagator
-families (`leSlot`, `ltSlot`, `eqSlot`, `neSlot`, `plusSlot`,
-`linLe`, `leConstHi`, `leConstLo`, `ltConstHi`, `ltConstLo`,
-`constEq`). SAT results carry `solveCertified_sat_correct` on every
-gate-passing model; UNSAT is claimed through either the singleton
-door or the wide decision-descent door (linLe-free registrations)
-— both composed into `solveCertified_unsat_correct`. A linLe-bearing
-multi-value refutation is reported as `unknown` (no verdict), never
-an unproved `unsat`. All theorems are kernel-checked end to end
-(standard Lean axioms only; see `audits/certified_axioms.lean`).
+Current checks: 85/85 solver tests, 117/117 LCG tests (including 64 graph edge
+subsets checked against the exhaustive oracle and a beyond-budget UNSAT
+acceptance case), 89/89 propagator tests, and all 66 audited theorem profiles
+with standard Lean axioms only. The proof-hole scan
+is clean. All 15 suites, including the checker benchmark, pass.
 
 ### Exact parser recognition
 
@@ -418,10 +347,12 @@ lake env leanfzn check model.fzn solution.txt
 # Solve with the certified LCG path (source-level SAT/UNSAT theorems;
 # `-` or omitted file reads stdin; --certified is a temporary
 # no-op alias). Multi-value finite domains are admitted: SAT results
-# carry the theorem (decisions + backtracking); UNSAT is claimed only
-# on the singleton fragment — an engine refutation of a multi-value
-# model reports `unknown` (exit 2) until the decision-descent proof
-# lands.
+# carry the theorem (decisions + backtracking); UNSAT is claimed
+# through either certified front door — the singleton door
+# (`solve_certified_unsat_real`, singleton domains) or the wide
+# decision-descent door (`solve_certified_unsat_wide`, all registered
+# families including linLe) — both composed into the source-level
+# `solveCertified_unsat_correct`.
 lake env leanfzn solve model.fzn
 ```
 
@@ -437,12 +368,28 @@ Exit codes of `leanfzn`:
   assignment);
 * `solve`: 0 = solution found (printed as-is, ending with the
   `----------` separator; multi-value domains included); 1 =
-  unsatisfiable (`=====UNSATISFIABLE=====` on stdout; the singleton
-  fragment); 2 = `unknown`/not well-formed — no verdict (fuel
-  exhausted, an uncertifiable multi-domain engine refutation, or a
-  statically malformed model; reason on stderr), also usage/IO/parse
-  errors; 3 = unsupported model (outside the certified gate; reason
-  on stderr).
+  unsatisfiable (`=====UNSATISFIABLE=====` on stdout; claimed only
+  through the certified singleton or wide decision-descent front
+  door); 2 = `unknown`/not well-formed — no verdict (fuel exhausted,
+  an engine search the engine cannot complete — notably a nonempty
+  unanalyzable conflict, where the chronological fallback retreats
+  WITHOUT learning and may exhaust fuel (see the engine limits
+  below) — or a statically malformed model; reason on stderr), also
+  usage/IO/parse errors; 3 = unsupported model (outside the certified
+  gate; reason on stderr).
+
+**Known engine limits (do not overclaim).** The engine learns nogoods
+at the leaf-failure arm and at the chronological fallback only when the
+reported conflict clause is empty (the propagator-origin shape); when
+`analyzeConflict` fails on a nonempty conflict clause the branch
+retreats without learning, so a search whose progress depends on that
+branch can exhaust fuel and report `unknown` even when the model has a
+definite verdict. The known instances are the 4-slot/3-value
+`int_ne` pigeonhole (UNSAT, currently reported as `unknown`) and a
+satisfiable value-removal engine case (see PLAN.md P3). The
+`hconfraw` entitlement proof for that branch
+(`solver/LCG/Proofs/FallbackRaw.lean`) is proved but NOT yet wired
+into the engine's run proof.
 
 `Tests/WellFormed.lean` and `Tests/Pretty.lean` can also be run directly
 with `lake env lean`; their `#eval`-based checks are compiled by the
@@ -451,18 +398,25 @@ intended aggregate check; a plain `lake build` currently has no default
 target. On 2026-09-29, the aggregate build (179 jobs: LeanFzn, solver,
 leanfzn, all 15 test executables) completed, all suites passed, and the
 10-theorem axiom audit (`audits/certified_axioms.lean`) reported only
-the three standard Lean axioms. The retired legacy suites (heur, fix,
-enum, sbench, opt, rev, learn, restart) and their modules were removed
-in the 2026-09-29 cleanup (PLAN.md §1); Git history keeps them.
+the three standard Lean axioms; the axiom audit is now run by the
+fail-closed `audits/run_axiom_audit.sh` in CI. The retired legacy
+suites (heur, fix, enum, sbench, opt, rev, learn, restart) and their
+modules were removed in the 2026-09-29 cleanup; Git history keeps them.
+The current `tests_solver` state (76/78 checks passing, the
+pigeonhole pair failing as documented in PLAN.md P3) is a known
+deficit tracked there, not a green baseline.
 
 ## Project status and roadmap
 
-The immediate milestone is restoring the compiler proof build and removing
-its two `sorry`s. Next come whole-model compiler exactness/coverage,
-discharge of the LCG fragment's remaining premises for the compiled
-configuration, and CLI integration. A separate parser/checker cleanup
-track preserves their public theorems and behavior while reducing unused
-code and broad imports. See [`PLAN.md`](PLAN.md) for both tracks and gates
-and [`code-structure.md`](code-structure.md) for module dependencies.
+The compiler proof is restored and split (CompileCore/CompileAux1/
+CompileAux2a/2b/2c with a re-export shell), and two-literal `int_times`
+shapes (`int_times(x,2,6)`, `int_times(2,x,6)`, `int_times(2,3,x)`,
+and the other literal-argument shapes) are supported through aux
+slots. The remaining solver work is the P3 engine-repair track
+(fallback-search progress on nonempty unanalyzable conflicts), then
+search completeness and sufficient fuel — see [PLAN.md](PLAN.md) for
+the task DAG and gates, and [`code-structure.md`](code-structure.md)
+for module dependencies. The axiom audit is fail-closed in CI
+(`audits/run_axiom_audit.sh`).
 On 2026-09-29 the full aggregate build (179 jobs) and all 15 suites
 passed, and the axiom audit is clean (see above).

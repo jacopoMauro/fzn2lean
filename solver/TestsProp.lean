@@ -197,7 +197,7 @@ def main : IO UInt32 := do
   -- ## propLeSlot: narrowing
 
   -- [1,2,3] ≤ [2,3,4]: left keeps ≤ 4 (all), right keeps ≥ 1 (all)
-  st ← st.check "le: no prune when bounds admit everything"
+  st ← st.check "le: no prune when bounds allow everything"
     (propLeSlot 0 1 [[vi 1, vi 2, vi 3], [vi 2, vi 3, vi 4]] ==
       .narrowed [[vi 1, vi 2, vi 3], [vi 2, vi 3, vi 4]])
   -- [3,4,5] ≤ [1,2,3]: left keeps ≤ 3 → [3], right keeps ≥ 3 → [3]
@@ -289,7 +289,7 @@ def main : IO UInt32 := do
       .contradiction)
   -- x in 1..3, y fixed 2, z in 3..5: z narrows to [3,5] via
   -- [1+2, 3+2] — no change; x narrows to [1,3]∩[1,3] — no change
-  st ← st.check "plus: stable when bounds admit everything"
+  st ← st.check "plus: stable when bounds allow everything"
     (propPlusSlot 0 1 2 [[vi 1, vi 2, vi 3], [vi 2], [vi 3, vi 4, vi 5]] ==
       .narrowed [[vi 1, vi 2, vi 3], [vi 2], [vi 3, vi 4, vi 5]])
   -- preservation sanity: the satisfying (2, 1, 3) survives

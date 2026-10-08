@@ -2479,10 +2479,10 @@ theorem go_fragment_no_decide {problem : Problem Constraint Objective}
                 problem.constraints.all (fun c => constraintHoldsB c a)))) := by
   intro fuel
   cases fuel with
-  | zero => intro st hlev hdisc h; simp only [lcgSearch.go] at h; cases h
+  | zero => intro st hlev hdisc h; simp only [lcgSearch.go, lcgSearchGo] at h; cases h
   | succ fuel =>
       intro st hlev hdisc h
-      simp only [lcgSearch.go] at h
+      simp only [lcgSearch.go, lcgSearchGo] at h
       -- the discipline at the post-propagation state
       have hdisc1 : ∀ s : Nat, (List.getD
           (propagateLoop (32 + 8 * st.domains.length + 4 * st.trail.length)

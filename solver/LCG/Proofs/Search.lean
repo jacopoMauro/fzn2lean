@@ -2,9 +2,12 @@
 File: solver/LCG/Proofs/Search.lean
 
 Purpose:
-  End-to-end internal SAT/UNSAT obligations for the LCG loop.
+  End-to-end internal SAT/UNSAT obligations. Public solve contracts now
+  use Proofs.Frontier's exhaustive pending-branch coverage. The remaining
+  go/terminal lemmas describe the retained historical analysis loop only;
+  its UnsatRun invariants are not prerequisites of the frontier driver.
 
-  SAT is fully discharged and near premise-free: every `.sat` outcome
+  Historical analysis-loop proof: SAT is fully discharged and near premise-free: every `.sat` outcome
   passes the engine's leaf test (domain fit + all constraints), proved
   by fuel induction over `lcgSearch.go` (`go_sat_leaf`), so
   `solve_sat_correct` takes only evaluator agreement.
@@ -56,6 +59,7 @@ DAG:
 -/
 
 import solver.LCG.Search
+import solver.LCG.Proofs.Frontier
 import solver.LCG.Proofs.Transitions
 import solver.LCG.Proofs.Lift
 import solver.LCG.Proofs.Singleton
@@ -80,11 +84,11 @@ theorem go_sat_leaf {problem : Problem Constraint Objective}
   induction fuel with
   | zero =>
       intro st a h
-      simp only [lcgSearch.go] at h
+      simp only [lcgSearch.go, lcgSearchGo] at h
       cases h
   | succ fuel ih =>
       intro st a h
-      simp only [lcgSearch.go] at h
+      simp only [lcgSearch.go, lcgSearchGo] at h
       -- outermost match: (conflict, decisionLevel)
       split at h
       · -- conflict at 0: unsat, contradiction
@@ -93,11 +97,22 @@ theorem go_sat_leaf {problem : Problem Constraint Objective}
         split at h
         · -- no analysis: chronological fallback; the match on the
           -- conflict clause gates the learning (some [] learns,
-          -- otherwise the plain retreat)
+          -- backjumps to the second-max falsifier level and flips
+          -- the max-level entry's negation; the flip arm splits on
+          -- the find?, otherwise the plain chronological retreat)
           split at h
           · -- the conflict clause is some []: the pins gate decides
             split at h
-            · exact ih _ _ h
+            · -- gate true: the find? split on the max-level entry
+              split at h
+              · -- some de: the bjL==0 if decides the flip's level
+                -- (level 1 at bjL = 0 — the soundness fix; the flip
+                -- lands at a positive level either way)
+                split at h
+                · exact ih _ _ h
+                · exact ih _ _ h
+              · -- none: the plain retreated state
+                exact ih _ _ h
             · exact ih _ _ h
           · -- a nonempty conflict: the plain retreat
             exact ih _ _ h
@@ -157,10 +172,10 @@ theorem go_unsat_shape {problem : Problem Constraint Objective}
                 problem.constraints.all (fun c => constraintHoldsB c a))) := by
   intro fuel
   induction fuel with
-  | zero => intro st h; simp only [lcgSearch.go] at h; cases h
+  | zero => intro st h; simp only [lcgSearch.go, lcgSearchGo] at h; cases h
   | succ fuel ih =>
       intro st h
-      simp only [lcgSearch.go] at h
+      simp only [lcgSearch.go, lcgSearchGo] at h
       split at h
       · -- conflict at level 0: store the terminal state
         next val hval hconf =>
@@ -172,11 +187,19 @@ theorem go_unsat_shape {problem : Problem Constraint Objective}
       · -- conflict above 0: the .unsat (if any) comes from the recursion
         split at h
         · -- no analysis: the fallback's sub-arms (the conflict-clause
-          -- match gates the learning)
+          -- match gates the learning; the some [] arm backjumps to
+          -- the second-max falsifier level and flips, the nonempty
+          -- arm retreats chronologically)
           split at h
           · -- some []: the pins gate decides
             split at h
-            · exact ih _ h
+            · -- gate true: the find? split on the max-level entry
+              split at h
+              · -- some de: the bjL==0 if (flip level soundness fix)
+                split at h
+                · exact ih _ h
+                · exact ih _ h
+              · exact ih _ h
             · exact ih _ h
           · -- nonempty: the plain retreat
             exact ih _ h
@@ -223,14 +246,7 @@ theorem solve_sat_correct
         constraintHolds constraint assignment)
     (hsolve : solve problem constraintHoldsB propagators = .sat assignment) :
     ProblemSolution problem constraintHolds assignment := by
-  -- solve = lcgSearch defaultFuel ...; unfold and apply the leaf theorem
-  unfold solve at hsolve
-  obtain ⟨hfits, hcs⟩ := go_sat_leaf defaultFuel
-    (initialStateWithRoots problem) assignment hsolve
-  refine ⟨fitsB_iff.mp hfits, ?_⟩
-  intro constraint hcons
-  have := List.all_eq_true.mp hcs constraint hcons
-  exact hagrees constraint assignment |>.mp this
+  exact chronological_sat_correct hagrees hsolve
 
 /-! ### The constructive leaf exclusion (PLAN Step 2.E item 2)
 
@@ -606,10 +622,10 @@ theorem go_unsat_entry
   := by
   intro fuel
   induction fuel with
-  | zero => intro st h; simp only [lcgSearch.go] at h; cases h
+  | zero => intro st h; simp only [lcgSearch.go, lcgSearchGo] at h; cases h
   | succ fuel ih =>
       intro st h
-      simp only [lcgSearch.go] at h
+      simp only [lcgSearch.go, lcgSearchGo] at h
       split at h
       · -- conflict at level 0: the terminal arm; st is the entry
         next w hw hlev =>
@@ -624,11 +640,19 @@ theorem go_unsat_entry
       · -- conflict above 0: recursion through the analysis arms
         split at h
         · -- no analysis: the fallback's sub-arms (the conflict-clause
-          -- match gates the learning)
+          -- match gates the learning; the some [] arm backjumps to
+          -- the second-max falsifier level and flips, the nonempty
+          -- arm retreats chronologically)
           split at h
           · -- some []: the pins gate decides
             split at h
-            · exact ih _ h
+            · -- gate true: the find? split on the max-level entry
+              split at h
+              · -- some de: the bjL==0 if (flip level soundness fix)
+                split at h
+                · exact ih _ h
+                · exact ih _ h
+              · exact ih _ h
             · exact ih _ h
           · -- nonempty: the plain retreat
             exact ih _ h
@@ -765,53 +789,7 @@ theorem solve_unsat_correct
     (hsafe : UnsatRun problem constraintHolds constraintHoldsB propagators)
     (hsolve : solve problem constraintHoldsB propagators = .unsat) :
     ¬ ∃ assignment, ProblemSolution problem constraintHolds assignment := by
-  by_cases hsolv : ∃ b, ProblemSolution problem constraintHolds b
-  · -- solutions exist: derive False from the terminal report
-    unfold solve at hsolve
-    obtain ⟨st', hlevel, hconf, hsolvedBy, hcohst, hclauses, hlearned,
-        hdisj⟩ :=
-      hsafe.unsat_entry defaultFuel (initialStateWithRoots problem) hsolve
-    rcases hdisj with hisSome | ⟨hclear, hsingle, a, hassign, hfail⟩
-    · -- CONFLICT arm: the entry facts + the report refute every
-      -- internal solution (entitlement derived internally from
-      -- hentFam via the proved loop-origin theorem)
-      exact unsat_root_conflict_constructive (problem := problem)
-        (constraintHolds := constraintHolds) (props := propagators)
-        st' hconf huniv hsolvedBy hclauses hlearned hdb0 hcohst hsolv
-        hentFam hisSome
-    · -- LEAF arm: the conflict-free transfer gives SolvedBy at the
-      -- post-propagation state; the leaf constructive refutes
-      have hsolvedBy1 : SolvedBy problem constraintHolds
-          (propagateLoop (engineFuel st') propagators st') := by
-        -- entry databases' entitlement (witness form over solutions):
-        have hentO : ∀ c ∈ st'.clauses, ∀ a2, ProblemSolution
-            problem constraintHolds a2 → ∃ l ∈ c, l.eval a2 = some true := by
-          intro c hc a2 ha2
-          rw [hclauses] at hc
-          exact hdb0 c hc a2 ha2
-        have hentL : ∀ c ∈ st'.learned, ∀ a2, ProblemSolution
-            problem constraintHolds a2 → ∃ l ∈ c, l.eval a2 = some true := by
-          intro c hc a2 ha2
-          obtain ⟨wl, hwl, hev⟩ := hlearned c hc a2 ha2
-          exact ⟨wl, hwl, hev⟩
-        exact propagateLoop_solvedBy (problem := problem)
-          (constraintHolds := constraintHolds) (props := propagators)
-          huniv hsolv st'.clauses st'.learned hentO hentL
-          (engineFuel st') st' hconf hsolvedBy hcohst rfl rfl hclear
-      -- the leaf state's level: propagation preserves the entry's 0
-      have hlevel1 :
-          (propagateLoop (engineFuel st') propagators st').decisionLevel
-            = 0 := by
-        rw [propagateLoop_decisionLevel propagators (engineFuel st') st']
-        exact hlevel
-      exact unsat_root_leaf_constructive (problem := problem)
-        (constraintHolds := constraintHolds)
-        (constraintHoldsB := constraintHoldsB) (props := propagators)
-        (propagateLoop (engineFuel st') propagators st') a
-        hclear hlevel1 hsingle hassign hfail
-        (fun b hb => hsolvedBy1 b hb) hagrees
-  · -- no solutions exist: the exclusion is immediate
-    exact hsolv
+  exact chronological_unsat_correct hagrees hdb0 hsolve
 
 /-! ### The decision-free fragment's discharge of `UnsatRun`
 
@@ -928,75 +906,6 @@ theorem solve_certified_fragment_unsat
         constraintHolds constraint assignment)
     (hunsat : solve problem constraintHoldsB propagators = .unsat) :
     ¬ ∃ assignment, ProblemSolution problem constraintHolds assignment := by
-  by_cases hsolv : ∃ b, ProblemSolution problem constraintHolds b
-  · -- solutions exist: the entry is the ROOTED INITIAL state, whose
-    -- facts are the base lemmas; go_fragment_no_decide exhibits it as
-    -- the generating entry, and the two constructive theorems refute
-    -- every internal solution
-    unfold solve at hunsat
-    -- the initial state's entry facts:
-    have hlevel0 : (initialStateWithRoots problem).decisionLevel = 0 :=
-      initialStateWithRoots_level problem
-    have hconf0 : (initialStateWithRoots problem).conflict = none :=
-      (initialWithRoots_fields problem).1
-    have hsolvedBy0 : SolvedBy problem constraintHolds
-        (initialStateWithRoots problem) :=
-      initialWithRoots_solvedBy hview hdb0
-    have hclauses0 : (initialStateWithRoots problem).clauses
-        = problem.clauses :=
-      initialWithRoots_clauses problem
-    have hlearned0 : ∀ c ∈ (initialStateWithRoots problem).learned,
-        c.EntailedBy problem constraintHolds := by
-      intro c hc
-      have h2 := (initialWithRoots_fields problem).2
-      rw [h2] at hc
-      exact absurd hc (by simp)
-    have hcoh0 : DomainCoherent problem (initialStateWithRoots problem) :=
-      initialStateWithRoots_coherent problem
-    have hdisc0 : ∀ s : Nat, (List.getD
-        (initialStateWithRoots problem).domains s []).length ≤ 1 := by
-      intro s
-      rw [initialStateWithRoots_domains problem]
-      exact problem_fragment_le_one hfrag s
-    obtain ⟨st', hlevel, hconf, hsolvedBy, hcohst, hclauses, hlearned,
-        hdisj⟩ :=
-      unsat_entry_fragment hfrag defaultFuel (initialStateWithRoots problem)
-        hlevel0 hconf0 hsolvedBy0 hclauses0 hlearned0 hdisc0 hcoh0 hunsat
-    rcases hdisj with hisSome | ⟨hclear, hsingle, a, hassign, hfail⟩
-    · -- CONFLICT arm
-      exact unsat_root_conflict_constructive (problem := problem)
-        (constraintHolds := constraintHolds) (props := propagators)
-        st' hconf huniv hsolvedBy hclauses hlearned hdb0 hcohst hsolv
-        hentFam hisSome
-    · -- LEAF arm
-      have hsolvedBy1 : SolvedBy problem constraintHolds
-          (propagateLoop (engineFuel st') propagators st') := by
-        have hentO : ∀ c ∈ st'.clauses, ∀ a2, ProblemSolution
-            problem constraintHolds a2 → ∃ l ∈ c, l.eval a2 = some true := by
-          intro c hc a2 ha2
-          rw [hclauses] at hc
-          exact hdb0 c hc a2 ha2
-        have hentL : ∀ c ∈ st'.learned, ∀ a2, ProblemSolution
-            problem constraintHolds a2 → ∃ l ∈ c, l.eval a2 = some true := by
-          intro c hc a2 ha2
-          obtain ⟨wl, hwl, hev⟩ := hlearned c hc a2 ha2
-          exact ⟨wl, hwl, hev⟩
-        exact propagateLoop_solvedBy (problem := problem)
-          (constraintHolds := constraintHolds) (props := propagators)
-          huniv hsolv st'.clauses st'.learned hentO hentL
-          (engineFuel st') st' hconf hsolvedBy hcohst rfl rfl hclear
-      have hlevel1 :
-          (propagateLoop (engineFuel st') propagators st').decisionLevel
-            = 0 := by
-        rw [propagateLoop_decisionLevel propagators (engineFuel st') st']
-        exact hlevel
-      exact unsat_root_leaf_constructive (problem := problem)
-        (constraintHolds := constraintHolds)
-        (constraintHoldsB := constraintHoldsB) (props := propagators)
-        (propagateLoop (engineFuel st') propagators st') a
-        hclear hlevel1 hsingle hassign hfail
-        (fun b hb => hsolvedBy1 b hb) hagrees
-  · -- no solutions exist: the exclusion is immediate
-    exact hsolv
+  exact chronological_unsat_correct hagrees hdb0 hunsat
 
 end LeanFzn.Solver.LCG

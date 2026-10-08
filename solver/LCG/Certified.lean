@@ -2,7 +2,11 @@
 File: solver/LCG/Certified.lean
 
 Purpose:
-  The first certified LCG front door: for the singleton-domain
+  Certified source-compiler front doors over the explicit chronological
+  frontier (SAT/UNSAT contracts unchanged). The wide UNSAT proof uses
+  frontier coverage; historical singleton/propagator lemmas remain below.
+
+  Historical analysis-loop design: for the singleton-domain
   fragment (every initial domain a singleton — no decisions, no
   propagation needed) of a successfully compiled model, the LCG
   engine's SAT/UNSAT verdicts carry kernel-checked theorems with
@@ -1117,173 +1121,9 @@ theorem solve_certified_unsat_wide
         ((compiled.constraints).filterMap propagatorOfProved) = .unsat) :
     ¬ ∃ assignment, ProblemSolution problem DomConstraint.SatisfiedBy
       assignment := by
-  -- the classical split: with no solution the claim is immediate;
-  -- otherwise the master theorem applies at the rooted initial
-  -- state and the two constructive refutations close
-  by_cases hsolv : ∃ b, ProblemSolution problem
-      DomConstraint.SatisfiedBy b
-  · -- solutions exist: the engine's unsat must refute them
-    unfold solve at hunsat
-    -- the int-view premise, derived from the gate itself
-    have hview : IntViewed problem := intViewed_of_gate hgate
-    -- the propagator-list premise (plain: the registration comes
-    -- from the problem's constraints)
-    have hprops : ∀ p ∈ compiled.constraints.filterMap
-        propagatorOfProved,
-        ∃ dc ∈ problem.constraints, propagatorOfProved dc = some p := by
-      intro p hp
-      obtain ⟨dc, hdcmem, hprop⟩ := propagatorsOfProved_mem hp
-      rw [hcons]
-      exact ⟨dc, hdcmem, hprop⟩
-    -- the compiled linLe shape (the extractor's gate)
-    have hlin : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
-        dc = .linLe coeffs is b2 → coeffs.length = is.length := by
-      intro dc hdcmem coeffs is b2 hdc2
-      rw [hcons] at hdcmem
-      exact compiled_linLe_shape hc hdcmem hdc2
-    -- the compiled linEq shape (the extractor's gate; the int_plus
-    -- fallback's [1, 1] over [i, j] shape)
-    have hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b2,
-        dc = .linEq coeffs is b2 → coeffs.length = is.length := by
-      intro dc hdcmem coeffs is b2 hdc2
-      rw [hcons] at hdcmem
-      exact compiled_linEq_shape hc hdcmem hdc2
-    -- the three premise discharges (the Reason assemblies)
-    have hreason : ReasonSafeUniv problem DomConstraint.SatisfiedBy
-        (compiled.constraints.filterMap propagatorOfProved) :=
-      propagatorsOfProved_reasonSafeUniv hview hprops hlin hlinE
-    have hjust := fun (acc : State) (hcoh : DomainCoherent problem acc)
-        (hlv : acc.decisionLevel = 0)
-        (hrootF : RootFacts problem DomConstraint.SatisfiedBy acc.trail)
-        (hrooted : ∀ e ∈ acc.trail, e.level ≤ acc.decisionLevel) =>
-      propagatorsOfProved_just hview hprops hlin hlinE
-        acc hcoh hlv hrooted hrootF
-    have hconfent := propagatorsOfProved_conflictEntitled
-      hview hsolv hprops hlin hlinE
-      (fun c hc a ha => by rw [hclauses] at hc; cases hc)
-    -- the problem's clause entitlement (vacuous: clauses = [])
-    have hdb : ∀ c ∈ problem.clauses, ∀ a,
-        ProblemSolution problem DomConstraint.SatisfiedBy a →
-          ∃ l ∈ c, l.eval a = some true := by
-      intro c hc a _; rw [hclauses] at hc; cases hc
-    -- the state-universal safety (the twenty-family assembly)
-    have hsafe : CoherentSafeUniv problem DomConstraint.SatisfiedBy
-        (compiled.constraints.filterMap propagatorOfProved) := by
-      intro st hcoh
-      exact propagatorsOfProved_safeUniv hview hprops hlin hlinE st hcoh
-    -- apply the master theorem at the rooted initial state
-    obtain ⟨st', hlevel, hconf, hsolvedBy, hcohst, hclauses',
-      hlearned, hdisj⟩ :=
-      go_unsat_entry_invariant (problem := problem)
-        (constraintHolds := DomConstraint.SatisfiedBy)
-        (constraintHoldsB := DomConstraint.satisfiedB)
-        (props := compiled.constraints.filterMap propagatorOfProved)
-        hsafe hjust hreason hsolv hdb hconfent
-        (fun st hnone hinv hdist hgate a0 hsingle hassign hfail => by
-          -- the leaf-nogood entitlement at the proved registration
-          -- (the body of propagatorsOfProved_leafng, inlined at the
-          -- plain hprops shape: the propagated state's run invariant
-          -- from propagateLoop_runInv, then leafNogood_entailed_by)
-          have hinv1 := propagateLoop_runInv hreason hjust
-            (fun c hc => by
-              rw [hclauses] at hc
-              cases hc) (engineFuel st) st hnone hinv
-          exact leafNogood_entailed_by (a0 := a0)
-            (fun c a => DomConstraint.satisfiedB_iff c a)
-            (propagateLoop (engineFuel st)
-              (compiled.constraints.filterMap propagatorOfProved) st)
-            hinv1.coherent hsingle hassign hfail hinv1.rootFacts
-            (trailBoolPinsOk_iff hgate))
-        (propagatorsOfProved_fallbackng_discharged hview hprops
-          hlin hlinE hreason hjust
-          (fun c hc => by
-            rw [hclauses] at hc
-            cases hc))
-        defaultFuel (initialStateWithRoots problem)
-        (initialWithRoots_fields problem).1
-        (initialStateWithRoots_runInv hview
-          (fun c hc l hl => by
-            rw [hclauses] at hc
-            cases hc))
-        (initialStateWithRoots_level0Solved hview
-          (fun c hc a ha => by
-            rw [hclauses] at hc
-            cases hc))
-        (initialStateWithRoots_trailDistinct problem)
-        (by rw [show defaultFuel = 10000 from rfl] at hunsat
-            exact hunsat)
-    -- the two disjuncts: the constructive refutations
-    rcases hdisj with ⟨hconflict, hSolvedBy1⟩ | ⟨hclear, hsingle,
-      a0, hassign, hfail⟩
-    · -- the conflict arm: unsat_root_conflict_constructive
-      -- (the entry's own facts + the internal entitlement chain)
-      have hentFam : ∀ (st : State), DomainCoherent problem st →
-        ∀ (p : Propagator), p ∈
-            compiled.constraints.filterMap propagatorOfProved →
-          ∀ (c : Clause), p.run st = .conflict c →
-            SolvedBy problem DomConstraint.SatisfiedBy st →
-            ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
-              ∃ l ∈ c, l.eval a = some true := by
-        intro st hcoh p hp c hrun hsol a ha
-        exact propagatorsOfProved_entitled hview hprops hlin hlinE
-          st hsol hcoh p hp c hrun a ha
-      exact unsat_root_conflict_constructive (problem := problem)
-        (constraintHolds := DomConstraint.SatisfiedBy)
-        (props := compiled.constraints.filterMap propagatorOfProved)
-        st' hconf hsafe hsolvedBy hclauses' hlearned hdb hcohst
-        hsolv hentFam hconflict
-    · -- the leaf arm: the failed complete assignment refutes
-      have hentFam : ∀ (st : State), DomainCoherent problem st →
-        ∀ (p : Propagator), p ∈
-            compiled.constraints.filterMap propagatorOfProved →
-          ∀ (c : Clause), p.run st = .conflict c →
-            SolvedBy problem DomConstraint.SatisfiedBy st →
-            ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
-              ∃ l ∈ c, l.eval a = some true := by
-        intro st hcoh p hp c hrun hsol a ha
-        exact propagatorsOfProved_entitled hview hprops hlin hlinE
-          st hsol hcoh p hp c hrun a ha
-      -- the leaf's SolvedBy transfer at the level-0 entry
-      have hentO : ∀ c ∈ st'.clauses, ∀ a2, ProblemSolution
-          problem DomConstraint.SatisfiedBy a2 →
-          ∃ l ∈ c, l.eval a2 = some true := by
-        intro c hc a2 ha2
-        rw [hclauses'] at hc
-        exact hdb c hc a2 ha2
-      have hentL : ∀ c ∈ st'.learned, ∀ a2, ProblemSolution
-          problem DomConstraint.SatisfiedBy a2 →
-          ∃ l ∈ c, l.eval a2 = some true := by
-        intro c hc a2 ha2
-        obtain ⟨wl, hwl, hev⟩ := hlearned c hc a2 ha2
-        exact ⟨wl, hwl, hev⟩
-      have hsolvedBy1 : SolvedBy problem DomConstraint.SatisfiedBy
-          (propagateLoop (engineFuel st')
-            (compiled.constraints.filterMap propagatorOfProved) st') :=
-        propagateLoop_solvedBy_any hsafe hsolv st'.clauses st'.learned
-          hentO hentL (engineFuel st') st' hconf hsolvedBy hcohst
-          rfl rfl
-      have hlevel1 :
-          (propagateLoop (engineFuel st')
-            (compiled.constraints.filterMap propagatorOfProved)
-            st').decisionLevel = 0 := by
-        rw [propagateLoop_decisionLevel
-          (compiled.constraints.filterMap propagatorOfProved)
-          (engineFuel st') st']
-        exact hlevel
-      have hagrees : ∀ constraint assignment,
-          DomConstraint.satisfiedB constraint assignment = true ↔
-            DomConstraint.SatisfiedBy constraint assignment :=
-        fun c a => DomConstraint.satisfiedB_iff c a
-      exact unsat_root_leaf_constructive (problem := problem)
-        (constraintHolds := DomConstraint.SatisfiedBy)
-        (constraintHoldsB := DomConstraint.satisfiedB)
-        (props := compiled.constraints.filterMap propagatorOfProved)
-        (propagateLoop (engineFuel st')
-          (compiled.constraints.filterMap propagatorOfProved) st') a0
-        hclear hlevel1 hsingle hassign hfail
-        (fun b hb => hsolvedBy1 b hb) hagrees
-  · -- no solutions exist: the exclusion is immediate
-    exact hsolv
+  exact chronological_unsat_correct
+    (fun c a => DomConstraint.satisfiedB_iff c a)
+    (fun c hc _ _ => by rw [hclauses] at hc; cases hc) hunsat
 
 end LeanFzn.Solver.LCG
 

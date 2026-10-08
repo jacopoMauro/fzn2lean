@@ -3,7 +3,7 @@ File: solver/LCG/Proofs/Run.lean
 
 Purpose:
   The run-level reachability induction for the LCG engine loop
-  (PLAN.md §3 item 2): the states `lcgSearch.go` recurses into carry
+  (PLAN.md P3b): the states `lcgSearch.go` recurses into carry
   the `RunInv` bundle, and at the positive-level conflict arm the
   analyzed state is `AnalysisReady`, so `analyzeConflict_correct`
   applies and every learned clause the engine inserts is entailed.
@@ -3452,6 +3452,53 @@ theorem runInv_cons_learned
     · exact hnorm q hq
     · exact h.learnedNorm c2 hc3 q hq
 
+/-- Raising the decision level preserves all run facts; only the upper
+    bound on trail levels changes. -/
+theorem newDecisionLevel_runInv
+    {problem : Problem Constraint Objective}
+    {constraintHolds : Constraint → Assignment → Prop}
+    {props : List Propagator} {st : State}
+    (h : RunInv problem constraintHolds props st) :
+    RunInv problem constraintHolds props (newDecisionLevel st) := by
+  exact ⟨h.coherent, h.clausesFixed, h.learnedEntailed,
+    fun e he => Nat.le_trans (h.rooted e he) (Nat.le_succ _),
+    h.trailNorm, h.reasonNorm, h.reasonValid, h.rootFacts,
+    h.clausesNorm, h.learnedNorm⟩
+
+/-- An explained enqueue above level zero preserves the run invariant.
+    Entailment and pivot membership validate the reason; the positive
+    stamp keeps the new literal out of the root-fact obligation. -/
+theorem enqueueNorm_runInv_pos
+    {problem : Problem Constraint Objective}
+    {constraintHolds : Constraint → Assignment → Prop}
+    {props : List Propagator} {st : State} {l : Literal} {c : Clause}
+    (h : RunInv problem constraintHolds props st)
+    (hpos : st.decisionLevel ≠ 0)
+    (hent : c.EntailedBy problem constraintHolds)
+    (hnorm : ∀ q ∈ c, q = q.norm)
+    (hpiv : l.norm ∈ c) :
+    RunInv problem constraintHolds props
+      (enqueueNorm st l (some { clause := c })) := by
+  refine ⟨enqueueNorm_coherent h.coherent,
+    enqueueNorm_clausesFixed h.clausesFixed,
+    enqueueNorm_learnedEntailed h.learnedEntailed,
+    enqueueNorm_rooted h.rooted, enqueueNorm_trailNorm h.trailNorm,
+    enqueueNorm_reasonNorm h.reasonNorm ?_,
+    enqueueNorm_reasonValid h.reasonValid ?_,
+    enqueueNorm_rootFacts_pos hpos h.rootFacts, ?_, ?_⟩
+  · intro r hr q hq
+    cases hr
+    exact hnorm q hq
+  · intro r hr
+    cases hr
+    exact ⟨hent, by simpa using hpiv⟩
+  · intro c2 hc q hq
+    rw [enqueueNorm_clauses] at hc
+    exact h.clausesNorm c2 hc q hq
+  · intro c2 hc q hq
+    rw [enqueueNorm_learned] at hc
+    exact h.learnedNorm c2 hc q hq
+
 /-- Repair-to-zero ignores an enqueue at a POSITIVE level: the fresh
     entry is stamped above 0 and dropped by the 0-filter; the skip and
     opposing arms leave the trail unchanged (and the repair clears
@@ -3995,7 +4042,7 @@ theorem go_unsat_entry_invariant
   induction fuel with
   | zero =>
       intro st _ _ _ _ h
-      simp only [lcgSearch.go] at h
+      simp only [lcgSearch.go, lcgSearchGo] at h
       cases h
   | succ fuel ih =>
       intro st hnone hinv hL0 hdist hunsat
@@ -4004,7 +4051,7 @@ theorem go_unsat_entry_invariant
           (propagateLoop (engineFuel st) props st) :=
         propagateLoop_runInv hreason hjust hdb (engineFuel st) st
           hnone hinv
-      simp only [lcgSearch.go] at hunsat
+      simp only [lcgSearch.go, lcgSearchGo] at hunsat
       split at hunsat
       · -- conflict at level 0: the terminal arm — the propagated
         -- state is the generating entry
@@ -4176,56 +4223,766 @@ theorem go_unsat_entry_invariant
               have hL01' : SolvedBy problem constraintHolds
                   (repairAfterBackjump problem 0
                     (propagateLoop (engineFuel st) props st)) := hL01
-              -- the retreat entry, spelled exactly as the engine
-              -- (structure eta: the let-form and the record-update
-              -- form are definitionally equal, so the IH applies)
-              exact ih (repairAfterBackjump problem
-                  ((propagateLoop (engineFuel st) props
-                    st).decisionLevel - 1)
-                  {propagateLoop (engineFuel st) props st with
-                   learned := (((propagateLoop (engineFuel st)
-                      props st).trail.filter
-                        (fun e => decide (e.level > 0))).map
-                          (fun e => e.literal.negate.norm)) ::
-                    (propagateLoop (engineFuel st) props st).learned})
-                (repair_conflict problem _ _)
-                (repair_runInv
+              -- P3b SECOND-MAX BACKJUMP + FLIP (engine change
+              -- 2026-10-06): the arm retreats to the SECOND-highest
+              -- falsifier level and — unconditionally when a
+              -- max-level entry exists — enqueues that entry's
+              -- negation with the nogood as reason (a branch-
+              -- exclusion flip). The four IH obligations mirror
+              -- a4_analyzed_entry; spell the engine's composite.
+              -- The flipped state st2: the repair + learned nogood.
+              -- Its RunInv: the learned gain is entitled (hent) and
+              -- normalized (leafNogood_norm), then the repair's own
+              -- transfers; its level is bjL ≤ the conflict level.
+              have hdl1 : (propagateLoop (engineFuel st) props
+                  st).decisionLevel =
+                  (propagateLoop (engineFuel st) props
+                    st).decisionLevel := rfl
+              -- the nogood is the engine's ng
+              let ng : Clause :=
+                (((propagateLoop (engineFuel st) props
+                    st).trail.filter
+                      (fun e => decide (e.level > 0))).map
+                        (fun e => e.literal.negate.norm))
+              -- the positive-level entries (the flip's level source)
+              let lvls : List TrailEntry :=
+                ((propagateLoop (engineFuel st) props
+                    st).trail.filter
+                      (fun e => decide (e.level > 0)))
+              -- the max/second-max levels and the found entry: case
+              -- on the engine's find? directly (the engine's own
+              -- match splits the recursion into the flip arm and
+              -- the plain arm). The invariants hold at the repaired
+              -- state for any level AT OR BELOW the propagated state's
+              -- own level (the repair's filter only keeps entries at
+              -- ≤ that level, and rootedness bounds them all) —
+              -- state the auxiliary facts with the level-bound
+              -- premise so the recursion can instantiate them at the
+              -- engine's second-max level (which the engine's own
+              -- fold bound guarantees is ≤ the propagated level —
+              -- proved in hbnd below).
+              have hbnd : lvls.foldl (fun acc e =>
+                  if (e.level == lvls.foldl
+                    (fun acc2 e2 => max acc2 e2.level) 0) = true
+                    then acc else max acc e.level) 0 ≤
+                  (propagateLoop (engineFuel st) props st).decisionLevel := by
+                -- the second-max fold ≤ the max fold ≤ the level. The
+                -- level bound: every positive-level entry's level is ≤
+                -- the propagated state's decisionLevel (rootedness).
+                have hrootedst1 : ∀ e ∈ (propagateLoop (engineFuel st)
+                    props st).trail,
+                    e.level ≤ (propagateLoop (engineFuel st) props
+                      st).decisionLevel :=
+                  propagateLoop_rooted (engineFuel st) st hinv.rooted
+                have hmaxle : lvls.foldl
+                      (fun acc e => max acc e.level) 0 ≤
+                      (propagateLoop (engineFuel st) props st).decisionLevel := by
+                    have hmain : ∀ (ls : List TrailEntry),
+                        (∀ e ∈ ls, e.level ≤
+                          (propagateLoop (engineFuel st) props
+                            st).decisionLevel) →
+                        ls.foldl (fun acc e => max acc e.level) 0 ≤
+                          (propagateLoop (engineFuel st) props
+                            st).decisionLevel := by
+                          intro ls
+                          induction ls with
+                          | nil => intro _; simp [Nat.zero_le]
+                          | cons e2 rest2 ih3 =>
+                              intro hmem2
+                              simp only [List.foldl_cons]
+                              have hrest : rest2.foldl
+                                  (fun acc e => max acc e.level) 0 ≤
+                                  (propagateLoop (engineFuel st) props
+                                    st).decisionLevel :=
+                                ih3 (fun e3 he3 => hmem2 e3
+                                  (List.mem_cons_of_mem _ he3))
+                              have h1 : e2.level ≤
+                                  (propagateLoop (engineFuel st) props
+                                    st).decisionLevel :=
+                                hmem2 e2 (List.mem_cons_self)
+                              -- max (fold) e2.level ≤ level: the
+                              -- cons-fold seeds with max 0 e2.level
+                              -- (= e2.level, levels ≥ 0) and its value
+                              -- IS max (rest2-fold) e2.level — bound
+                              -- each part by the propagated level
+                              show List.foldl
+                                  (fun acc e => max acc e.level)
+                                  (max 0 e2.level) rest2 ≤
+                                (propagateLoop (engineFuel st) props
+                                  st).decisionLevel
+                              have hseed : max 0 e2.level = e2.level := by
+                                have : (0 : Int) ≤ e2.level := by omega
+                                simp [Nat.max_def, this]
+                              rw [hseed]
+                              -- the seeded fold ≤ level: every
+                              -- accumulator step is a max with a
+                              -- member level ≤ the propagated level,
+                              -- so the fold's final value is too
+                              have hgen2 : ∀ (seed : Nat)
+                                  (ls : List TrailEntry),
+                                  seed ≤
+                                    (propagateLoop (engineFuel st) props
+                                      st).decisionLevel →
+                                  (∀ e3 ∈ ls, e3.level ≤
+                                    (propagateLoop (engineFuel st) props
+                                      st).decisionLevel) →
+                                  ls.foldl (fun acc e => max acc e.level)
+                                    seed ≤
+                                    (propagateLoop (engineFuel st) props
+                                      st).decisionLevel := by
+                                intro seed ls
+                                induction ls generalizing seed with
+                                | nil => intro hs _; exact hs
+                                | cons e3 rest3 ih4 =>
+                                    intro hs hmem3
+                                    simp only [List.foldl_cons]
+                                    have h3i : e3.level ≤
+                                        (propagateLoop (engineFuel st)
+                                          props st).decisionLevel :=
+                                      hmem3 e3 (List.mem_cons_self)
+                                    have hs2 : max seed e3.level ≤
+                                        (propagateLoop (engineFuel st)
+                                          props st).decisionLevel :=
+                                      Nat.max_le.mpr ⟨hs, h3i⟩
+                                    show List.foldl
+                                        (fun acc e => max acc e.level)
+                                        (max seed e3.level) rest3 ≤
+                                      (propagateLoop (engineFuel st)
+                                        props st).decisionLevel
+                                    exact ih4 (max seed e3.level) hs2
+                                      (fun e4 he4 => hmem3 e4
+                                        (List.mem_cons_of_mem _ he4))
+                              exact hgen2 e2.level rest2 h1
+                                (fun e4 he4 => hmem2 e4
+                                  (List.mem_cons_of_mem _ he4))
+                    exact hmain lvls
+                      (fun e he => hrootedst1 e
+                        ((List.mem_filter.mp he).1))
+                -- the second-max fold is ≤ the max fold: every
+                -- accumulator step either keeps the seed or takes an
+                -- entry level, both ≤ the max fold's final value
+                have h2le : lvls.foldl (fun acc e =>
+                    if (e.level == lvls.foldl
+                      (fun acc2 e2 => max acc2 e2.level) 0) = true
+                      then acc else max acc e.level) 0 ≤
+                    lvls.foldl (fun acc e => max acc e.level) 0 := by
+                  have hgen : ∀ (ls : List TrailEntry) (mx : Nat),
+                      ls.foldl (fun acc e =>
+                        if (e.level == mx) = true then acc
+                        else max acc e.level) 0 ≤
+                        ls.foldl (fun acc e => max acc e.level) 0 := by
+                        intro ls mx
+                        induction ls with
+                        | nil => exact Nat.le_refl _
+                        | cons e2 rest2 ih3 =>
+                            simp only [List.foldl_cons]
+                            -- the second-max fold over the cons list:
+                            --   foldl f' 0 (e2 :: rest2)
+                            --    = foldl f' (f' 0 e2) rest2, where
+                            --    f' 0 e2 = if (e2.level == mx) = true
+                            --    then 0 else max 0 e2.level
+                            -- SEED MONOTONICITY: a max-fold with a
+                            -- smaller seed is ≤ one with a bigger seed
+                            have hmono : ∀ (s1 s2 : Nat)
+                                (ls : List TrailEntry),
+                                s1 ≤ s2 →
+                                List.foldl (fun acc e => max acc e.level)
+                                  s1 ls ≤
+                                List.foldl (fun acc e => max acc e.level)
+                                  s2 ls := by
+                              intro s1 s2 ls
+                              induction ls generalizing s1 s2 with
+                              | nil => intro h; exact h
+                              | cons e3 rest3 ih4 =>
+                                  intro hle
+                                  simp only [List.foldl_cons]
+                                  show List.foldl
+                                      (fun acc e => max acc e.level)
+                                      (max s1 e3.level) rest3 ≤
+                                    List.foldl
+                                      (fun acc e => max acc e.level)
+                                      (max s2 e3.level) rest3
+                                  exact ih4 (max s1 e3.level)
+                                    (max s2 e3.level)
+                                    (Nat.max_le.mpr
+                                      ⟨Nat.le_trans hle
+                                        (Nat.le_trans (Nat.le_refl s2)
+                                          (Nat.le_max_left s2 e3.level)),
+                                        Nat.le_max_right s2 e3.level⟩)
+                            -- the cons list's max fold dominates its
+                            -- members (needed below): unfold max and
+                            -- split on the accumulator's two values;
+                            -- keep the ∀-form for reuse in the arms
+                            have hdom' : ∀ e3 ∈ (e2 :: rest2 : List
+                                TrailEntry), e3.level ≤
+                                List.foldl (fun acc e => max acc e.level)
+                                  0 (e2 :: rest2) := by
+                              intro e3 he3
+                              -- the fold's value is ≥ every member's
+                              -- level: the cons-fold's seed is
+                              -- max 0 e2.level = e2.level (levels ≥ 0)
+                              show e3.level ≤ List.foldl
+                                  (fun acc e => max acc e.level)
+                                  (max 0 e2.level) rest2
+                              -- members of the cons list: e2 itself
+                              -- (seed-dominated) or a rest2 member
+                              -- (absorbed by the fold)
+                              have hgen3 : ∀ (ls : List TrailEntry)
+                                  (seed : Nat) (v : TrailEntry),
+                                  seed ≤ v.level →
+                                  v ∈ ls →
+                                  List.foldl (fun acc e => max acc e.level)
+                                    seed ls ≥ v.level := by
+                                intro ls
+                                induction ls with
+                                | nil => intro seed v hv hvv; cases hvv
+                                | cons e4 rest4 ih5 =>
+                                    intro seed v hseed hv
+                                    show List.foldl
+                                        (fun acc e => max acc e.level)
+                                        (max seed e4.level) rest4 ≥
+                                      v.level
+                                    rcases List.mem_cons.mp hv with hv3 | hv2
+                                    · -- v = e4: a general fold-bound
+                                      -- lemma — the fold is ≥ its
+                                      -- own seed for any list
+                                      rw [hv3] at hseed
+                                      rw [hv3]
+                                      have hbound : ∀ (ls2 : List
+                                          TrailEntry) (s : Nat),
+                                          List.foldl
+                                            (fun acc e =>
+                                              max acc e.level) s ls2 ≥
+                                            s := by
+                                        intro ls2
+                                        induction ls2 with
+                                        | nil => intro s; exact Nat.le_refl _
+                                        | cons e5 rest5 ih6 =>
+                                            intro s
+                                            simp only [List.foldl_cons]
+                                            have h6 := ih6
+                                              (max s e5.level)
+                                            have hgt : max s e5.level ≥ s :=
+                                              Nat.le_max_left s e5.level
+                                            omega
+                                      -- goal: fold ≥ e4.level;
+                                      -- hseed : seed ≤ e4.level
+                                      have h2 := hbound rest4
+                                        (max seed e4.level)
+                                      have h3 : max seed e4.level ≥
+                                          e4.level :=
+                                        Nat.le_max_right seed e4.level
+                                      omega
+                                    · -- v ∈ rest4: the IH at the
+                                      -- ORIGINAL seed — then lift
+                                      -- with seed monotonicity
+                                      have hmono : ∀ (ls2 : List
+                                          TrailEntry) (s1 s2 : Nat),
+                                          s1 ≤ s2 →
+                                          List.foldl
+                                            (fun acc e =>
+                                              max acc e.level) s1 ls2 ≤
+                                          List.foldl
+                                            (fun acc e =>
+                                              max acc e.level) s2 ls2 := by
+                                        intro ls2
+                                        induction ls2 with
+                                        | nil => intro s1 s2 h; exact h
+                                        | cons e5 rest5 ih6 =>
+                                            intro s1 s2 hle
+                                            simp only [List.foldl_cons]
+                                            show List.foldl
+                                                (fun acc e =>
+                                                  max acc e.level)
+                                                (max s1 e5.level) rest5 ≤
+                                              List.foldl
+                                                (fun acc e =>
+                                                  max acc e.level)
+                                                (max s2 e5.level) rest5
+                                            exact ih6 (max s1 e5.level)
+                                              (max s2 e5.level)
+                                              (Nat.max_le.mpr
+                                                ⟨Nat.le_trans hle
+                                                  (Nat.le_trans
+                                                    (Nat.le_refl s2)
+                                                    (Nat.le_max_left s2
+                                                      e5.level)),
+                                                  Nat.le_max_right s2
+                                                    e5.level⟩)
+                                      have hstep : List.foldl
+                                          (fun acc e =>
+                                            max acc e.level) seed rest4 ≤
+                                        List.foldl
+                                          (fun acc e => max acc e.level)
+                                          (max seed e4.level) rest4 :=
+                                        hmono rest4 seed
+                                          (max seed e4.level)
+                                          (Nat.le_max_left seed e4.level)
+                                      have hih : List.foldl
+                                          (fun acc e =>
+                                            max acc e.level) seed rest4 ≥
+                                          v.level := ih5 seed v hseed hv2
+                                      omega
+                              -- members: e2 itself (the fold's
+                              -- seed dominates) or a rest2 member
+                              -- (hgen3 at seed max 0 e2.level)
+                              -- ∀-member domination: the max fold
+                              -- over the rest (any seed) absorbs
+                              -- every rest member's level
+                              have hdomrest : ∀ (ls2 : List TrailEntry)
+                                  (s : Nat) (v : TrailEntry),
+                                  v ∈ ls2 →
+                                  List.foldl (fun acc e =>
+                                    max acc e.level) s ls2 ≥ v.level := by
+                                intro ls2
+                                induction ls2 with
+                                | nil => intro s v hv; cases hv
+                                | cons e4 rest4 ih5 =>
+                                    intro s v hv
+                                    show List.foldl
+                                        (fun acc e => max acc e.level)
+                                        (max s e4.level) rest4 ≥ v.level
+                                    rcases List.mem_cons.mp hv with hv3 | hv2
+                                    · -- v = e4: the rest-fold is ≥ its
+                                      -- seed, which is ≥ e4.level
+                                      rw [hv3]
+                                      have hge : ∀ (ls3 : List TrailEntry)
+                                          (s2 : Nat),
+                                          List.foldl (fun acc e =>
+                                            max acc e.level) s2 ls3 ≥ s2 :=
+                                        by
+                                          intro ls3
+                                          induction ls3 with
+                                          | nil => intro s2; exact Nat.le_refl _
+                                          | cons e5 rest5 ih6 =>
+                                              intro s2
+                                              simp only [List.foldl_cons]
+                                              have h6 := ih6
+                                                (max s2 e5.level)
+                                              have hgt : s2 ≤ max s2 e5.level :=
+                                                Nat.le_max_left s2 e5.level
+                                              omega
+                                      exact Nat.le_trans
+                                        (Nat.le_max_right s e4.level)
+                                        (hge rest4 (max s e4.level))
+                                    · exact ih5 (max s e4.level) v hv2
+                              rcases List.mem_cons.mp he3 with hv3 | hv3
+                              · rw [hv3]
+                                have hge : ∀ (ls3 : List TrailEntry)
+                                    (s2 : Nat),
+                                    List.foldl (fun acc e =>
+                                      max acc e.level) s2 ls3 ≥ s2 := by
+                                  intro ls3
+                                  induction ls3 with
+                                  | nil => intro s2; exact Nat.le_refl _
+                                  | cons e5 rest5 ih6 =>
+                                      intro s2
+                                      simp only [List.foldl_cons]
+                                      have h6 := ih6 (max s2 e5.level)
+                                      have hgt : s2 ≤ max s2 e5.level :=
+                                        Nat.le_max_left s2 e5.level
+                                      omega
+                                exact Nat.le_trans
+                                  (Nat.le_max_right 0 e2.level)
+                                  (hge rest2 (max 0 e2.level))
+                              · have hseedv : max 0 e2.level = e2.level := by simp
+                                rw [hseedv]
+                                exact hdomrest rest2 e2.level e3 hv3
+                            have hdom : List.foldl
+                                (fun acc e => max acc e.level) 0
+                                (e2 :: rest2) ≥ e2.level :=
+                              hdom' e2 (List.mem_cons_self)
+                            cases hbv : (e2.level == mx) with
+                            | true =>
+                                -- the seed collapses to 0: the rest
+                                -- fold (≤ max fold over rest, ≤ max
+                                -- fold over cons) closes. The goal's
+                                -- seed collapses too (hbv already
+                                -- reduced it); keep the engine's own
+                                -- shapes and chain ih3 + hmono + hdom.
+                                show List.foldl
+                                    (fun acc e =>
+                                      if (e.level == mx) = true then acc
+                                      else max acc e.level)
+                                    0 rest2 ≤
+                                  List.foldl
+                                    (fun acc e => max acc e.level)
+                                    (max 0 e2.level) rest2
+                                exact Nat.le_trans (ih3)
+                                  (hmono 0 (max 0 e2.level) rest2
+                                    (by simp))
+                            | false =>
+                                -- the seed is max 0 e2.level: the rest
+                                -- fold grows to at most max(seed, e2)
+                                -- ≤ the cons max fold. The goal is the
+                                -- second-max fold over rest2 ≤ the max
+                                -- fold over rest2: f' at each step is
+                                -- either the accumulated second-max or
+                                -- a member level — both bounded by the
+                                -- max fold's accumulator (which absorbs
+                                -- every member level). Generalize over
+                                -- the seed pair.
+                                have hgen2 : ∀ (ls : List TrailEntry)
+                                    (acc1 acc2 : Nat),
+                                    acc1 ≤ acc2 →
+                                    ls.foldl (fun acc e =>
+                                      if (e.level == mx) = true then acc
+                                      else max acc e.level) acc1 ≤
+                                    ls.foldl (fun acc e =>
+                                      max acc e.level) acc2 := by
+                                  intro ls
+                                  induction ls with
+                                  | nil => intro a1 a2 h; exact h
+                                  | cons e3 rest3 ih4 =>
+                                      intro a1 a2 hle
+                                      simp only [List.foldl_cons]
+                                      -- step: f' a1 e3 vs max a2 e3.level
+                                      have hstep :
+                                          (if (e3.level == mx) = true
+                                              then a1
+                                          else max a1 e3.level) ≤
+                                        max a2 e3.level := by
+                                        by_cases h3 :
+                                            (e3.level == mx) = true
+                                        · simp [h3]
+                                          exact Nat.le_trans hle
+                                            (Nat.le_max_left a2 e3.level)
+                                        · simp [h3]
+                                          omega
+                                      show rest3.foldl (fun acc e =>
+                                        if (e.level == mx) = true then acc
+                                        else max acc e.level)
+                                        ((if (e3.level == mx) = true then a1
+                                          else max a1 e3.level)) ≤
+                                        rest3.foldl (fun acc e =>
+                                          max acc e.level)
+                                        (max a2 e3.level)
+                                      exact ih4 _ _ hstep
+                                -- instantiate at the cons pair's seed:
+                                -- f' 0 e2 = max 0 e2.level (hbv
+                                -- false); the goal's RHS reduces to
+                                -- the max fold at seed max 0 e2.level
+                                -- (rfl), and hgen2 at equal seeds
+                                -- closes it
+                                show List.foldl (fun acc e =>
+                                  if (e.level == mx) = true then acc
+                                  else max acc e.level)
+                                  (max 0 e2.level) rest2 ≤
+                                List.foldl
+                                  (fun acc e => max acc e.level)
+                                  (max 0 e2.level) rest2
+                                exact hgen2 rest2 (max 0 e2.level)
+                                  (max 0 e2.level) (Nat.le_refl _)
+                  exact hgen lvls
+                    (lvls.foldl (fun acc2 e2 =>
+                      max acc2 e2.level) 0)
+                exact Nat.le_trans h2le hmaxle
+              have hst2inv : ∀ (bjL : Nat), bjL ≤
+                  (propagateLoop (engineFuel st) props st).decisionLevel →
+                  RunInv problem constraintHolds props
+                    (repairAfterBackjump problem bjL
+                      {propagateLoop (engineFuel st) props st with
+                       learned := ng :: (propagateLoop (engineFuel st)
+                         props st).learned}) := by
+                intro bjL hbjl
+                refine repair_runInv
                   (runInv_cons_learned hinv1 hent
-                    (leafNogood_norm _))
-                  (Nat.le_trans (Nat.sub_le _ _)
-                    (Nat.le_of_eq rfl)))
-                (by
-                  unfold Level0Solved
-                  rw [repair0_repair]
-                  show SolvedBy problem constraintHolds
-                    (repairAfterBackjump problem 0
+                    (leafNogood_norm _)) hbjl
+              have hst2L0 : ∀ (bjL : Nat),
+                  Level0Solved problem constraintHolds
+                    (repairAfterBackjump problem bjL
                       {propagateLoop (engineFuel st) props st with
-                       learned := (((propagateLoop (engineFuel st)
-                          props st).trail.filter
-                            (fun e => decide (e.level > 0))).map
-                              (fun e => e.literal.negate.norm)) ::
-                        (propagateLoop (engineFuel st) props st).learned})
-                  have hrec2 : repairAfterBackjump problem 0
+                       learned := ng :: (propagateLoop (engineFuel st)
+                         props st).learned}) := by
+                intro lvl
+                show SolvedBy problem constraintHolds
+                  (repairAfterBackjump problem 0
+                    (repairAfterBackjump problem lvl
                       {propagateLoop (engineFuel st) props st with
-                       learned := (((propagateLoop (engineFuel st)
-                          props st).trail.filter
-                            (fun e => decide (e.level > 0))).map
-                              (fun e => e.literal.negate.norm)) ::
-                        (propagateLoop (engineFuel st) props st).learned}
-                      = {repairAfterBackjump problem 0
-                          (propagateLoop (engineFuel st) props st) with
-                          learned := (((propagateLoop (engineFuel st)
-                             props st).trail.filter
-                               (fun e => decide (e.level > 0))).map
-                                 (fun e => e.literal.negate.norm)) ::
-                            (repairAfterBackjump problem 0
-                              (propagateLoop (engineFuel st)
-                                props st)).learned} := rfl
-                  rw [hrec2]
-                  exact solvedBy_cons_learned hL01' hent)
-                (repair_trailDistinct
-                  (propagateLoop_trailDistinct (engineFuel st) st hdist))
-                hunsat
+                       learned := ng :: (propagateLoop (engineFuel st)
+                         props st).learned}))
+                rw [repair0_repair problem lvl]
+                rw [repair0_learned_update problem
+                  (propagateLoop (engineFuel st) props st) ng]
+                exact solvedBy_cons_learned hL01' hent
+              have hst2dist : ∀ (bjL : Nat),
+                  TrailDistinct
+                    (repairAfterBackjump problem bjL
+                      {propagateLoop (engineFuel st) props st with
+                       learned := ng :: (propagateLoop (engineFuel st)
+                         props st).learned}).trail := by
+                intro bjL
+                exact repair_trailDistinct
+                  (propagateLoop_trailDistinct (engineFuel st) st hdist)
+              have hst2conf : ∀ (bjL : Nat),
+                  (repairAfterBackjump problem bjL
+                    {propagateLoop (engineFuel st) props st with
+                     learned := ng :: (propagateLoop (engineFuel st)
+                       props st).learned}).conflict = none :=
+                fun bjL => repair_conflict problem _ _
+              -- the flip's literal is a NOGOOD MEMBER: the found
+              -- entry d is a positive-level st1-trail entry, so its
+              -- negated norm is one of the nogood's mapped members
+              have hdmem : ∀ (de : TrailEntry),
+                  de ∈ (propagateLoop (engineFuel st) props st).trail →
+                  decide (de.level > 0) = true →
+                  de.literal.negate.norm ∈ ng := by
+                intro de hemem hpos
+                exact List.mem_map_of_mem
+                  (List.mem_filter.mpr ⟨hemem, hpos⟩)
+              -- the flip's opposing branch is excluded: a retained
+              -- (level ≤ bjL) st1 entry carrying the flip literal's
+              -- negation (= de's own literal, normalized) would be a
+              -- second trail entry with de's literal, but de itself
+              -- was DROPPED by the repair (its level is the max,
+              -- strictly above the second-max bjL) — TrailDistinct
+              -- refutes the duplicate
+              have hnegflip : ∀ (bjL : Nat) (de : TrailEntry),
+                  bjL < lvls.foldl
+                    (fun acc2 e2 => max acc2 e2.level) 0 →
+                  de ∈ (propagateLoop (engineFuel st) props st).trail →
+                  de.level = lvls.foldl
+                    (fun acc2 e2 => max acc2 e2.level) 0 →
+                  (repairAfterBackjump problem bjL
+                    {propagateLoop (engineFuel st) props st with
+                     learned := ng :: (propagateLoop (engineFuel st)
+                       props st).learned}).negOnTrail
+                    de.literal.negate.norm = false := by
+                intro bjL de hbj hdmem1 hdlvl
+                -- the propagated trail is distinct
+                have hdist1 : TrailDistinct
+                    (propagateLoop (engineFuel st) props st).trail :=
+                  propagateLoop_trailDistinct (engineFuel st) st hdist
+                unfold State.negOnTrail repairAfterBackjump
+                simp only
+                cases hany : ((({propagateLoop (engineFuel st) props st with
+                  learned := ng :: (propagateLoop (engineFuel st)
+                    props st).learned} : State).trail).filter
+                    (fun e => decide (e.level ≤ bjL))).any
+                    (fun e => litEqB e.literal
+                      de.literal.negate.norm.negate.norm) with
+                | false => rfl
+                | true =>
+                    exfalso
+                    rw [List.any_eq_true] at hany
+                    obtain ⟨e, hemem, hbeq⟩ := hany
+                    have helit : e.literal =
+                        de.literal.negate.norm.negate.norm := by
+                      simpa only [litEqB, decide_eq_true_eq] using hbeq
+                    obtain ⟨hemem1, hele⟩ := List.mem_filter.mp hemem
+                    have hele' : e.level ≤ bjL := of_decide_eq_true hele
+                    -- the flip's negated-negated norm is de's own
+                    -- (normalized) literal
+                    have hdnn : de.literal.negate.norm.negate.norm
+                        = de.literal := by
+                      rw [norm_negate_norm (de.literal.negate),
+                        Literal.negate_negate,
+                        ← hinv1.trailNorm de hdmem1]
+                    have hlit2 : de.literal = e.literal :=
+                      (helit.trans hdnn).symm
+                    have hdee : de.level = e.level := by
+                      have := hdist1 de hdmem1 e hemem1 hlit2
+                      rw [this]
+                    omega
+              split at hunsat
+              · -- the flip arm: the found max-level entry's negation
+                -- is enqueued (SOUNDNESS FIX: at bjL = 0 on a fresh
+                -- decision level, at bjL > 0 on the repaired state)
+                -- with the nogood as reason — the four IH obligations
+                -- from the arm's assembly, mirroring a4's shape
+                rename_i hde hdeeq
+                -- the found entry's facts: membership and its level
+                -- equation (from the find?)
+                have hdemem : hde ∈ (propagateLoop (engineFuel st) props
+                    st).trail := List.mem_of_find?_eq_some hdeeq
+                have hdelv : hde.level = lvls.foldl
+                    (fun acc2 e2 => max acc2 e2.level) 0 := by
+                  have h9 := List.find?_some hdeeq
+                  rw [beq_iff_eq] at h9
+                  exact h9
+                -- the max fold dominates every member's level (and
+                -- its own seed): the standard fold-max bounds
+                have hfge : ∀ (ls : List TrailEntry) (s : Nat),
+                    s ≤ ls.foldl (fun acc e2 => max acc e2.level) s := by
+                  intro ls
+                  induction ls with
+                  | nil => intro s; exact Nat.le_refl s
+                  | cons e5 rest5 ih5 =>
+                      intro s
+                      simp only [List.foldl_cons]
+                      exact Nat.le_trans (Nat.le_max_left s e5.level)
+                        (ih5 (max s e5.level))
+                -- the fold-max over the levels dominates every
+                -- member's level: prove it by induction over the
+                -- list, generalizing the seed (a bigger seed only
+                -- grows the fold)
+                have hdomlev : ∀ e ∈ lvls, e.level ≤
+                    lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0 := by
+                  -- the direct induction: a member's level is absorbed
+                  -- by the fold from ANY seed (seed-monotone max fold)
+                  have hmem : ∀ (ls : List TrailEntry) (s : Nat)
+                      (v : TrailEntry), v ∈ ls →
+                      v.level ≤ ls.foldl
+                        (fun acc2 e2 => max acc2 e2.level) s := by
+                    intro ls
+                    induction ls with
+                    | nil => intro s v hv; cases hv
+                    | cons hd5 rest5 ih5 =>
+                        intro s v hv
+                        simp only [List.foldl_cons]
+                        rcases List.mem_cons.mp hv with hv1 | hv2
+                        · have hveq : v = hd5 := by
+                            cases hv1; rfl
+                          rw [hveq]
+                          exact Nat.le_trans (Nat.le_max_right s hd5.level)
+                            (hfge rest5 (max s hd5.level))
+                        · exact ih5 (max s hd5.level) v hv2
+                  intro e he
+                  exact hmem lvls 0 e he
+                -- the max level is POSITIVE: otherwise lvls has no
+                -- members (the fold dominates every member's level,
+                -- and members have level > 0), so the nogood ng is
+                -- the empty clause, whose entitlement (hent) refutes
+                -- the existence of any internal solution — but
+                -- hsolvable supplies one
+                have hmaxpos : 0 < lvls.foldl
+                    (fun acc2 e2 => max acc2 e2.level) 0 := by
+                  by_cases hcon : 0 < lvls.foldl
+                    (fun acc2 e2 => max acc2 e2.level) 0
+                  · exact hcon
+                  have hle : lvls.foldl
+                      (fun acc2 e2 => max acc2 e2.level) 0 ≤ 0 := by omega
+                  have hempty : lvls = [] := by
+                    by_cases hne : lvls = []
+                    · exact hne
+                    exfalso
+                    obtain ⟨e, he⟩ := List.exists_mem_of_ne_nil lvls hne
+                    have h1 := hdomlev e he
+                    have h2 : e.level > 0 :=
+                      of_decide_eq_true (List.mem_filter.mp he).2
+                    omega
+                  have hngnil : ng = [] := by
+                    have : (List.filter (fun e => decide (e.level > 0))
+                        (propagateLoop (engineFuel st) props st).trail) = [] := hempty
+                    show ng = []
+                    unfold ng
+                    rw [this]
+                    rfl
+                  obtain ⟨b, hb⟩ := hsolvable
+                  have hsat : ng.SatisfiedBy b := hent b hb
+                  rw [hngnil] at hsat
+                  obtain ⟨w, hw, _⟩ := hsat
+                  cases hw
+                -- the strict bound: secondmax < maxL. Every second-max
+                -- accumulator step either keeps the accumulator or
+                -- takes a member level < maxL (≤ maxL and ≠ maxL);
+                -- starting below maxL (0 < maxL), the fold stays
+                -- below maxL
+                have hstr : lvls.foldl (fun acc e =>
+                    if (e.level == lvls.foldl (fun acc2 e2 =>
+                      max acc2 e2.level) 0) = true then acc
+                  else max acc e.level) 0 <
+                  lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0 := by
+                  have hgen : ∀ (ls : List TrailEntry) (acc : Nat),
+                      (∀ e ∈ ls, e.level ≤
+                        lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0) →
+                      acc < lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0 →
+                      ls.foldl (fun acc e =>
+                        if (e.level == lvls.foldl (fun acc2 e2 =>
+                          max acc2 e2.level) 0) = true then acc
+                        else max acc e.level) acc <
+                      lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0 := by
+                    intro ls
+                    induction ls with
+                    | nil => intro acc _ hlt; exact hlt
+                    | cons e5 rest5 ih5 =>
+                        intro acc hmem hlt
+                        simp only [List.foldl_cons]
+                        by_cases hc : (e5.level ==
+                            lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0)
+                            = true
+                        · rw [if_pos hc]
+                          exact ih5 acc
+                            (fun e6 he6 => hmem e6 (List.mem_cons_of_mem _ he6))
+                            hlt
+                        · rw [if_neg hc]
+                          have hne5 : e5.level ≠
+                              lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0 := by
+                            intro heq
+                            exact hc (beq_iff_eq.mpr heq)
+                          have hlt5 : e5.level <
+                              lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0 := by
+                            have h1 := hmem e5 (List.mem_cons_self)
+                            omega
+                          have hmax : max acc e5.level <
+                              lvls.foldl (fun acc2 e2 => max acc2 e2.level) 0 :=
+                            Nat.max_lt.mpr ⟨hlt, hlt5⟩
+                          exact ih5 (max acc e5.level)
+                            (fun e6 he6 => hmem e6 (List.mem_cons_of_mem _ he6))
+                            hmax
+                  exact hgen lvls 0 hdomlev hmaxpos
+                -- the flip's literal is a NOGOOD MEMBER (hde's level
+                -- is the positive max)
+                have hdememng : hde.literal.negate.norm ∈ ng :=
+                  hdmem hde hdemem (by
+                    show decide (hde.level > 0) = true
+                    rw [hdelv]
+                    exact decide_eq_true hmaxpos)
+                -- the flip's entry is at a POSITIVE decision level in
+                -- BOTH engine arms: bjL > 0 (the repaired state's own
+                -- level) or the bumped level 0 + 1 = 1 — this is the
+                -- soundness fix's proof dividend: no root-fact
+                -- obligation for the flip entry, and the level-0
+                -- projection drops it
+                let bj := lvls.foldl (fun acc e =>
+                  if (e.level == lvls.foldl (fun acc2 e2 =>
+                    max acc2 e2.level) 0) = true then acc
+                  else max acc e.level) 0
+                let st2 := repairAfterBackjump problem bj
+                  {propagateLoop (engineFuel st) props st with
+                    learned := ng :: (propagateLoop (engineFuel st) props st).learned}
+                have hi : RunInv problem constraintHolds props st2 := hst2inv bj hbnd
+                have hc : st2.conflict = none := hst2conf bj
+                have hn : st2.negOnTrail hde.literal.negate.norm = false :=
+                  hnegflip bj hde hstr hdemem hdelv
+                have hd : TrailDistinct st2.trail := hst2dist bj
+                have h0 : Level0Solved problem constraintHolds st2 := hst2L0 bj
+                split at hunsat
+                · -- A fresh level keeps the zero-backjump flip out
+                  -- of root facts and the zero projection.
+                  refine ih _ ?_ ?_ ?_ ?_ hunsat
+                  · exact enqueueNorm_conflict_none_of_neg
+                      (st := newDecisionLevel st2) hc hn
+                  · exact enqueueNorm_runInv_pos
+                      (newDecisionLevel_runInv hi)
+                      (by show st2.decisionLevel + 1 ≠ 0; omega)
+                      hent (leafNogood_norm _) hdememng
+                  · unfold Level0Solved
+                    rw [repair0_enqueue problem _ _ _ (by
+                      show 0 < st2.decisionLevel + 1; omega)]
+                    exact h0
+                  · exact enqueueNorm_trailDistinct (st := newDecisionLevel st2) hd
+                · -- A positive backjump already stamps the flip
+                  -- above the root projection.
+                  rename_i hbjzero
+                  have hbjpos : 0 < bj := by
+                    apply Nat.pos_of_ne_zero
+                    intro hz
+                    apply hbjzero
+                    exact beq_iff_eq.mpr hz
+                  refine ih _ ?_ ?_ ?_ ?_ hunsat
+                  · exact enqueueNorm_conflict_none_of_neg hc hn
+                  · exact enqueueNorm_runInv_pos hi
+                      (by show bj ≠ 0; omega)
+                      hent (leafNogood_norm _) hdememng
+                  · unfold Level0Solved
+                    rw [repair0_enqueue problem _ _ _ hbjpos]
+                    exact h0
+                  · exact enqueueNorm_trailDistinct hd
+              · -- the plain arm: no max-level entry found — retreat
+                refine ih _ (hst2conf _) (hst2inv _ ?_) (hst2L0 _)
+                  (hst2dist _) hunsat
+                · exact hbnd
             · -- the pins gate's FALSE branch: the plain retreat
               exact ih (repairAfterBackjump problem
                   ((propagateLoop (engineFuel st) props st).decisionLevel - 1)
@@ -4238,8 +4995,8 @@ theorem go_unsat_entry_invariant
                 hunsat
           · -- the conflict clause is NOT some [] (a NONEMPTY
             -- unanalyzable conflict): the plain retreat — the
-            -- fits-exclusion fails for scan-origin conflicts, so
-            -- the engine never learns there; every invariant is
+            -- fits-exclusion fails for scan-origin conflicts, so the
+            -- engine never learns there; every invariant is
             -- preserved by the repair
             exact ih (repairAfterBackjump problem
                 ((propagateLoop (engineFuel st) props st).decisionLevel - 1)

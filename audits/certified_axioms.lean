@@ -66,3 +66,23 @@ open LeanFzn LeanFzn.Solver.Direct LeanFzn.Solver.LCG
 #print axioms LeanFzn.Solver.LCG.lin2_fl_hi_lt
 #print axioms LeanFzn.Solver.LCG.lin2_cl_neg_lo_gt
 #print axioms LeanFzn.Solver.LCG.propagatorsOfProved_conflictraw
+
+#print axioms LeanFzn.Solver.LCG.frontier_sat_leaf
+#print axioms LeanFzn.Solver.LCG.frontier_unsat_excludes
+#print axioms LeanFzn.Solver.LCG.frontier_sufficient
+#print axioms LeanFzn.Solver.LCG.chronological_sat_correct
+#print axioms LeanFzn.Solver.LCG.chronological_unsat_correct
+#print axioms LeanFzn.Solver.LCG.chronological_sufficient
+
+-- Fuel-free driver (T0): the executable, its measure lemmas, and its
+-- coverage/soundness/completeness/total-verdict theorems.
+#print axioms LeanFzn.Solver.LCG.branchCost_pos
+#print axioms LeanFzn.Solver.LCG.frontierCost_cons
+#print axioms LeanFzn.Solver.LCG.frontierCost_expand
+#print axioms LeanFzn.Solver.LCG.frontierSolve
+#print axioms LeanFzn.Solver.LCG.frontierSolve_sat_leaf
+#print axioms LeanFzn.Solver.LCG.frontierSolve_sat_mem
+#print axioms LeanFzn.Solver.LCG.frontierSolve_unsat_excludes
+#print axioms LeanFzn.Solver.LCG.frontierSolve_complete
+#print axioms LeanFzn.Solver.LCG.chronological_total
+#print axioms LeanFzn.Solver.Direct.solveCertified_total
