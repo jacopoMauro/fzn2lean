@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Reject staged FlatZinc files larger than 5 MB (5,000,000 bytes)."""
+import subprocess
+import sys
+
+limit = 5_000_000
+entries = subprocess.check_output(["git", "ls-files", "--stage", "-z"])
+bad = []
+for entry in entries.split(b"\0"):
+    if not entry:
+        continue
+    metadata, path = entry.split(b"\t", 1)
+    if not path.lower().endswith(b".fzn"):
+        continue
+    mode, oid, stage = metadata.split()
+    size = int(subprocess.check_output(["git", "cat-file", "-s", oid.decode()]))
+    if size > limit:
+        bad.append((path.decode(errors="replace"), size))
+if bad:
+    print("Commit rejected: FlatZinc files must be at most 5,000,000 bytes.", file=sys.stderr)
+    for path, size in bad:
+        print(f"  {path}: {size:,} bytes", file=sys.stderr)
+    sys.exit(1)
