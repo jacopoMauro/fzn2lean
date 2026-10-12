@@ -58,6 +58,5 @@ Chronological, UIP and Integration. Compiler/source correspondence assertions
 are exercised by Integration.Solver. Existing executable target names remain stable.
 
 `audits/check_module_boundaries.py` checks transitive forbidden imports and
-cycles. `audits/migration_manifest.json` records the pre-migration module/import
-inventory and initial physical mapping; current source imports are authoritative.
+cycles. Current source imports are authoritative.
 All continuation instructions and open obligations remain exclusively in PLAN.md.
