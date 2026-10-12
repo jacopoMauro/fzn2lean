@@ -1,21 +1,78 @@
 name = "fzn2lean"
 version = "0.1.0"
 
-# Pass an explicit thread count to every Lean invocation. Without it,
-# Lean sizes its worker pool with `nproc` (256 on this host) while the
-# cgroup CPU quota is 8 CPUs; thread creation then fails under load
-# with `lean::exception: failed to create thread`.
+[[lean_lib]]
+name = "LeanFzn.Syntax"
+globs = ["LeanFzn.Syntax", "LeanFzn.Syntax.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Parser"
+globs = ["LeanFzn.Parser", "LeanFzn.Parser.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Semantics"
+globs = ["LeanFzn.Semantics", "LeanFzn.Semantics.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Checker"
+globs = ["LeanFzn.Checker", "LeanFzn.Checker.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Compiler"
+globs = ["LeanFzn.Compiler", "LeanFzn.Compiler.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Solver.Core"
+globs = ["LeanFzn.Solver.Core", "LeanFzn.Solver.Core.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Solver.Propagation"
+globs = ["LeanFzn.Solver.Propagation", "LeanFzn.Solver.Propagation.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Solver.Chronological"
+globs = ["LeanFzn.Solver.Chronological", "LeanFzn.Solver.Chronological.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Solver.UIP"
+globs = ["LeanFzn.Solver.UIP", "LeanFzn.Solver.UIP.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Solver.Reference"
+globs = ["LeanFzn.Solver.Reference", "LeanFzn.Solver.Reference.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Integration"
+globs = ["LeanFzn.Integration", "LeanFzn.Integration.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
 [[lean_lib]]
 name = "LeanFzn"
+globs = ["LeanFzn"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "Tests"
+globs = ["Tests.+"]
 moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_exe]]
 name = "tests_smoke"
-root = "Tests.Smoke"
+root = "Tests.Parser.Smoke"
 
 [[lean_exe]]
 name = "tests_stdlib"
-root = "Tests.StdLib"
+root = "Tests.Semantics.StdLib"
 
 [[lean_exe]]
 name = "leanfzn"
@@ -23,57 +80,81 @@ root = "Main"
 
 [[lean_exe]]
 name = "tests_solution"
-root = "Tests.Solution"
+root = "Tests.Checker.Solution"
 
 [[lean_exe]]
 name = "tests_gecode"
-root = "Tests.Gecode"
+root = "Tests.Semantics.Gecode"
 
 [[lean_exe]]
 name = "tests_globals"
-root = "Tests.Globals"
+root = "Tests.Semantics.Globals"
 
 [[lean_exe]]
 name = "tests_bench"
-root = "Tests.Bench"
-
+root = "Tests.Checker.Bench"
 
 [[lean_exe]]
 name = "tests_coverage"
-root = "Tests.Coverage"
+root = "Tests.Semantics.Coverage"
 
 [[lean_exe]]
 name = "tests_wellformed"
-root = "Tests.WellFormed"
+root = "Tests.Semantics.WellFormed"
 
 [[lean_exe]]
 name = "tests_pretty"
-root = "Tests.Pretty"
+root = "Tests.Parser.Pretty"
 
 [[lean_exe]]
 name = "tests_prof"
-root = "Tests.Prof"
+root = "Tests.Checker.Prof"
 
 [[lean_exe]]
 name = "tests_check"
-root = "Tests.Check"
-
-[[lean_lib]]
-name = "solver"
-moreLeanArgs = ["-j2", "-s131072"]
+root = "Tests.Checker.Check"
 
 [[lean_exe]]
 name = "tests_solver"
-root = "solver.Tests"
+root = "Tests.Integration.Solver"
 
 [[lean_exe]]
 name = "tests_prop"
-root = "solver.TestsProp"
+root = "Tests.Propagation.Propagators"
 
 [[lean_exe]]
 name = "tests_fast"
-root = "Tests.Fast"
+root = "Tests.Checker.Fast"
 
 [[lean_exe]]
 name = "tests_lcg"
-root = "solver.TestsLCG"
+root = "Tests.Chronological.Solver"
+
+[[lean_exe]]
+name = "tests_lcg_analysis"
+root = "Tests.UIP.LCGAnalysis"
+
+[[lean_exe]]
+name = "tests_oracle"
+root = "Tests.UIP.OracleRunner"
+
+[[lean_exe]]
+name = "tests_lcg_scheduler_fixtures"
+root = "Tests.UIP.SchedulerRunner"
+
+[[lean_exe]]
+name = "tests_lcg_scheduler_activation"
+root = "Tests.UIP.SchedulerActivationRunner"
+
+[[lean_exe]]
+name = "tests_scheduler_computability"
+root = "Tests.UIP.SchedulerComputability"
+
+[[lean_exe]]
+name = "tests_lcg_public_fixtures"
+root = "Tests.Integration.PublicSchedulerFixtures"
+
+[[lean_lib]]
+name = "LeanFzn.Cli"
+globs = ["LeanFzn.Cli", "LeanFzn.Cli.+"]
+moreLeanArgs = ["-j2", "-s131072"]

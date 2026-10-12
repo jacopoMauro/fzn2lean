@@ -1,13 +1,15 @@
-/- Diagnostic replay of the current engine: dependencies are Direct.Cli for
-compilation/proved propagators and Direct.Search for the exhaustive oracle.
+/- Diagnostic replay of the current engine: dependencies are LeanFzn.Compiler.Cli for
+compilation/proved propagators and LeanFzn.Compiler.Search for the exhaustive oracle.
 Generated mechanically from lcgSearch.go; production code is unchanged.
 Run: lake env lean -j2 --run audits/pigeonhole_trace.lean
 Snapshot Engine.lean SHA256: 7fefdf673c6d3787c85cee9aa63a1b1001207157ff48552d4a4f64c9fe27eb9f
 The repeated signature omits reason clauses and the learned database; it is
-a branch-configuration repeat, not equality of complete solver states. -/
-import solver.Direct.Cli
-import solver.Direct.Search
-namespace LeanFzn.Solver.LCG
+a branch-configuration repeat, not equality of complete LeanFzn.Solver states. -/
+import LeanFzn.Integration.CertifiedSolve
+import LeanFzn.Solver.Reference.Search
+open LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
+
+namespace LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Integration
 open LeanFzn LeanFzn.Solver LeanFzn.Solver.Core
 inductive TraceStep where
   | next (st : State)
@@ -92,15 +94,15 @@ def replay (p : Problem DomConstraint Unit) (ps : List Propagator)
   | n+1 => match traceStep p DomConstraint.satisfiedB ps st with
     | .next s => replay p ps n s
     | .done r => r
-end LeanFzn.Solver.LCG
-open LeanFzn LeanFzn.Solver LeanFzn.Solver.Core LeanFzn.Solver.LCG
+end LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Integration
+open LeanFzn LeanFzn.Solver LeanFzn.Solver.Core LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Integration
 def main : IO Unit := do
   let src := "var 0..2: x;\nvar 0..2: y;\nvar 0..2: z;\nvar 0..2: w;\nconstraint int_ne(x,y);\nconstraint int_ne(x,z);\nconstraint int_ne(y,z);\nconstraint int_ne(x,w);\nconstraint int_ne(y,w);\nconstraint int_ne(z,w);\nsolve satisfy;"
   let .ok m := Parser.parseModel src | throw (IO.userError "parse failed")
-  let .ok compiled := Direct.compileModel m | throw (IO.userError "compile failed")
-  let p := Direct.toLCG compiled
+  let .ok compiled := LeanFzn.Compiler.compileModel m | throw (IO.userError "compile failed")
+  let p := LeanFzn.Integration.toLCG compiled
   let ps := compiled.constraints.filterMap propagatorOfProved
-  IO.println s!"oracle assignment: {reprStr (Direct.solveCompiled compiled)}"
+  IO.println s!"oracle assignment: {reprStr (LeanFzn.Solver.Reference.solveCompiled compiled)}"
   for n in [0,1,5,20,50,100] do
     let actual := lcgSearch.go p DomConstraint.satisfiedB ps n (initialStateWithRoots p)
     let copied := replay p ps n (initialStateWithRoots p)

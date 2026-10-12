@@ -1,171 +1,166 @@
-# Remaining work for the finite-domain solver
+# Remaining work: certified public first-UIP LCG
 
-Updated: 2026-10-08. This plan lists remaining work; completed implementation
-steps and historical task descriptions have been removed.
+Updated: 2026-10-12. This is the sole continuation plan, coordinator prompt,
+worker handoff and current status record. Do not create separate planning files.
+README, architecture and interface files remain reference documentation;
+actual Lean signatures and public call sites are authoritative.
 
-## Verified current basis
+Repository modules now live under LeanFzn.Syntax/Parser/Semantics/Checker,
+LeanFzn.Compiler, LeanFzn.Solver.Core/Propagation/Chronological/UIP/Reference,
+and LeanFzn.Integration/Cli. Internal imports are component-specific. Existing
+CLI behavior is chronological; restructuring does not activate UIP. Old
+solver.* imports and LCG/Direct namespaces are removed. Architecture validation
+is `python3 audits/check_module_boundaries.py`; aggregate validation uses
+`lake build LeanFzn Tests leanfzn` plus every registered test executable.
 
-The public path is `Main → Direct.solveCertified → LCG.solve → lcgSearch →
-chronologicalSearch → frontierSolve`. The frontier consumes pending alternatives
-permanently and checks complete assignments against domains, constraints and
-original clauses. `frontierSolve` has a two-constructor SAT/UNSAT result and
-kernel-checked well-founded recursion using `frontierCost`. There is no runtime
-search fuel. Coverage, SAT/UNSAT soundness, completeness and the source-entry
-total-verdict theorem are present. Bounded APIs remain diagnostic references;
-propagation and learning do not prune the public search.
+## Current checkpoint and scope
 
-The compiler no longer enforces `domainCap` or `leavesCap`. Integer ranges and
-enumerated domains are extracted directly; `slotsChecked` delegates to
-`declSlots`. Extraction faithfulness and compiler correspondence proofs remain
-in place. Unsupported types and constraint shapes remain outside the accepted
-fragment. Source correctness retains its well-formedness assumptions and
-parameter honesty for UNSAT. Mathematical termination does not bound elapsed
-time or machine memory; domains are still materialized as lists.
+The unit-kit invariant, restoration, log and consume assemblies compile.
+The concrete invariant package in SupportedInstance still exposes two genuine
+residuals: coverless-site level separation (`hsepF`) and original-pool trail
+vocabulary (`hv`). Extended-pool producers/rank proofs exist, but the remaining
+original-pool consumers must be re-keyed before those proofs discharge `hv`.
 
-Fresh validation on 2026-10-08: aggregate build passed (213 jobs), the
-identity-checked axiom audit passed all 66 profiles with standard axioms only,
-and comment-aware proof-hole/user-axiom scans were clean. All 15 retained test
-suites passed, including 93 solver tests, 117 LCG tests and 89 propagator tests.
-The axiom queries were run with explicit `-j2` and their captured output checked
-by the audit script; normal-invocation hardening is deferred below.
+Last independent verification after restructuring: explicit aggregate 486 jobs
+exit 0; all 21 registered test executables exit 0; axiom audit 323/323
+allowlist-only, no sorryAx; transitive component boundaries and cycles pass.
+CLI smoke outputs/exit classes and checked SAT witnesses match the recorded
+chronological baseline. This is full registered-suite validation of the refactor,
+not public first-UIP acceptance. Revalidate after edits.
+Public solving still uses `Search.solveWithStats → analyzedSolve`.
 
-The top priority is an active lazy clause generation (LCG) solver that reduces
-search through propagation and learned clauses. Full enumeration is a checked
-reference implementation, not the intended final public algorithm. Former cap
-thresholds are no longer meaningful development targets.
+Target: computable certified public first-UIP solving for an explicit finite
+int/bool satisfaction fragment, preserving accepted source models through the
+proved fallback policy and keeping the named chronological reference. Language
+expansion, optimization and tuning are outside scope. Non-unit multiple-resolution
+capability remains unmet; unit-only activation must not be advertised as closing
+that part of the goal.
 
-## Priority 1 — Put propagation and clause learning into the public solver
+## Remaining DAG
 
-Files: `solver/LCG/Engine.lean`, `Propagate.lean`, `TrailEval.lean`,
-`Frontier.lean`, their proof modules, `Search.lean`, `Certified.lean`, and
-`solver/Direct/Cli.lean`.
+Ready: C2b and C2c. Their completion releases C2 and the concrete entry. Do not
+redo the completed restoration/log/consume or extended-pool proof assemblies.
 
-### 1. Define the search state and coverage invariant
+```mermaid
+flowchart TD
+  C2b["C2b: re-key invariant vocabulary to extended pool"]
+  C2c["C2c: coverless-site level separation"]
+  C2["C2: instantiate invariant and sorted progress"]
+  W1["W1: certified compiled entry"]
+  A1["A1: public routing"]
+  U1["U1: non-unit multiple-resolution capability"]
+  T1["T1: parsed-source event acceptance"]
+  V1["V1: final validation"]
+  C2b --> C2
+  C2c --> C2
+  C2 --> W1
+  W1 --> A1
+  W1 --> U1
+  A1 --> T1
+  U1 --> T1
+  T1 --> V1
+```
 
-- Retain explicit bookkeeping for exhausted alternatives: an explored branch
-  must never become pending again merely because a conflict causes a backtrack.
-- Relate the trail, narrowed domains, original/learned clauses and pending
-  alternatives to the original problem's solutions. Every possible solution
-  must remain represented until a proved conflict excludes its branch.
-- Use the existing fuel-free exhaustive traversal as reference semantics and
-  a small-instance oracle. Do not make enumeration the normal public fallback.
+## Assignable tasks and acceptance
 
-### 2. Propagate before branching and prove safe pruning
+Proof paths are relative to `LeanFzn/Solver/UIP/Proofs/`. A compiled conditional wrapper
+is not a concrete producer. Acceptance requires all row conditions and explicit
+review of hypotheses; no holes, custom axioms or circular assumptions.
 
-- Run constraint and clause propagation on partial assignments, before choosing
-  another decision. Preserve every solution compatible with the current frame
-  when narrowing domains or enqueuing a consequence.
-- Prove that reported conflicts exclude the affected branch before removing it.
-  Reuse existing propagator proofs where their hypotheses match the new state
-  invariant; identify and discharge missing refinement obligations explicitly.
-- Define a terminating propagation closure using finite domain/trail progress
-  and a worklist or equivalent checked mechanism. Repeated deductions must not
-  produce an endless loop; no fuel cutoff may stand in for convergence.
+| ID | Depends on | Deliverable and acceptance conditions |
+| --- | --- | --- |
+| C2b | None | Replace remaining `hv : BranchTrailVocabulary orig ...` consumers with `BranchTrailVocabularyAt (litPoolExt orig dcs) ...`. Own isolated extended-pool slot-range and producer adapters; coordinate HdeadCkpt/SupportedInstance edits. Prove slot-range facts for the actual pool and instantiate the existing extended run vocabulary. Eliminate dependence on refutable original-pool UnitEmissionVocabulary. No assumed original/extended pool equivalence or new semantic vocabulary gate. Compile all invariant/progress consumers. |
+| C2c | None | Discharge the exact `hsepF` family of the `_or_coverless` SupportedInstance entry. Own FreshCoverless and isolated site lemmas; coordinate runtime changes. Remaining case: empty-prefix canonical consume, level-0 propagations, then a decision pushing a level-0 checkpoint. Reuse canonical-trail separation and unit-kit target-0 facts. Prove separation along the actual run, or preserve a reachable counterexample and implement a sound freshness/snapshot repair. Do not assume universal inhabitedness or weaken the required loose survivor bound. |
+| C2 | C2b, C2c | Instantiate the existing unit-kit invariant package without `hsepF`/`hv` caller premises, using the proved inhabited-or-coverless classification. Feed concrete extended-pool alignment, novelty/rank and site facts into SupportedPhaseRun/SupportedCertifiedRun. Produce usable SupportedPhasePremises and terminal/dead/root facts from legitimate problem hypotheses; no assumed progress or per-state semantic invariant. Include a non-vacuous initialized instance. |
+| W1 | C2 | Export a computable compiled SAT/UNSAT/totality entry from compiler/model hypotheses only. Instantiate existing whole-run transfers and FallbackPolicy for uncovered families, preserving source acceptance and aux/parameter semantics. No exposed restoration, deadness, log, vocabulary, invariant or progress conclusion. Execute compiled SAT and UNSAT inputs and check witnesses. |
+| A1 | W1 | Wire Search/Certified/direct CLI through the concrete certified entry and explicit fallback policy. Preserve source theorem meanings and named chronological reference. Verify the executable-to-proof call graph, compile CLI and show that supported parsed input reaches the intended scheduler. |
+| U1 | W1 | Close the retained non-unit multiple-resolution obligation. Build on the concrete unit route; specify and implement the additional explanation/learning contracts needed for a meaningful non-unit fragment, retaining counterexamples to older evidence assumptions. Produce concrete certification for that route and update the routing predicate only after proofs compile. Source acceptance must remain preserved through proved fallback. This is an explicit remaining capability task, not a claim that fallback provides first-UIP behavior. |
+| T1 | A1, U1 | Apply event predicates to genuine parsed-source public runs: multiple resolutions, skipped-level jump, assertion and subsequent propagation. Bypassing analysis must fail acceptance. Check oracle verdicts/witnesses and pending/empty/root/sparse/repeated-learning regressions. Unit-only results may be reported as an intermediate milestone; constructed-state events or chronological fallback cannot satisfy final multiple-resolution acceptance. |
+| V1 | T1 | Build explicit aggregate and run every registered suite with preserved exit statuses/timeouts. Audit the instantiated public source/invariant/progress chains and scan code for holes/custom axioms. Record actual public events, supported scope/fallbacks and limitations; reconcile this plan and applicable reference documentation. |
 
-### 3. Learn explained conflicts and backtrack without losing alternatives
+## Execution priority and completion
 
-- Repair explanations for singleton bounds obtained through value removals,
-  using actual trail evidence. Resolve Boolean/int literal distinctions and
-  clause-scan/conflict ordering before relying on first-UIP analysis.
-- Prove learned clauses follow from the original problem. Global entailment
-  and pivot membership alone do not justify enqueuing a non-unit clause member.
-- Use learned clauses to propagate or prune subsequent branches. Prove asserting
-  literal/unit conditions and show backjumps preserve every still-possible
-  alternative while retaining the record of exhausted ones.
-- Treat the historical analysis/flip loop as reusable components requiring
-  repair and integration, not a complete optimized driver ready to reactivate.
+Assign C2b and C2c to separate owners. An integration owner reserves
+SupportedInstance, shared runtime/gate consumers and umbrella/audits. Once their
+producers compile, integrate C2, then W1/A1. U1 is a substantive capability
+extension within the final goal and may need smaller proof tasks after its
+interfaces are fixed; it must remain visibly open until certified.
 
-### 4. Prove termination and connect the public correctness contracts
+Complete the unit-kit intermediate milestone after C2/W1/A1 with parsed-source
+unit evidence. Complete the full goal only after U1/T1/V1 as well. Do not declare
+the goal complete merely because the current conditional tree is coherent.
 
-- Supply a well-founded progress argument for propagation, decisions, conflict
-  handling, learning and backtracking. The raw frontier measure does not
-  automatically cover transitions that add or revisit work.
-- Preserve fuel-free termination, SAT soundness, UNSAT exclusion and completeness;
-  transport the existing source-level theorems and parameter-honesty scope.
-- Route `LCG.solve` and `Direct.solveCertified` through the proved pruning driver.
-  No internal budget, arbitrary input cap or unknown-on-exhaustion fallback.
+## Coordinator prompt and round protocol
 
-### 5. Verify actual search reduction
+When asked to execute this plan, act as coordinator and use worker agents within
+available slots, leaving one slot for the coordinator. This section is a future
+execution prompt; maintaining the document does not itself start proof workers.
+Preserve unrelated working-tree edits. No commit, push or publication unless
+separately authorized. Read applicable AGENTS.md, this plan, relevant reference
+entries and Lean/Lake configuration once; inspect actual signatures before work.
+Use lean-development and lean-proof-coordinator skills when applicable.
 
-- Compare public-driver verdicts and SAT witnesses with the exhaustive oracle
-  on small instances, retaining the 64 graph cases and pigeonhole regression.
-- Collect decision, propagation, conflict, learned-clause and checked-leaf counts
-  without using them to stop search. Require deterministic regressions showing
-  propagation eliminates branches and learned clauses prevent repeated work.
-- Test both SAT and UNSAT, including conflicts after value removals, repeated
-  conflicts, backjumps and exhausted siblings. Validate emitted SAT solutions.
-- Preserve source theorem applications, check the new proof chain's axioms,
-  and measure performance on representative supported constraints.
+Follow the DAG. Assign one small objective and exclusive files per worker.
+Shared runtime, SupportedArms/SupportedDead, umbrella, target and audit edits
+have one integration owner. Workers request shared changes with an exact diff;
+no unallocated subdelegation. Inspect CPU/RAM and active builds, preserve caches,
+and use one substantial build at a time.
 
-Completion gate: the public solver performs proved propagation and effective
-clause learning, demonstrably explores less than the full assignment product
-on pruning regressions, remembers exhausted branches and remains fuel-free,
-complete and source-correct. Merely retaining unused LCG primitives or renaming
-an exhaustive traversal does not satisfy this objective. Defer watched clauses,
-scheduler tuning and stronger propagators until this foundation is checked.
+Every round is at most 10 minutes wall-clock. Record start/deadline, ask for a
+checkpoint around minute 8 and a stopped-editing handoff by minute 10. Check
+with waits no longer than 60 seconds. Interrupt a nonreporting worker at the
+deadline and settle files/jobs/ownership before reassignment; do not kill
+unrelated jobs. A round ending does not complete the objective. Continue, split,
+repair or reassign after coordinator review. If repeated attempts stall,
+reassess the statement or seek a reachable counterexample.
 
-## Priority 2 — Align regressions with the uncapped LCG public solver
+Assignment template: task/round; precise declaration or repair; accepted
+prerequisites and residual owners; exclusive/shared files; acceptance conditions;
+focused validation command; start, minute-8 checkpoint and minute-10 stop/report.
+Reports include changed files, exported signatures, fulfilled/unfulfilled
+conditions, exact remaining hypotheses, commands/exit codes, running jobs,
+errors/counterexamples and a recommended next step. Status is
+COMPLETE-CANDIDATE, PARTIAL or BLOCKED. Coordinator decides ACCEPT, CONTINUE,
+SPLIT/REASSIGN, REPAIR or BLOCK/REPLAN after checking diffs and call sites.
+Only ACCEPT releases dependencies; never label partial work accepted.
 
-Files: `solver/Tests.lean`, `solver/TestsLCG.lean`, CLI integration checks.
+Record current ownership, accepted results and residuals in this plan. Replace
+superseded status instead of appending long round histories. Recover crashed
+workers from files and compiler feedback. Keep user updates concise. Continue
+until the completion gate or an explicit stop/execution limit; if stopping
+unfinished, leave exact resume instructions here without claiming completion.
 
-- Replace the misleading 12-value “above-cap” enumerated-domain case. Former
-  10,000-value/1,000,000-product thresholds have no special solver meaning;
-  do not use crossing them as the main acceptance or performance criterion.
-- Use representative large finite range and enumerated domains and large
-  products with constraints that support strong pruning. Test through
-  `Direct.solveCertified` and the CLI, rather than only `Direct.solveCompiled`.
-  Assert the verdict, validate emitted SAT output and verify search reduction
-  with the Priority 1 counters. Avoid enormous unpruned UNSAT products.
-- Keep a small compiler-only check that finite domain extraction is faithful
-  and independent of arbitrary cardinality limits. If retaining an old-threshold
-  case as a historical non-regression, label it accordingly; it is not a new cap.
-- Keep late-witness SAT, beyond-former-budget UNSAT, zero-variable/empty-domain,
-  duplicate-value, Boolean-domain and original-clause cases as correctness
-  regressions. Do not require the optimized solver to enumerate the old number
-  of transitions; effective pruning should change those counts.
-- Correct comments to describe the implemented pruning behavior rather than
-  assuming that equality constraints already bypass enumeration.
+## Worker ownership and handoffs
 
-Completion gate: tests cover the actual public LCG path, semantic boundaries,
-large supported finite models and measurable pruning; obsolete cap numbers do
-not define the solver's scope or the development priority.
+- C2b: ExtendedPoolProducers/ExtendedPoolRank plus isolated slot-range adapters.
+  Inspect every remaining original-pool `hv` use. Request exact shared-consumer
+  edits from integration owner. Handoff includes exported slot-range/vocabulary
+  statements and every consumer converted.
+- C2c: FreshCoverless plus isolated coverless-site lemmas. State the exact
+  SupportedInstance `hsepF` shape before proving it; checkpoint claims against
+  the concrete empty-prefix/level-0 case. Handoff includes checked proof or
+  reachable counterexample and the proposed semantics-preserving repair.
+- Integration: SupportedInstance/SupportedPhaseRun/SupportedCertifiedRun,
+  shared gates/runtime, registration and audits. Reuse existing AnalysisEntail,
+  SupportedLogSites, ConsumeRun and CheckpointPrefix results; do not recreate
+  their dispatcher inductions. Review residual dependencies before integration.
+- Downstream: assign C2/W1 and public routing only after their prerequisite
+  interfaces are accepted. Keep U1 visible in the capability matrix and split
+  it into exact obligations when its explanation interface is chosen.
 
-## Priority 3 — Make documentation match the implementation
+## Validation and semantic guardrails
 
-Files: `README.md`, `code-structure.md`, `solver/LCG/Engine.lean`,
-`audits/dependency_inventory.md`.
+Capture the command's exit status before displaying its log. Build pipelines,
+stale binaries after failed builds, timeouts and missing profiles are not passes.
+Run focused checks within rounds; final V1 runs every registered suite and fresh
+instantiated theorem/dependency audits, code-aware hole/custom-axiom scanning
+and genuine public event checks. Keep module/reference docs current when imports
+or semantics change, but keep continuation instructions only here.
 
-- Correct stale claims about fuel budgets, compiler caps and singleton-only gates.
-- Document the active call graph and which propagation/learning features are
-  actually enabled. Until Priority 1 is integrated, describe the current public
-  path accurately as exhaustive and distinguish it from the intended LCG driver.
-- Update test counts, CLI exit descriptions and module/proof dependencies.
-  Keep unsupported-input errors distinct from UNSAT and retain source theorem
-  assumptions. Remove obsolete plan task IDs.
-
-Completion gate: documentation agrees with the executable and checked proofs.
-
-## Local validation and deferred scope
-
-For solver changes, run the relevant Lean build, targeted regressions and axiom
-profiles locally; run the aggregate build and retained suites for integration.
-CI and workflow maintenance are out of scope for now; do not recreate the
-removed workflow. Audit-script hardening is deferred, not a prerequisite for
-solver development. Until its normal invocation is repaired, run axiom queries
-with explicit `-j2` and audit the captured output, as in the latest validation.
-
-
-Lazy/range domains and more efficient prefix/stack representations require
-semantic refinement and profiling; they are not reasons to restore admission
-caps. Measure eager domain construction and exhaustive traversal separately.
-
-Language expansion, enumeration and optimization remain separate projects.
-Arrays, aliases/initializers, reified/element shapes, sets and other globals
-need explicit semantics and compiler correspondence. Enumeration needs
-coverage/uniqueness contracts; optimization needs an optimality contract.
-The checker's predicate coverage is not solver coverage.
-
-Work in order: integrate and prove active LCG pruning → align public-path
-regressions → correct documentation. Preserve unrelated working-tree
-changes and use one substantial Lean build at a time. Remove closed tasks from
-this plan instead of accumulating another completed-task log.
+Retain counterexamples and preserve source acceptance, named chronological
+reference, bool/int typing and auxiliary-slot/parameter semantics. Never replace
+live-sibling preservation with level-only dropping, infer ancestor exclusion from
+one dead descendant, assume universal frame inhabitedness, fabricate counters,
+use arbitrary verdict fuel, or weaken statements silently. An axiom-clean
+implication with impossible premises is not concrete certification. Treat old
+historical task aliases/counts as stale; actual declarations are authoritative.
