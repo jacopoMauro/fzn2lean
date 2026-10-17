@@ -186,7 +186,7 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                   (stepChronologicalFallback_status cfg (branchRegion cfg)) hsc
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 cases hsc : stepConsume
                     (stepLocalExclude cfg ev.learned (checkpointRegion cp)) with
@@ -337,7 +337,7 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
             simp at hsucc
           · -- ARM 4: the analyze site — resolved through the recorded route
             cases hev : (stepAnalyzeConflictCounted cfg c learned
-                (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).conflict with
+                (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).conflict with
             | none =>
                 simp [stepAnalyzeConflictCounted, stepAnalyzeConflict,
                   SchedulerConfig.countResolutions] at hev
@@ -345,11 +345,11 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                 -- the recorded config is a REAL dispatcher successor
                 have hsuccN : (conflictStep cfg (c :: rest) learned).successor =
                     some (stepAnalyzeConflictCounted cfg c learned
-                      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) := by
+                      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) := by
                   simp only [conflictStep, if_neg hlv, successor_analyzeConflict]
                 have h1 : (schedulerNext cfg).successor =
                     some (stepAnalyzeConflictCounted cfg c learned
-                      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) := by
+                      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) := by
                   rw [hnext]; exact hsuccN
                 refine RawReach.step h1 ?_
                 cases ha : ev.analysis with
@@ -358,9 +358,9 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                     cases hsc : stepConsume
                         (stepChronologicalFallback
                           (stepAnalyzeConflictCounted cfg c learned
-                            (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                            (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                           (branchRegion (stepAnalyzeConflictCounted cfg c learned
-                            (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)))) with
+                            (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)))) with
                     | none =>
                         have hpe : phaseNext cfg = (.unsat : SchedulerTransition leaf) := by
                           simp only [phaseNext, hnext, conflictStep, if_neg hlv, hev,
@@ -383,15 +383,15 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                 | some an =>
                     cases hcp : checkpointAt
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).checkpoints
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).checkpoints
                         an.backjumpLevel with
                     | none =>
                         cases hsc : stepConsume
                             (stepChronologicalFallback
                               (stepAnalyzeConflictCounted cfg c learned
-                                (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                                (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                               (branchRegion (stepAnalyzeConflictCounted cfg c learned
-                                (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)))) with
+                                (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)))) with
                         | none =>
                             have hpe : phaseNext cfg =
                                 (.unsat : SchedulerTransition leaf) := by
@@ -415,19 +415,20 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                     | some cp =>
                         cases hp : (BackjumpPlan.ofCheckpoint cp
                             (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail
                                 cfg.branch.level c)).branch
                             an.asserting an.learned).perform
                             (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail
                                 cfg.branch.level c)).branch
+                            cfg.orig
                             cfg.original cfg.props with
                         | none =>
                             -- checkpoint rejection → localExclude → consume
                             cases hsc : stepConsume
                                 (stepLocalExclude
                                   (stepAnalyzeConflictCounted cfg c learned
-                                    (analyzeEventsExpansions cfg.branch.trail
+                                    (analyzeEventsExpansions cfg.orig cfg.branch.trail
                                       cfg.branch.level c))
                                   ev.learned (checkpointRegion cp)) with
                             | none =>
@@ -436,7 +437,7 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                                   simp only [phaseNext, hnext, conflictStep, if_neg hlv,
                                     hev, backjumpStep, ha, hcp,
                                     stepAnalyzeConflictCounted_original_rc,
-                                    stepAnalyzeConflictCounted_props, hp, hsc]
+                                    stepAnalyzeConflictCounted_props, stepAnalyzeConflictCounted_orig, hp, hsc]
                                 rw [hpe] at hsucc
                                 simp at hsucc
                             | some next =>
@@ -445,7 +446,7 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                                   simp only [phaseNext, hnext, conflictStep, if_neg hlv,
                                     hev, backjumpStep, ha, hcp,
                                     stepAnalyzeConflictCounted_original_rc,
-                                    stepAnalyzeConflictCounted_props, hp, hsc]
+                                    stepAnalyzeConflictCounted_props, stepAnalyzeConflictCounted_orig, hp, hsc]
                                 rw [hpe] at hsucc
                                 simp only [successor_chronologicalFallback,
                                   Option.some.injEq] at hsucc
@@ -453,7 +454,7 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                                 exact rawReach_of_landing_consume
                                   (by simp only [schedulerNext, hev, backjumpStep, ha,
                                     hcp, stepAnalyzeConflictCounted_original_rc,
-                                    stepAnalyzeConflictCounted_props, hp,
+                                    stepAnalyzeConflictCounted_props, stepAnalyzeConflictCounted_orig, hp,
                                     successor_localExclude])
                                   (stepLocalExclude_conflict _ _ _)
                                   (stepLocalExclude_status _ _ _) hsc
@@ -463,23 +464,23 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                                 .learnBackjumpAssert
                                   (stepLearnBackjumpAssert
                                     (stepAnalyzeConflictCounted cfg c learned
-                                      (analyzeEventsExpansions cfg.branch.trail
+                                      (analyzeEventsExpansions cfg.orig cfg.branch.trail
                                         cfg.branch.level c))
                                     (BackjumpPlan.ofCheckpoint cp
                                       (stepAnalyzeConflictCounted cfg c learned
-                                        (analyzeEventsExpansions cfg.branch.trail
+                                        (analyzeEventsExpansions cfg.orig cfg.branch.trail
                                           cfg.branch.level c)).branch
                                       an.asserting an.learned)
                                     ev restored)
                                   (BackjumpPlan.ofCheckpoint cp
                                     (stepAnalyzeConflictCounted cfg c learned
-                                      (analyzeEventsExpansions cfg.branch.trail
+                                      (analyzeEventsExpansions cfg.orig cfg.branch.trail
                                         cfg.branch.level c)).branch
                                     an.asserting an.learned) an := by
                               simp only [phaseNext, hnext, conflictStep, if_neg hlv,
                                 hev, backjumpStep, ha, hcp,
                                 stepAnalyzeConflictCounted_original_rc,
-                                stepAnalyzeConflictCounted_props, hp]
+                                stepAnalyzeConflictCounted_props, stepAnalyzeConflictCounted_orig, hp]
                             rw [hpe] at hsucc
                             simp only [successor_learnBackjumpAssert,
                               Option.some.injEq] at hsucc
@@ -487,7 +488,7 @@ theorem phaseNext_successor_rawReach {leaf : Assignment → Bool}
                             exact rawReach_of_step (by
                               simp only [schedulerNext, hev, backjumpStep, ha, hcp,
                                 stepAnalyzeConflictCounted_original_rc,
-                                stepAnalyzeConflictCounted_props, hp,
+                                stepAnalyzeConflictCounted_props, stepAnalyzeConflictCounted_orig, hp,
                                 successor_learnBackjumpAssert])
     · -- ARM 6: localExcluded site → forced consume
       cases hsc : stepConsume (stepLocalExclude cfg learned (branchRegion cfg)) with
@@ -582,7 +583,7 @@ theorem reachableBranchInvariant_of_preservation {leaf : Assignment → Bool}
     (hpres : ReachableArmsPreserve leaf) : ReachableBranchInvariant leaf := by
   intro cfg h
   induction h with
-  | init orig original props => exact reachable_init leaf orig
+  | init orig original props hent => exact reachable_seed leaf orig original hent
   | step hnext hsucc _hr ih =>
       have h' := hpres (hnext ▸ hsucc) ih
       rw [W1.schedulerNext_succ_orig (hnext ▸ hsucc)]

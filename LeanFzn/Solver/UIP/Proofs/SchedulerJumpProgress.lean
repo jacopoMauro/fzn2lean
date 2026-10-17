@@ -126,7 +126,7 @@ theorem absentCount_stepLearnBackjumpAssert_lt {leaf : Assignment → Bool}
     {ev : ConflictEvidence} {restored : BranchState leaf}
     {an : ConflictAnalysis} {props : List Propagator}
     (hpool : Clause.canonicalClause an.learned ∈ clausePool orig)
-    (hperf : p.perform cfg.branch cfg.original props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original props = some restored)
     (hm : PlanMatchesAnalysis p an) (hn : JumpNovelty cfg.branch.learned an) :
     absentCount (stepLearnBackjumpAssert cfg p ev restored).branch.learned
         (clausePool orig)
@@ -151,7 +151,7 @@ theorem phaseLt_stepLearnBackjumpAssert_of_novelty {leaf : Assignment → Bool}
     {ev : ConflictEvidence} {restored : BranchState leaf}
     {an : ConflictAnalysis} {props : List Propagator}
     (hpool : Clause.canonicalClause an.learned ∈ clausePool orig)
-    (hperf : p.perform cfg.branch cfg.original props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original props = some restored)
     (hm : PlanMatchesAnalysis p an) (hn : JumpNovelty cfg.branch.learned an) :
     PhaseLt (PhaseRank orig (stepLearnBackjumpAssert cfg p ev restored))
       (PhaseRank orig cfg) :=
@@ -168,7 +168,7 @@ theorem phaseLt_stepLearnBackjumpAssert {leaf : Assignment → Bool}
     {ev : ConflictEvidence} {restored : BranchState leaf}
     {an : ConflictAnalysis} {props : List Propagator}
     (hpool : Clause.canonicalClause an.learned ∈ clausePool orig)
-    (hperf : p.perform cfg.branch cfg.original props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original props = some restored)
     (hm : PlanMatchesAnalysis p an)
     (hdb : DatabaseUnfalsified cfg.branch)
     (hfals : FalsifiedByTrailNorm cfg.branch an.learned) :
@@ -187,7 +187,7 @@ theorem phaseLt_stepLearnBackjumpAssert_of_reachable {leaf : Assignment → Bool
     {ev : ConflictEvidence} {restored : BranchState leaf}
     {an : ConflictAnalysis} {props : List Propagator} {bs : BranchState leaf}
     (hpool : Clause.canonicalClause an.learned ∈ clausePool orig)
-    (hperf : p.perform cfg.branch cfg.original props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original props = some restored)
     (hm : PlanMatchesAnalysis p an)
     (hdb : DatabaseUnfalsified cfg.branch)
     (hb : cfg.branch = bs) (hreach : ReachableState leaf orig bs)
@@ -234,6 +234,37 @@ def PhaseRankSorted (orig : List Domain) (cfg : SchedulerConfig leaf) :
 def SortedNovelty (orig : List Domain) (pre : List Clause)
     (an : ConflictAnalysis) : Prop :=
   canonicalSorted orig an.learned ∉ canonicalDBSorted orig pre
+
+/-- **RUNTIME-GUARD NOVELTY**: when the scheduler's cheap repeat guard
+`learnedRepeats` is false, the sorted canonical form of the learned clause is
+absent from the sorted canonical database. -/
+theorem sortedNovelty_of_not_repeats {leaf : Assignment → Bool}
+    {cfg : SchedulerConfig leaf} {an : ConflictAnalysis}
+    (hg : learnedRepeats cfg an.learned = false) :
+    SortedNovelty cfg.orig cfg.branch.learned an := by
+  intro hmem
+  obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hmem
+  have hany := List.any_eq_false.mp hg d hd
+  have hiff : ∀ x, x ∈ litPool cfg.orig →
+      (x ∈ an.learned.map Literal.norm ↔ x ∈ d.map Literal.norm) := by
+    intro x hx
+    have h1 : x ∈ canonicalSorted cfg.orig d ↔
+        x ∈ canonicalSorted cfg.orig an.learned := by rw [hdeq]
+    simp only [canonicalSorted, List.mem_filter, decide_eq_true_eq,
+      sortedLitPool_mem] at h1
+    constructor
+    · intro h; exact (h1.mpr ⟨hx, h⟩).2
+    · intro h; exact (h1.mp ⟨hx, h⟩).2
+  apply hany
+  simp only [learnedRepeats, Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq,
+    Bool.or_eq_true, Bool.not_eq_true', decide_eq_false_iff_not, List.mem_filter]
+  constructor
+  · intro x hx
+    exact (hiff x hx.2).mp hx.1
+  · intro x hx
+    by_cases hP : x ∈ litPool cfg.orig
+    · exact Or.inl ⟨(hiff x hP).mpr hx, hP⟩
+    · exact Or.inr hP
 
 /-- **SORTED-CANONICAL EQUALITY TRANSFERS NORM FALSIFICATION (C1)**: when the
 clause being proved falsified has pool-aligned literals, equal `canonicalSorted`
@@ -285,7 +316,7 @@ theorem absentCountSorted_stepLearnBackjumpAssert_lt {leaf : Assignment → Bool
     {ev : ConflictEvidence} {restored : BranchState leaf}
     {an : ConflictAnalysis} {props : List Propagator}
     (hnov : SortedNovelty orig cfg.branch.learned an)
-    (hperf : p.perform cfg.branch cfg.original props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original props = some restored)
     (hm : PlanMatchesAnalysis p an) :
     absentCountSorted orig (stepLearnBackjumpAssert cfg p ev restored).branch.learned
       < absentCountSorted orig cfg.branch.learned := by
@@ -311,7 +342,7 @@ theorem phaseLtSorted_stepLearnBackjumpAssert {leaf : Assignment → Bool}
     {ev : ConflictEvidence} {restored : BranchState leaf}
     {an : ConflictAnalysis} {props : List Propagator}
     (hnov : SortedNovelty orig cfg.branch.learned an)
-    (hperf : p.perform cfg.branch cfg.original props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original props = some restored)
     (hm : PlanMatchesAnalysis p an) :
     PhaseLt (PhaseRankSorted orig (stepLearnBackjumpAssert cfg p ev restored))
       (PhaseRankSorted orig cfg) :=
@@ -373,6 +404,11 @@ theorem phaseRankSorted_lt_propagate (orig : List Domain)
   · refine Or.inr ⟨heq, ?_⟩
     have hcost : branchCost d.frame.1 ≤ branchCost cfg.branch.frame.1 :=
       filterFrame_cost_le d.filtered
+    have e1 : (PhaseRankSorted orig (stepPropagate cfg d)).snd =
+        (frontierCost (d.frame :: cfg.pending), Frame.mass d.frame,
+          statusWeight (stepPropagate cfg d).status) := by
+      simp [PhaseRankSorted, SchedulerConfig.frontier, narrowState]
+    rw [e1]
     rcases Nat.lt_or_eq_of_le hcost with hclt | hceq
     · exact Or.inl (C3a.frontierCost_frame_lt hclt cfg.pending)
     · exact Or.inr ⟨C3a.frontierCost_frame_congr hceq cfg.pending,

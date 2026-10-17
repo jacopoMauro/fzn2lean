@@ -740,6 +740,16 @@ theorem reachable_init (leaf : Assignment → Bool) (orig : List Domain) :
   · exact levelSorted_nil
   · exact TrailLiteralsDistinct.nil
 
+/-- The SEEDED root (R1c): the same root state with the problem's original
+clauses preloaded as the scanned database. Reachable as soon as they are
+globally entailed. -/
+theorem reachable_seed (leaf : Assignment → Bool) (orig : List Domain)
+    (db : List Clause) (h : LearnedEntailed leaf db) :
+    ReachableState leaf orig
+      ({ BranchState.init (leaf := leaf) (orig, []) with learned := db }) := by
+  have h0 := reachable_init leaf orig
+  exact { h0 with wf := ⟨h0.wf.1, h0.wf.2.1, h0.wf.2.2.1, h0.wf.2.2.2.1, h⟩ }
+
 /-- FORM 2 of the distinctness obligation (INTERFACES §2.1): the reachable
 invariant IMPLIES the duplicate-safe discipline, so B1/B2/C2 consumers
 never take a caller-supplied `TrailLiteralsDistinct` hypothesis. -/

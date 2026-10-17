@@ -221,12 +221,12 @@ theorem _root_.LeanFzn.Solver.Propagation.ConflictAnalysis.ofUIP_backjumpLevel_l
 /-- The scheduler's analysis agrees with the reference
 `BranchState.analyzeWithAllowance`: both are the `Option.map` of
 `ConflictAnalysis.ofUIP` over the same allowance run. -/
-theorem analyzeWithAllowance_eq_ofUIP (bs : BranchState leaf) (c : Clause) :
-    bs.analyzeWithAllowance c =
-      (analyzeAtAllowance bs.trail bs.level c).map
+theorem analyzeWithAllowance_eq_ofUIP (orig : List Domain) (bs : BranchState leaf) (c : Clause) :
+    bs.analyzeWithAllowance orig c =
+      (analyzeAtAllowance orig bs.trail bs.level c).map
         (fun p => ConflictAnalysis.ofUIP p.1 p.2) := by
   rw [BranchState.analyzeWithAllowance]
-  cases h : analyzeAtAllowance bs.trail bs.level c with
+  cases h : analyzeAtAllowance orig bs.trail bs.level c with
   | none => rfl
   | some p => cases p with
     | mk below uip => rfl
@@ -317,7 +317,7 @@ def SchedulerConfig.init (orig : List Domain) (original : List Clause)
   orig := orig
   original := original
   props := props
-  branch := BranchState.init (orig, [])
+  branch := { BranchState.init (leaf := leaf) (orig, []) with learned := original }
   checkpoints := [rootCheckpoint orig]
   pending := []
   log := {}
@@ -329,7 +329,7 @@ def SchedulerConfig.init (orig : List Domain) (original : List Clause)
 @[simp] theorem SchedulerConfig.init_branch (orig : List Domain)
     (original : List Clause) (props : List Propagator) :
     (SchedulerConfig.init (leaf := leaf) orig original props).branch
-      = BranchState.init (orig, []) := rfl
+      = { BranchState.init (leaf := leaf) (orig, []) with learned := original } := rfl
 
 @[simp] theorem SchedulerConfig.init_pending (orig : List Domain)
     (original : List Clause) (props : List Propagator) :
@@ -410,7 +410,7 @@ theorem SchedulerConfig.init_wellFormed_parts (leaf : Assignment → Bool)
   · intro cp hcp
     simp only [SchedulerConfig.init, List.mem_singleton] at hcp
     rw [hcp]
-    exact rootCheckpoint_identifies_init leaf orig
+    exact rootCheckpoint_identifies_init leaf orig original
   · intro r hr
     simp only [SchedulerConfig.init, List.not_mem_nil] at hr
 

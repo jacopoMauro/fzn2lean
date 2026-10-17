@@ -176,15 +176,100 @@ def UnitEvidenceRoute (dc : DomConstraint) : Prop :=
 /-- F1 coverage predicate (fallback route): a proved propagator is
 registered for the family, so the per-family fits-exclusion (§4) applies;
 and the conflict/trail-nogood obligations of §5 apply to the registration
-it belongs to. -/
+it belongs to. The `boolClauseSlot` family (PLAN C2) is the second
+fallback shape: it registers NO propagator and is enforced by the leaf
+    check alone (with its original clause seeded into the clause database);
+    the C3 Boolean families `arrayBoolAndSlot`, `bool2intSlot` and
+    `boolEqSlot` are the third: no propagator, leaf-enforced; the C4
+    element families `arrayIntElementSlot`, `arrayVarIntElementSlot`
+    and `arrayVarBoolElementSlot` are the fourth: no propagator,
+    leaf-enforced; the C5 reified families `eqReifSlot`, `leReifSlot`,
+    `neReifSlot`, `linEqReif`, `linLeReif` and `linNeReif` are the
+    fifth: no propagator, leaf-enforced; the C6 general arithmetic
+    families `minPair`, `maxPair`, `divGen`, `modGen` and the array
+    extremes `maxGen`/`minGen` are the sixth: no propagator,
+    leaf-enforced. -/
 def FallbackRoute (dc : DomConstraint) : Prop :=
-  ∃ p : Propagator, propagatorOfProved dc = some p
+  (∃ p : Propagator, propagatorOfProved dc = some p) ∨
+    (∃ ps ns, dc = .boolClauseSlot ps ns) ∨
+    (∃ is k, dc = .arrayBoolAndSlot is k) ∨
+    (∃ i k, dc = .bool2intSlot i k) ∨
+    (∃ i j, dc = .boolEqSlot i j) ∨
+    (∃ xs i k, dc = .arrayIntElementSlot xs i k) ∨
+    (∃ is i k, dc = .arrayVarIntElementSlot is i k) ∨
+    (∃ is i k, dc = .arrayVarBoolElementSlot is i k) ∨
+    (∃ i j r, dc = .eqReifSlot i j r) ∨
+    (∃ i j r, dc = .leReifSlot i j r) ∨
+    (∃ i j r, dc = .neReifSlot i j r) ∨
+    (∃ coeffs is b r, dc = .linEqReif coeffs is b r) ∨
+    (∃ coeffs is b r, dc = .linLeReif coeffs is b r) ∨
+    (∃ coeffs is b r, dc = .linNeReif coeffs is b r) ∨
+    (∃ o₀ o₁ r, dc = .minPair o₀ o₁ r) ∨
+    (∃ o₀ o₁ r, dc = .maxPair o₀ o₁ r) ∨
+    (∃ o₁ o₂ r, dc = .divGen o₁ o₂ r) ∨
+    (∃ o₁ o₂ r, dc = .modGen o₁ o₂ r) ∨
+    (∃ os r, dc = .maxGen os r) ∨
+    (∃ os r, dc = .minGen os r)
 
 /-- The fallback route is TOTAL on the accepted fragment: every translated
-constraint family has a registered proved propagator (no source family is
-left without a proved route). -/
+constraint family is covered by the proved fallback — either it has a
+registered proved propagator (whose per-family fits-exclusion supplies the
+fallback obligations) or it is one of the leaf-enforced families
+(`bool_clause` with its seeded original clause, and the C3 Boolean
+families). -/
 theorem fallbackRoute_total (dc : DomConstraint) : FallbackRoute dc := by
-  cases dc <;> exact ⟨_, rfl⟩
+  cases dc with
+  | boolClauseSlot ps ns => exact Or.inr (Or.inl ⟨ps, ns, rfl⟩)
+  | arrayBoolAndSlot is k => exact Or.inr (Or.inr (Or.inl ⟨is, k, rfl⟩))
+  | bool2intSlot i k => exact Or.inr (Or.inr (Or.inr (Or.inl ⟨i, k, rfl⟩)))
+  | boolEqSlot i j =>
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨i, j, rfl⟩))))
+  | arrayIntElementSlot xs i k =>
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr
+        (Or.inl ⟨xs, i, k, rfl⟩)))))
+  | arrayVarIntElementSlot is i k =>
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr
+        (Or.inl ⟨is, i, k, rfl⟩))))))
+  | arrayVarBoolElementSlot is i k =>
+      iterate 7 (apply Or.inr)
+      exact Or.inl ⟨is, i, k, rfl⟩
+  | eqReifSlot i j r =>
+      iterate 8 (apply Or.inr)
+      exact Or.inl ⟨i, j, r, rfl⟩
+  | leReifSlot i j r =>
+      iterate 9 (apply Or.inr)
+      exact Or.inl ⟨i, j, r, rfl⟩
+  | neReifSlot i j r =>
+      iterate 10 (apply Or.inr)
+      exact Or.inl ⟨i, j, r, rfl⟩
+  | linEqReif coeffs is b r =>
+      iterate 11 (apply Or.inr)
+      exact Or.inl ⟨coeffs, is, b, r, rfl⟩
+  | linLeReif coeffs is b r =>
+      iterate 12 (apply Or.inr)
+      exact Or.inl ⟨coeffs, is, b, r, rfl⟩
+  | linNeReif coeffs is b r =>
+      iterate 13 (apply Or.inr)
+      exact Or.inl ⟨coeffs, is, b, r, rfl⟩
+  | minPair o₀ o₁ r =>
+      iterate 14 (apply Or.inr)
+      exact Or.inl ⟨o₀, o₁, r, rfl⟩
+  | maxPair o₀ o₁ r =>
+      iterate 15 (apply Or.inr)
+      exact Or.inl ⟨o₀, o₁, r, rfl⟩
+  | divGen o₁ o₂ r =>
+      iterate 16 (apply Or.inr)
+      exact Or.inl ⟨o₁, o₂, r, rfl⟩
+  | modGen o₁ o₂ r =>
+      iterate 17 (apply Or.inr)
+      exact Or.inl ⟨o₁, o₂, r, rfl⟩
+  | maxGen os r =>
+      iterate 18 (apply Or.inr)
+      exact Or.inl ⟨os, r, rfl⟩
+  | minGen os r =>
+      iterate 19 (apply Or.inr)
+      exact ⟨os, r, rfl⟩
+  | _ => exact Or.inl ⟨_, rfl⟩
 
 /-- The unit route is a sub-route of the fallback route. -/
 theorem unitEvidenceRoute_subset_fallback {dc : DomConstraint}
@@ -212,7 +297,7 @@ theorem unitEvidence_familyRoute_explained (dc : DomConstraint)
 /-- The `propagatorOfProved` image of `boolNotSlot 0 1` (the registered
 non-unit Boolean family). -/
 def boolNotRegistered : Propagator :=
-  { watches := [], run := fun st => propBoolNot st 0 1 }
+  { watches := [.intLe 0 0, .intLe 1 0], run := fun st => propBoolNot st 0 1 }
 
 /-- The registration equation, definitionally. -/
 theorem propagatorOfProved_boolNotSlot_0_1 :
@@ -486,6 +571,7 @@ problem-level premise the master theorem carries. -/
 theorem fallbackCoverage_nonempty_of_proved
     {problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit}
     (hview : IntViewedDoms problem.domains)
+    (hshape : DomsShapeTyped problem.domains)
     {props : List Propagator}
     (hprops : ∀ p ∈ props, ∃ dc ∈ problem.constraints,
       propagatorOfProved dc = some p)
@@ -506,7 +592,7 @@ theorem fallbackCoverage_nonempty_of_proved
         analyzeConflict (propagateLoop (engineFuel st) props st) = none →
         cc ≠ [] →
         Clause.EntailedBy problem DomConstraint.SatisfiedBy cc :=
-  propagatorsOfProved_conflictraw hview hprops hlin hlinE
+  propagatorsOfProved_conflictraw hview hshape hprops hlin hlinE
     hsolvable hdb
 
 /-- **THE EMPTY-CLAUSE FALLBACK NOGOOD (the `hfallbackng` shape)**: over
@@ -529,6 +615,11 @@ theorem fallbackCoverage_empty_of_proved
       dc = .linLe coeffs is b → coeffs.length = is.length)
     (hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b,
       dc = .linEq coeffs is b → coeffs.length = is.length)
+    (hlreif : ∀ dc ∈ problem.constraints, ∀ coeffs is b r,
+      dc = .linLeReif coeffs is b r →
+        ∀ i ∈ is, i < problem.domains.length)
+    (hlad : ∀ dc ∈ problem.constraints, ∀ is, dc = .allDiff is →
+        ∀ i ∈ is, i < problem.domains.length)
     (hdb : ∀ c ∈ problem.clauses, ∀ a,
       ProblemSolution problem DomConstraint.SatisfiedBy a →
         ∃ l ∈ c, l.eval a = some true) :
@@ -543,7 +634,7 @@ theorem fallbackCoverage_empty_of_proved
           (List.filter (fun e => decide (e.level > 0))
             (propagateLoop (engineFuel st) props st).trail)) :=
   propagatorsOfProved_fallbackng_discharged hview hprops hlin hlinE
-    (propagatorsOfProved_reasonSafeUniv hview hprops hlin hlinE)
+    (propagatorsOfProved_reasonSafeUniv hview hprops hlin hlinE hlreif hlad)
     (fun acc hcoh hlv hrootF hrooted =>
       propagatorsOfProved_just hview hprops hlin hlinE
         acc hcoh hlv hrooted hrootF)
@@ -554,6 +645,7 @@ obligation set over the proved registration). -/
 theorem fallbackCoverage_of_proved
     {problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit}
     (hview : IntViewedDoms problem.domains)
+    (hshape : DomsShapeTyped problem.domains)
     {props : List Propagator}
     (hprops : ∀ p ∈ props, ∃ dc ∈ problem.constraints,
       propagatorOfProved dc = some p)
@@ -561,6 +653,11 @@ theorem fallbackCoverage_of_proved
       dc = .linLe coeffs is b → coeffs.length = is.length)
     (hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b,
       dc = .linEq coeffs is b → coeffs.length = is.length)
+    (hlreif : ∀ dc ∈ problem.constraints, ∀ coeffs is b r,
+      dc = .linLeReif coeffs is b r →
+        ∀ i ∈ is, i < problem.domains.length)
+    (hlad : ∀ dc ∈ problem.constraints, ∀ is, dc = .allDiff is →
+        ∀ i ∈ is, i < problem.domains.length)
     (hsolvable : ∃ b, ProblemSolution problem
       DomConstraint.SatisfiedBy b)
     (hdb : ∀ c ∈ problem.clauses, ∀ a,
@@ -584,16 +681,26 @@ theorem fallbackCoverage_of_proved
         (List.map (fun e => e.literal.negate.norm)
           (List.filter (fun e => decide (e.level > 0))
             (propagateLoop (engineFuel st) props st).trail))) :=
-  ⟨fallbackCoverage_nonempty_of_proved hview hprops hlin hlinE
+  ⟨fallbackCoverage_nonempty_of_proved hview hshape hprops hlin hlinE
       hsolvable hdb,
-   fallbackCoverage_empty_of_proved hview hprops hlin hlinE hdb⟩
+   fallbackCoverage_empty_of_proved hview hprops hlin hlinE hlreif hlad hdb⟩
 
 /-! ## §6 The compiled entry: all premises discharged from `compileModel` -/
 
-/-- The compiled clause base is empty. -/
-theorem compiled_clauseDatabase_empty
+/-- The compiled clause base is exactly the `bool_clause` seed (PLAN C2):
+    every `boolClauseSlot` constraint contributes its original clause,
+    every other family contributes none. -/
+theorem compiled_clauseDatabase_seed
     (compiled : LeanFzn.Compiler.CompiledProblem DomConstraint) :
-    (LeanFzn.Integration.toLCG compiled).clauses = [] := rfl
+    (LeanFzn.Integration.toLCG compiled).clauses =
+      LeanFzn.Compiler.seedClauses compiled.constraints := rfl
+
+/-- The compiled clause base is empty exactly when the `bool_clause`
+    seed is empty (the C1-stage fact, now carried by the seed). -/
+theorem compiled_clauseDatabase_empty
+    (compiled : LeanFzn.Compiler.CompiledProblem DomConstraint)
+    (hseed : LeanFzn.Compiler.seedClauses compiled.constraints = []) :
+    (LeanFzn.Integration.toLCG compiled).clauses = [] := hseed
 
 private theorem compiledView {m : Model}
     {compiled : LeanFzn.Compiler.CompiledProblem DomConstraint}
@@ -602,6 +709,13 @@ private theorem compiledView {m : Model}
   intViewedDomains_of_shapeTyped
     (shapeTypedDomains_of_compileModel_toLCG
       (problem := LeanFzn.Integration.toLCG compiled) hc rfl)
+
+private theorem compiledShape {m : Model}
+    {compiled : LeanFzn.Compiler.CompiledProblem DomConstraint}
+    (hc : LeanFzn.Compiler.compileModel m = .ok compiled) :
+    DomsShapeTyped (LeanFzn.Integration.toLCG compiled).domains :=
+  shapeTypedDomains_of_compileModel_toLCG
+    (problem := LeanFzn.Integration.toLCG compiled) hc rfl
 
 private theorem compiledHprops
     (compiled : LeanFzn.Compiler.CompiledProblem DomConstraint) :
@@ -629,8 +743,9 @@ private theorem compiledHdb
     ∀ c ∈ (LeanFzn.Integration.toLCG compiled).clauses, ∀ a,
       ProblemSolution (LeanFzn.Integration.toLCG compiled) DomConstraint.SatisfiedBy a →
         ∃ l ∈ c, l.eval a = some true :=
-  fun c hmem _ _ =>
-    absurd (show c ∈ ([] : List Clause) from hmem) (by simp)
+  fun c hmem a hsol =>
+    LeanFzn.Compiler.seedClauses_satisfiedBy
+      (fun dc hdc => hsol.2 dc hdc) c hmem
 
 /-- **THE COMPILED `hfallbackng` PRODUCER (PLAN F1's fallback landing)**:
 the master theorem's fallback-nogood premise, derived for the FULL
@@ -638,7 +753,13 @@ compiled fragment (all twenty families, no unit gate) from compilation
 success alone. -/
 theorem compiled_hfallbackng_of_compileModel {m : Model}
     {compiled : LeanFzn.Compiler.CompiledProblem DomConstraint}
-    (hc : LeanFzn.Compiler.compileModel m = .ok compiled) :
+    (hc : LeanFzn.Compiler.compileModel m = .ok compiled)
+    (hreif : ∀ dc ∈ (LeanFzn.Integration.toLCG compiled).constraints,
+      ∀ coeffs is b r, dc = .linLeReif coeffs is b r →
+        ∀ i ∈ is, i < (LeanFzn.Integration.toLCG compiled).domains.length)
+    (hlad : ∀ dc ∈ (LeanFzn.Integration.toLCG compiled).constraints,
+      ∀ is, dc = .allDiff is →
+        ∀ i ∈ is, i < (LeanFzn.Integration.toLCG compiled).domains.length) :
     ∀ (st : State), st.conflict = none →
       RunInv (LeanFzn.Integration.toLCG compiled) DomConstraint.SatisfiedBy
         (compiled.constraints.filterMap propagatorOfProved) st →
@@ -658,7 +779,7 @@ theorem compiled_hfallbackng_of_compileModel {m : Model}
   fallbackCoverage_empty_of_proved (problem := LeanFzn.Integration.toLCG compiled)
     (props := compiled.constraints.filterMap propagatorOfProved)
     (compiledView hc) (compiledHprops compiled)
-    (compiledHlin hc) (compiledHlinE hc) (compiledHdb compiled)
+    (compiledHlin hc) (compiledHlinE hc) hreif hlad (compiledHdb compiled)
 
 /-- **THE COMPILED `hconfent` PRODUCER** (nonempty-clause conflict
 entitlement at every conflict-free RunInv entry, the shape
@@ -681,7 +802,7 @@ theorem compiled_hconfent_norm_of_compileModel {m : Model}
           DomConstraint.SatisfiedBy cc :=
   propagatorsOfProved_conflictEntitled (problem := LeanFzn.Integration.toLCG compiled)
     (props := compiled.constraints.filterMap propagatorOfProved)
-    (compiledView hc) hsolvable (compiledHprops compiled)
+    (compiledView hc) (compiledShape hc) hsolvable (compiledHprops compiled)
     (compiledHlin hc) (compiledHlinE hc) (compiledHdb compiled)
 
 /-- **THE COMPILED `hconfraw` PRODUCER** (the analysis-failure
@@ -708,7 +829,7 @@ theorem compiled_hconfraw_of_compileModel {m : Model}
           DomConstraint.SatisfiedBy cc :=
   fallbackCoverage_nonempty_of_proved (problem := LeanFzn.Integration.toLCG compiled)
     (props := compiled.constraints.filterMap propagatorOfProved)
-    (compiledView hc) (compiledHprops compiled)
+    (compiledView hc) (compiledShape hc) (compiledHprops compiled)
     (compiledHlin hc) (compiledHlinE hc) hsolvable (compiledHdb compiled)
 
 /-- **THE COMPILED FALLBACK COVERAGE**: the conjunction of the two
@@ -719,6 +840,12 @@ fallback, and no previously accepted program is rejected or gated by it.
 theorem fallbackCoverage_of_compiled {m : Model}
     {compiled : LeanFzn.Compiler.CompiledProblem DomConstraint}
     (hc : LeanFzn.Compiler.compileModel m = .ok compiled)
+    (hreif : ∀ dc ∈ (LeanFzn.Integration.toLCG compiled).constraints,
+      ∀ coeffs is b r, dc = .linLeReif coeffs is b r →
+        ∀ i ∈ is, i < (LeanFzn.Integration.toLCG compiled).domains.length)
+    (hlad : ∀ dc ∈ (LeanFzn.Integration.toLCG compiled).constraints,
+      ∀ is, dc = .allDiff is →
+        ∀ i ∈ is, i < (LeanFzn.Integration.toLCG compiled).domains.length)
     (hsolvable : ∃ b, ProblemSolution (LeanFzn.Integration.toLCG compiled)
       DomConstraint.SatisfiedBy b) :
     (∀ (st : State), st.conflict = none →
@@ -750,7 +877,7 @@ theorem fallbackCoverage_of_compiled {m : Model}
             (propagateLoop (engineFuel st)
               (compiled.constraints.filterMap propagatorOfProved) st).trail))) :=
   ⟨compiled_hconfraw_of_compileModel hc hsolvable,
-   compiled_hfallbackng_of_compileModel hc⟩
+   compiled_hfallbackng_of_compileModel hc hreif hlad⟩
 
 #print axioms LeanFzn.Integration.fallbackCoverage_nonempty_of_proved
 #print axioms LeanFzn.Integration.fallbackCoverage_empty_of_proved

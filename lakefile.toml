@@ -154,7 +154,55 @@ root = "Tests.UIP.SchedulerComputability"
 name = "tests_lcg_public_fixtures"
 root = "Tests.Integration.PublicSchedulerFixtures"
 
+[[lean_exe]]
+name = "tests_lcg_harness"
+root = "Tests.UIP.LcgHarnessRunner"
+
 [[lean_lib]]
 name = "LeanFzn.Cli"
 globs = ["LeanFzn.Cli", "LeanFzn.Cli.+"]
 moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_exe]]
+name = "challenge_scan"
+root = "Tests.Integration.ChallengeScan"
+
+[[lean_exe]]
+name = "tests_lcg_proto"
+root = "Tests.UIP.LcgProtoRunner"
+
+[[lean_exe]]
+name = "tests_array_params"
+root = "Tests.Integration.ArrayParams"
+
+[[lean_exe]]
+name = "tests_optimize"
+root = "Tests.Integration.Optimize"
+
+[[lean_exe]]
+name = "tests_optimize_bnb"
+root = "Tests.Integration.OptimizeBnB"
+
+[[lean_exe]]
+name = "tests_lcg_kernel"
+root = "Tests.UIP.LcgKernelRunner"
+
+[[lean_exe]]
+name = "tests_lcg_optimize"
+root = "Tests.Integration.LcgOptimize"
+
+[[lean_exe]]
+name = "tests_public_lcg"
+root = "Tests.Integration.PublicLcgRunner"
+
+[[lean_exe]]
+name = "tests_dbscan"
+root = "Tests.E1.DbScanCounts"
+
+[[lean_exe]]
+name = "tests_p3b_gate"
+root = "Tests.E1.P3bGateTiming"
+
+[[lean_exe]]
+name = "tests_lcg_heur"
+root = "Tests.Integration.HeurLcgRunner"

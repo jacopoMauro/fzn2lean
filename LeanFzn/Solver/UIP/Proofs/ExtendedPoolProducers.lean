@@ -40,6 +40,7 @@ NO `sorry`, NO custom axiom. Registration owes the umbrella import line
 import LeanFzn.Solver.UIP.Proofs.TrailVocabularyProducers
 import LeanFzn.Solver.UIP.Proofs.PendingRun
 import LeanFzn.Solver.UIP.Proofs.SchedulerConflict
+import LeanFzn.Solver.UIP.Proofs.TrailSlotRange
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler
 
 
@@ -233,6 +234,25 @@ theorem databaseAlignedAt_if_singleton {pool : List Literal} {c : Clause}
   | false => simpa using databaseAlignedAt_nil pool
   | true => simpa using databaseAlignedAt_of_unit hunit
 
+/-- A single-clause database is `pool`-aligned from its clause's pointwise
+alignment. -/
+theorem databaseAlignedAt_singleton_of_clause {pool : List Literal} {c : Clause}
+    (h : ∀ q ∈ c, q.norm ∈ pool) : DatabaseAlignedAt pool [c] := by
+  intro c' hc' q hq
+  have hc'e : c' = c := List.mem_singleton.mp hc'
+  subst hc'e
+  exact h q hq
+
+/-- U1e: a freshness-filtered payload of a pooled clause (any shape). -/
+theorem databaseAlignedAt_if_clause {pool : List Literal} {c : Clause}
+    {b : Bool} (h : ∀ q ∈ c, q.norm ∈ pool) :
+    DatabaseAlignedAt pool (if b then [c] else []) := by
+  cases b with
+  | false => simpa using databaseAlignedAt_nil pool
+  | true =>
+      simp only [if_true]
+      exact databaseAlignedAt_singleton_of_clause h
+
 /-- **PARAMETRIC DEDUCTION-LITERAL PRODUCER**: a selected deduction's literal
 is `pool`-pooled — propagator-sourced events from the pool-parametric
 emission vocabulary, database-sourced events from the `pool`-alignment of the
@@ -241,7 +261,7 @@ theorem deduction_literal_pooled_at {leaf : Assignment → Bool}
     {original : List Clause} {props : List Propagator}
     {bs : BranchState leaf} {d : ProductiveDeduction leaf bs}
     {pool : List Literal}
-    (hvocab : EmissionVocabularyAt pool props)
+    (hvocab : EmissionPoolAt pool props)
     (hdb : DatabaseAlignedAt pool bs.learned)
     (hd : explainedDeduction original props bs = some d) :
     d.literal.norm ∈ pool := by
@@ -256,17 +276,14 @@ theorem deduction_literal_pooled_at {leaf : Assignment → Bool}
     exact hdb c hmem d.literal hl
   · obtain ⟨p, hpm, r, hrun, hcl, -, -⟩ :=
       scanPropagators_implied_facts hprop
-    obtain ⟨q, -, hlq, -, hqpool⟩ :=
-      hvocab.1 p hpm (frameState bs.frame) d.literal r hrun
-    rw [hlq]
-    exact hqpool
+    exact (hvocab.1 p hpm (frameState bs.frame) d.literal r hrun).1
 
 /-- **PARAMETRIC PROPAGATE-ARM PAYLOAD PRODUCER**. -/
 theorem databaseAlignedAt_deduction_learned {leaf : Assignment → Bool}
     {original : List Clause} {props : List Propagator}
     {bs : BranchState leaf} {d : ProductiveDeduction leaf bs}
     {pool : List Literal}
-    (hvocab : EmissionVocabularyAt pool props)
+    (hvocab : EmissionPoolAt pool props)
     (hd : explainedDeduction original props bs = some d) :
     DatabaseAlignedAt pool d.learned := by
   obtain ⟨c, lr, fl, hev, -, hlearned⟩ := explainedDeduction_learned_shape hd
@@ -278,96 +295,76 @@ theorem databaseAlignedAt_deduction_learned {leaf : Assignment → Bool}
     exact databaseAlignedAt_nil pool
   · obtain ⟨p, hpm, r, hrun, hcl, -, -⟩ :=
       scanPropagators_implied_facts hprop
-    obtain ⟨q, hq, -, -, hqpool⟩ :=
-      hvocab.1 p hpm (frameState bs.frame) d.literal r hrun
-    exact databaseAlignedAt_if_singleton ⟨q, by rw [hcl, hq], hqpool⟩
+    have hr := (hvocab.1 p hpm (frameState bs.frame) d.literal r hrun).2
+    rw [← hcl] at hr
+    exact databaseAlignedAt_if_clause hr
 
 /-- **PARAMETRIC LOCALEXCLUDE / EVIDENCE PAYLOAD PRODUCER**. -/
 theorem databaseAlignedAt_conflict_learned {leaf : Assignment → Bool}
     {original : List Clause} {props : List Propagator}
     {bs : BranchState leaf} {cs : List Clause} {pool : List Literal}
-    (hvocab : EmissionVocabularyAt pool props)
+    (hvocab : EmissionPoolAt pool props)
     (hev : nextPruningEvent original props bs.frame bs.learned = .conflict cs) :
     DatabaseAlignedAt pool
       (cs.filter fun c => !(bs.learned.contains c)) := by
   rcases nextPruningEvent_conflict_cases hev with hsrc | ⟨-, -, hprop⟩
-  · obtain ⟨-, -, -, hcs⟩ := scanDatabase_conflict_facts hsrc
-    rw [hcs, List.filter_nil]
+  · obtain ⟨c, hmem, -, hcs⟩ := scanDatabase_conflict_facts hsrc
+    -- the reported stored clause is already in the database: nothing fresh
+    have hfilt : [c].filter (fun c => !(bs.learned.contains c)) = [] := by
+      simp [List.elem_eq_mem, hmem]
+    rw [hcs, hfilt]
     exact databaseAlignedAt_nil pool
   · obtain ⟨p, hpm, c, hrun, hcs⟩ := scanPropagators_conflict_facts hprop
     rw [hcs]
-    rcases hvocab.2 p hpm (frameState bs.frame) c hrun with
-      hnil | ⟨q, hcq, -, hqpool⟩
-    · rw [hnil]
+    have hcp := hvocab.2 p hpm (frameState bs.frame) c hrun
+    by_cases hempty : c.isEmpty = true
+    · rw [hempty]
       show DatabaseAlignedAt pool
         (List.filter (fun c => !(bs.learned.contains c)) [])
       rw [List.filter_nil]
       exact databaseAlignedAt_nil pool
-    · by_cases hempty : c.isEmpty = true
-      · rw [hempty]
-        show DatabaseAlignedAt pool
-          (List.filter (fun c => !(bs.learned.contains c)) [])
-        rw [List.filter_nil]
-        exact databaseAlignedAt_nil pool
-      · rw [if_neg hempty]
-        refine databaseAlignedAt_of_sub
-          (fun c' hc' => (List.mem_filter.mp hc').1) ?_
-        exact databaseAlignedAt_of_unit ⟨q, hcq, hqpool⟩
+    · rw [if_neg hempty]
+      refine databaseAlignedAt_of_sub
+        (fun c' hc' => (List.mem_filter.mp hc').1) ?_
+      exact databaseAlignedAt_singleton_of_clause hcp
 
 /-- The terminal-conflict payload of `terminalResult` is `pool`-aligned. -/
 theorem databaseAlignedAt_terminalResult_conflict {leaf : Assignment → Bool}
-    {original : List Clause} {props : List Propagator}
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
     {bs bs' : BranchState leaf} {cs learned : List Clause}
     {pool : List Literal}
-    (hvocab : EmissionVocabularyAt pool props)
-    (ht : terminalResult original props bs = .conflict bs' cs learned) :
+    (hvocab : EmissionPoolAt pool props)
+    (ht : terminalResult orig original props bs = .conflict bs' cs learned) :
     DatabaseAlignedAt pool learned := by
-  rw [terminalResult] at ht
-  split at ht
-  · cases ht
-  · rename_i cs' hev
-    cases ht
+  obtain ⟨-, hcase⟩ := terminalResult_conflict_cases ht
+  rcases hcase with ⟨hev, hlearned⟩ | ⟨l, c, lr, fl, hev, -, -, hlearned⟩ |
+      ⟨w, -, -, -, hlearned⟩
+  · rw [hlearned]
     exact databaseAlignedAt_conflict_learned hvocab hev
-  · split at ht <;> cases ht
-
-/-- The terminal `localExcluded` payload is `pool`-aligned. -/
-theorem databaseAlignedAt_terminalResult_localExcluded
-    {leaf : Assignment → Bool}
-    {original : List Clause} {props : List Propagator}
-    {bs bs' : BranchState leaf} {lit : Option Literal} {reason : Option Clause}
-    {learned : List Clause} {pool : List Literal}
-    (hvocab : EmissionVocabularyAt pool props)
-    (ht : terminalResult original props bs =
-      .localExcluded bs' lit reason learned) :
-    DatabaseAlignedAt pool learned := by
-  rw [terminalResult] at ht
-  split at ht
-  · cases ht
-  · cases ht
-  · rename_i l c lr fl hev
-    split at ht
-    · cases ht
-      rcases nextPruningEvent_implied_cases hev with hsrc | ⟨-, -, hprop⟩
-      · obtain ⟨-, hlr, -⟩ := scanDatabase_implied_facts hsrc
-        rw [hlr]
-        rw [if_neg (by simp)]
-        exact databaseAlignedAt_nil pool
-      · obtain ⟨p, hpm, r, hrun, hcl, -, -⟩ :=
-          scanPropagators_implied_facts hprop
-        obtain ⟨q, hq, -, -, hqpool⟩ :=
-          hvocab.1 p hpm (frameState bs.frame) l r hrun
-        exact databaseAlignedAt_if_singleton ⟨q, by rw [hcl, hq], hqpool⟩
-    · cases ht
+  · rw [hlearned]
+    rcases nextPruningEvent_implied_cases hev with hsrc | ⟨-, -, hprop⟩
+    · obtain ⟨-, hlr, -⟩ := scanDatabase_implied_facts hsrc
+      rw [hlr]
+      rw [if_neg (by simp)]
+      exact databaseAlignedAt_nil pool
+    · obtain ⟨p, hpm, r, hrun, hcl, -, -⟩ :=
+        scanPropagators_implied_facts hprop
+      have hr := (hvocab.1 p hpm (frameState bs.frame) l r hrun).2
+      rw [← hcl] at hr
+      exact databaseAlignedAt_if_clause hr
+  · rw [hlearned]
+    exact databaseAlignedAt_nil pool
 
 /-- **PARAMETRIC CLOSURE MAINTENANCE** (database half). -/
 theorem databaseAlignedAt_explainedClosure {leaf : Assignment → Bool}
-    (original : List Clause) (props : List Propagator) (bs : BranchState leaf)
-    {pool : List Literal} (hvocab : EmissionVocabularyAt pool props)
+    (dom : List Domain) (original : List Clause) (props : List Propagator)
+    (bs : BranchState leaf)
+    {pool : List Literal} (hvocab : EmissionPoolAt pool props)
     (h : DatabaseAlignedAt pool bs.learned) :
-    DatabaseAlignedAt pool (explainedClosure original props bs).learned := by
+    DatabaseAlignedAt pool (explainedClosure dom original props bs).learned := by
   suffices hmain : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel → DatabaseAlignedAt pool bs.learned →
-      DatabaseAlignedAt pool (explainedClosure original props bs).learned from
+      DatabaseAlignedAt pool (explainedClosure dom original props bs).learned from
     hmain (Frame.mass bs.frame) bs (Nat.le_refl _) h
   intro fuel
   induction fuel with
@@ -387,13 +384,12 @@ theorem databaseAlignedAt_explainedClosure {leaf : Assignment → Bool}
       · exact h
       · rename_i d hd
         have hpay := databaseAlignedAt_deduction_learned hvocab hd
-        have hnew : DatabaseAlignedAt pool
-            (narrowState bs d.frame d.literal d.reason d.learned).learned := by
-          show DatabaseAlignedAt pool (d.learned ++ bs.learned)
+        have hnew : DatabaseAlignedAt pool (stepNarrowSync dom bs d).learned := by
+          rw [stepNarrowSync_learned]
           exact databaseAlignedAt_append hpay h
-        refine ih (narrowState bs d.frame d.literal d.reason d.learned) ?_ hnew
+        refine ih (stepNarrowSync dom bs d) ?_ hnew
         have hdec := d.decreases
-        simp only [narrowState] at hdec ⊢
+        simp only [stepNarrowSync_frame]
         omega
 
 /-- **PARAMETRIC JUMP RESTORED-DATABASE PRODUCER**. -/
@@ -401,10 +397,10 @@ theorem databaseAlignedAt_perform {leaf : Assignment → Bool}
     {original : List Clause} {props : List Propagator}
     {p : BackjumpPlan leaf} {bs restored : BranchState leaf}
     {pool : List Literal}
-    (hvocab : EmissionVocabularyAt pool props)
+    (hvocab : EmissionPoolAt pool props)
     (hdb : DatabaseAlignedAt pool bs.learned)
     (hplan : DatabaseAlignedAt pool [p.learned])
-    (hperf : p.perform bs original props = some restored) :
+    (hperf : p.perform bs orig original props = some restored) :
     DatabaseAlignedAt pool restored.learned := by
   unfold BackjumpPlan.perform at hperf
   cases hr : p.restoreNarrow bs with
@@ -414,7 +410,8 @@ theorem databaseAlignedAt_perform {leaf : Assignment → Bool}
   | some s =>
       simp only [hr, Option.map_some, Option.some.injEq] at hperf
       rw [← hperf]
-      refine databaseAlignedAt_explainedClosure original props s hvocab ?_
+      refine databaseAlignedAt_explainedClosure orig original props _ hvocab ?_
+      rw [syncAll_learned]
       unfold BackjumpPlan.restoreNarrow at hr
       split at hr
       · cases hr
@@ -422,14 +419,6 @@ theorem databaseAlignedAt_perform {leaf : Assignment → Bool}
         show DatabaseAlignedAt pool (p.learned :: bs.learned)
         exact databaseAlignedAt_append hplan hdb
 
-/-- A single-clause database is `pool`-aligned from its clause's pointwise
-alignment. -/
-theorem databaseAlignedAt_singleton_of_clause {pool : List Literal} {c : Clause}
-    (h : ∀ q ∈ c, q.norm ∈ pool) : DatabaseAlignedAt pool [c] := by
-  intro c' hc' q hq
-  have hc'e : c' = c := List.mem_singleton.mp hc'
-  subst hc'e
-  exact h q hq
 
 /-! ## §2b The parametric trail facts -/
 
@@ -437,14 +426,15 @@ theorem databaseAlignedAt_singleton_of_clause {pool : List Literal} {c : Clause}
 induction of `explainedClosure_trailVocabulary` with the pool abstracted). -/
 theorem explainedClosure_trailVocabulary_at {leaf : Assignment → Bool}
     (original : List Clause) (props : List Propagator) (bs : BranchState leaf)
-    {pool : List Literal} (hvocab : EmissionVocabularyAt pool props)
+    {orig : List Domain} {pool : List Literal}
+    (hP : ∀ l ∈ litPool orig, l ∈ pool) (hvocab : EmissionPoolAt pool props)
     (hdb : DatabaseAlignedAt pool bs.learned)
     (hv : TrailVocabularyAt pool bs.trail) :
-    TrailVocabularyAt pool (explainedClosure original props bs).trail := by
+    TrailVocabularyAt pool (explainedClosure orig original props bs).trail := by
   suffices hmain : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel → TrailVocabularyAt pool bs.trail →
       DatabaseAlignedAt pool bs.learned →
-      TrailVocabularyAt pool (explainedClosure original props bs).trail from
+      TrailVocabularyAt pool (explainedClosure orig original props bs).trail from
     hmain (Frame.mass bs.frame) bs (Nat.le_refl _) hv hdb
   intro fuel
   induction fuel with
@@ -465,21 +455,21 @@ theorem explainedClosure_trailVocabulary_at {leaf : Assignment → Bool}
       · rename_i d hd
         have hl := deduction_literal_pooled_at hvocab hdb hd
         have hpay := databaseAlignedAt_deduction_learned hvocab hd
-        have hv' : TrailVocabularyAt pool
+        have hv0 : TrailVocabularyAt pool
             (narrowState bs d.frame d.literal d.reason d.learned).trail := by
           show TrailVocabularyAt pool (bs.trail ++
             [{ literal := d.literal.norm, level := bs.level,
                reason := some { clause := d.reason } }])
           exact trailVocabularyAt_append_entry hv
             (by rw [norm_norm]; exact hl)
-        have hdb' : DatabaseAlignedAt pool
-            (narrowState bs d.frame d.literal d.reason d.learned).learned := by
-          show DatabaseAlignedAt pool (d.learned ++ bs.learned)
+        have hv' : TrailVocabularyAt pool (stepNarrowSync orig bs d).trail :=
+          syncSlot_trail_vocab (orig := orig) _ d.literal.atom.slot hP hv0
+        have hdb' : DatabaseAlignedAt pool (stepNarrowSync orig bs d).learned := by
+          rw [stepNarrowSync_learned]
           exact databaseAlignedAt_append hpay hdb
-        refine ih (narrowState bs d.frame d.literal d.reason d.learned)
-          ?_ hv' hdb'
+        refine ih (stepNarrowSync orig bs d) ?_ hv' hdb'
         have hdec := d.decreases
-        simp only [narrowState] at hdec ⊢
+        simp only [stepNarrowSync_frame]
         omega
 
 /-- **PARAMETRIC RESTORE-LEVEL TRAIL VOCABULARY** (trail filtering). -/
@@ -507,18 +497,22 @@ theorem restoreNarrow_trailVocabulary_at {leaf : Assignment → Bool}
     cases h
     show TrailVocabularyAt pool (p.execute (bs.learnGlobal p.learned)).trail
     rw [BackjumpPlan.execute_trail]
-    exact trailVocabularyAt_append_entry hcp (by rw [norm_norm]; exact hass)
+    rcases p.assertExtra_cases with hx | hx
+    · rw [hx, List.append_nil]; exact hcp
+    · rw [hx]
+      exact trailVocabularyAt_append_entry hcp (by simp only [BackjumpPlan.assertEntry, norm_norm]; exact hass)
 
 /-- **PARAMETRIC FULL JUMP TRAIL VOCABULARY** (`perform`). -/
 theorem perform_trailVocabulary_at {leaf : Assignment → Bool}
     {pool : List Literal} {original : List Clause} {props : List Propagator}
     {p : BackjumpPlan leaf} {bs restored : BranchState leaf}
-    (hvocab : EmissionVocabularyAt pool props)
+    (hvocab : EmissionPoolAt pool props)
     (hdb : DatabaseAlignedAt pool bs.learned)
     (hplan : DatabaseAlignedAt pool [p.learned])
     (hcp : TrailVocabularyAt pool p.checkpoint.trail)
     (hass : p.asserting.norm ∈ pool)
-    (hperf : p.perform bs original props = some restored) :
+    (hP : ∀ l ∈ litPool orig, l ∈ pool)
+    (hperf : p.perform bs orig original props = some restored) :
     TrailVocabularyAt pool restored.trail := by
   unfold BackjumpPlan.perform at hperf
   cases hr : p.restoreNarrow bs with
@@ -528,14 +522,18 @@ theorem perform_trailVocabulary_at {leaf : Assignment → Bool}
   | some s =>
       simp only [hr, Option.map_some, Option.some.injEq] at hperf
       rw [← hperf]
-      refine explainedClosure_trailVocabulary_at original props s hvocab ?_
-        (restoreNarrow_trailVocabulary_at hcp hass hr)
-      unfold BackjumpPlan.restoreNarrow at hr
-      split at hr
-      · cases hr
-      · cases hr
-        show DatabaseAlignedAt pool (p.learned :: bs.learned)
-        exact databaseAlignedAt_append hplan hdb
+      have hrt := restoreNarrow_trailVocabulary_at hcp hass hr
+      have hdb0 : DatabaseAlignedAt pool s.learned := by
+        unfold BackjumpPlan.restoreNarrow at hr
+        split at hr
+        · cases hr
+        · cases hr
+          show DatabaseAlignedAt pool (p.learned :: bs.learned)
+          exact databaseAlignedAt_append hplan hdb
+      refine explainedClosure_trailVocabulary_at original props _ hP hvocab ?_
+        (syncAll_trail_vocab (orig := orig) _ hP hrt)
+      rw [syncAll_learned]
+      exact hdb0
 
 /-! ## §2c The parametric arm laws -/
 
@@ -543,12 +541,14 @@ theorem stepPropagate_branchTrailVocabulary_at {leaf : Assignment → Bool}
     {pool : List Literal} {cfg : SchedulerConfig leaf}
     {d : ProductiveDeduction leaf cfg.branch}
     (hv : BranchTrailVocabularyAt pool cfg.branch)
-    (hl : d.literal.norm ∈ pool) :
+    (hl : d.literal.norm ∈ pool)
+    (hP : ∀ l ∈ litPool cfg.orig, l ∈ pool) :
     BranchTrailVocabularyAt pool (stepPropagate cfg d).branch := by
   change TrailVocabularyAt pool (stepPropagate cfg d).branch.trail
   have hv' : TrailVocabularyAt pool cfg.branch.trail := hv
+  refine syncSlot_trail_vocab (orig := cfg.orig) _ d.literal.atom.slot hP ?_
   intro e he
-  simp only [stepPropagate, narrowState] at he
+  simp only [narrowState] at he
   rcases List.mem_append.mp he with h1 | h1
   · exact hv' e h1
   · rw [List.mem_singleton] at h1
@@ -714,7 +714,7 @@ consume arm produces the resumed trail vocabulary from the pending head's
 `PendingBacked`. No recording-site premise. -/
 theorem trailInvWith_step {leaf : Assignment → Bool} {orig : List Domain}
     {extra : List Atom} {cfg cfg' : SchedulerConfig leaf}
-    (hvocab : EmissionVocabularyAt (litPoolWith extra orig) cfg.props)
+    (hvocab : EmissionPoolAt (litPoolWith extra orig) cfg.props)
     (horig : cfg.orig = orig)
     (hbr : ReachableState leaf orig cfg.branch)
     (hinv : TrailInvWith orig extra cfg)
@@ -753,7 +753,7 @@ theorem trailInvWith_step {leaf : Assignment → Bool} {orig : List Domain}
                   cases h }
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 rw [C2d.schedulerNext_eq_backjump_perform_none hc ha hcp hp] at hsucc
                 rw [successor_localExclude] at hsucc
@@ -795,7 +795,8 @@ theorem trailInvWith_step {leaf : Assignment → Bool} {orig : List Domain}
                   databaseAlignedAt_perform hvocab hinv.db hplan hp
                 have hperfTr : TrailVocabularyAt (litPoolWith extra orig)
                     restored.trail :=
-                  perform_trailVocabulary_at hvocab hinv.db hplan hcpv hass hp
+                  perform_trailVocabulary_at hvocab hinv.db hplan hcpv hass
+                    (fun l hl => litPool_mem_litPoolWith hl) (horig ▸ hp)
                 refine
                   { branch := ?_
                     db := ?_
@@ -867,6 +868,7 @@ theorem trailInvWith_step {leaf : Assignment → Bool} {orig : List Domain}
       have hdl := deduction_literal_pooled_at hvocab hinv.db hd
       exact
         { branch := stepPropagate_branchTrailVocabulary_at hinv.branch hdl
+            (by rw [horig]; exact fun l hl => litPool_mem_litPoolWith hl)
           db := stepPropagate_halignDBAt d hinv.db
             (databaseAlignedAt_deduction_learned hvocab hd)
           checkpoints := fun cp hcp' => hinv.checkpoints cp hcp'
@@ -970,18 +972,7 @@ theorem trailInvWith_step {leaf : Assignment → Bool} {orig : List Domain}
                       (learned := learned) h'
                   rw [hlearned]
                   exact databaseAlignedAt_terminalResult_conflict hvocab ht }
-    · -- the local-exclusion terminal result
-      rw [hsj] at hsucc
-      rw [successor_localExclude] at hsucc
-      cases hsucc
-      exact
-        { branch := stepLocalExclude_branchTrailVocabulary_at _ _ hinv.branch
-          db := stepLocalExclude_halignDBAt learned (branchRegion cfg) hinv.db
-            (databaseAlignedAt_terminalResult_localExcluded hvocab ht)
-          checkpoints := fun cp hcp' => hinv.checkpoints cp hcp'
-          evidence := fun h => by
-            rw [stepLocalExclude_conflict] at h
-            cases h }
+    · exact absurd ht terminalResult_ne_localExcluded
 
 /-- **THE RUN-WIDE PRODUCER (hrec DISCHARGED)**: along a supported run, the
 joint extended-pool invariant holds at EVERY state — from the emission
@@ -992,7 +983,8 @@ inherits the predecessor's branch vocabulary. -/
 theorem trailInvWith_of_supportedRun {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     {extra : List Atom}
-    (hvocab : EmissionVocabularyAt (litPoolWith extra orig) props)
+    (hvocab : EmissionPoolAt (litPoolWith extra orig) props)
+    (horig : DatabaseAlignedAt (litPoolWith extra orig) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
@@ -1000,10 +992,10 @@ theorem trailInvWith_of_supportedRun {leaf : Assignment → Bool}
       TrailInvWith orig extra cfg := by
   intro cfg hreach
   induction hreach with
-  | init =>
+  | init _ =>
       refine
         { branch := ?_
-          db := databaseAlignedAt_nil _
+          db := horig
           checkpoints := ?_
           evidence := ?_ }
       · intro e he
@@ -1028,25 +1020,27 @@ theorem trailInvWith_of_supportedRun {leaf : Assignment → Bool}
 theorem branchTrailVocabularyAt_of_supportedRun {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     {extra : List Atom}
-    (hvocab : EmissionVocabularyAt (litPoolWith extra orig) props)
+    (hvocab : EmissionPoolAt (litPoolWith extra orig) props)
+    (horig : DatabaseAlignedAt (litPoolWith extra orig) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       BranchTrailVocabularyAt (litPoolWith extra orig) cfg.branch :=
-  fun hreach => (trailInvWith_of_supportedRun hvocab hbr hshape hreach).branch
+  fun hreach => (trailInvWith_of_supportedRun hvocab horig hbr hshape hreach).branch
 
 /-- The database-alignment component at an arbitrary extended pool. -/
 theorem halignDBAt_of_supportedRun {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     {extra : List Atom}
-    (hvocab : EmissionVocabularyAt (litPoolWith extra orig) props)
+    (hvocab : EmissionPoolAt (litPoolWith extra orig) props)
+    (horig : DatabaseAlignedAt (litPoolWith extra orig) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPoolWith extra orig :=
-  fun hreach => (trailInvWith_of_supportedRun hvocab hbr hshape hreach).db
+  fun hreach => (trailInvWith_of_supportedRun hvocab horig hbr hshape hreach).db
 
 /-- The checkpoint-trail-vocabulary component at an arbitrary extended
 pool (the input `restoreNarrow_trailVocabulary_at`/C2's checkpoint
@@ -1054,27 +1048,29 @@ consumers need). -/
 theorem checkpointTrailVocabularyAt_of_supportedRun {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     {extra : List Atom}
-    (hvocab : EmissionVocabularyAt (litPoolWith extra orig) props)
+    (hvocab : EmissionPoolAt (litPoolWith extra orig) props)
+    (horig : DatabaseAlignedAt (litPoolWith extra orig) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ∀ cp ∈ cfg.checkpoints,
         TrailVocabularyAt (litPoolWith extra orig) cp.trail :=
-  fun hreach => (trailInvWith_of_supportedRun hvocab hbr hshape hreach).checkpoints
+  fun hreach => (trailInvWith_of_supportedRun hvocab horig hbr hshape hreach).checkpoints
 
 /-- The recorded-evidence payload alignment at an arbitrary extended pool. -/
 theorem evidencePayload_alignedAt_of_supportedRun {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     {extra : List Atom}
-    (hvocab : EmissionVocabularyAt (litPoolWith extra orig) props)
+    (hvocab : EmissionPoolAt (litPoolWith extra orig) props)
+    (horig : DatabaseAlignedAt (litPoolWith extra orig) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ∀ {ev : ConflictEvidence}, cfg.conflict = some ev →
         DatabaseAlignedAt (litPoolWith extra orig) ev.learned :=
-  fun hreach => (trailInvWith_of_supportedRun hvocab hbr hshape hreach).evidence
+  fun hreach => (trailInvWith_of_supportedRun hvocab horig hbr hshape hreach).evidence
 
 /-! ### §4a The unit-route instantiation (`litPoolExt`)
 
@@ -1089,13 +1085,14 @@ theorem trailInv_litPoolExt_of_supportedRun {leaf : Assignment → Bool}
     {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (horig : DatabaseAlignedAt (litPoolExt orig dcs) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       TrailInvWith orig (constraintAtomPool dcs) cfg :=
   trailInvWith_of_supportedRun
-    (by rw [hprops]; exact emissionVocabularyAt_litPoolExt hSupp) hbr hshape
+    (by rw [hprops]; exact (emissionVocabularyAt_litPoolExt hSupp).toPool) horig hbr hshape
 
 /-- **THE C1 SITE-FORM TRAIL VOCABULARY AT `litPoolExt`, `hrec`
 DISCHARGED**: the replacement for
@@ -1107,6 +1104,7 @@ theorem branchTrailVocabulary_evidenceSites_litPoolExt_of_supportedRun
     {props : List Propagator} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (horig : DatabaseAlignedAt (litPoolExt orig dcs) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
@@ -1114,7 +1112,7 @@ theorem branchTrailVocabulary_evidenceSites_litPoolExt_of_supportedRun
       ∀ {ev : ConflictEvidence}, cfg.conflict = some ev →
         BranchTrailVocabularyAt (litPoolExt orig dcs) cfg.branch := by
   intro cfg hreach ev hconf
-  exact (trailInv_litPoolExt_of_supportedRun hprops hSupp hbr hshape hreach).branch
+  exact (trailInv_litPoolExt_of_supportedRun hprops hSupp horig hbr hshape hreach).branch
 
 /-- The universal (not site-restricted) form of the same producer. -/
 theorem branchTrailVocabulary_at_litPoolExt_of_supportedRun
@@ -1122,12 +1120,13 @@ theorem branchTrailVocabulary_at_litPoolExt_of_supportedRun
     {props : List Propagator} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (horig : DatabaseAlignedAt (litPoolExt orig dcs) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       BranchTrailVocabularyAt (litPoolExt orig dcs) cfg.branch :=
-  fun hreach => (trailInv_litPoolExt_of_supportedRun hprops hSupp hbr hshape hreach).branch
+  fun hreach => (trailInv_litPoolExt_of_supportedRun hprops hSupp horig hbr hshape hreach).branch
 
 /-- **THE C1 EXTENDED-POOL `halignDB` PRODUCER**: the unit-route database
 alignment at `litPoolExt orig dcs`, from `hprops`/`hSupp`, branch
@@ -1137,12 +1136,13 @@ theorem halignDB_litPoolExt_of_supportedRun {leaf : Assignment → Bool}
     {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (horig : DatabaseAlignedAt (litPoolExt orig dcs) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPoolExt orig dcs :=
-  fun hreach => (trailInv_litPoolExt_of_supportedRun hprops hSupp hbr hshape hreach).db
+  fun hreach => (trailInv_litPoolExt_of_supportedRun hprops hSupp horig hbr hshape hreach).db
 
 /-- The unit-route checkpoint trail vocabulary at `litPoolExt`. -/
 theorem checkpointTrailVocabulary_litPoolExt_of_supportedRun
@@ -1150,6 +1150,7 @@ theorem checkpointTrailVocabulary_litPoolExt_of_supportedRun
     {props : List Propagator} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (horig : DatabaseAlignedAt (litPoolExt orig dcs) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
@@ -1157,7 +1158,7 @@ theorem checkpointTrailVocabulary_litPoolExt_of_supportedRun
       ∀ cp ∈ cfg.checkpoints,
         TrailVocabularyAt (litPoolExt orig dcs) cp.trail :=
   fun hreach =>
-    (trailInv_litPoolExt_of_supportedRun hprops hSupp hbr hshape hreach).checkpoints
+    (trailInv_litPoolExt_of_supportedRun hprops hSupp horig hbr hshape hreach).checkpoints
 
 /-- The unit-route recorded-evidence payload alignment at `litPoolExt`. -/
 theorem evidencePayload_aligned_litPoolExt_of_supportedRun
@@ -1165,6 +1166,7 @@ theorem evidencePayload_aligned_litPoolExt_of_supportedRun
     {props : List Propagator} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (horig : DatabaseAlignedAt (litPoolExt orig dcs) original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
@@ -1172,7 +1174,7 @@ theorem evidencePayload_aligned_litPoolExt_of_supportedRun
       ∀ {ev : ConflictEvidence}, cfg.conflict = some ev →
         DatabaseAlignedAt (litPoolExt orig dcs) ev.learned :=
   fun hreach =>
-    (trailInv_litPoolExt_of_supportedRun hprops hSupp hbr hshape hreach).evidence
+    (trailInv_litPoolExt_of_supportedRun hprops hSupp horig hbr hshape hreach).evidence
 
 /-! ### §4b The `litPool`-keyed instantiation (`extra := []`)
 
@@ -1192,6 +1194,7 @@ recording-site premise. -/
 theorem branchTrailVocabulary_supportedRun_allStates {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     (hvocab : UnitEmissionVocabulary orig props)
+    (horig : DatabaseAligned orig original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
@@ -1199,8 +1202,8 @@ theorem branchTrailVocabulary_supportedRun_allStates {leaf : Assignment → Bool
       BranchTrailVocabulary orig cfg.branch := by
   intro cfg hreach
   have h := (trailInvWith_of_supportedRun (extra := [])
-    (by rw [litPoolWith_nil]; exact unitEmissionVocabulary_iff_at.mp hvocab)
-    hbr hshape hreach).branch
+    (by rw [litPoolWith_nil]; exact (unitEmissionVocabulary_iff_at.mp hvocab).toPool)
+    (by rw [litPoolWith_nil]; exact horig) hbr hshape hreach).branch
   rwa [litPoolWith_nil] at h
 
 /-- The site-form of the same producer (the exact conclusion of
@@ -1209,6 +1212,7 @@ theorem branchTrailVocabulary_supportedRun_evidenceSites_allStates
     {leaf : Assignment → Bool} {orig : List Domain} {original : List Clause}
     {props : List Propagator}
     (hvocab : UnitEmissionVocabulary orig props)
+    (horig : DatabaseAligned orig original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
@@ -1216,7 +1220,7 @@ theorem branchTrailVocabulary_supportedRun_evidenceSites_allStates
       ∀ {ev : ConflictEvidence}, cfg.conflict = some ev →
         BranchTrailVocabulary orig cfg.branch := by
   intro cfg hreach ev hconf
-  exact branchTrailVocabulary_supportedRun_allStates hvocab hbr hshape hreach
+  exact branchTrailVocabulary_supportedRun_allStates hvocab horig hbr hshape hreach
 
 /-- **THE `litPool`-KEYED `halignDB` PRODUCER**: the landed
 `halignDB_of_supportedRun` conclusion from `hvocab`, branch reachability and
@@ -1224,6 +1228,7 @@ box typing — its `htrail` premise is DISCHARGED here. -/
 theorem halignDB_supportedRun_allStates {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     (hvocab : UnitEmissionVocabulary orig props)
+    (horig : DatabaseAligned orig original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
@@ -1231,8 +1236,8 @@ theorem halignDB_supportedRun_allStates {leaf : Assignment → Bool}
       ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPool orig := by
   intro cfg hreach
   have h := (trailInvWith_of_supportedRun (extra := [])
-    (by rw [litPoolWith_nil]; exact unitEmissionVocabulary_iff_at.mp hvocab)
-    hbr hshape hreach).db
+    (by rw [litPoolWith_nil]; exact (unitEmissionVocabulary_iff_at.mp hvocab).toPool)
+    (by rw [litPoolWith_nil]; exact horig) hbr hshape hreach).db
   rwa [litPoolWith_nil] at h
 
 /-- The checkpoint-side component at the box's own pool (also `hrec`-free). -/
@@ -1240,6 +1245,7 @@ theorem checkpointTrailVocabulary_supportedRun_allStates
     {leaf : Assignment → Bool} {orig : List Domain} {original : List Clause}
     {props : List Propagator}
     (hvocab : UnitEmissionVocabulary orig props)
+    (horig : DatabaseAligned orig original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hshape : ShapeTypedDomains orig) :
@@ -1247,8 +1253,8 @@ theorem checkpointTrailVocabulary_supportedRun_allStates
       ∀ cp ∈ cfg.checkpoints, TrailVocabulary orig cp.trail := by
   intro cfg hreach
   have h := (trailInvWith_of_supportedRun (extra := [])
-    (by rw [litPoolWith_nil]; exact unitEmissionVocabulary_iff_at.mp hvocab)
-    hbr hshape hreach).checkpoints
+    (by rw [litPoolWith_nil]; exact (unitEmissionVocabulary_iff_at.mp hvocab).toPool)
+    (by rw [litPoolWith_nil]; exact horig) hbr hshape hreach).checkpoints
   intro cp hcp
   have h' := h cp hcp
   rwa [litPoolWith_nil] at h'
@@ -1279,5 +1285,126 @@ theorem recordedAnalysis_learned_poolAligned_at_resumePending
     resumePending_branchTrailVocabulary_at (bs := bs) hpb
   exact recordedAnalysis_learned_poolAligned_at
     (fun _ hl => litPoolWith_negate_norm_mem hl) hb hbr' hcfg hconf hana htr
+
+
+/-! ## §5 C2b: the actual-run pool, and the original-pool vocabulary refuted
+
+The ACTUAL run pool of the unit kit is the extended pool restricted to the
+box's slots: `litPoolExtIn orig dcs`. Membership in `litPoolExt` comes from
+the joint invariant (§3/§4a); the slot range comes from the runtime, NOT
+from the pool (`TrailSlotRange.trailSlots_of_supportedRun`: productive
+filters, decision pins, asserting UIPs and canonical resumes are all
+in-range) — the constraint atoms of `litPoolExt` are not slot-ranged in
+general, so no pool-only slot lemma exists for them.
+
+The ORIGINAL-pool vocabulary (`hv : BranchTrailVocabulary orig`) and the
+original-pool `UnitEmissionVocabulary` are both REFUTED for a concrete
+registered unit instance (`vocabCexOrig`/`vocabCexProps`: the sparse box `{1, 5}`
+with `leConstHi 0 3`); the first one ALONG AN ACTUAL SUPPORTED RUN (one
+real dispatcher step propagates `posLe 0 3 ∉ litPool [[1, 5]]`). The §4b
+`UnitEmissionVocabulary`-keyed exports therefore remain only as
+conditional legacy lemmas; no entry point consumes them. -/
+
+/-- The actual-run literal pool: the extended pool restricted to the box's
+slots. -/
+def litPoolExtIn (orig : List Domain) (dcs : List DomConstraint) : List Literal :=
+  (litPoolExt orig dcs).filter fun l => decide (l.atom.slot < orig.length)
+
+/-- **SLOT RANGE OF THE ACTUAL POOL** (by construction). -/
+theorem litPoolExtIn_slot_lt {orig : List Domain} {dcs : List DomConstraint}
+    {l : Literal} (h : l ∈ litPoolExtIn orig dcs) : l.atom.slot < orig.length := by
+  have := (List.mem_filter.mp h).2
+  simpa using this
+
+theorem litPoolExtIn_sub {orig : List Domain} {dcs : List DomConstraint}
+    {l : Literal} (h : l ∈ litPoolExtIn orig dcs) : l ∈ litPoolExt orig dcs :=
+  (List.mem_filter.mp h).1
+
+/-- **THE PROVED EXTENDED-POOL RUN VOCABULARY (C2b)**: along every
+`hprops`/`hSupp`-supported run, every trail literal lies in the extended
+pool AND names a slot of the box — i.e. the branch vocabulary at the actual
+pool `litPoolExtIn`. Inputs: the unit-kit equations, the branch
+reachability family and the box typing (the §4a inputs); no vocabulary,
+emission or slot premise. -/
+theorem branchTrailVocabularyAt_litPoolExtIn_of_supportedRun
+    {leaf : Assignment → Bool} {orig : List Domain} {original : List Clause}
+    {props : List Propagator} {dcs : List DomConstraint}
+    (hprops : props = dcs.filterMap propagatorOfProved)
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (horig : DatabaseAlignedAt (litPoolExt orig dcs) original)
+    (hbr : ∀ {cfg : SchedulerConfig leaf},
+      SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
+    (hshape : ShapeTypedDomains orig) :
+    ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
+      BranchTrailVocabularyAt (litPoolExtIn orig dcs) cfg.branch := by
+  intro cfg hreach e he
+  have hv := branchTrailVocabulary_at_litPoolExt_of_supportedRun hprops hSupp horig hbr
+    hshape hreach e he
+  have hs := trailSlots_of_supportedRun hreach e he
+  refine List.mem_filter.mpr ⟨hv, ?_⟩
+  simpa [norm_atom_slot] using hs
+
+/-- The concrete registered unit instance of the refutations: the sparse box
+`{1, 5}` with the single supported constraint `leConstHi 0 3`. -/
+def vocabCexOrig : List Domain := [[Value.int 1, Value.int 5]]
+
+/-- The constraint base of the refutation (`unitFamilyB`-supported). -/
+def vocabCexDcs : List DomConstraint := [.leConstHi 0 3]
+
+/-- The registered kit of the refutation. -/
+def vocabCexProps : List Propagator := vocabCexDcs.filterMap propagatorOfProved
+
+theorem vocabCexDcs_supported : ∀ dc ∈ vocabCexDcs, unitFamilyB dc = true := by
+  intro dc hdc
+  simp only [vocabCexDcs, List.mem_singleton] at hdc
+  subst hdc
+  rfl
+
+/-- **ORIGINAL-POOL EMISSION VOCABULARY REFUTED** for a registered unit
+instance (kernel-checked). -/
+theorem unitEmissionVocabulary_false_vocabCex :
+    ¬ UnitEmissionVocabulary vocabCexOrig vocabCexProps := by
+  intro h
+  obtain ⟨q, -, hl, -, hq⟩ := h.1 _ (List.mem_singleton_self _)
+    witnessSparseState (posLe 0 3) { clause := [posLe 0 3] } rfl
+  subst hl
+  revert hq
+  decide
+
+/-- The refutation instance's root configuration (`leaf` is irrelevant). -/
+def vocabCexCfg0 : SchedulerConfig (fun _ => true) :=
+  SchedulerConfig.init vocabCexOrig [] vocabCexProps
+
+/-- One real dispatcher step from the root propagates `posLe 0 3`
+(kernel-evaluated; R1d: the synchronised step also records the tightened
+bound/fix literals after it, so the trail is stated by membership). -/
+theorem vocabCexCfg0_step_trail :
+    ((schedulerNext vocabCexCfg0).successor.map
+      (fun c => decide (posLe 0 3 ∈ c.branch.trail.map (fun (e : TrailEntry) => e.literal))))
+      = some true := by
+  decide
+
+/-- **ORIGINAL-POOL TRAIL VOCABULARY REFUTED ALONG AN ACTUAL RUN**: the
+`hv` premise formerly carried by the SupportedInstance entries is false at
+a supported configuration of a registered unit instance. -/
+theorem branchTrailVocabulary_refuted_on_run :
+    ∃ cfg, SupportedReach (leaf := fun _ => true) vocabCexOrig [] vocabCexProps cfg ∧
+      ¬ BranchTrailVocabulary vocabCexOrig cfg.branch := by
+  have h := vocabCexCfg0_step_trail
+  cases hs : (schedulerNext vocabCexCfg0).successor with
+  | none =>
+      rw [hs] at h
+      cases h
+  | some c =>
+      rw [hs] at h
+      simp only [Option.map_some, Option.some.injEq, decide_eq_true_eq] at h
+      refine ⟨c, SupportedReach.step (SupportedReach.init (fun _ hc => absurd hc (List.not_mem_nil))) hs, ?_⟩
+      intro hv
+      have hmem : posLe 0 3 ∈ c.branch.trail.map (fun (e : TrailEntry) => e.literal) := h
+      obtain ⟨e, he, hel⟩ := List.mem_map.mp hmem
+      have := hv e he
+      rw [hel] at this
+      revert this
+      decide
 
 end LeanFzn.Solver.UIP

@@ -78,7 +78,8 @@ invariant, progress or correctness conclusion is a field here (PLAN.md R1:
 inductive SchedulerReachable {leaf : Assignment → Bool} :
     SchedulerConfig leaf → Prop where
   /-- supported initialization: the real root configuration -/
-  | init (orig : List Domain) (original : List Clause) (props : List Propagator) :
+  | init (orig : List Domain) (original : List Clause) (props : List Propagator)
+      (hent : LearnedEntailed leaf original) :
       SchedulerReachable (SchedulerConfig.init orig original props)
   /-- one real dispatcher step: `schedulerNext` produced `t` and `t`'s
       successor is `cfg'` (terminal transitions have no successor) -/
@@ -91,9 +92,9 @@ This is the real initializer (whole original box, empty trail, level zero,
 root checkpoint registered), so the predicate has at least one inhabitant
 for every input — the reachability construct itself is not vacuous. -/
 theorem schedulerReachable_init (orig : List Domain) (original : List Clause)
-    (props : List Propagator) :
+    (props : List Propagator) (hent : LearnedEntailed leaf original) :
     SchedulerReachable (SchedulerConfig.init (leaf := leaf) orig original props) :=
-  SchedulerReachable.init orig original props
+  SchedulerReachable.init orig original props hent
 
 /-- Reachability is closed under one real dispatcher step — the shape S5's
 induction consumes, with the dispatcher's successor equation supplied
@@ -144,8 +145,7 @@ computed-allowance analysis of the branch's own trail/level, mapped through
     (c : Clause) (learned : List Clause) :
     (stepAnalyzeConflict cfg c learned).conflict =
       some { clause := c, learned := learned,
-             analysis := (analyzeAtAllowance cfg.branch.trail cfg.branch.level c).map
-               (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized) } := rfl
+             analysis := recordedAnalysis cfg c } := rfl
 
 /-! NOTE: `stepAnalyzeConflict_branch` and `stepLearnBackjumpAssert_conflict`
 already exist (SchedulerStep.lean :428, :475) and are reused, not
@@ -232,7 +232,7 @@ theorem conflictStep_successor_conflict {cfg cfg' : SchedulerConfig leaf}
     cfg'.conflict = none ∨
       ∃ c rest, cs = c :: rest ∧
         cfg' = stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c) := by
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c) := by
   cases cs with
   | nil =>
       simp only [conflictStep] at h
@@ -282,7 +282,7 @@ theorem backjumpStep_successor_conflict_none {cfg : SchedulerConfig leaf}
           rfl
       | some cp =>
           cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-              an.learned).perform cfg.branch cfg.original cfg.props with
+              an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
           | none =>
               simp only [backjumpStep, ha, hc, hp] at h
               rw [successor_localExclude] at h
@@ -306,7 +306,7 @@ theorem schedulerNext_successor_conflict_classification {cfg : SchedulerConfig l
     cfg'.conflict = none ∨
       ∃ (c : Clause) (learned : List Clause),
         cfg' = stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c) := by
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c) := by
   cases hst : cfg.status with
   | dead =>
       have ht : consumeStep cfg = t := by
@@ -325,7 +325,7 @@ theorem schedulerNext_successor_conflict_classification {cfg : SchedulerConfig l
           cases hsucc
           exact Or.inl (by rw [stepPropagate_conflict, hc])
       | none =>
-          cases htt : terminalResult cfg.original cfg.props cfg.branch with
+          cases htt : terminalResult cfg.orig cfg.original cfg.props cfg.branch with
           | stable st =>
               have ht : stableStepGuarded cfg = t := by
                 simp only [schedulerNext, hc, hst, hd, htt] at hnext
@@ -362,9 +362,7 @@ theorem stepAnalyzeConflict_evidence {cfg : SchedulerConfig leaf} {c : Clause}
     {learned : List Clause} {ev : ConflictEvidence}
     (h : (stepAnalyzeConflict cfg c learned).conflict = some ev) :
     ev.clause = c ∧ ev.learned = learned ∧
-      ev.analysis
-        = (analyzeAtAllowance cfg.branch.trail cfg.branch.level c).map
-            (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized) := by
+      ev.analysis = recordedAnalysis cfg c := by
   simp only [stepAnalyzeConflict] at h
   injection h with h
   rw [← h]
@@ -380,9 +378,7 @@ resolves it. -/
 def EvidenceProvenance {leaf : Assignment → Bool}
     (cfg : SchedulerConfig leaf) : Prop :=
   ∀ ev : ConflictEvidence, cfg.conflict = some ev →
-    ev.analysis
-      = (analyzeAtAllowance cfg.branch.trail cfg.branch.level ev.clause).map
-          (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized)
+    ev.analysis = recordedAnalysis cfg ev.clause
 
 /-- ONE REAL STEP establishes evidence provenance — unconditionally on the
 predecessor (the only transition installing `some` evidence is the
@@ -410,8 +406,8 @@ theorem evidenceProvenance_of_step {cfg : SchedulerConfig leaf}
         cases hev'
       · subst cfg'
         obtain ⟨hcl, -, hana⟩ := stepAnalyzeConflictCounted_evidence hev'
-        simp only [stepAnalyzeConflictCounted_branch]
         rw [hana, hcl]
+        rfl
 
 /-- PROVED: every reachable configuration satisfies evidence provenance
 (structural induction on reachability, each step discharged by
@@ -425,6 +421,29 @@ theorem evidenceProvenance_of_reachable {cfg₀ : SchedulerConfig leaf}
   | step hnext hsucc ih =>
       exact evidenceProvenance_of_step hnext hsucc
 
+/-- Unfolding the recording site's analysis: a stored `some an` is the
+normalised allowance analysis AND passed the runtime repeat guard. -/
+theorem recordedAnalysis_eq_some {cfg : SchedulerConfig leaf} {c : Clause}
+    {an : ConflictAnalysis} (h : recordedAnalysis cfg c = some an) :
+    ∃ (below : List (Literal × Nat)) (uip : Literal),
+      analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level c
+        = some (below, uip) ∧
+      an = (ConflictAnalysis.ofUIP below uip).normalized ∧
+      learnedRepeats cfg an.learned = false := by
+  unfold recordedAnalysis at h
+  cases hm : analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level c with
+  | none => rw [hm] at h; simp at h
+  | some p =>
+      obtain ⟨below, uip⟩ := p
+      rw [hm] at h
+      simp only [Option.map_some, Option.filter_some] at h
+      split at h
+      · rename_i hb
+        simp only [Option.some.injEq] at h
+        subst h
+        exact ⟨below, uip, rfl, rfl, by simpa using hb⟩
+      · cases h
+
 /-- The SUCCESS BRIDGE (the analysis-success obligation of S3/S5),
 discharged here from provenance: whenever a reachable configuration has an
 analysis record `some an`, there IS a computed-allowance run at the
@@ -434,7 +453,7 @@ def ReachableAnalysisSuccess (leaf : Assignment → Bool) : Prop :=
   ∀ (cfg : SchedulerConfig leaf) (ev : ConflictEvidence) (an : ConflictAnalysis),
     SchedulerReachable cfg → cfg.conflict = some ev → ev.analysis = some an →
       ∃ (below : List (Literal × Nat)) (uip : Literal),
-        analyzeAtAllowance cfg.branch.trail cfg.branch.level ev.clause
+        analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level ev.clause
           = some (below, uip) ∧
         an = (ConflictAnalysis.ofUIP below uip).normalized
 
@@ -442,19 +461,20 @@ def ReachableAnalysisSuccess (leaf : Assignment → Bool) : Prop :=
 theorem reachable_analysis_success (leaf : Assignment → Bool) :
     ReachableAnalysisSuccess leaf := by
   intro cfg ev an hreach hconf hana
-  cases hmap : analyzeAtAllowance cfg.branch.trail cfg.branch.level ev.clause with
-  | none =>
-      have h := evidenceProvenance_of_reachable hreach ev hconf
-      rw [hana] at h
-      rw [hmap] at h
-      cases h
-  | some p =>
-      obtain ⟨below, uip⟩ := p
-      refine ⟨below, uip, rfl, ?_⟩
-      have h := evidenceProvenance_of_reachable hreach ev hconf
-      rw [hana] at h
-      rw [hmap] at h
-      simpa using h
+  have h := evidenceProvenance_of_reachable hreach ev hconf
+  rw [hana] at h
+  obtain ⟨below, uip, h1, h2, -⟩ := recordedAnalysis_eq_some h.symm
+  exact ⟨below, uip, h1, h2⟩
+
+/-- **NOVELTY BY CONSTRUCTION**: at every reachable recorded site the stored
+analysis passed the runtime repeat guard against the current database. -/
+theorem reachable_analysis_novel {leaf : Assignment → Bool}
+    {cfg : SchedulerConfig leaf} {ev : ConflictEvidence} {an : ConflictAnalysis}
+    (hreach : SchedulerReachable cfg) (hconf : cfg.conflict = some ev)
+    (hana : ev.analysis = some an) : learnedRepeats cfg an.learned = false := by
+  have h := evidenceProvenance_of_reachable hreach ev hconf
+  rw [hana] at h
+  exact (recordedAnalysis_eq_some h.symm).choose_spec.choose_spec.2.2
 
 /-- **ONE REAL STEP** establishes the positive-level fact for recorded
 evidence: no induction hypothesis is needed — the only transition
@@ -636,16 +656,10 @@ theorem stepAnalyzeConflict_analysis_learned_ne_nil {cfg : SchedulerConfig leaf}
     (ha : ev.analysis = some an) : an.learned ≠ [] := by
   obtain ⟨-, -, hana⟩ := stepAnalyzeConflict_evidence h
   rw [ha] at hana
-  cases hm : analyzeAtAllowance cfg.branch.trail cfg.branch.level c with
-  | none =>
-      simp only [hm] at hana
-      cases hana
-  | some p =>
-      obtain ⟨below, uip⟩ := p
-      simp only [hm, Option.map_some, Option.some.injEq] at hana
-      rw [hana]
-      exact ConflictAnalysis.normalized_learned_ne_nil _
-        (ConflictAnalysis.ofUIP_learned_ne_nil below uip)
+  obtain ⟨below, uip, -, hen, -⟩ := recordedAnalysis_eq_some hana.symm
+  rw [hen]
+  exact ConflictAnalysis.normalized_learned_ne_nil _
+    (ConflictAnalysis.ofUIP_learned_ne_nil below uip)
 
 /-- F1 EXCLUSION (reachable-execution form): on a reachable configuration,
 no recorded analysis `some an` has an empty learned clause — successful

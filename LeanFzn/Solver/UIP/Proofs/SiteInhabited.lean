@@ -163,16 +163,18 @@ theorem coverless_not_inhabited {f : BranchFrame} (h : ∃ d ∈ f.1, d = []) :
 
 /-! ## §2 The kernel-checked refutation of the ALL-SITES family
 
-The witness run: box `[[0, 1]]`, clause base `[]`, the single registered
-unit-family propagator `propagatorOfProved (.leConstHi 0 0)`, leaf
-`fun _ => false`. Four real `schedulerNext` successors:
+The witness run: box `[[0]]`, clause base `[]`, the single registered
+unit-family propagator `propagatorOfProved (.leConstHi 0 0)` (already
+satisfied by the box, so no deduction is productive), leaf `fun _ => false`.
+(R1d: the earlier box `[[0, 1]]` is no longer a witness — the synchronised
+frame/trail records the fixing literal after the propagation, so the
+singleton is trail-redundant and never split; the singleton box splits at
+the ROOT, before any synchronisation.) Three real `schedulerNext`
+successors:
 
-  0. `propagate` — `LeanFzn.Solver.Propagation.propLeConstHi 0 0` narrows slot 0 to `{0}` (learned
-     clause `[posLe 0 0]`, trail entry at level 0);
-  1. `decide`    — the guarded dispatch's FRESH arm (`negNe 0 0` is not the
-     recorded `posLe 0 0`), splitting the singleton `{0}`: child
-     `([], [0])`, sibling `([[]], [])` — the sibling's remaining head is
-     the EMPTY leftover;
+  1. `decide`    — the guarded dispatch's FRESH arm (`negNe 0 0` is not
+     recorded), splitting the singleton `{0}`: child `([], [0])`, sibling
+     `([[]], [])` — the sibling's remaining head is the EMPTY leftover;
   2. `localExclude (stable site)` — the child is a complete frame failing
      the leaf, `splitData = none`;
   3. `chronologicalFallback (consume)` — the coverless sibling becomes the
@@ -181,11 +183,11 @@ unit-family propagator `propagatorOfProved (.leConstHi 0 0)`, leaf
 The final configuration is a genuine `SupportedReach` configuration whose
 frame is coverless, which refutes the all-sites family. -/
 
-def cexOrig : List Domain := [([Value.int 0, Value.int 1] : Domain)]
+def cexOrig : List Domain := [([Value.int 0] : Domain)]
 
 def cexLeaf : Assignment → Bool := fun _ => false
 
-def cexProp : Propagator := { watches := [], run := fun st => LeanFzn.Solver.Propagation.propLeConstHi st 0 0 }
+def cexProp : Propagator := { watches := [.intLe 0 0], run := fun st => LeanFzn.Solver.Propagation.propLeConstHi st 0 0 }
 
 def cexCfg0 : SchedulerConfig cexLeaf :=
   SchedulerConfig.init cexOrig [] [cexProp]
@@ -205,35 +207,16 @@ theorem cexProp_unitFamily : unitFamilyB (.leConstHi 0 0) = true := rfl
 theorem cexCfg0_eq :
     cexCfg0 = SchedulerConfig.init (leaf := cexLeaf) cexOrig [] [cexProp] := rfl
 
-/-- Step 0's post-state branch (the narrowed frame, the recorded level-0
-entry and the learned unit clause). -/
+/-- The root branch (the supported initializer of the witness triple). -/
 def cexBs1 : BranchState cexLeaf :=
-  { frame := cexF1,
-    trail := [{ literal := posLe 0 0, level := 0,
-                reason := some { clause := [posLe 0 0] } }],
-    level := 0, learned := [[posLe 0 0]] }
+  { frame := cexF1, trail := [], level := 0, learned := [] }
 
 /-- Step 1's post-state branch (the pinned child frame and the decision
 entry at level 1). -/
 def cexBs2 : BranchState cexLeaf :=
   { frame := cexF2,
-    trail := [{ literal := posLe 0 0, level := 0,
-                reason := some { clause := [posLe 0 0] } },
-              { literal := negNe 0 0, level := 1, reason := none }],
-    level := 1, learned := [[posLe 0 0]] }
-
-/-- Step 0's deduction, with all its fields pinned (the field values the
-successor computation consumes). -/
-theorem cexDeductionExists :
-    ∃ d : ProductiveDeduction cexLeaf (BranchState.init (leaf := cexLeaf) (cexOrig, [])),
-      explainedDeduction [] [cexProp] (BranchState.init (leaf := cexLeaf) (cexOrig, [])) = some d ∧
-      d.frame = cexF1 ∧ d.literal = posLe 0 0 ∧ d.reason = [posLe 0 0] ∧
-      d.learned = [[posLe 0 0]] := by
-  refine ⟨{ literal := posLe 0 0, reason := [posLe 0 0], learned := [[posLe 0 0]],
-            frame := cexF1, filtered := rfl, decreases := ?_ }, ?_, rfl, rfl, rfl, rfl⟩
-  · decide
-  · unfold explainedDeduction
-    rfl
+    trail := [{ literal := negNe 0 0, level := 1, reason := none }],
+    level := 1, learned := [] }
 
 /-- **THE WITNESS RUN**: a supported (unit-kit image) run reaching a
 configuration with a COVERLESS branch frame. -/
@@ -242,27 +225,14 @@ theorem cexNotAllSites :
       SupportedReach cexOrig [] [cexProp] cfg →
         ∃ a : Assignment, FrameCovers cfg.branch.frame a) := by
   intro hall
-  obtain ⟨d, hd, hdframe, hdlit, hdreason, hdlearned⟩ := cexDeductionExists
-  -- STEP 0: the propagator's deduction narrows slot 0 to {0}
-  let cfg1 : SchedulerConfig cexLeaf := stepPropagate cexCfg0 d
-  have hslot0a : (schedulerNext cexCfg0).successor = some cfg1 := by
-    rw [show schedulerNext cexCfg0 = .propagate cfg1 from
-      C2d.schedulerNext_eq_deduction rfl rfl (by
-        show explainedDeduction [] [cexProp]
-          (BranchState.init (leaf := cexLeaf) (cexOrig, [])) = some d
-        exact hd)]
-    rfl
-  have hb1 : cfg1.branch = cexBs1 := by
-    show narrowState (BranchState.init (leaf := cexLeaf) (cexOrig, []))
-      d.frame d.literal d.reason d.learned = cexBs1
-    rw [hdframe, hdlit, hdreason, hdlearned]
-    rfl
+  let cfg1 : SchedulerConfig cexLeaf := cexCfg0
+  have hb1 : cfg1.branch = cexBs1 := rfl
   -- STEP 1: the stable fixpoint's FRESH decide on the singleton head {0}
   have hd1 : explainedDeduction [] [cexProp] cfg1.branch = none := by
     rw [hb1]
     unfold explainedDeduction
     rfl
-  have ht1 : terminalResult [] [cexProp] cfg1.branch = .stable cfg1.branch := by
+  have ht1 : terminalResult cexOrig [] [cexProp] cfg1.branch = .stable cfg1.branch := by
     rw [hb1]
     unfold terminalResult
     rfl
@@ -291,7 +261,7 @@ theorem cexNotAllSites :
     rw [hb2]
     unfold explainedDeduction
     rfl
-  have ht2 : terminalResult [] [cexProp] cfg2.branch = .stable cfg2.branch := by
+  have ht2 : terminalResult cexOrig [] [cexProp] cfg2.branch = .stable cfg2.branch := by
     rw [hb2]
     unfold terminalResult
     rfl
@@ -319,7 +289,7 @@ theorem cexNotAllSites :
     rfl
   -- the final configuration is supported and its frame is coverless
   have hreach4 : SupportedReach cexOrig [] [cexProp] cfg4 :=
-    .step (.step (.step (.step .init hslot0a) hslot1a) hslot2a) hslot3a
+    .step (.step (.step (.init (fun _ hc => absurd hc (List.not_mem_nil))) hslot1a) hslot2a) hslot3a
   have hcov4 : ¬ (∃ a : Assignment, FrameCovers cfg4.branch.frame a) := by
     rw [hframe4]
     exact coverless_not_inhabited ⟨[], List.mem_cons_self .., rfl⟩
@@ -334,7 +304,8 @@ theorem cexNotAllSites_emptyOrig :
         ∃ a : Assignment, FrameCovers cfg.branch.frame a) := by
   intro hall
   have hreach : SupportedReach ([[]] : List Domain) [] []
-      (SchedulerConfig.init (leaf := cexLeaf) [[]] [] []) := .init
+      (SchedulerConfig.init (leaf := cexLeaf) [[]] [] []) :=
+    .init (fun _ hc => absurd hc (List.not_mem_nil))
   have hcov : ¬ (∃ a : Assignment,
       FrameCovers (SchedulerConfig.init (leaf := cexLeaf) [[]] [] []).branch.frame a) :=
     coverless_not_inhabited ⟨[], List.mem_cons_self .., rfl⟩

@@ -20,8 +20,9 @@ Purpose:
   | boolNotSlot   | explained deduction (non-unit) | `explains_boolNotSlot`       | this file |
   | boolAndSlot   | explained deduction (non-unit) | `explains_boolAndSlot`       | this file |
   | boolOrSlot    | explained deduction (non-unit) | `explains_boolOrSlot`        | this file |
-  | leSlot, ltSlot, eqSlot, neSlot, plusSlot, linLe, linEq, timesSlot, minSlot, maxSlot, absSlot | proved local fallback (explained route deferred) | `propagatorsOfProved_safeUniv`, `propagatorsOfProved_entitled`, `DomConflictEvidence.excluded` | Proofs/Propagators.lean, LCG/DomExplained.lean |
-  | allDiff       | proved local fallback (conflict-only, EMPTY payload → `.local`) | `propAllDiffLCG_conflict_nofit`, `propAllDiffLCG_never_implied` | Proofs/Fam/AllDiff.lean |
+  | neSlot        | explained CONFLICT (both sides pinned to one value → `[x≠c, y≠c]` / `[x=¬b, y=¬b]`); value-removal implication stays the proved local fallback | `propNe_conflict_falsified`, `propNe_conflict_entailed` | Proofs/Propagators.lean |
+  | leSlot, ltSlot, eqSlot, plusSlot, linLe, linEq, timesSlot, minSlot, maxSlot, absSlot | proved local fallback (explained route deferred) | `propagatorsOfProved_safeUniv`, `propagatorsOfProved_entitled`, `DomConflictEvidence.excluded` | Proofs/Propagators.lean, LCG/DomExplained.lean |
+  | allDiff       | explained conflict (Hall clause payload → `.analyzable`/`.root`, PLAN U1b) + explained value ELIMINATIONS (PLAN L8: a fixed slot's value is removed from the other slots, reason `allDiffElimClause`) | `propAllDiffLCG_conflict_falsified`, `propAllDiffLCG_conflict_entailed`, `propAllDiffLCG_conflict_nofit`, `propAllDiffLCG_implied_inv`, `propAllDiffLCG_sem` | Proofs/Fam/AllDiff.lean, LcgFamiliesAllDiff.lean |
 
   Deferred rows: the 11 deferred families still carry per-family
   REASON-VALIDITY theorems in their `Fam/*` modules
@@ -116,14 +117,34 @@ def familyRoute : DomConstraint → FamilyRoute
   | .ltSlot _ _ => .localFallback
   | .eqSlot _ _ => .localFallback
   | .neSlot _ _ => .localFallback
+  | .boolClauseSlot _ _ => .localFallback
+  | .arrayBoolAndSlot _ _ => .localFallback
+  | .bool2intSlot _ _ => .localFallback
+  | .boolEqSlot _ _ => .localFallback
+  | .arrayIntElementSlot _ _ _ => .localFallback
+  | .arrayVarIntElementSlot _ _ _ => .localFallback
+  | .arrayVarBoolElementSlot _ _ _ => .localFallback
+  | .eqReifSlot _ _ _ => .localFallback
+  | .leReifSlot _ _ _ => .localFallback
+  | .neReifSlot _ _ _ => .localFallback
+  | .linEqReif _ _ _ _ => .localFallback
+  | .linLeReif _ _ _ _ => .localFallback
+  | .linNeReif _ _ _ _ => .localFallback
   | .plusSlot _ _ _ => .localFallback
   | .linLe _ _ _ => .localFallback
   | .linEq _ _ _ => .localFallback
+  | .linNe _ _ _ => .localFallback
   | .timesSlot _ _ _ => .localFallback
   | .minSlot _ _ _ => .localFallback
   | .maxSlot _ _ _ => .localFallback
   | .absSlot _ _ => .localFallback
   | .allDiff _ => .localFallback
+  | .minPair _ _ _ => .localFallback
+  | .maxPair _ _ _ => .localFallback
+  | .divGen _ _ _ => .localFallback
+  | .modGen _ _ _ => .localFallback
+  | .maxGen _ _ => .localFallback
+  | .minGen _ _ => .localFallback
 
 example : familyRoute (.leConstHi 0 3) = .explainedDeduction := rfl
 example : familyRoute (.constEq 2 (.bool true)) = .explainedDeduction := rfl
@@ -133,7 +154,7 @@ example : familyRoute (.allDiff [0, 1, 2]) = .localFallback := rfl
 
 /-- The matrix is total and two-valued: every registered family is either
     an explained-deduction row (the five unit families and the three
-    Boolean families) or a proved-local-fallback row (the 11 deferred
+    Boolean families) or a proved-local-fallback row (the 12 deferred
     families plus the conflict-only `allDiff` row, whose empty payload
     routes `.local`). No family row claims an unexplained route. -/
 theorem familyRoute_explained_or_fallback (dc : DomConstraint) :
@@ -321,21 +342,33 @@ private def negBoundState : State :=
 example : LeanFzn.Solver.Propagation.propLtConstLo negBoundState 0 (-4) =
     .implied (negLe 0 (-3 - 1)) { clause := [negLe 0 (-4)] } := rfl
 
-/-! ## The actual CP conflict row: `allDiff` (fallback route)
+/-! ## The actual CP conflict rows: `neSlot` and `allDiff` (explained conflicts)
 
-One concrete pigeonhole conflict of `propAllDiffLCG` (an actual CP
-conflict, not an assembly refutation): two Boolean slots pinned to the
-same value. The payload is EMPTY, so `classifyConflict` routes it
-`.local` at every level — the CP conflict never supplies a root
-contradiction and never reaches the `.unsat` arm (`backjumpStep_ne_unsat`
-in `Proofs/SchedulerConflict.lean`). -/
+Two concrete conflicts of the CP propagators, each now carrying its
+EXPLAINED clause instead of the former empty payload:
+
+* `propNe` on two slots pinned to the same value reports `[x ≠ c, y ≠ c]`
+  (integer shape) or `[x = ¬b, y = ¬b]` (Boolean shape);
+* `propAllDiffLCG` on a pigeonhole reports its Hall clause (per in-range
+  slot: below the domain minimum, above its maximum, or equal to a hole).
+
+Both clauses are FALSE at every assignment fitting the state they were read
+from (`propNe_conflict_falsified`, `propAllDiffLCG_conflict_falsified`) and
+ENTAILED by the constraint at every sort-faithful assignment
+(`propNe_conflict_entailed`, `propAllDiffLCG_conflict_entailed`), so
+`classifyConflict` routes them `.analyzable` at every positive level
+(`.root` at level 0) instead of `.local`. -/
 
 /-- Two Boolean slots pinned to `true`: the pigeonhole count fires. -/
 private def allDiffCPState : State := esState [[.bool true], [.bool true]]
 
+/-- The Hall clause of the pigeonhole: each slot is below 1 or above 1. -/
+def allDiffCPClause : Clause :=
+  [posLe 0 0, negLe 0 1, posLe 1 0, negLe 1 1]
+
 /-- The actual CP conflict, by kernel reduction. -/
 theorem allDiffCP_conflict :
-    propAllDiffLCG allDiffCPState [0, 1] = .conflict [] := rfl
+    propAllDiffLCG allDiffCPState [0, 1] = .conflict allDiffCPClause := rfl
 
 /-- The conflict's exclusion content: no assignment fits the CP state's
 domains and satisfies `allDiff [0, 1]` (the pigeonhole). -/
@@ -344,13 +377,55 @@ theorem allDiffCP_nofit {a : Assignment}
     ¬ (DomConstraint.allDiff [0, 1]).SatisfiedBy a :=
   fun hcons => propAllDiffLCG_conflict_nofit allDiffCP_conflict a hfit hcons
 
-/-- The actual CP conflict's empty payload routes `.local` at every
-level, and `.local` is not `.root`: the unsupported/conflict-only
-analysis never supplies a root contradiction. -/
-theorem allDiffCP_routes_local (level : Nat) :
-    classifyConflict level ([] : List Clause) = ConflictShape.local ∧
-      ConflictShape.local ≠ ConflictShape.root :=
-  ⟨rfl, by intro h; cases h⟩
+/-- The Hall clause is falsified by every assignment fitting the CP state. -/
+theorem allDiffCP_falsified {a : Assignment}
+    (hfit : Core.Assignment.Fits allDiffCPState.domains a) :
+    ∀ q ∈ allDiffCPClause, q.eval a = some false :=
+  propAllDiffLCG_conflict_falsified allDiffCP_conflict hfit
+
+/-- The Hall clause is entailed by `allDiff [0, 1]` at every faithful
+assignment. -/
+theorem allDiffCP_entailed {a : Assignment}
+    (hsat : (DomConstraint.allDiff [0, 1]).SatisfiedBy a)
+    (hfaith : FrameFaithful allDiffCPState.domains a) :
+    ∃ l ∈ allDiffCPClause, l.eval a = some true :=
+  propAllDiffLCG_conflict_entailed allDiffCP_conflict (by simp [allDiffCPClause]) hsat hfaith
+
+/-- The actual CP conflict's NON-EMPTY payload routes `.analyzable` at every
+positive level and `.root` at level 0: the Hall clause feeds the analyzer
+(the former empty payload was `.local` at every level). -/
+theorem allDiffCP_routes_analyzable (level : Nat) (hlvl : 0 < level) :
+    classifyConflict level [allDiffCPClause] = ConflictShape.analyzable ∧
+      classifyConflict 0 [allDiffCPClause] = ConflictShape.root := by
+  refine ⟨?_, rfl⟩
+  have : level ≠ 0 := by omega
+  simp [classifyConflict, ConflictShape.ofConflict, allDiffCPClause, this]
+
+/-- Two integer slots pinned to `3`. -/
+private def neIntCPState : State := esState [[.int 3], [.int 3]]
+
+/-- Two Boolean slots pinned to `true`. -/
+private def neBoolCPState : State := esState [[.bool true], [.bool true]]
+
+/-- The integer `propNe` conflict reports `[x ≠ 3, y ≠ 3]`. -/
+theorem neCP_int_conflict :
+    propNe neIntCPState 0 1 = .conflict [posNe 0 3, posNe 1 3] := rfl
+
+/-- The Boolean `propNe` conflict reports `[x = ¬b, y = ¬b]`. -/
+theorem neCP_bool_conflict :
+    propNe neBoolCPState 0 1 = .conflict [posBool 0 false, posBool 1 false] := rfl
+
+/-- The `propNe` conflict clauses are falsified by every assignment fitting
+the state. -/
+theorem neCP_int_falsified {a : Assignment}
+    (hfit : Core.Assignment.Fits neIntCPState.domains a) :
+    ∀ q ∈ [posNe 0 3, posNe 1 3], q.eval a = some false :=
+  propNe_conflict_falsified neCP_int_conflict hfit
+
+theorem neCP_bool_falsified {a : Assignment}
+    (hfit : Core.Assignment.Fits neBoolCPState.domains a) :
+    ∀ q ∈ [posBool 0 false, posBool 1 false], q.eval a = some false :=
+  propNe_conflict_falsified neCP_bool_conflict hfit
 
 /-! ## The three Boolean families: `ExplainsNonUnit` instances -/
 
@@ -358,7 +433,7 @@ theorem allDiffCP_routes_local (level : Nat) :
     inversion `propBoolNot_emit`. -/
 theorem explains_boolNotSlot (i j : Nat) :
     ExplainsNonUnit
-      ({ watches := [], run := fun st => propBoolNot st i j } :
+      ({ watches := [.intLe i 0, .intLe j 0], run := fun st => propBoolNot st i j } :
         Propagator) where
   reason_norm := by
     intro st l r hrun q hq
@@ -445,7 +520,7 @@ theorem explains_boolNotSlot (i j : Nat) :
     inversion `propBoolAnd_emit`. -/
 theorem explains_boolAndSlot (i j k : Nat) :
     ExplainsNonUnit
-      ({ watches := [], run := fun st => propBoolAnd st i j k } :
+      ({ watches := [.intLe i 0, .intLe j 0, .intLe k 0], run := fun st => propBoolAnd st i j k } :
         Propagator) where
   reason_norm := by
     intro st l r hrun q hq
@@ -560,7 +635,7 @@ theorem explains_boolAndSlot (i j k : Nat) :
     inversion `propBoolOr_emit`. -/
 theorem explains_boolOrSlot (i j k : Nat) :
     ExplainsNonUnit
-      ({ watches := [], run := fun st => propBoolOr st i j k } :
+      ({ watches := [.intLe i 0, .intLe j 0, .intLe k 0], run := fun st => propBoolOr st i j k } :
         Propagator) where
   reason_norm := by
     intro st l r hrun q hq
@@ -765,10 +840,15 @@ The deferred rows of the matrix keep the PROVED LOCAL FALLBACK:
 * A3's `DomConflictEvidence.excluded` (`LCG/DomExplained.lean`) exports
   the branch-relative exclusion payload, and `classifyConflict` routes
   an EMPTY payload to `.local`;
-* `allDiff` is conflict-only with an EMPTY payload
-  (`propAllDiffLCG_never_implied`, `propAllDiffLCG_conflict_clause_empty`)
-  and its exclusion is `propAllDiffLCG_conflict_nofit`
-  (`Proofs/Fam/AllDiff.lean`).
+* `allDiff` reports the explained Hall-clause payload on conflicts
+  (`propAllDiffLCG_conflict_falsified`, `propAllDiffLCG_conflict_entailed`);
+  its exclusion is `propAllDiffLCG_conflict_nofit` and, since PLAN L8, its
+  value eliminations are explained by the same-family reason clause
+  (`propAllDiffLCG_implied_inv`, `propAllDiffLCG_sem`,
+  `Proofs/Fam/AllDiff.lean` + `LcgFamiliesAllDiff.lean`), so the family is
+  NOT conflict-only any more; `neSlot`'s
+  both-pinned conflict is explained likewise (`propNe_conflict_falsified`,
+  `propNe_conflict_entailed`, `Proofs/Propagators.lean`).
 
 Nothing here is a `sorry`/`admit`/`axiom`; the deferred rows are a
 deliberate scope boundary, not a gap in a claimed proof. -/
@@ -786,7 +866,11 @@ deliberate scope boundary, not a gap in a claimed proof. -/
 #print axioms LeanFzn.Solver.UIP.boolOr_branch_conditional_reason
 #print axioms LeanFzn.Solver.UIP.allDiffCP_conflict
 #print axioms LeanFzn.Solver.UIP.allDiffCP_nofit
-#print axioms LeanFzn.Solver.UIP.allDiffCP_routes_local
+#print axioms LeanFzn.Solver.UIP.allDiffCP_routes_analyzable
+#print axioms LeanFzn.Solver.UIP.allDiffCP_falsified
+#print axioms LeanFzn.Solver.UIP.allDiffCP_entailed
+#print axioms LeanFzn.Solver.UIP.neCP_int_conflict
+#print axioms LeanFzn.Solver.UIP.neCP_bool_conflict
 #print axioms LeanFzn.Solver.UIP.familyRoute_explained_or_fallback
 
 end LeanFzn.Solver.UIP

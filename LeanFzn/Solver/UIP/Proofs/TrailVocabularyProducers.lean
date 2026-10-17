@@ -223,11 +223,11 @@ theorem explainedClosure_trailVocabulary {leaf : Assignment → Bool}
     {orig : List Domain} (hvocab : UnitEmissionVocabulary orig props)
     (hdb : DatabaseAligned orig bs.learned)
     (hv : TrailVocabulary orig bs.trail) :
-    TrailVocabulary orig (explainedClosure original props bs).trail := by
+    TrailVocabulary orig (explainedClosure orig original props bs).trail := by
   suffices hmain : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel → TrailVocabulary orig bs.trail →
       DatabaseAligned orig bs.learned →
-      TrailVocabulary orig (explainedClosure original props bs).trail from
+      TrailVocabulary orig (explainedClosure orig original props bs).trail from
     hmain (Frame.mass bs.frame) bs (Nat.le_refl _) hv hdb
   intro fuel
   induction fuel with
@@ -248,20 +248,21 @@ theorem explainedClosure_trailVocabulary {leaf : Assignment → Bool}
       · rename_i d hd
         have hl := deduction_literal_pooled hvocab hdb hd
         have hpay := databaseAligned_deduction_learned hvocab hd
-        have hv' : TrailVocabulary orig
+        have hv0 : TrailVocabulary orig
             (narrowState bs d.frame d.literal d.reason d.learned).trail := by
           show TrailVocabulary orig (bs.trail ++
             [{ literal := d.literal.norm, level := bs.level,
                reason := some { clause := d.reason } }])
           exact trailVocabulary_append_entry hv (litPool_norm_closed hl)
-        have hdb' : DatabaseAligned orig
-            (narrowState bs d.frame d.literal d.reason d.learned).learned := by
-          show DatabaseAligned orig (d.learned ++ bs.learned)
+        have hv' : TrailVocabulary orig (stepNarrowSync orig bs d).trail :=
+          syncSlot_trail_vocab (orig := orig) _ d.literal.atom.slot
+            (P := litPool orig) (fun l hl => hl) hv0
+        have hdb' : DatabaseAligned orig (stepNarrowSync orig bs d).learned := by
+          rw [stepNarrowSync_learned]
           exact databaseAligned_append hpay hdb
-        refine ih (narrowState bs d.frame d.literal d.reason d.learned)
-          ?_ hv' hdb'
+        refine ih (stepNarrowSync orig bs d) ?_ hv' hdb'
         have hdec := d.decreases
-        simp only [narrowState] at hdec ⊢
+        simp only [stepNarrowSync_frame]
         omega
 
 /-- **RESTORE-LEVEL TRAIL VOCABULARY**: `BranchState.restoreLevel` filters
@@ -293,7 +294,10 @@ theorem restoreNarrow_trailVocabulary {leaf : Assignment → Bool}
     cases h
     show TrailVocabulary orig (p.execute (bs.learnGlobal p.learned)).trail
     rw [BackjumpPlan.execute_trail]
-    exact trailVocabulary_append_entry hcp (litPool_norm_closed hass)
+    rcases p.assertExtra_cases with hx | hx
+    · rw [hx, List.append_nil]; exact hcp
+    · rw [hx]
+      exact trailVocabulary_append_entry hcp (litPool_norm_closed hass)
 
 /-- The full jump (`BackjumpPlan.perform`) trail vocabulary: restoreNarrow
 followed by the closure (`explainedClosure_trailVocabulary`), with the
@@ -307,7 +311,7 @@ theorem perform_trailVocabulary {leaf : Assignment → Bool}
     (hplan : DatabaseAligned orig [p.learned])
     (hcp : TrailVocabulary orig p.checkpoint.trail)
     (hass : p.asserting.norm ∈ litPool orig)
-    (hperf : p.perform bs original props = some restored) :
+    (hperf : p.perform bs orig original props = some restored) :
     TrailVocabulary orig restored.trail := by
   unfold BackjumpPlan.perform at hperf
   cases hr : p.restoreNarrow bs with
@@ -317,14 +321,19 @@ theorem perform_trailVocabulary {leaf : Assignment → Bool}
   | some s =>
       simp only [hr, Option.map_some, Option.some.injEq] at hperf
       rw [← hperf]
-      refine explainedClosure_trailVocabulary original props s hvocab ?_
-        (restoreNarrow_trailVocabulary hcp hass hr)
-      unfold BackjumpPlan.restoreNarrow at hr
-      split at hr
-      · cases hr
-      · cases hr
-        show DatabaseAligned orig (p.learned :: bs.learned)
-        exact databaseAligned_append hplan hdb
+      have hrt := restoreNarrow_trailVocabulary hcp hass hr
+      have hdb0 : DatabaseAligned orig s.learned := by
+        unfold BackjumpPlan.restoreNarrow at hr
+        split at hr
+        · cases hr
+        · cases hr
+          show DatabaseAligned orig (p.learned :: bs.learned)
+          exact databaseAligned_append hplan hdb
+      refine explainedClosure_trailVocabulary original props _ hvocab ?_
+        (syncAll_trail_vocab (orig := orig) _ (P := litPool orig)
+          (fun l hl => hl) hrt)
+      rw [syncAll_learned]
+      exact hdb0
 
 /-! ## §5 The run-level site-form producer -/
 
@@ -342,7 +351,7 @@ theorem stepTrailVocabulary_evidenceSites {leaf : Assignment → Bool}
     (htrail : ∀ {ev : ConflictEvidence}, cfg.conflict = some ev →
       BranchTrailVocabulary orig cfg.branch)
     (hrec : ∀ bs cs learned,
-      terminalResult cfg.original cfg.props cfg.branch
+      terminalResult cfg.orig cfg.original cfg.props cfg.branch
           = .conflict bs cs learned →
         BranchTrailVocabulary orig cfg.branch)
     (hsucc : (schedulerNext cfg).successor = some cfg') :
@@ -376,7 +385,7 @@ theorem stepTrailVocabulary_evidenceSites {leaf : Assignment → Bool}
             cases h
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 rw [C2d.schedulerNext_eq_backjump_perform_none hc ha hcp hp]
                   at hsucc
@@ -500,7 +509,7 @@ theorem branchTrailVocabulary_supportedRun_evidenceSites
     (hrec : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         ∀ (bs : BranchState leaf) (cs learned : List Clause),
-          terminalResult cfg.original cfg.props cfg.branch = .conflict bs cs learned →
+          terminalResult cfg.orig cfg.original cfg.props cfg.branch = .conflict bs cs learned →
             BranchTrailVocabulary orig cfg.branch) :
     ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →

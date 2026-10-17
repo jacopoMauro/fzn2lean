@@ -1,342 +1,265 @@
-# LeanFzn — FlatZinc, formalized in Lean 4
+# LeanFzn — verified FlatZinc tools in Lean 4
 
-LeanFzn is a verified FlatZinc toolchain in Lean 4 for the
-**integer/Boolean/set fragment** of the MiniZinc solver language. Its checker
-covers that fragment. Its finite-domain solver is being rebuilt around a
-direct correctness theorem rather than checker acceptance. Its main results
-and active development target are:
+LeanFzn provides a parser, a solution checker and a certified finite-domain
+solver for FlatZinc. Shared formal semantics connect parsed models, checked
+solutions and solver results.
 
-- reusable finite-domain search, propagation, and refinement components, now
-  being assembled into a directly verified solver;
-- a solution checker covering 218 standard and global predicate names; and
-- a parser proved to recognize exactly the declarative FlatZinc grammar.
+- **Parser:** soundness and completeness with respect to the project's
+  declarative grammar.
+- **Solution checker:** verified checking of integer, Boolean and set models
+  using supported standard predicates and global constraints.
+- **Chronological solver:** certified propagation, learned-clause pruning,
+  search and chronological backtracking for the supported finite integer/Boolean
+  satisfaction fragment.
+- **First-UIP solver:** fuel-free certified conflict analysis, backjumping and
+  non-unit learning for the checked finite integer/Boolean LCG fragment (mixed
+  shape-typed domains), with chronological fallback.
 
-The parser and declarative semantics remain the common foundation. The
-solution checker is for external solutions and independent testing. The new
-solver correctness argument will instead connect compiled constraints, solver
-states, propagation, branching, and terminal results directly to
-`Satisfies fullSig fullInterp`; output rendering happens only afterward.
+The public `solve` command uses certified first-UIP search when its family,
+shape, domain and slot gates pass (integer or Boolean-uniform domains); it uses
+certified chronological search otherwise. Optimization uses the same certified
+routing and streams and flushes improving solutions as they are found. The CLI
+currently uses the unseeded optimization driver; a separate certified seeded
+driver supports clause reuse across tighter bounds. Remaining implementation
+work is tracked in [PLAN.md](PLAN.md), with optional performance tasks and agent
+coordination in [PLAN_PERFORMANCE.md](PLAN_PERFORMANCE.md).
 
-**Status (2026-10-08):** the public finite-domain solver propagates before
-branching and lazily generates globally entailed explanation and conflict
-clauses. Learned clauses are shared with later branches and used for domain
-unit propagation. Explicit pending siblings remember exhausted alternatives.
-The solver is fuel-free, with kernel-checked coverage, completeness and
-termination; the compiler has no arbitrary domain or product size caps.
+The language reference is **MiniZinc 2.10.0**, pinned to commit
+`c9f9b649b2a251a40aa427a84d7cce73a8807fea`. See the
+[vendor reference](specification/minizinc-2.10.0/README.md) and
+[formalization assumptions](specification/flatzinc_specification_assumptions.md).
+Float syntax and semantics are outside the supported fragment; strings are
+supported in annotations.
 
-The 4-variable/3-value pairwise-disequality pigeonhole regression now returns
-UNSAT with 5 branching decisions, 24 propagations, 15 learned clauses and no
-complete-assignment checks; 9 deductions reuse learned clauses. Search can
-still take exponential time, and domains are materialized eagerly. The active
-driver backtracks chronologically; first-UIP resolution and nonchronological
-backjumping remain future refinements. See [PLAN.md](PLAN.md).
+## Guarantees and supported scope
 
-The normative reference is **MiniZinc 2.10.0**, pinned to immutable commit
-`c9f9b649b2a251a40aa427a84d7cce73a8807fea` (see
-`specification/minizinc-2.10.0/README.md`). Float syntax and semantics are
-deliberately excluded; strings remain supported in annotations.
+### Parser
 
-## Repository components
+`LeanFzn.Parser.parseModel_ok_iff_valid` states that parsing succeeds exactly
+when the input satisfies `ValidFlatZinc`. Parser soundness and completeness
+also identify the AST produced by a grammar derivation. The recursive-descent
+parser's fuel bound is proved sufficient.
 
-The implementation uses one `LeanFzn` module hierarchy:
+Recognition is relative to the grammar over tokens produced by the project's
+lexer. Lexical conventions and differences from the reference grammar are
+recorded in the formalization assumptions.
+
+### Solution checker
+
+`leanfzn check` checks supplied solutions against the model's domains,
+initializers and constraints. It establishes static well-formedness, supported
+predicate names and valid solution entries before checking satisfaction.
+Solution entries must name declared variables, with no duplicate assignments
+or parameter reassignment. Model parameters retain their declared values.
+
+`LeanFzn.Checker.checkModelSolution_correct` characterizes acceptance in terms
+of the formal model semantics. `checkModelSolution_accepted` additionally ties
+that satisfying store to the values written in the solution and the model's
+parameters. The executable fast entry is proved equivalent to the verified
+entry by `checkModelSolutionFast_eq`.
+
+Supported predicates have executable interpretations proved equivalent to their
+declarative meanings. The checker covers standard arithmetic, Boolean and set
+predicates and supported global constraints. Unknown or unsupported predicates
+produce an explicit unsupported outcome. The predicate definitions and coverage
+lists live in `LeanFzn.Semantics` and `LeanFzn.Checker.Globals`.
+
+The checker accepts solver output containing several solutions separated by
+`----------` and checks each solution. It reports the first failure.
+
+### Certified solver
+
+`leanfzn solve` compiles supported, statically well-formed satisfaction models
+with finite nonempty integer/Boolean domains. It propagates constraints, shares
+entailed learned clauses between branches and searches an explicit frontier.
+Unsupported declaration or constraint forms are reported explicitly.
+`solve minimize/maximize <int variable>` uses certified branch-and-bound;
+the final `==========` marker is backed by UNSAT under the improving bound.
+
+The accepted constraint families are `int_eq`, `int_ne`, `int_le`, `int_lt`,
+`int_plus`, `int_times`, `int_min`, `int_max`, `array_int_minimum`, `array_int_maximum`
+(including supported literal-operand shapes), `int_abs`, `int_div`, `int_mod`,
+`int_lin_eq`, `int_lin_le`, `int_lin_ne`, `bool_not`, `bool_and`, `bool_or`,
+`bool_eq`, `bool2int`, `bool_clause`, `array_bool_and`, `array_int_element`,
+`array_var_int_element`, `array_var_bool_element`, the reified forms
+`int_eq_reif`, `int_le_reif`, `int_ne_reif`, `int_lin_eq_reif`,
+`int_lin_le_reif`, `int_lin_ne_reif`, and `all_different`.
+`int_gt` and `int_ge` are also accepted for variable–constant comparisons.
+Variables must be initializer-free scalar Booleans or integers with an explicit
+finite range or enumerated domain. Literal scalar and array parameters and the supported variable-array aliases
+are normalized before scalar compilation. Objectives must name an integer slot.
+
+Support also depends on the argument form. Linear constraints require inline
+arrays of literal integer coefficients and scalar variable names, matching array
+lengths, and a literal integer right-hand side. `all_different` requires an
+inline array of scalar variable names. Supported parameter arrays and variable-array aliases may also supply these
+arguments after normalization. Other predicates accept the variable/literal
+forms implemented by the [constraint extractor](LeanFzn/Compiler/Extract.lean)
+and [compiler](LeanFzn/Compiler/Compile.lean); arbitrary expressions and parameter
+substitution are not supported uniformly. For example, `int_le(x, k)` can resolve
+a scalar integer parameter `k`, whereas `int_eq(x, k)` currently cannot; an
+integer literal in its place is accepted.
+
+| Unsupported feature | Why it is outside the current solver fragment |
+| --- | --- |
+| General objective expressions | Certified optimization currently requires a plain integer variable objective. |
+| Unbounded `var int` | Search enumerates finite domains; its termination argument needs a finite set of candidates. |
+| Set-valued variables, including bounded sets | Solver slots represent scalar integer/Boolean values. Set-value domains and their certified compilation are not implemented. |
+| General array variable declarations/indexing | The front end supports aliases of scalar integer/Boolean slots and the compiled element/array families; arbitrary array storage and general index expressions remain unsupported. |
+| Variable initializers | The accepted declaration translation handles initializer-free variables. Initializer relationships are not compiled; express supported scalar relationships as constraints instead. |
+| Set parameters and general parameter expressions | Literal integer/Boolean arrays are supported; arbitrary expression evaluation remains outside compilation. |
+| Predicate declaration items | The compiler rejects predicate items and translates only its built-in constraint families. |
+| Empty variable domains | The public solver gate requires every domain to be nonempty. It does not currently turn an empty domain into a certified UNSAT result. |
+| `bool_xor`, set constraints and globals other than the supported `all_different`/element/array forms | These lack an accepted translation and the corresponding compiler/solver correctness route. Checker support alone does not supply that route. |
+| Propagation strength | All constraint constructors pass the LCG family gate, but the other route gates still apply. Arithmetic and reified families have dedicated explained propagators, with strength depending on the family and reification direction. `bool_clause` seeds the clause database. `array_bool_and`, `bool2int`, `bool_eq`, and the three element families have no dedicated registered propagator and retain leaf checking. Residual literal-pair `minPair`/`maxPair` shapes use checking-only `propCheck`. |
+| Other argument forms of the listed predicates | Compilation only covers specific argument patterns; the predicate name alone does not guarantee acceptance. |
+
+These are limits of the current certified implementation, rather than inherent
+limits of chronological search; adding UIP does not by itself remove them.
+For parsed, well-formed models outside this fragment, `solve` reports an
+unsupported reason and exits with code 3. Syntax outside the parser's language,
+such as floating-point declarations, instead produces a parse error (exit 2).
+
+The source-level theorems establish:
+
+- A returned store satisfies the model:
+  `LeanFzn.Integration.solveCertified_sat_correct`.
+- An UNSAT verdict excludes every parameter-honest satisfying store:
+  `LeanFzn.Integration.solveCertified_unsat_correct`.
+- Accepted finite inputs terminate without a budget-exhaustion `unknown` verdict:
+  `LeanFzn.Integration.solveCertified_total`.
+
+Propagation preserves solutions and learned clauses are globally entailed.
+LCG search termination follows a checked sorted phase rank; chronological
+fallback uses a finite-frontier measure. Domains are materialized
+eagerly, and search can take exponential time; certification establishes
+correctness and termination rather than a performance bound. The scheduled
+propagator dispatch is proved equivalent to the plain per-step rescan. The
+public route also uses a proved-equivalent indexed database scan and fast route
+gate. Static activity-based value ordering is certified by domain permutations;
+variable ordering remains positional, and dynamic activity and restarts remain
+future work. Huge domains remain impractical with eager lists; compact domains
+are the owner-gated D1 task.
+
+## Repository structure
 
 | Component | Responsibility |
 | --- | --- |
-| `Syntax`, `Parser` | FlatZinc AST, parsing/printing and parser proofs |
-| `Semantics` | Stores, predicate interpretations and model meanings |
-| `Checker` | External solution parsing, completion and certified checking |
-| `Compiler` | FlatZinc-to-domain compilation and correspondence proofs |
-| `Solver.Core`, `Solver.Propagation` | Shared problems, domains, clauses, propagation and explanation contracts |
-| `Solver.Chronological` | Current certified frontier traversal and learned-clause pruning |
-| `Solver.UIP` | First-UIP scheduler, backjumping and its developing certification |
-| `Solver.Reference` | Exhaustive and historical diagnostic search |
-| `Integration`, `Cli` | Source-level theorem composition, fallback and commands |
+| `LeanFzn.Syntax`, `LeanFzn.Parser` | AST, lexer, grammar, parsing, printing and parser proofs |
+| `LeanFzn.Semantics` | Stores, model meanings and predicate interpretations |
+| `LeanFzn.Checker` | Solution parsing, completion and certified checking |
+| `LeanFzn.Compiler` | Domain/constraint compilation and correspondence proofs |
+| `LeanFzn.Solver.Core`, `LeanFzn.Solver.Propagation` | Shared problems, domains, clauses, propagation and explanation contracts |
+| `LeanFzn.Solver.Chronological` | Certified frontier search and learned-clause pruning |
+| `LeanFzn.Solver.UIP` | First-UIP scheduler, backjumping, learning and certification |
+| `LeanFzn.Solver.Reference` | Exhaustive and diagnostic search |
+| `LeanFzn.Integration`, `LeanFzn.Cli` | Source-level certification, fallback policy and commands |
 
-Each component has a Lake library target and root import. Parser and checker
-build independently of solving; chronological and UIP strategies do not import
-each other. Shared propagation includes explanation/analysis primitives used by
-both diagnostics and scheduler proofs. The public command still uses the
-chronological route; this reorganization does not activate unfinished UIP proofs.
-`Main.lean` delegates to `LeanFzn.Cli.Main`. Executable names and CLI arguments
-are unchanged. The old `solver.*` module names and LCG/Direct namespaces were
-removed; downstream Lean imports must use the component names.
+Each component has a Lake library target and a root import module. Parser and
+checker build independently of solving. The chronological and UIP components
+share foundations and do not import each other. `Main.lean` delegates to the
+CLI component; `LeanFzn.lean` is an optional full-stack library import.
 
-Run `python3 audits/check_module_boundaries.py` to verify component boundaries.
-See `code-structure.md` for dependencies and `PLAN.md` for remaining proof work.
-
-## Main results
-
-### Directly verified finite-domain solver
-
-`leanfzn solve MODEL.fzn` (also accepting the `--certified` alias) runs the
-well-formedness check, the fragment compiler, the nonempty finite int/bool gate,
-and the explicit frontier driver. It reports `sat`, `unsat` or
-`unsupported` with exit codes 0/1/3 (a statically malformed model is a
-usage-class exit 2).
-
-- A `sat store` satisfies the source model (`LeanFzn.Integration.solveCertified_sat_correct`,
-  composed with compiler exactness).
-- `unsat` excludes every parameter-honest satisfying source store
-  (`LeanFzn.Integration.solveCertified_unsat_correct`, composed with compiler coverage).
-- The traversal is FUEL-FREE: termination is kernel-checked by the
-  frontier-cost measure, so an accepted finite model always receives a
-  verdict (`solveCertified_total`); there is no budget-exhaustion
-  `unknown` outcome.
-
-`LeanFzn/Solver/Chronological/Pruned.lean` implements the active frontier; `Pruning.lean`
-implements finite-domain propagation closure and clause generation. Closure
-terminates by strict domain-size reduction, and search terminates by the
-proof-only pending-work measure. A repeated deduction that removes no value
-does not trigger another round. `Proofs/Pruned.lean` proves coverage-based
-verdict correctness and completeness; `Proofs/Pruning.lean` proves preservation
-and global entailment. `DomPruning.lean` connects the existing per-family
-propagator proofs to the public driver. Compiled gate-passing models enable
-that kit (`compiled_domPruningOk`).
-
-The public CLI and `solveDom` use the concrete proved kit. Generic `solve`
-accepts a proof-carrying kit; its identity default and `frontierSolve` remain
-reference traversals. Arbitrary callbacks do not acquire pruning authority
-merely by being supplied as the legacy propagator argument. The historical
-analysis/flip loop (`lcgSearch.go`) remains diagnostic and is not executed.
-
-Current solver regressions exercise the public certified path on large finite
-ranges, enumerated domains and products, emitted-solution checker round trips,
-all 64 graph edge subsets, conflicts, stale deductions and learned-clause reuse.
-Builds, tests and axiom audits are run locally; CI is out of scope.
-
-### Exact parser recognition
-
-The recognition theorem is proven with no `sorry` or user-declared `axiom`.
-
-```lean
-theorem parseModel_ok_iff_valid (s : String) :
-    (∃ m, Parser.parseModel s = .ok m) ↔ ValidFlatZinc s
-```
-
-That is: the parser succeeds on a string if and only if that string is a valid
-FlatZinc program (and by case analysis on the `Except` result, it fails
-exactly on the invalid ones). This is the
-combination of two directions, each proven independently:
-
-- **Soundness** (`FznCorrectness.lean`): every successful parse yields a model
-  that the declarative grammar derives — the parser never accepts garbage.
-- **Completeness** (`FznCompleteness.lean`, `FznAssembled.lean`): every grammar
-  derivation is accepted by the parser, producing exactly the derived AST —
-  the parser never rejects, or mangles, a valid program.
-
-The parser is a fuelled recursive-descent implementation; completeness
-includes a proof that the fuel budget `8 * (tokens + 1)` always suffices.
-
-`ValidFlatZinc` is defined over the tokens produced by the project's own
-lexer (`FznLexer.lean`), so the theorem is a statement about the grammar
-over tokens: lexical validity (comments, integer literals, keywords, string
-escapes per assumption R11) is defined by the lexer, which is trusted. Where
-the project's grammar knowingly departs from the vendored BNF (scalar
-parameter declarations, nested annotation arrays, the spelling of the
-index-set bound), the choice is recorded as R27–R29 in
-`specification/flatzinc_specification_assumptions.md`.
-
-### Verified solution checker
-
-The store a solution describes (`completedStore`: the model's parameters,
-overridden by the solution's entries, closed under variable initializers) is
-an ordinary definition, so the theorems below speak about the actual store.
-Its compiled code goes through `@[implemented_by]` twins with the same body
-(a compilation safeguard against an O(n²) blow-up, see `FznSolution.lean`).
-
-`checkSolutionFull` has a machine-checked correctness theorem for the
-predicates in `fullCheckableNames`. That closed list currently contains
-**218 names**:
-
-- 61 non-extensional standard FlatZinc predicates;
-- 19 extensional set predicates; and
-- 138 supported `fzn_*` global constraints.
-
-For each of those names, the executable Boolean interpretation is proved
-equivalent to the corresponding declarative `Prop` interpretation. Subject
-to the theorem's explicit predicate-name hypothesis,
-`checkSolutionFull_correct` states that the checker accepts exactly when the
-solution parses and its completed store satisfies all variable domains,
-initializers, and constraints according to `fullInterp`.
-
-This guarantee is relative to the semantics formalized in this repository.
-MiniZinc leaves parts of the `fzn_*` predicate semantics to solver libraries,
-so choices and corner cases that are not fixed literally by the reference
-material are recorded in
-`specification/flatzinc_specification_assumptions.md`. Tests against Gecode
-provide useful cross-validation but are not part of the proof.
-
-The checker does **not** support every predicate shipped with MiniZinc 2.10.0.
-`Globals.globalsUnsupported` lists the intentionally unsupported globals —
-currently the optional-variable pair `fzn_alternative`/`fzn_span` and the
-float-dependent `fzn_neural_net`/`fzn_piecewise_linear*` (the `_reif`,
-float, and opt variants of other names are outside the fragment too).
-Unknown or unsupported constraints evaluate to `false`, so they are rejected
-rather than assigned guessed semantics. Float syntax and semantics are
-outside the project fragment entirely.
-
-#### The verified front door (`FznCheck.lean`)
-
-`checkSolutionFull` itself decides the dynamic part of satisfaction only;
-its correctness theorem takes static well-formedness and predicate
-checkability as explicit preconditions. The CLI therefore does not call
-it directly: `LeanFzn/Checker/Check.lean` provides `checkModelSolution`, a
-verified wrapper that establishes both preconditions itself and
-classifies every failure mode. Its correctness theorem
-`checkModelSolution_correct` is unconditional: acceptance is equivalent
-to full `Satisfies fullSig fullInterp` (with the completed store of the
-parsed entries), `WellFormed fullSig m`, and all-checkable constraint
-names. `checkModelSolution_accepted` adds what the store is: for an
-accepted solution, the completed store maps every assigned name to the
-value written in the solution (`completedStore_entry`), gives every
-parameter its declared value (`ParamHonest`, via
-`completedStore_paramHonest`), and satisfies the model. The CLI runs
-`checkModelSolutionFast`, which returns exactly the same outcome
-(`checkModelSolutionFast_eq`). The wrapper consists of:
-
-* `wellFormedFastB` — a hash-based fast twin of `wellFormedB`,
-  proved equivalent by `wellFormedFastB_iff`. The naive checker is
-  Θ(n²) (about 37 s at the benchmark's 32,000 variables); the fast
-  twin is linear (~50 ms for the whole front door there).
-* `firstUnsupported` — the predicate-name precondition, with
-  `firstUnsupported_none_iff`.
-* `entriesOkB` — entry well-formedness: a solution string assigns
-  declared variables only, each at most once (A7/A10). This closed a
-  hole where a cheating string could reassign a *parameter* (e.g.
-  override `int: k = 3;` with `k = 5;`) and satisfy constraints its
-  model-given values violate; the old checker accepted such strings.
-  `Tests/Checker/Check.lean` pins the rejection.
-
-Solver output with several solutions (each ended by a `----------` line) is
-split by `splitSolutions`; `leanfzn check` checks every solution and reports
-the first one that is not accepted.
-
-## Project layout
-
-```text
-LeanFzn/
-  Syntax/             AST and common syntax
-  Parser/Proofs/      Parsing, printing and parser correspondence
-  Semantics/Globals/  Model meanings and predicate interpretations
-  Checker/            Solution parsing, completion and checking
-  Compiler/Proofs/    Compilation and source correspondence
-  Solver/
-    Core/             Problems, domains and finite enumeration
-    Propagation/      Shared filtering, explanation contracts and proofs
-    Chronological/    Current certified frontier strategy
-    UIP/              First-UIP scheduler and conditional certification
-    Reference/        Diagnostic search
-  Integration/        Source verdict proofs and fallback composition
-  Cli/                Command adapters
-Tests/                Parser, Checker, Semantics, Propagation,
-                      Chronological, UIP and Integration (including compiler checks)
-audits/               Axiom and component-boundary checks
-specification/        Pinned FlatZinc reference
-Main.lean             Stable executable wrapper
-PLAN.md               Sole continuation plan
-```
+Tests are grouped by component, including compiler and source-level integration
+checks. [audits/README.md](audits/README.md) describes proof checks, benchmark
+tools, and retained measurement provenance. The lowercase `solver/` tree is a
+legacy implementation outside the current Lake library targets; active
+`LeanFzn` modules must not import it.
+See [code-structure.md](code-structure.md) for dependency details.
 
 ## Building and running
 
-Requires Lean 4.33.1 (see `lean-toolchain`; `elan` installs it automatically).
+Requires Lean 4.33.1; `elan` uses the version specified in `lean-toolchain`.
 
 ```sh
-# Build the complete library, test modules and every executable:
+# Build the library and CLI.
+lake build LeanFzn leanfzn
+
+# Build individual components.
+lake build LeanFzn.Parser LeanFzn.Checker
+lake build LeanFzn.Solver.Chronological LeanFzn.Solver.UIP
+
+# Parse a model, printing its AST.
+lake env leanfzn model.fzn
+echo 'solve satisfy;' | lake env leanfzn -
+
+# Check supplied solutions.
+lake env leanfzn check model.fzn solution.txt
+
+# Solve a supported satisfaction model.
+lake env leanfzn solve model.fzn
+lake env leanfzn solve --certified model.fzn
+```
+
+`--certified` is an alias for the same certified solve command. Solve input
+can be a file, `-`, or stdin when the file argument is omitted.
+
+| Command | Exit codes |
+| --- | --- |
+| Parse | 0: success; 1: parse error; 2: usage/IO error |
+| Check | 0: all supplied solutions accepted; 1: unsatisfied condition; 2: malformed model or usage/IO error; 3: unsupported predicate; 4: malformed solution entries |
+| Solve | 0: solution found; 1: UNSAT; 2: malformed model or usage/IO/parse error; 3: unsupported model |
+
+SAT output ends with `----------`; UNSAT is printed as
+`=====UNSATISFIABLE=====`. Optimization prints improving solutions followed by
+`==========` on proven completion. Each improving solution is printed and
+flushed immediately; external timeouts can therefore retain partial progress.
+
+## Tests and audits
+
+Build and run every registered test executable:
+
+```sh
 lake build LeanFzn Tests leanfzn \
   tests_smoke tests_stdlib tests_solution tests_gecode tests_globals \
   tests_bench tests_coverage tests_wellformed tests_pretty tests_prof tests_check \
   tests_solver tests_prop tests_fast tests_lcg tests_lcg_analysis tests_oracle \
   tests_lcg_scheduler_fixtures tests_lcg_scheduler_activation \
-  tests_scheduler_computability tests_lcg_public_fixtures
+  tests_scheduler_computability tests_lcg_public_fixtures \
+  tests_lcg_harness tests_lcg_proto tests_array_params tests_optimize \
+  tests_optimize_bnb tests_lcg_kernel tests_lcg_optimize tests_public_lcg \
+  tests_dbscan tests_p3b_gate tests_lcg_heur
 
-# Components can also be built independently, for example:
-lake build LeanFzn.Parser LeanFzn.Checker \
-  LeanFzn.Solver.Chronological LeanFzn.Solver.UIP
-
-# Run the listed test and benchmark suites; stop at the first failure:
 for t in tests_smoke tests_stdlib tests_solution tests_gecode tests_globals \
          tests_bench tests_coverage tests_wellformed tests_pretty tests_prof \
          tests_check tests_solver tests_prop tests_fast tests_lcg \
          tests_lcg_analysis tests_oracle tests_lcg_scheduler_fixtures \
          tests_lcg_scheduler_activation tests_scheduler_computability \
-         tests_lcg_public_fixtures; do
-  lake env $t || exit 1
+         tests_lcg_public_fixtures tests_lcg_harness tests_lcg_proto \
+         tests_array_params tests_optimize tests_optimize_bnb tests_lcg_kernel \
+         tests_lcg_optimize tests_public_lcg tests_dbscan tests_p3b_gate \
+         tests_lcg_heur; do
+  lake env "$t" || exit 1
 done
 
-# Per-suite reference (each also runs standalone through `lake env`)
-lake env tests_smoke      # 41 parser smoke tests
-lake env tests_stdlib     # 64 standard-library tests (static + dynamic)
-lake env tests_solution   # solution-checker end-to-end tests
-lake env tests_globals    # 52 global-constraint tests (static + dynamic + e2e)
-lake env tests_gecode     # 64 Gecode-derived solution-checker regression tests (15 models)
-lake env tests_coverage   # 465 tests covering every checkable predicate and global
-lake env tests_check     # 18 front-door tests (outcome classes + exit codes)
-lake env tests_bench     # compiled perf regression suite (front door + checker + parser timings)
-lake env tests_wellformed # 49 static well-formedness tests
-lake env tests_pretty     # 39 pretty-printer round-trip tests
-lake env tests_prof      # profiling driver (parser timing analysis)
-lake env tests_fast      # 7 fast-path differential tests
-
-# Solver suites
-lake env tests_solver    # 36 certified-path tests (compiler, theorems, CLI command)
-lake env tests_prop      # 89 propagator tests
-lake env tests_lcg       # 37 LCG engine tests
-
-# Parse a FlatZinc file (prints the AST), or pipe via stdin
-lake env leanfzn model.fzn
-echo 'solve satisfy;' | lake env leanfzn -
-
-# Check a solution string against a model (verified front door:
-# static validation + predicate checkability + dynamic checking)
-lake env leanfzn check model.fzn solution.txt
-
-# Solve with the certified LCG path (source-level SAT/UNSAT theorems;
-# `-` or omitted file reads stdin; --certified is a temporary
-# no-op alias). Multi-value finite domains are admitted: SAT results
-# carry the theorem (decisions + backtracking); UNSAT is claimed
-# through either certified front door — the singleton door
-# (`solve_certified_unsat_real`, singleton domains) or the wide
-# decision-descent door (`solve_certified_unsat_wide`, all registered
-# families including linLe) — both composed into the source-level
-# `solveCertified_unsat_correct`.
-lake env leanfzn solve model.fzn
+lake env tests_p3b_gate --battery-crosscheck
+lake env tests_lcg_harness --fuzz 3000 100000 --bound 50000 --no-chrono
+bash audits/run_axiom_audit.sh
+python3 audits/check_module_boundaries.py
 ```
 
-Exit codes of `leanfzn`:
+The axiom audit requires the queried proofs to depend only on Lean's standard
+allowlist (`propext`, `Classical.choice`, `Quot.sound`), rejecting missing
+profiles and `sorryAx`. The boundary check rejects import cycles and forbidden
+component dependencies.
 
-* parse mode: 0 = success, 1 = parse error, 2 = usage/IO error;
-* `check` (every solution in the input is checked; the first one not
-  accepted decides): 0 = solution(s) accepted; 1 = rejected (a domain, initializer,
-  or constraint condition is unsatisfied); 2 = malformed model (static
-  well-formedness or model-parse failure); 3 = unsupported predicate
-  (unknown name, model declaration, or an intentionally unsupported
-  global — see `Globals.globalsUnsupported`); 4 = malformed solution
-  string (parse failure, parameter/unknown reassignment, duplicate
-  assignment);
-* `solve`: 0 = solution found, ending with `----------`; 1 = UNSAT,
-  rendered as `=====UNSATISFIABLE=====`; 2 = malformed model or usage/IO/parse
-  error; 3 = unsupported model. Accepted finite models have no internal
-  budget-exhaustion outcome.
+Tests exercise parsing, checking, compilation, propagation, solver verdicts and
+witnesses. `tests_public_lcg` exercises parsed-source routing; `tests_lcg_heur`
+checks the activity-ordered entry. `tests_dbscan` and `tests_p3b_gate` cover the
+scan and gate optimizations. `challenge_scan` is a separate file-driven tool,
+not a no-argument test executable.
 
-The listed build targets run the libraries and all 15 retained suites. A plain
-`lake build` has no default target. Audit profiles are checked locally with
-`lake env lean -j2 audits/certified_axioms.lean` and the identity-checking audit
-script on its captured output.
+The last recorded full validation on 2026-10-17 reports 458 solver tests,
+1040 allowlisted axiom profiles, 307 modules with no import cycles, all runnable
+executables passing, a 50-case harness battery, and 3,000 fuzz instances without
+wrong answers, bound failures, or rejected witnesses. These are saved results,
+not a guarantee that a later checkout has been revalidated. The harness also
+records 31 `c-sem` observations attributed to its trail-only tracker; resolving
+that instrumentation limitation is tracked in the performance plan.
 
-## Project status
-
-The public command remains the certified chronological propagation/learning
-route. The first-UIP scheduler and its proofs are separate, and its concrete
-public activation is still unfinished. The repository reorganization preserves
-CLI arguments, outputs and accepted source models; it does not claim that the
-conditional UIP proof package is complete.
-
-Validation after restructuring (2026-10-12): explicit aggregate build passed
-(486 jobs), all 21 registered test executables passed, component boundaries and
-cycles passed, and the axiom audit passed 323/323 profiles on the standard
-allowlist with no sorryAx. Boolean, integer, sparse-domain, auxiliary arithmetic,
-SAT/UNSAT and error-exit CLI cases preserve recorded baseline results; emitted
-SAT witnesses pass the checker. The certified alias has the same behavior.
-
-See [PLAN.md](PLAN.md) for the exact remaining obligations and
-[code-structure.md](code-structure.md) for module dependencies.
+The latest retained challenge run completes 2/21 cases within 60 seconds.
+There is no current full 300-second result or controlled comparison establishing
+competitiveness with other solvers. Historical profiles and comparisons in the
+benchmark JSON describe different implementation snapshots. See the audit README
+for rerunning measurements; the fixed benchmark cohort is not a fresh compiler
+coverage scan.

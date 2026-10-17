@@ -45,6 +45,29 @@ def emitScalar : Value → String
 def emitEntry (name : String) (v : Value) : String :=
   s!"{name} = {emitScalar v};"
 
+/-- The FlatZinc text of a declared variable's value: scalars as
+    `emitScalar`; an array as `array1d(1..n, [..])` with the declared
+    index set `1..n` (FlatZinc index sets always start at 1) and
+    scalar elements. -/
+def emitDeclValue (d : VarDeclItem) (v : Value) : String :=
+  match d, v with
+  | .array ty _ _ _, .array vs =>
+      s!"array1d(1..{ty.idx.hi}, [{", ".intercalate (vs.map emitScalar)}])"
+  | _, v => emitScalar v
+
+/-- One solution line for a declaration: `name = value;`. -/
+def emitDeclEntry (d : VarDeclItem) (v : Value) : String :=
+  s!"{(VarDeclItem.name d).name} = {emitDeclValue d v};"
+
+/-- FlatZinc solution separator (ends every solution; O1 prints one per
+    intermediate solution). -/
+def solutionSeparator : String := "----------"
+
+/-- FlatZinc optimum marker, printed once after the last solution when an
+    optimisation run proves optimality (reserved for task O1; unused by
+    satisfaction runs). -/
+def optimumMarker : String := "=========="
+
 /-- A list of assignment lines followed by the FlatZinc solution separator. -/
 def emitSolution : List (String × Value) → String
   | [] => "----------"

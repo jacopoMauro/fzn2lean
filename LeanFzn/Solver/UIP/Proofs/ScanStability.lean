@@ -12,14 +12,16 @@ non-evidence states); PLAN C1 restates `hdb` at the ACTUAL analysis site:
      classification WITH the predecessor's terminal event: a successor
      carrying evidence is exactly the `.analyzeConflict` successor of a
      conflictStep arm whose `terminalResult` was a nonempty conflict.
-  §3 `scanDatabase_stable_of_recordedStep` / `scanStableRecorded_of_reachable`
-     — ONE dispatched step (then the whole run by structural induction)
-     establishes the site predicate, via
-     `nextPruningEvent_eq_of_terminalResult_conflict` +
-     `scanDatabase_stable_of_nextPruningEvent_conflict_cons`.
-  §4 `databaseUnfalsified_of_reachable_recorded` /
+  §3 `scanDatabase_stable_of_recordedStep` — ONE dispatched step transports
+     the predecessor's stable scan to the recording successor. RESTATED by
+     R1c (conflict routing): the run-level induction
+     `scanStableRecorded_of_reachable` is RETIRED, because database-sourced,
+     filter-rejected and wipe-out conflicts are analyzed too and their
+     recorded sites do not have a stable scan.
+  §4 `databaseUnfalsified_of_recorded_scanStable` /
      `supportedDatabaseUnfalsified_of_recorded` — the concrete site-form
-     `hdb` producers (branch reachability + frame inhabitedness inputs).
+     `hdb` producers at stable-scan (propagator-sourced) sites (branch
+     reachability + frame inhabitedness inputs).
 
 NO `sorry`, NO custom axiom. Registration owes the umbrella import line
 `LeanFzn.Solver.UIP.Proofs.ScanStability` in `LeanFzn.Solver/LeanFzn.Solver.UIP.lean`.
@@ -61,10 +63,10 @@ theorem schedulerNext_successor_conflict_terminal {leaf : Assignment → Bool}
     (hnext : schedulerNext cfg = t) (hsucc : t.successor = some cfg')
     (hev' : cfg'.conflict = some ev') :
     ∃ (bs : BranchState leaf) (c : Clause) (rest learned : List Clause),
-      terminalResult cfg.original cfg.props cfg.branch
+      terminalResult cfg.orig cfg.original cfg.props cfg.branch
           = .conflict bs (c :: rest) learned ∧
         cfg' = stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c) := by
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c) := by
   cases hcc : cfg.conflict with
   | some ev =>
       have ht : backjumpStep cfg ev = t := by
@@ -94,7 +96,7 @@ theorem schedulerNext_successor_conflict_terminal {leaf : Assignment → Bool}
               rw [stepPropagate_conflict, hcc] at hev'
               cases hev'
           | none =>
-              cases htt : terminalResult cfg.original cfg.props cfg.branch with
+              cases htt : terminalResult cfg.orig cfg.original cfg.props cfg.branch with
               | stable st =>
                   have ht : stableStepGuarded cfg = t := by
                     simp only [schedulerNext, hcc, hst, hd, htt] at hnext
@@ -133,72 +135,63 @@ theorem schedulerNext_successor_conflict_terminal {leaf : Assignment → Bool}
                   rw [stepLocalExclude_conflict] at hev'
                   cases hev'
 
-/-! ## §3 The one-step and run-level scan stability -/
+/-! ## §3 The one-step scan stability (RESTATED by R1c)
 
-/-- **THE C1 ONE-STEP LAW**: at any successor carrying recorded evidence,
-the database scan is stable. The classification exposes the predecessor's
-nonempty terminal conflict; the event bridge and the database-stability
-transfer close it, transported along the recording site's definitional
-shape. -/
+Before conflict routing every analyzed (nonempty-conflict) site was
+PROPAGATOR-sourced (a database conflict reported `.conflict []`), so the
+database scan was stable at every recorded site and the run-level induction
+`scanStableRecorded_of_reachable` held. With routing, a database conflict,
+a filter-rejected implied literal and a wipe-out conflict are analyzed too, and
+at those sites the scan is NOT stable (the falsified/unit stored clause is the
+very reason of the conflict). The honest replacement transports the stability
+of the PREDECESSOR's scan to the recording successor; the run-level induction
+is retired (its conclusion is false at the routed sites). -/
+
+/-- **THE C1 ONE-STEP LAW (restated)**: when the predecessor's database scan
+is stable (a propagator-sourced conflict), the recording successor satisfies
+the site predicate. The recording step leaves `original` and the branch
+unchanged. -/
 theorem scanDatabase_stable_of_recordedStep {leaf : Assignment → Bool}
     {cfg cfg' : SchedulerConfig leaf} {t : SchedulerTransition leaf}
-    (hnext : schedulerNext cfg = t) (hsucc : t.successor = some cfg') :
+    (hnext : schedulerNext cfg = t) (hsucc : t.successor = some cfg')
+    (hstable : scanDatabase cfg.original cfg.branch.frame cfg.branch.learned = .stable) :
     ScanStableRecorded cfg' := by
   intro ev' hev'
   obtain ⟨bs, c, rest, learned, htt, hcfg'⟩ :=
     schedulerNext_successor_conflict_terminal hnext hsucc hev'
   rw [hcfg']
   have horig : (stepAnalyzeConflictCounted cfg c learned
-      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).original
+      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).original
       = cfg.original := rfl
-  have hev_eq : nextPruningEvent cfg.original cfg.props cfg.branch.frame
-      cfg.branch.learned = .conflict (c :: rest) :=
-    nextPruningEvent_eq_of_terminalResult_conflict htt
   rw [horig, stepAnalyzeConflictCounted_branch]
-  exact scanDatabase_stable_of_nextPruningEvent_conflict_cons hev_eq
+  exact hstable
 
-/-- **PROVED**: every reachable configuration satisfies the site predicate
-(structural induction on reachability; each step by the one-step law). -/
-theorem scanStableRecorded_of_reachable {leaf : Assignment → Bool}
-    {cfg₀ : SchedulerConfig leaf} (h : SchedulerReachable cfg₀) :
-    ScanStableRecorded cfg₀ := by
-  induction h with
-  | init orig original props =>
-      intro ev hev
-      simp [SchedulerConfig.init] at hev
-  | step hnext hsucc ih =>
-      exact scanDatabase_stable_of_recordedStep hnext hsucc
+/-! ## §4 The site-form `hdb` producers (restated by R1c) -/
 
-/-! ## §4 The site-form `hdb` producers -/
-
-/-- **THE C1 SITE-FORM `hdb` PRODUCER**: at a reachable configuration
-carrying recorded evidence, the branch database is unfalsified — from the
-run-level scan stability plus the two per-state inputs this site needs
-(branch reachability and frame inhabitedness; the latter is C2's named
-input, kernel-refuted as a universal invariant). -/
-theorem databaseUnfalsified_of_reachable_recorded {leaf : Assignment → Bool}
-    {orig : List Domain} {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
-    (hreach : SchedulerReachable cfg) (hconf : cfg.conflict = some ev)
+/-- **THE C1 SITE-FORM `hdb` PRODUCER (restated)**: at a configuration whose
+database scan is stable (the propagator-sourced recorded sites), the branch
+database is unfalsified — from the two per-state inputs (branch reachability
+and frame inhabitedness; the latter is C2's named input). At the
+routed (database-sourced) sites no such claim holds. -/
+theorem databaseUnfalsified_of_recorded_scanStable {leaf : Assignment → Bool}
+    {cfg : SchedulerConfig leaf}
+    (hstable : scanDatabase cfg.original cfg.branch.frame cfg.branch.learned = .stable)
     (hbr : ReachableState leaf cfg.orig cfg.branch)
     (hinhab : ∃ a, FrameCovers cfg.branch.frame a) :
     DatabaseUnfalsified cfg.branch :=
-  databaseUnfalsified_of_scanDatabase_stable hbr hinhab
-    (scanStableRecorded_of_reachable hreach ev hconf)
+  databaseUnfalsified_of_scanDatabase_stable hbr hinhab hstable
 
-/-- The `SupportedReach`-indexed form (the field shape
-`SupportedPhasePremises.hdb` needs, restricted to evidence sites). -/
+/-- The `SupportedReach`-indexed form. -/
 theorem supportedDatabaseUnfalsified_of_recorded {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {cfg : SchedulerConfig leaf}
-    {ev : ConflictEvidence}
     (hreach : SupportedReach orig original props cfg)
-    (hconf : cfg.conflict = some ev)
+    (hstable : scanDatabase cfg.original cfg.branch.frame cfg.branch.learned = .stable)
     (hbr : ReachableState leaf orig cfg.branch)
     (hinhab : ∃ a, FrameCovers cfg.branch.frame a) :
     DatabaseUnfalsified cfg.branch := by
   have hbr' : ReachableState leaf cfg.orig cfg.branch :=
     (by rwa [← SupportedReach.orig_eq hreach] at hbr)
-  exact databaseUnfalsified_of_reachable_recorded (orig := cfg.orig)
-    hreach.reachable hconf hbr' hinhab
+  exact databaseUnfalsified_of_recorded_scanStable hstable hbr' hinhab
 
 end LeanFzn.Solver.UIP

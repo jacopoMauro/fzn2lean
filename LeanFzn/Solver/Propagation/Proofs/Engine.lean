@@ -388,10 +388,9 @@ theorem fits_fold_original : ∀ (trail : List TrailEntry)
                     exact Or.inr himg.1
               | boolEq s' b =>
                   have himg := mem_getD_updateSlot_eq doms s'
-                    (fun _ => [Value.bool (if positive then b else !b)]) v
-                    horig
-                  simp only [List.mem_singleton] at himg
-                  exact Or.inl ⟨if positive then b else !b, himg⟩
+                    (fun d => d.filter (fun v => v.eqB
+                      (.bool (if positive then b else !b)))) v horig
+                  exact Or.inr (List.mem_filter.mp himg).1
               | intNe s' k =>
                   cases positive
                   · -- negative: keep p = k
@@ -414,6 +413,85 @@ theorem fits_fold_original : ∀ (trail : List TrailEntry)
                     exact Or.inr himg.1
         · exact Or.inr (domOfLit_getD_ne doms e.literal s0 v
             (fun h => heq h) horig)
+
+/-- `domOfLit` only ever removes values. -/
+theorem domOfLit_domSub (doms : List (List Value)) (l : Literal) :
+    DomSub (domOfLit doms l) doms := by
+  refine ⟨domOfLit_length l, ?_⟩
+  intro s0 v hv
+  by_cases heq : s0 = l.atom.slot
+  · cases l with
+    | mk atom positive =>
+        cases atom with
+        | intLe s' k =>
+            cases positive
+            all_goals
+              first
+              | (have himg := mem_getD_updateSlot_eq doms s' _ v
+                   (by rw [show s0 = s' from heq] at hv; exact hv)
+                 rw [domFilterInt, List.mem_filter] at himg
+                 rw [show s0 = s' from heq]; exact himg.1)
+        | boolEq s' b =>
+            have hv' : v ∈ (updateSlot doms s'
+                (fun d => d.filter (fun v => v.eqB
+                  (.bool (if positive then b else !b))))).getD s' [] := by
+              rw [show s0 = s' from heq] at hv; exact hv
+            have himg := mem_getD_updateSlot_eq doms s' _ v hv'
+            rw [show s0 = s' from heq]
+            exact (List.mem_filter.mp himg).1
+        | intNe s' k =>
+            cases positive
+            all_goals
+              first
+              | (have himg := mem_getD_updateSlot_eq doms s' _ v
+                   (by rw [show s0 = s' from heq] at hv; exact hv)
+                 rw [domFilterInt, List.mem_filter] at himg
+                 rw [show s0 = s' from heq]; exact himg.1)
+  · exact domOfLit_getD_ne doms l s0 v heq hv
+
+/-- A fold of `domOfLit` over any trail only removes values. -/
+theorem foldl_domOfLit_domSub : ∀ (trail : List TrailEntry)
+    (doms : List (List Value)),
+    DomSub (trail.foldl (fun acc e => domOfLit acc e.literal) doms) doms := by
+  intro trail
+  induction trail with
+  | nil => intro doms; exact DomSub.refl doms
+  | cons e rest ih =>
+      intro doms
+      rw [List.foldl_cons]
+      exact (ih (domOfLit doms e.literal)).trans (domOfLit_domSub doms e.literal)
+
+/-- `enqueueNorm` only ever removes values. -/
+theorem enqueueNorm_domSub (st : State) (l : Literal) (r : Option Reason) :
+    DomSub (enqueueNorm st l r).domains st.domains := by
+  unfold enqueueNorm
+  dsimp only
+  split
+  · exact DomSub.refl _
+  · split
+    · exact DomSub.refl _
+    · exact domOfLit_domSub _ _
+
+/-- The propagator sweep only ever removes values. -/
+theorem runPropagators_go_domSub : ∀ (props : List Propagator) (s : State),
+    DomSub (runPropagators.go props s).domains s.domains := by
+  intro props
+  induction props with
+  | nil => intro s; exact DomSub.refl _
+  | cons p rest ih =>
+      intro s
+      simp only [runPropagators.go]
+      split
+      · exact DomSub.refl _
+      · split
+        · exact ih s
+        · exact DomSub.refl _
+        · rename_i l r _
+          exact (ih (enqueueNorm s l (some r))).trans (enqueueNorm_domSub s l (some r))
+
+theorem runPropagators_domSub (props : List Propagator) (s : State) :
+    DomSub (runPropagators props s).domains s.domains :=
+  runPropagators_go_domSub props s
 
 /-- Slot-value extraction: an int-viewed slot of a fitting assignment
     carries the viewed value at an in-range slot. -/
@@ -561,6 +639,10 @@ theorem fits_domOfLit_sat_neg {doms : List (List Value)} {s : Nat}
       rw [slotInt, hget, hva] at hslot
       exact absurd hslot (by simp [Value.intView])
 
+theorem eqB_bool_true {v : Value} {b : Bool} (h : v.eqB (.bool b) = true) :
+    v = .bool b := by
+  cases v <;> simp_all [Value.eqB]
+
 /-- THE SINGLE-STEP COHERENCE (Boolean pin): an assignment fitting
     the Boolean-pinned domain satisfies the Boolean literal. -/
 theorem fits_domOfLit_sat_bool {doms : List (List Value)} {s : Nat}
@@ -575,8 +657,10 @@ theorem fits_domOfLit_sat_bool {doms : List (List Value)} {s : Nat}
     hmem s a[s] hget
   have himg : a[s] ∈ [Value.bool b] := by
     have hstep : a[s] ∈ (updateSlot doms s
-        (fun _ => [Value.bool b])).getD s [] := hslotmem
-    exact mem_getD_updateSlot_eq doms s _ a[s] hstep
+        (fun d => d.filter (fun v => v.eqB (.bool b)))).getD s [] := hslotmem
+    have hf := (List.mem_filter.mp
+      (mem_getD_updateSlot_eq doms s _ a[s] hstep)).2
+    exact List.mem_singleton.mpr (eqB_bool_true hf)
   simp only [List.mem_singleton] at himg
   show (posBool s b).eval a = some true
   simp only [posBool, Literal.eval, Atom.eval]

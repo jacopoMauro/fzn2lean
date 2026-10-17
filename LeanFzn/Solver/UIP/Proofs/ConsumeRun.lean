@@ -137,7 +137,7 @@ theorem supportedHconsumeInv_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch)
@@ -176,6 +176,7 @@ theorem supportedHconsumeInv_of_premises {orig : List Domain}
   exact stepConsume_invariant_of_components hp hs hbrG hpendG
     (supportedLogSound_of_newRegions hnew hreach) hcov
     (consumeHdead_of_deadStatus hdeadEv hreach hstatus)
+    (by rw [SupportedReach.orig_eq hreach]; exact (hclos hreach).leafFits)
 
 /-! ## §2-bis The supported coverage producer (discharging the `hcov`
 residual)
@@ -213,12 +214,12 @@ theorem stepPropagate_coverage_of_reachable {leaf : Assignment → Bool}
       obtain ⟨g, hg, hcv'⟩ := filterFrame_preserves hcv hlit'
       have hg' : g = d.frame := Option.some.inj (hg.symm.trans d.filtered)
       subst hg'
-      exact ⟨d.frame, List.mem_cons_self .., hcv'⟩
+      exact ⟨d.frame, by simp [SchedulerConfig.frontier, stepPropagate, narrowState], hcv'⟩
     · left
       exact ⟨f, List.mem_cons_of_mem _ hf, hcv⟩
   · right
     rcases hdb with ⟨c, hc', hnc⟩
-    exact ⟨c, List.mem_append.mpr (Or.inr hc'), hnc⟩
+    exact ⟨c, by simpa [stepPropagate, narrowState] using Or.inr hc', hnc⟩
 
 /-- Coverage of the redundant-pin skip: `stepDecideSkip_covers` with its
 `SchedulerInvariant` input split into coverage + branch reachability.
@@ -292,7 +293,7 @@ theorem supportedCoverage_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         BackjumpCovers leaf orig cfg
           (stepLearnBackjumpAssert cfg
             (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
@@ -303,7 +304,7 @@ theorem supportedCoverage_of_premises {orig : List Domain}
       cfg.coverage := by
   intro cfg hreach
   induction hreach with
-  | init => exact covers_root_init leaf orig
+  | init _ => exact covers_root_init leaf orig original
   | step hrec hs ih =>
       clear cfg
       rename_i cfg cfg'
@@ -334,7 +335,7 @@ theorem supportedCoverage_of_premises {orig : List Domain}
                   SchedulerConfig.frontier] using ih
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hs
                     simp only [] at hs
@@ -486,7 +487,7 @@ theorem supportedHconsumeInv_of_coverage {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch)
@@ -496,7 +497,7 @@ theorem supportedHconsumeInv_of_coverage {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         BackjumpCovers leaf orig cfg
           (stepLearnBackjumpAssert cfg
             (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev

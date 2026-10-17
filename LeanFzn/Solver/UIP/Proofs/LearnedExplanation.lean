@@ -538,6 +538,8 @@ theorem domExplainedContract_of_provenance {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     (hOriginal : ∀ c ∈ original, ∀ a, leaf a = true → c.SatisfiedBy a)
     (hViewed : ∀ d ∈ orig, IntViewedDomain d)
+    (hSorts : DomsShapeTyped orig)
+    (hLeafFits : ∀ a, leaf a = true → a.Fits orig)
     (hp : PropagationContract leaf props)
     (hEvidence : PropagatorEvidence leaf props)
     (hShape : ∀ (bs : BranchState leaf), ReachableState leaf orig bs →
@@ -547,7 +549,7 @@ theorem domExplainedContract_of_provenance {leaf : Assignment → Bool}
         frameLiveB bs.frame = true →
         ∃ p : Literal, RecordedWith leaf bs c p ∧ l.norm = p) :
     ClosureContract leaf orig original props :=
-  domExplainedContract hOriginal hViewed hp hEvidence
+  domExplainedContract hOriginal hViewed hSorts hLeafFits hp hEvidence
     (unitClauseEvidence_of_provenance hShape)
 
 /-- Inhabitedness of a list of nonempty domains: the covering tail
@@ -606,12 +608,14 @@ theorem domExplainedContract_of_provenance' {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
     (hOriginal : ∀ c ∈ original, ∀ a, leaf a = true → c.SatisfiedBy a)
     (hViewed : ∀ d ∈ orig, IntViewedDomain d)
+    (hSorts : DomsShapeTyped orig)
+    (hLeafFits : ∀ a, leaf a = true → a.Fits orig)
     (hp : PropagationContract leaf props)
     (hEvidence : PropagatorEvidence leaf props)
     (hprov : ∀ (bs : BranchState leaf), ReachableState leaf orig bs →
       LearnedProvenance leaf bs) :
     ClosureContract leaf orig original props :=
-  domExplainedContract_of_provenance hOriginal hViewed hp hEvidence
+  domExplainedContract_of_provenance hOriginal hViewed hSorts hLeafFits hp hEvidence
     (unitShape_of_provenance hprov)
 
 /-! ## The component example: a real two-literal learned clause

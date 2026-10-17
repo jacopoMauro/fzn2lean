@@ -362,7 +362,7 @@ reachable configuration and is therefore not fixture-instantiable today. -/
 
 /-- The completed counted analyzer run of the multi-resolution fixture. -/
 def mEventRun : Option (EventCounts × Option (List (Literal × Nat) × Literal)) :=
-  analyzeEvents mTrail 3 (analysisFuel mTrail mConflict)
+  analyzeEvents oOrig mTrail 3 (analysisFuel mTrail mConflict)
     (initAnalysisState mConflict)
 
 /-- The event counts of that run (derived, not a driver observation). -/
@@ -374,24 +374,24 @@ def mExpansions : Nat := (mCounts.map fun c => c.expansions).getD 0
 -- The counted run completed at the executable allowance with exactly two
 -- reason expansions; `2 + 10 + 1 = 13` decomposes T1's observed trace.
 example : mEventRun = some ({ expansions := 2, scans := 10, marks := 3 },
-    some ([(negLe 0 5, 1)], posLe 1 7)) := rfl
+    some ([(negLe 0 5, 1)], posLe 1 7)) := by decide
 
-example : mCounts = some { expansions := 2, scans := 10, marks := 3 } := rfl
-example : mExpansions = 2 := rfl
+example : mCounts = some { expansions := 2, scans := 10, marks := 3 } := by decide
+example : mExpansions = 2 := by decide
 example : mTargetLevel = 1 := rfl
 
 -- O1's exactness theorem instantiated on the fixture: the derived counts
 -- decompose the executed trace (expansions + scans + 1 = k), so `2` is the
 -- completed run's expansion count, not a fuel bound or a guess.
 example : ∃ k : Nat,
-    analyzeTrace mTrail 3 (analysisFuel mTrail mConflict)
+    analyzeTrace oOrig mTrail 3 (analysisFuel mTrail mConflict)
         (initAnalysisState mConflict)
       = some (k, some ([(negLe 0 5, 1)], posLe 1 7)) ∧
     2 + 10 + 1 = k := by
-  obtain ⟨k, hk, har⟩ := analyzeEvents_trace_of_events mTrail 3
+  obtain ⟨k, hk, har⟩ := analyzeEvents_trace_of_events oOrig mTrail 3
     (analysisFuel mTrail mConflict) (initAnalysisState mConflict)
     { expansions := 2, scans := 10, marks := 3 }
-    (some ([(negLe 0 5, 1)], posLe 1 7)) rfl
+    (some ([(negLe 0 5, 1)], posLe 1 7)) (by decide)
   exact ⟨k, hk, har⟩
 
 /-- PENDING D1b activation — MULTI-RESOLUTION. A scheduled run of this

@@ -1090,6 +1090,42 @@ theorem valuesAllDifferent_iff_nodup : ∀ (l : List Value),
 
 /-! ## Constraint representation -/
 
+/-- An integer operand of a GENERAL arithmetic constraint: a slot
+    position or an integer literal. The general shapes of `int_max` /
+    `int_min` / `int_div` / `int_mod` accept either, and the array
+    forms `array_int_maximum(m, xs)` / `array_int_minimum(m, xs)`
+    (result slot `m` first) are the all-slot special case. -/
+inductive DomIntArg where
+  /-- The value at a slot position. -/
+  | slot (i : Nat)
+  /-- An integer literal. -/
+  | lit (k : Int)
+  deriving DecidableEq, Repr
+
+namespace DomIntArg
+
+/-- The value an operand reads from an assignment: the slot's value (the
+    bang read, matching the `linEq`/`allDiff` convention) or the
+    literal's integer. -/
+def read (a : List Value) : DomIntArg → Value
+  | .slot i => a[i]!
+  | .lit k => .int k
+
+/-- The slot positions an operand names. -/
+def slots : DomIntArg → List Nat
+  | .slot i => [i]
+  | .lit _ => []
+
+/-- `read` unfolded at a slot. -/
+theorem read_slot (a : List Value) (i : Nat) :
+    read a (.slot i) = a[i]! := rfl
+
+/-- `read` unfolded at a literal. -/
+theorem read_lit (a : List Value) (k : Int) :
+    read a (.lit k) = .int k := rfl
+
+end DomIntArg
+
 /-- A constraint over slot positions: the declarative representation a
     propagator narrows domains for.  The positions index the search
     slots of `LeanFzn/Compiler/Domain.lean`; each constructor matches the
@@ -1141,6 +1177,9 @@ inductive DomConstraint where
   /-- Linear inequality: the dot product of `coeffs` and the values at
       the slot positions `is` is at most `b` (`int_lin_le` style). -/
   | linLe (coeffs : List Int) (is : List Nat) (b : Int)
+  /-- Linear disequality: the dot product of `coeffs` and the values at
+      the slot positions `is` differs from `b` (`int_lin_ne` style). -/
+  | linNe (coeffs : List Int) (is : List Nat) (b : Int)
   /-- Slot `i`'s value must be strictly below slot `j`'s
       (`int_lt` style). -/
   | ltSlot (i j : Nat)
@@ -1159,6 +1198,106 @@ inductive DomConstraint where
   /-- Slot `k`'s value must be the disjunction of slots `i`'s and
       `j`'s Booleans (`bool_or` style). -/
   | boolOrSlot (i j k : Nat)
+  /-- The Boolean clause "some slot of `ps` is true, or some slot of
+      `ns` is false" (`bool_clause` style: the positive argument
+      array `ps`, the negated argument array `ns`). The constraint is
+      enforced at the leaf (no propagator is registered); the
+      compiler additionally seeds the corresponding original clause
+      `∨ ps ∨ ¬ns` into the clause database (see `SeedClauses` and
+      `Integration.Lcg`) so the LCG engine can propagate it. -/
+  | boolClauseSlot (ps ns : List Nat)
+  /-- Slot `k`'s Boolean must be the conjunction of the Booleans at
+      the listed slots (`array_bool_and` style: the source form
+      `array_bool_and(array of var bool, var bool)`). The target's
+      truth value IS the `all` of the source slots' `= true` reads,
+      so the EMPTY list forces the target to `true` (the `all` of an
+      empty source array). -/
+  | arrayBoolAndSlot (is : List Nat) (k : Nat)
+  /-- Slot `k`'s integer must be the 0/1 view of slot `i`'s Boolean
+      (`bool2int` style: `i = (if b then 1 else 0)`). -/
+  | bool2intSlot (i : Nat) (k : Nat)
+  /-- Slots `i` and `j` must carry equal Booleans (`bool_eq` style). -/
+  | boolEqSlot (i j : Nat)
+  /-- Slot `i`'s value is an integer index into the constant integer
+      array `xs`, and slot `k` holds the 1-based element read at that
+      index (`array_int_element` style: `xs[i] = k`, FlatZinc arrays
+      are 1-based, and an out-of-range index is unsatisfiable). -/
+  | arrayIntElementSlot (xs : List Int) (i : Nat) (k : Nat)
+  /-- Slot `i`'s value is an integer index into the variable integer
+      array at the slots `is`, and slot `k` holds the 1-based element
+      read at that index (`array_var_int_element` style). -/
+  | arrayVarIntElementSlot (is : List Nat) (i : Nat) (k : Nat)
+  /-- Slot `i`'s value is an integer index into the variable Boolean
+      array at the slots `is`, and slot `k` holds the 1-based element
+      read at that index (`array_var_bool_element` style). -/
+  | arrayVarBoolElementSlot (is : List Nat) (i : Nat) (k : Nat)
+  /-- Slot `r`'s Boolean holds the truth value of "slot `i`'s value
+      equals slot `j`'s" (`int_eq_reif` style: `R ↔ x = y`, the
+      reification slot `r` is `true` exactly when the relation
+      holds). -/
+  | eqReifSlot (i j r : Nat)
+  /-- Slot `r`'s Boolean holds the truth value of "slot `i`'s integer
+      is at most slot `j`'s" (`int_le_reif` style: `R ↔ x ≤ y`). -/
+  | leReifSlot (i j r : Nat)
+  /-- Slot `r`'s Boolean holds the truth value of "slot `i`'s value
+      differs from slot `j`'s" (`int_ne_reif` style: `R ↔ x ≠ y`). -/
+  | neReifSlot (i j r : Nat)
+  /-- Slot `r`'s Boolean holds the truth value of the linear equality
+      "the dot product of `coeffs` and the values at `is` equals
+      `b`" (`int_lin_eq_reif` style:
+      `R ↔ dotProduct coeffs xs = some b`). -/
+  | linEqReif (coeffs : List Int) (is : List Nat) (b : Int) (r : Nat)
+  /-- Slot `r`'s Boolean holds the truth value of the linear
+      inequality "the dot product of `coeffs` and the values at `is`
+      is at most `b`" (`int_lin_le_reif` style:
+      `R ↔ dotLe coeffs xs b`). -/
+  | linLeReif (coeffs : List Int) (is : List Nat) (b : Int) (r : Nat)
+  /-- Slot `r`'s Boolean holds the truth value of the linear
+      disequality "the dot product of `coeffs` and the values at `is`
+      differs from `b`" (`int_lin_ne_reif` style:
+      `R ↔ dotNe coeffs xs b`). -/
+  | linNeReif (coeffs : List Int) (is : List Nat) (b : Int) (r : Nat)
+  /-- The `array_int_maximum(m, xs)` array form (result slot first in
+      the source): the result operand `r` carries the maximum of the
+      operand list `os` — `maxValue` of the operand VALUES in the
+      source predicate's exact reading (operands may be slots or
+      integer literals; the empty list is unsatisfiable, as in the
+      source). -/
+  | maxGen (os : List DomIntArg) (r : DomIntArg)
+  /-- The `array_int_minimum(m, xs)` array form: the result operand
+      `r` carries the minimum of the operand list `os` (`minValue` of
+      the operand values, empty list unsatisfiable). -/
+  | minGen (os : List DomIntArg) (r : DomIntArg)
+  /-- The GENERAL `int_div` shape: the result operand is the
+      TRUNCATED quotient `Int.tdiv` of the two operands, and a zero
+      divisor is unsatisfiable (the source predicate's exact
+      `b ≠ 0 ∧ c = Int.tdiv a b` reading, so negative operands
+      truncate towards zero). -/
+  | divGen (o₁ o₂ r : DomIntArg)
+  /-- The GENERAL `int_mod` shape: the result operand is the
+      TRUNCATED remainder `Int.tmod` of the two operands, and a zero
+      divisor is unsatisfiable (the source predicate's exact
+      `b ≠ 0 ∧ c = Int.tmod a b` reading, so the remainder's sign
+      follows the dividend). -/
+  | modGen (o₁ o₂ r : DomIntArg)
+  /-- The GENERAL two-operand `int_min` shape: the result operand `r`
+      carries the minimum of the two operands, and all THREE operands
+      must be integers — the source predicate's exact
+      `[.int a, .int b, .int c] ↦ c = min a b` reading, so a
+      non-integer operand is unsatisfiable in either reading (unlike
+      `array_int_minimum`'s `minValue` reading, which ignores a
+      non-integer tail element). -/
+  | minPair (o₀ o₁ r : DomIntArg)
+  /-- The GENERAL two-operand `int_max` shape, the `max` twin of
+      `minPair`: `c = max a b` with all three operands integers. -/
+  | maxPair (o₀ o₁ r : DomIntArg)
+
+/-- The read of slot `i` is the Boolean `b` (false when the slot is
+    absent or holds a non-Boolean value). -/
+def slotIsBoolB (a : List Value) (i : Nat) (b : Bool) : Bool :=
+  match a[i]? with
+  | some v => v.eqB (.bool b)
+  | none => false
 
 /-- The declarative semantics of a slot constraint: what it means, in
     `Prop`, for a complete assignment (one value per slot, in slot
@@ -1190,6 +1329,8 @@ def DomConstraint.SatisfiedBy : DomConstraint → List Value → Prop
       dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some b
   | .linLe coeffs is b, a =>
       dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+  | .linNe coeffs is b, a =>
+      dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
   | .ltSlot i j, a =>
       ∃ p q, a[i]? = some (.int p) ∧ a[j]? = some (.int q) ∧ p < q
   | .ltConstHi i c, a => ∃ p, a[i]? = some (.int p) ∧ p < c
@@ -1204,6 +1345,73 @@ def DomConstraint.SatisfiedBy : DomConstraint → List Value → Prop
   | .boolOrSlot i j k, a =>
       ∃ p q r, a[i]? = some (.bool p) ∧ a[j]? = some (.bool q) ∧
         a[k]? = some (.bool r) ∧ (p || q) = r
+  | .boolClauseSlot ps ns, a =>
+      (ps.any (fun i => slotIsBoolB a i true)) = true ∨
+      (ns.any (fun j => slotIsBoolB a j false)) = true
+  | .arrayBoolAndSlot is k, a =>
+      a[k]? = some (.bool (is.all (fun i => slotIsBoolB a i true)))
+  | .bool2intSlot i k, a =>
+      ∃ b : Bool, a[i]? = some (.bool b) ∧
+        a[k]? = some (.int (if b then 1 else 0))
+  | .boolEqSlot i j, a =>
+      ∃ p q : Bool, a[i]? = some (.bool p) ∧ a[j]? = some (.bool q) ∧ p = q
+  | .arrayIntElementSlot xs i k, a =>
+      ∃ idx e, a[i]? = some (.int idx) ∧ a[k]? = some (.int e) ∧
+        valuesGet1 (xs.map Value.int) idx = some (.int e)
+  | .arrayVarIntElementSlot is i k, a =>
+      ∃ idx e, a[i]? = some (.int idx) ∧ a[k]? = some (.int e) ∧
+        (∀ j ∈ is, ∃ v, a[j]? = some v) ∧
+        valuesGet1 (is.map (fun j => a[j]!)) idx = some (.int e)
+  | .arrayVarBoolElementSlot is i k, a =>
+      ∃ idx e, a[i]? = some (.int idx) ∧ a[k]? = some (.bool e) ∧
+        (∀ j ∈ is, ∃ v, a[j]? = some v) ∧
+        valuesGet1 (is.map (fun j => a[j]!)) idx = some (.bool e)
+  | .eqReifSlot i j r, a =>
+      ∃ (p : Int) (q : Int) (rb : Bool), a[i]? = some (.int p) ∧
+        a[j]? = some (.int q) ∧
+        a[r]? = some (.bool rb) ∧ (rb = true ↔ p = q)
+  | .leReifSlot i j r, a =>
+      ∃ (p : Int) (q : Int) (rb : Bool), a[i]? = some (.int p) ∧
+        a[j]? = some (.int q) ∧
+        a[r]? = some (.bool rb) ∧ (rb = true ↔ p ≤ q)
+  | .neReifSlot i j r, a =>
+      ∃ (p : Int) (q : Int) (rb : Bool), a[i]? = some (.int p) ∧
+        a[j]? = some (.int q) ∧
+        a[r]? = some (.bool rb) ∧ (rb = true ↔ p ≠ q)
+  | .linEqReif coeffs is b r, a =>
+      ∃ (rb : Bool), a[r]? = some (.bool rb) ∧
+        (rb = true ↔
+          dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some b)
+  | .linLeReif coeffs is b r, a =>
+      ∃ (rb : Bool), a[r]? = some (.bool rb) ∧
+        (rb = true ↔
+          dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true)
+  | .linNeReif coeffs is b r, a =>
+      ∃ (rb : Bool), a[r]? = some (.bool rb) ∧
+        (rb = true ↔
+          dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true)
+  | .maxGen os r, a =>
+      ∃ m : Int, DomIntArg.read a r = .int m ∧
+        maxValue (os.map (DomIntArg.read a)) = some m
+  | .minGen os r, a =>
+      ∃ m : Int, DomIntArg.read a r = .int m ∧
+        minValue (os.map (DomIntArg.read a)) = some m
+  | .divGen o₁ o₂ r, a =>
+      ∃ p q : Int, DomIntArg.read a o₁ = .int p ∧
+        DomIntArg.read a o₂ = .int q ∧ q ≠ 0 ∧
+        DomIntArg.read a r = .int (Int.tdiv p q)
+  | .modGen o₁ o₂ r, a =>
+      ∃ p q : Int, DomIntArg.read a o₁ = .int p ∧
+        DomIntArg.read a o₂ = .int q ∧ q ≠ 0 ∧
+        DomIntArg.read a r = .int (Int.tmod p q)
+  | .minPair o₀ o₁ r, a =>
+      ∃ p q : Int, DomIntArg.read a o₀ = .int p ∧
+        DomIntArg.read a o₁ = .int q ∧
+        DomIntArg.read a r = .int (min p q)
+  | .maxPair o₀ o₁ r, a =>
+      ∃ p q : Int, DomIntArg.read a o₀ = .int p ∧
+        DomIntArg.read a o₁ = .int q ∧
+        DomIntArg.read a r = .int (max p q)
 
 /-- The executable Boolean twin of `SatisfiedBy`, for testing and for
     a pruning search's leaf integration. -/
@@ -1260,6 +1468,8 @@ def DomConstraint.satisfiedB (c : DomConstraint) (a : List Value) : Bool :=
       | none => false
   | .linLe coeffs is b =>
       dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b
+  | .linNe coeffs is b =>
+      dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b
   | .ltSlot i j =>
       match a[i]?, a[j]? with
       | some (.int p), some (.int q) => decide (p < q)
@@ -1286,6 +1496,140 @@ def DomConstraint.satisfiedB (c : DomConstraint) (a : List Value) : Bool :=
       | some (.bool p), some (.bool q), some (.bool r) =>
           decide ((p || q) = r)
       | _, _, _ => false
+  | .boolClauseSlot ps ns =>
+      (ps.any (fun i => slotIsBoolB a i true)) ||
+      (ns.any (fun j => slotIsBoolB a j false))
+  | .arrayBoolAndSlot is k =>
+      match a[k]? with
+      | some (.bool b) => decide (b = is.all (fun i => slotIsBoolB a i true))
+      | _ => false
+  | .bool2intSlot i k =>
+      match a[i]?, a[k]? with
+      | some (.bool b), some (.int p) => decide (p = (if b then 1 else 0))
+      | _, _ => false
+  | .boolEqSlot i j =>
+      match a[i]?, a[j]? with
+      | some (.bool p), some (.bool q) => decide (p = q)
+      | _, _ => false
+  | .arrayIntElementSlot xs i k =>
+      match a[i]?, a[k]? with
+      | some (.int idx), some (.int e) =>
+          match valuesGet1 (xs.map Value.int) idx with
+          | some v => v.eqB (.int e)
+          | none => false
+      | _, _ => false
+  | .arrayVarIntElementSlot is i k =>
+      match a[i]?, a[k]? with
+      | some (.int idx), some (.int e) =>
+          is.all (fun j => (a[j]?).isSome) &&
+            (match valuesGet1 (is.map (fun j => a[j]!)) idx with
+             | some v => v.eqB (.int e)
+             | none => false)
+      | _, _ => false
+  | .arrayVarBoolElementSlot is i k =>
+      match a[i]?, a[k]? with
+      | some (.int idx), some (.bool e) =>
+          is.all (fun j => (a[j]?).isSome) &&
+            (match valuesGet1 (is.map (fun j => a[j]!)) idx with
+             | some v => v.eqB (.bool e)
+             | none => false)
+      | _, _ => false
+  | .eqReifSlot i j r =>
+      match a[i]?, a[j]?, a[r]? with
+      | some (.int p), some (.int q), some (.bool rb) =>
+          decide (rb = decide (p = q))
+      | _, _, _ => false
+  | .leReifSlot i j r =>
+      match a[i]?, a[j]?, a[r]? with
+      | some (.int p), some (.int q), some (.bool rb) =>
+          decide (rb = decide (p ≤ q))
+      | _, _, _ => false
+  | .neReifSlot i j r =>
+      match a[i]?, a[j]?, a[r]? with
+      | some (.int p), some (.int q), some (.bool rb) =>
+          decide (rb = decide (p ≠ q))
+      | _, _, _ => false
+  | .linEqReif coeffs is b r =>
+      match a[r]? with
+      | some (.bool rb) =>
+          decide (rb = (match dotProduct (intVals coeffs)
+              (is.map (fun i => a[i]!)) with
+            | some d => decide (d = b)
+            | none => false))
+      | _ => false
+  | .linLeReif coeffs is b r =>
+      match a[r]? with
+      | some (.bool rb) =>
+          decide (rb = dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b)
+      | _ => false
+  | .linNeReif coeffs is b r =>
+      match a[r]? with
+      | some (.bool rb) =>
+          decide (rb = dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b)
+      | _ => false
+  | .maxGen os r =>
+      match DomIntArg.read a r with
+      | .int m => decide (maxValue (os.map (DomIntArg.read a)) = some m)
+      | _ => false
+  | .minGen os r =>
+      match DomIntArg.read a r with
+      | .int m => decide (minValue (os.map (DomIntArg.read a)) = some m)
+      | _ => false
+  | .divGen o₁ o₂ r =>
+      match DomIntArg.read a o₁, DomIntArg.read a o₂ with
+      | .int p, .int q =>
+          decide (q ≠ 0) && (DomIntArg.read a r).eqB (.int (Int.tdiv p q))
+      | _, _ => false
+  | .modGen o₁ o₂ r =>
+      match DomIntArg.read a o₁, DomIntArg.read a o₂ with
+      | .int p, .int q =>
+          decide (q ≠ 0) && (DomIntArg.read a r).eqB (.int (Int.tmod p q))
+      | _, _ => false
+  | .minPair o₀ o₁ r =>
+      match DomIntArg.read a o₀, DomIntArg.read a o₁ with
+      | .int p, .int q => (DomIntArg.read a r).eqB (.int (min p q))
+      | _, _ => false
+  | .maxPair o₀ o₁ r =>
+      match DomIntArg.read a o₀, DomIntArg.read a o₁ with
+      | .int p, .int q => (DomIntArg.read a r).eqB (.int (max p q))
+      | _, _ => false
+
+/-- A `valuesGet1` read of an all-integer value list realizes the
+    chosen element with `eqB` exactly when it IS that integer. -/
+private theorem valuesGet1_intEqB_iff (idx : Int) (ys : List Value)
+    (e : Int) :
+    ((match valuesGet1 ys idx with
+      | some v => v.eqB (.int e)
+      | none => false) = true) ↔ valuesGet1 ys idx = some (.int e) := by
+  cases h : valuesGet1 ys idx with
+  | none => simp
+  | some v =>
+      cases v <;> simp [value_eqB_iff]
+
+/-- The Bool twin of `valuesGet1_intEqB_iff`. -/
+private theorem valuesGet1_boolEqB_iff (idx : Int) (ys : List Value)
+    (e : Bool) :
+    ((match valuesGet1 ys idx with
+      | some v => v.eqB (.bool e)
+      | none => false) = true) ↔ valuesGet1 ys idx = some (.bool e) := by
+  cases h : valuesGet1 ys idx with
+  | none => simp
+  | some v =>
+      cases v <;> simp [value_eqB_iff]
+
+/-- An `all` of `Option.isSome` reads is the pointwise existence of the
+    reads. -/
+private theorem all_isSome_iff {a : List Value} {is : List Nat} :
+    (is.all (fun j => (a[j]?).isSome) = true) ↔
+      ∀ j ∈ is, ∃ v, a[j]? = some v := by
+  rw [List.all_eq_true]
+  constructor
+  · intro h j hj
+    exact Option.isSome_iff_exists.mp (h j hj)
+  · intro h j hj
+    obtain ⟨v, hv⟩ := h j hj
+    rw [hv]
+    rfl
 
 private theorem dotProduct_match_eq_some (xs ys : List Value) (b : Int) :
     (match dotProduct xs ys with
@@ -1294,6 +1638,49 @@ private theorem dotProduct_match_eq_some (xs ys : List Value) (b : Int) :
   cases h : dotProduct xs ys with
   | none => simp
   | some d => simp
+
+/-- A reification-slot decision IS the truth-value agreement it
+    represents: `decide (rb = t)` holds exactly when `rb` is `true`
+    precisely if `t` is. -/
+private theorem decide_eq_bool_iff (rb t : Bool) :
+    decide (rb = t) = true ↔ (rb = true ↔ t = true) := by
+  cases rb <;> cases t <;> simp
+
+/-- The source form of a reified constraint — the disjunction "the
+    reification slot is `true` and the relation holds, or it is
+    `false` and the relation fails" — IS the truth-value agreement
+    `R ↔ P`.  This is the bridge between the FlatZinc `*_reif`
+    disjunction and the slot-agreement form of the `DomConstraint`
+    semantics. -/
+theorem reif_disj_iff (P : Prop) (rb : Bool) :
+    ((rb = true ∧ P) ∨ (rb = false ∧ ¬ P)) ↔ (rb = true ↔ P) := by
+  constructor
+  · rintro (⟨hrb, hP⟩ | ⟨hrb, hnP⟩)
+    · subst hrb
+      exact ⟨fun _ => hP, fun _ => rfl⟩
+    · subst hrb
+      exact ⟨fun hfalse => absurd hfalse (by simp), fun hP => absurd hP hnP⟩
+  · intro h
+    cases rb with
+    | true => exact Or.inl ⟨rfl, h.mp rfl⟩
+    | false =>
+        exact Or.inr ⟨rfl, fun hP => absurd (h.mpr hP) (by simp)⟩
+
+/-- `dotNe` unfolds to a decision on the dot product. -/
+theorem dotNe_eq (as_ xs : List Value) (b : Int) :
+    dotNe as_ xs b = true ↔ ∃ d, dotProduct as_ xs = some d ∧ d ≠ b := by
+  unfold dotNe
+  cases h : dotProduct as_ xs with
+  | none => simp
+  | some d =>
+      simp only [decide_eq_true_eq]
+      constructor
+      · intro hd
+        exact ⟨d, rfl, hd⟩
+      · rintro ⟨d', hd', hne⟩
+        have : d' = d := (Option.some.inj hd').symm
+        subst this
+        exact hne
 
 /-- `dotLe` unfolds to a decision on the dot product. -/
 theorem dotLe_eq (as_ xs : List Value) (b : Int) :
@@ -1580,6 +1967,8 @@ theorem DomConstraint.satisfiedB_iff (c : DomConstraint) (a : List Value) :
       exact dotProduct_match_eq_some (intVals coeffs) (is.map (fun i => a[i]!)) b
   | linLe coeffs is b =>
       simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+  | linNe coeffs is b =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
   | ltSlot i j =>
       simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
       cases hx : a[i]? with
@@ -1728,6 +2117,388 @@ theorem DomConstraint.satisfiedB_iff (c : DomConstraint) (a : List Value) :
                   | int w => simp
                   | setOfInt w => simp
                   | array w => simp
+  | boolClauseSlot ps ns =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy,
+        Bool.or_eq_true]
+  | arrayBoolAndSlot is k =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hz : a[k]? with
+      | none => simp
+      | some z =>
+          cases z with
+          | bool b =>
+              simp only [decide_eq_true_eq, Option.some.injEq, Value.bool.injEq]
+          | int w => simp
+          | setOfInt w => simp
+          | array w => simp
+  | bool2intSlot i k =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hx : a[i]? with
+      | none => simp
+      | some x =>
+          cases hz : a[k]? with
+          | none => simp
+          | some z =>
+              cases x with
+              | bool p =>
+                  cases z with
+                  | int q => cases p <;> simp_all
+                  | bool w => simp
+                  | setOfInt w => simp
+                  | array w => simp
+              | int w => simp
+              | setOfInt w => simp
+              | array w => simp
+  | boolEqSlot i j =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hx : a[i]? with
+      | none => simp
+      | some x =>
+          cases hy : a[j]? with
+          | none => simp
+          | some y =>
+              cases x with
+              | bool p =>
+                  cases y with
+                  | bool q => cases p <;> cases q <;> simp_all
+                  | int w => simp
+                  | setOfInt w => simp
+                  | array w => simp
+              | int w => simp
+              | setOfInt w => simp
+              | array w => simp
+  | arrayIntElementSlot xs i k =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hx : a[i]? with
+      | none => simp
+      | some x =>
+          cases hz : a[k]? with
+          | none => simp
+          | some z =>
+              cases x with
+              | int idx =>
+                  cases z with
+                  | int e =>
+                      rw [valuesGet1_intEqB_iff]
+                      refine ⟨fun h => ⟨idx, e, rfl, rfl, h⟩, ?_⟩
+                      rintro ⟨idx', e', h1, h2, hget⟩
+                      cases h1; cases h2
+                      exact hget
+                  | bool w => simp
+                  | setOfInt w => simp
+                  | array w => simp
+              | bool w => simp
+              | setOfInt w => simp
+              | array w => simp
+  | arrayVarIntElementSlot is i k =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hx : a[i]? with
+      | none => simp
+      | some x =>
+          cases hz : a[k]? with
+          | none => simp
+          | some z =>
+              cases x with
+              | int idx =>
+                  cases z with
+                  | int e =>
+                      simp only [all_isSome_iff, valuesGet1_intEqB_iff,
+                        Bool.and_eq_true, Option.some.injEq]
+                      refine ⟨fun ⟨hin, hget⟩ =>
+                        ⟨idx, e, rfl, rfl, hin, hget⟩, ?_⟩
+                      rintro ⟨idx', e', h1, h2, hin, hget⟩
+                      injection h1 with h1'; injection h2 with h2'
+                      subst h1'; subst h2'
+                      exact ⟨hin, hget⟩
+                  | bool w => simp
+                  | setOfInt w => simp
+                  | array w => simp
+              | bool w => simp
+              | setOfInt w => simp
+              | array w => simp
+  | arrayVarBoolElementSlot is i k =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hx : a[i]? with
+      | none => simp
+      | some x =>
+          cases hz : a[k]? with
+          | none => simp
+          | some z =>
+              cases x with
+              | int idx =>
+                  cases z with
+                  | bool e =>
+                      simp only [all_isSome_iff, valuesGet1_boolEqB_iff,
+                        Bool.and_eq_true, Option.some.injEq]
+                      refine ⟨fun ⟨hin, hget⟩ =>
+                        ⟨idx, e, rfl, rfl, hin, hget⟩, ?_⟩
+                      rintro ⟨idx', e', h1, h2, hin, hget⟩
+                      injection h1 with h1'; injection h2 with h2'
+                      subst h1'; subst h2'
+                      exact ⟨hin, hget⟩
+                  | int w => simp
+                  | setOfInt w => simp
+                  | array w => simp
+              | bool w => simp
+              | setOfInt w => simp
+              | array w => simp
+  | eqReifSlot i j r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hx : a[i]? with
+      | none => simp
+      | some x =>
+          cases hy : a[j]? with
+          | none => simp
+          | some y =>
+              cases hr : a[r]? with
+              | none => simp
+              | some rv =>
+                  cases rv with
+                  | bool rb =>
+                      cases x with
+                      | int p =>
+                          cases y with
+                          | int q =>
+                              rw [decide_eq_bool_iff, decide_eq_true_eq]
+                              refine ⟨fun h => ⟨p, q, rb, rfl, rfl, rfl, h⟩,
+                                ?_⟩
+                              rintro ⟨p', q', rb', h1, h2, h3, h⟩
+                              cases h1; cases h2; cases h3
+                              exact h
+                          | bool w => simp
+                          | setOfInt w => simp
+                          | array w => simp
+                      | bool w => simp
+                      | setOfInt w => simp
+                      | array w => simp
+                  | int w => simp
+                  | setOfInt w => simp
+                  | array w => simp
+  | leReifSlot i j r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hx : a[i]? with
+      | none => simp
+      | some x =>
+          cases hy : a[j]? with
+          | none => simp
+          | some y =>
+              cases hr : a[r]? with
+              | none => simp
+              | some rv =>
+                  cases rv with
+                  | bool rb =>
+                      cases x with
+                      | int p =>
+                          cases y with
+                          | int q =>
+                              rw [decide_eq_bool_iff, decide_eq_true_eq]
+                              refine ⟨fun h => ⟨p, q, rb, rfl, rfl, rfl, h⟩,
+                                ?_⟩
+                              rintro ⟨p', q', rb', h1, h2, h3, h⟩
+                              cases h1; cases h2; cases h3
+                              exact h
+                          | bool w => simp
+                          | setOfInt w => simp
+                          | array w => simp
+                      | bool w => simp
+                      | setOfInt w => simp
+                      | array w => simp
+                  | int w => simp
+                  | setOfInt w => simp
+                  | array w => simp
+  | neReifSlot i j r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hx : a[i]? with
+      | none => simp
+      | some x =>
+          cases hy : a[j]? with
+          | none => simp
+          | some y =>
+              cases hr : a[r]? with
+              | none => simp
+              | some rv =>
+                  cases rv with
+                  | bool rb =>
+                      cases x with
+                      | int p =>
+                          cases y with
+                          | int q =>
+                              rw [decide_eq_bool_iff, decide_eq_true_eq]
+                              refine ⟨fun h => ⟨p, q, rb, rfl, rfl, rfl, h⟩,
+                                ?_⟩
+                              rintro ⟨p', q', rb', h1, h2, h3, h⟩
+                              cases h1; cases h2; cases h3
+                              exact h
+                          | bool w => simp
+                          | setOfInt w => simp
+                          | array w => simp
+                      | bool w => simp
+                      | setOfInt w => simp
+                      | array w => simp
+                  | int w => simp
+                  | setOfInt w => simp
+                  | array w => simp
+  | linEqReif coeffs is b r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hr : a[r]? with
+      | none => simp
+      | some rv =>
+          cases rv with
+          | bool rb =>
+              rw [decide_eq_bool_iff, dotProduct_match_eq_some]
+              refine ⟨fun h => ⟨rb, rfl, h⟩, ?_⟩
+              rintro ⟨rb', h1, h⟩
+              cases h1
+              exact h
+          | int w => simp
+          | setOfInt w => simp
+          | array w => simp
+  | linLeReif coeffs is b r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hr : a[r]? with
+      | none => simp
+      | some rv =>
+          cases rv with
+          | bool rb =>
+              rw [decide_eq_bool_iff]
+              refine ⟨fun h => ⟨rb, rfl, h⟩, ?_⟩
+              rintro ⟨rb', h1, h⟩
+              cases h1
+              exact h
+          | int w => simp
+          | setOfInt w => simp
+          | array w => simp
+  | linNeReif coeffs is b r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hr : a[r]? with
+      | none => simp
+      | some rv =>
+          cases rv with
+          | bool rb =>
+              rw [decide_eq_bool_iff]
+              refine ⟨fun h => ⟨rb, rfl, h⟩, ?_⟩
+              rintro ⟨rb', h1, h⟩
+              cases h1
+              exact h
+          | int w => simp
+          | setOfInt w => simp
+          | array w => simp
+  | maxGen os r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hr : DomIntArg.read a r with
+      | int m =>
+          rw [decide_eq_true_eq]
+          constructor
+          · intro h
+            exact ⟨m, rfl, h⟩
+          · rintro ⟨m', hm', h⟩
+            have hm : m = m' := by injection hm' with hmi
+            subst hm
+            exact h
+      | bool w => simp [hr]
+      | setOfInt w => simp [hr]
+      | array w => simp [hr]
+  | minGen os r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases hr : DomIntArg.read a r with
+      | int m =>
+          rw [decide_eq_true_eq]
+          constructor
+          · intro h
+            exact ⟨m, rfl, h⟩
+          · rintro ⟨m', hm', h⟩
+            have hm : m = m' := by injection hm' with hmi
+            subst hm
+            exact h
+      | bool w => simp [hr]
+      | setOfInt w => simp [hr]
+      | array w => simp [hr]
+  | divGen o₁ o₂ r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases h₁ : DomIntArg.read a o₁ with
+      | int p =>
+          cases h₂ : DomIntArg.read a o₂ with
+          | int q =>
+              rw [Bool.and_eq_true, decide_eq_true_eq, value_eqB_iff]
+              constructor
+              · rintro ⟨hq, hr⟩
+                exact ⟨p, q, rfl, rfl, hq, hr⟩
+              · rintro ⟨p', q', hp', hq'', hq, hr⟩
+                have hpv : p' = p := by injection hp' with hpi; exact hpi.symm
+                have hqv : q' = q := by injection hq'' with hqi; exact hqi.symm
+                rw [hqv] at hq
+                rw [hpv, hqv] at hr
+                exact ⟨hq, hr⟩
+          | bool w => simp [h₁, h₂]
+          | setOfInt w => simp [h₁, h₂]
+          | array w => simp [h₁, h₂]
+      | bool w => simp [h₁]
+      | setOfInt w => simp [h₁]
+      | array w => simp [h₁]
+  | modGen o₁ o₂ r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases h₁ : DomIntArg.read a o₁ with
+      | int p =>
+          cases h₂ : DomIntArg.read a o₂ with
+          | int q =>
+              rw [Bool.and_eq_true, decide_eq_true_eq, value_eqB_iff]
+              constructor
+              · rintro ⟨hq, hr⟩
+                exact ⟨p, q, rfl, rfl, hq, hr⟩
+              · rintro ⟨p', q', hp', hq'', hq, hr⟩
+                have hpv : p' = p := by injection hp' with hpi; exact hpi.symm
+                have hqv : q' = q := by injection hq'' with hqi; exact hqi.symm
+                rw [hqv] at hq
+                rw [hpv, hqv] at hr
+                exact ⟨hq, hr⟩
+          | bool w => simp [h₁, h₂]
+          | setOfInt w => simp [h₁, h₂]
+          | array w => simp [h₁, h₂]
+      | bool w => simp [h₁]
+      | setOfInt w => simp [h₁]
+      | array w => simp [h₁]
+  | minPair o₀ o₁ r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases h₁ : DomIntArg.read a o₀ with
+      | int p =>
+          cases h₂ : DomIntArg.read a o₁ with
+          | int q =>
+              rw [value_eqB_iff]
+              constructor
+              · intro hr
+                exact ⟨p, q, rfl, rfl, hr⟩
+              · rintro ⟨p', q', hp', hq'', hr⟩
+                have hpv : p' = p := by injection hp' with hpi; exact hpi.symm
+                have hqv : q' = q := by injection hq'' with hqi; exact hqi.symm
+                rw [hpv, hqv] at hr
+                exact hr
+          | bool w => simp [h₁, h₂]
+          | setOfInt w => simp [h₁, h₂]
+          | array w => simp [h₁, h₂]
+      | bool w => simp [h₁]
+      | setOfInt w => simp [h₁]
+      | array w => simp [h₁]
+  | maxPair o₀ o₁ r =>
+      simp only [DomConstraint.satisfiedB, DomConstraint.SatisfiedBy]
+      cases h₁ : DomIntArg.read a o₀ with
+      | int p =>
+          cases h₂ : DomIntArg.read a o₁ with
+          | int q =>
+              rw [value_eqB_iff]
+              constructor
+              · intro hr
+                exact ⟨p, q, rfl, rfl, hr⟩
+              · rintro ⟨p', q', hp', hq'', hr⟩
+                have hpv : p' = p := by injection hp' with hpi; exact hpi.symm
+                have hqv : q' = q := by injection hq'' with hqi; exact hqi.symm
+                rw [hpv, hqv] at hr
+                exact hr
+          | bool w => simp [h₁, h₂]
+          | setOfInt w => simp [h₁, h₂]
+          | array w => simp [h₁, h₂]
+      | bool w => simp [h₁]
+      | setOfInt w => simp [h₁]
+      | array w => simp [h₁]
 
 /-- `neSlot` is symmetric in its two positions. -/
 theorem DomConstraint.satisfiedBy_neSlot_comm (i j : Nat) (a : List Value) :
@@ -2845,13 +3616,13 @@ theorem propLeConstLo_preserves (i : Nat) (c : Int) :
 /-- The slots of `is` that are in range of `doms`: out-of-range
     positions read no value in any assignment, so only the in-range
     ones demand distinct values of the union. -/
-private def inRangeSlots (doms : List (List Value)) (is : List Nat) : List Nat :=
+def inRangeSlots (doms : List (List Value)) (is : List Nat) : List Nat :=
   is.filter (fun i => decide (i < doms.length))
 
 /-- The number of distinct values in the union of the domains of the
     slots `is` (the deduplicated concatenation, first occurrence
     kept). -/
-private def distinctUnionVals (doms : List (List Value)) (is : List Nat) : List Value :=
+def distinctUnionVals (doms : List (List Value)) (is : List Nat) : List Value :=
   dedupVals (is.flatMap (getSlot doms))
 
 /-- **The all-different propagator** (`all_different` style over a
@@ -2867,6 +3638,34 @@ def propAllDiff (is : List Nat) (doms : List (List Value)) : PropResult :=
     .contradiction
   else
     .narrowed doms
+
+/-- **The pigeonhole bound, membership form**: if an assignment satisfies
+    the pairwise-distinctness and reads, at every in-range slot, a value of
+    the deduplicated union, then the in-range slots are at most as many as
+    the union's distinct values. (The `allAssigns` form below derives the
+    membership from the domains; this form is what the Hall-clause
+    entailment needs, where the membership is DERIVED from the clause's
+    falsity instead.) -/
+theorem allDiff_pigeonhole_of_mem {doms : List (List Value)} {is : List Nat}
+    {a : List Value}
+    (hsat : DomConstraint.SatisfiedBy (DomConstraint.allDiff is) a)
+    (hmem : ∀ i ∈ inRangeSlots doms is, a[i]! ∈ distinctUnionVals doms is) :
+    (inRangeSlots doms is).length ≤ (distinctUnionVals doms is).length := by
+  have hmem' : ∀ (x : Value), x ∈ (inRangeSlots doms is).map (fun i => a[i]!) →
+      x ∈ distinctUnionVals doms is := by
+    intro x hx
+    obtain ⟨i, hi, hxi⟩ := List.mem_map.mp hx
+    rw [← hxi]
+    exact hmem i hi
+  have hnd : ((inRangeSlots doms is).map (fun i => a[i]!)).Nodup := by
+    have hfilt : inRangeSlots doms is <+ is := List.filter_sublist
+    have hsub : (inRangeSlots doms is).map (fun i => a[i]!) <+
+        is.map (fun i => a[i]!) := List.Sublist.map _ hfilt
+    exact List.Nodup.sublist hsub hsat
+  have hwnd : (distinctUnionVals doms is).Nodup := nodup_dedupVals _
+  have hle := nodup_subset_length_le _ _ hnd hmem' hwnd
+  rw [List.length_map] at hle
+  exact hle
 
 /-- **The pigeonhole bound**: if a complete assignment of `doms`
     makes the values read at the slots of `is` pairwise distinct, then

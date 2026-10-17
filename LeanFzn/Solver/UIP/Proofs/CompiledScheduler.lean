@@ -124,6 +124,13 @@ theorem leaf_clauses (hin : CompiledInput leaf problem) (c : Clause)
     List.any_eq_true.mp (List.all_eq_true.mp ha.2.2 c hc)
   exact ⟨l, hl, of_decide_eq_true hev⟩
 
+/-- The gate's shape-typing invariant (every domain holds only integers or
+only Booleans), DERIVED from `domPruningOkB`: the premise under which the
+explained `neSlot`/`allDiff` conflict clauses are entailed. -/
+theorem shapeTypedDomains (hin : CompiledInput leaf problem) :
+    DomsShapeTyped problem.domains :=
+  domPruningOk_shape hin.pruning
+
 /-- The certified propagation contract, transported from the executable
 kit gate (`domPropagationContract`): the registered proved propagators of
 the compiled problem discharge A2's `PropagationContract`. No
@@ -149,6 +156,7 @@ theorem closureContract_of_provenance (hin : CompiledInput leaf problem)
     ClosureContract leaf problem.domains problem.clauses
       (problem.constraints.filterMap propagatorOfProved) :=
   domExplainedContract_of_provenance hin.leaf_clauses hin.intViewedDomains
+    hin.shapeTypedDomains (fun _ ha => hin.leaf_fits ha)
     hin.propagationContract
     (propagatorEvidence_unit problem.constraints hSupp)
     (fun _ _ hu => hshape_of_unitLearned hu)
@@ -165,7 +173,8 @@ theorem closureContract_of_discipline (hin : CompiledInput leaf problem)
     ClosureContract leaf problem.domains problem.clauses
       (problem.constraints.filterMap propagatorOfProved) :=
   domExplainedContract_of_problem problem hin.propagationContract hSupp
-    hin.leaf_clauses hin.intViewedDomains hDisc
+    hin.leaf_clauses hin.intViewedDomains hin.shapeTypedDomains
+    (fun _ ha => hin.leaf_fits ha) hDisc
 
 /-- THE SHAPE-FREE E1 CONTRACT EXPORT (D0): `hShape` is GONE — it is
 discharged by L1's `unitShape_of_provenance` (`unit_shape_pivot`), at the
@@ -191,6 +200,7 @@ theorem closureContract_of_reachable (hin : CompiledInput leaf problem)
     ClosureContract leaf problem.domains problem.clauses
       (problem.constraints.filterMap propagatorOfProved) :=
   domExplainedContract_of_provenance' hin.leaf_clauses hin.intViewedDomains
+    hin.shapeTypedDomains (fun _ ha => hin.leaf_fits ha)
     hin.propagationContract
     (propagatorEvidence_unit problem.constraints hSupp)
     (fun bs hreach => hprov bs hreach)
@@ -257,7 +267,7 @@ theorem rootFactsBridge_of_explainedClosure {leaf : Assignment → Bool}
     (hinhab : ReachableFrameInhabited leaf
       (ReachableState leaf problem.domains)) :
     RootFactsBridge leaf
-      (explainedClosure problem.clauses
+      (explainedClosure problem.domains problem.clauses
         (problem.constraints.filterMap propagatorOfProved)
         (BranchState.init (problem.domains, []))) :=
   rootFactsBridge_of_represents fun a ha =>
@@ -301,13 +311,15 @@ def CompiledScheduler (leaf : Assignment → Bool)
 
 /-- THE INITIALISER WITNESS (S0 instantiated at a real compiled problem):
 the concrete configuration satisfies the full scheduler invariant. NO
-premises: the frontier is the real `[(orig, [])]`, the learned database
-is empty, the pending list is empty. -/
+premises beyond the entailment of the problem's original clauses (R1c: they
+seed the scanned database; vacuous for the compiled `clauses = []`): the
+frontier is the real `[(orig, [])]`, the pending list is empty. -/
 theorem compiledScheduler_invariant (leaf : Assignment → Bool)
-    (problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit) :
+    (problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit)
+    (hent : LearnedEntailed leaf problem.clauses) :
     SchedulerInvariant (CompiledScheduler leaf problem) :=
   schedulerInvariant_init leaf problem.domains problem.clauses
-    (problem.constraints.filterMap propagatorOfProved)
+    (problem.constraints.filterMap propagatorOfProved) hent
 
 /-- The initialiser's root-facts bridge (vacuous trail). -/
 theorem compiledScheduler_rootFacts (leaf : Assignment → Bool)
@@ -318,18 +330,20 @@ theorem compiledScheduler_rootFacts (leaf : Assignment → Bool)
 /-- The initialiser's coverage obligation, extracted from the invariant —
 the non-vacuity half C3b's `unsat_outcome_coverage` consumes. -/
 theorem compiledScheduler_coverage (leaf : Assignment → Bool)
-    (problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit) :
+    (problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit)
+    (hent : LearnedEntailed leaf problem.clauses) :
     (CompiledScheduler leaf problem).coverage :=
-  (compiledScheduler_invariant leaf problem).coverage
+  (compiledScheduler_invariant leaf problem hent).coverage
 
 /-- The initialiser's learned-database entailment: the database is empty,
 so `LearnedEntailed` holds without any chronology or entailment premise.
 (`hlent` is never a public hypothesis of this package.) -/
 theorem compiledScheduler_learned_entailed (leaf : Assignment → Bool)
-    (problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit) :
+    (problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit)
+    (hent : LearnedEntailed leaf problem.clauses) :
     ∀ c ∈ (CompiledScheduler leaf problem).branch.learned,
       LearnedEntailed leaf [c] :=
-  (compiledScheduler_invariant leaf problem).learned_entailed
+  (compiledScheduler_invariant leaf problem hent).learned_entailed
 
 /-- THE BUNDLE FROM THE EXECUTABLE GATES (D0): the two executable checks
 (`gateOk`, `domPruningOkB`) plus the problem→leaf identification ARE the
@@ -361,11 +375,13 @@ theorem initialPackage_of_gates {leaf : Assignment → Bool}
       (∀ c ∈ (CompiledScheduler leaf problem).branch.learned,
         LearnedEntailed leaf [c]) ∧
       (∀ d ∈ problem.domains, IntViewedDomain d) :=
-  ⟨compiledScheduler_invariant leaf problem,
+  have hin := compiledInput_of_gates hleaf hgate hprune
+  have hent : LearnedEntailed leaf problem.clauses := hin.leaf_clauses
+  ⟨compiledScheduler_invariant leaf problem hent,
    compiledScheduler_rootFacts leaf problem,
-   compiledScheduler_coverage leaf problem,
-   compiledScheduler_learned_entailed leaf problem,
-   (compiledInput_of_gates hleaf hgate hprune).intViewedDomains⟩
+   compiledScheduler_coverage leaf problem hent,
+   compiledScheduler_learned_entailed leaf problem hent,
+   hin.intViewedDomains⟩
 
 /-! ## §5 The Int pin bridge (`hpin` of C2a's decide theorem) -/
 
@@ -558,12 +574,15 @@ example : CompiledInput famAllDiffLeaf famAllDiff :=
 unconditionally (no premises at all). -/
 example : SchedulerInvariant (CompiledScheduler famUnitLeaf famUnit) :=
   compiledScheduler_invariant famUnitLeaf famUnit
+    (⟨rfl, gateOk_famUnit, pruningOk_famUnit⟩ : CompiledInput famUnitLeaf famUnit).leaf_clauses
 
 example : SchedulerInvariant (CompiledScheduler famBoolLeaf famBool) :=
   compiledScheduler_invariant famBoolLeaf famBool
+    (⟨rfl, gateOk_famBool, pruningOk_famBool⟩ : CompiledInput famBoolLeaf famBool).leaf_clauses
 
 example : SchedulerInvariant (CompiledScheduler famAllDiffLeaf famAllDiff) :=
   compiledScheduler_invariant famAllDiffLeaf famAllDiff
+    (⟨rfl, gateOk_famAllDiff, pruningOk_famAllDiff⟩ : CompiledInput famAllDiffLeaf famAllDiff).leaf_clauses
 
 /-- The compiled leaf→fits bridge on a representative input, from the
 bundle alone. -/
@@ -634,7 +653,7 @@ example (hprov : ReachableLearnedProvenance famUnitLeaf
     (hinhab : ReachableFrameInhabited famUnitLeaf
       (ReachableState famUnitLeaf famUnit.domains)) :
     RootFactsBridge famUnitLeaf
-      (explainedClosure famUnit.clauses
+      (explainedClosure famUnit.domains famUnit.clauses
         (famUnit.constraints.filterMap propagatorOfProved)
         (BranchState.init (famUnit.domains, []))) :=
   rootFactsBridge_of_explainedClosure

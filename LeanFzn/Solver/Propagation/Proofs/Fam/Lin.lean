@@ -119,6 +119,7 @@ DAG:
 
 
 import LeanFzn.Solver.Propagation.Proofs.ConstFamilies
+import LeanFzn.Solver.Propagation.Proofs.Fam.Bool
 import LeanFzn.Solver.Propagation.Proofs.Theory
 import LeanFzn.Solver.Propagation.Propagate
 import LeanFzn.Solver.Propagation.Encoding
@@ -4682,5 +4683,2613 @@ Every theorem above uses only the standard axioms. -/
 #print axioms lin2_causesMin_false_of_fits
 #print axioms lin2_causesMax_false_of_fits
 #print axioms propagatorOfProvedBLin
+
+
+/-! ## L1a: the pinned `int_lin_le_reif` delegation -/
+
+/-- An integer-only domain guard: no Boolean value can be read. -/
+def domIntOnlyB (d : List Value) : Bool :=
+  d.all (fun v => match v with | .int _ => true | _ => false)
+
+/-- The integer-only operand guard of a linear constraint: every operand
+    slot is in range, has a nonempty domain, and its domain holds only
+    integers. -/
+def domsIntOnlyB (doms : List Domain) (is : List Nat) : Bool :=
+  is.all (fun i => decide (i < doms.length) && decide (0 < (doms.getD i []).length)
+    && domIntOnlyB (doms.getD i []))
+
+/-- The delegation escape of the `r = true` direction: the reified fact is
+    true only when the slot reads `true`, so `r = false` refutes the whole
+    delegated nogood. -/
+def linLeReifEscTrue (r : Nat) : Clause := [posBool r false]
+
+/-- The delegation escapes of the `r = false` direction: `r = true`, plus,
+    for every operand slot, the two Boolean-value literals — one of which is
+    true exactly when the slot reads a Boolean. -/
+def linLeReifEscFalse (is : List Nat) (r : Nat) : Clause :=
+  posBool r true :: is.flatMap (fun i => [posBool i false, posBool i true])
+
+/-- Insert `extras` after the head of a clause (the head is the pivot of the
+    emission and stays first; an empty clause holds the extras alone). -/
+def insertAfterHead (extras : Clause) : Clause → Clause
+  | [] => extras
+  | h :: t => h :: (extras ++ t)
+
+/-- Augment every emitted clause of a result with `extras` (after its
+    head). -/
+def augmentRes (extras : Clause) : PropagationResult → PropagationResult
+  | .stable => .stable
+  | .implied l rs => .implied l { clause := insertAfterHead extras rs.clause }
+  | .conflict c => .conflict (insertAfterHead extras c)
+
+/-- Drop implied emissions, keep conflicts. The `r = false` direction emits
+    conflicts only: its bound implications need a reason contract that
+    relates the state box's slot count to the problem box's (see PLAN L1a);
+    its conflicts are entitled at faithful solutions alone. -/
+def conflictsOnly : PropagationResult → PropagationResult
+  | .stable => .stable
+  | .implied _ _ => .stable
+  | .conflict c => .conflict c
+
+/-! ## L1b: the unpinned bounds-decide-`b` arm (machinery) -/
+
+def domBoolOnlyB (d : List Value) : Bool :=
+  decide (0 < d.length) && d.all (fun v => match v with | .bool _ => true | _ => false)
+
+theorem domBoolOnlyB_eq {d : List Value} (h : domBoolOnlyB d = true) :
+    0 < d.length ∧ ∀ v ∈ d, ∃ b : Bool, v = .bool b := by
+  rw [domBoolOnlyB, Bool.and_eq_true] at h
+  exact ⟨of_decide_eq_true h.1, by
+    intro v hv
+    have hv' := List.all_eq_true.mp h.2 v hv
+    cases v with
+    | bool b => exact ⟨b, rfl⟩
+    | int k => exact absurd hv' (by simp)
+    | setOfInt s => exact absurd hv' (by simp)
+    | array a => exact absurd hv' (by simp)⟩
+
+/-- The operand Boolean-value escapes of the bounds-decide-`b` arm. -/
+def linLeReifEscB (is : List Nat) : Clause :=
+  is.flatMap (fun i => [posBool i false, posBool i true])
+
+/-- The bounds-decide-`b` arm: when the reif slot is unpinned (and
+    Boolean-valued) and the operand domains are integer-only with complete
+    extrema, an exceeding max-contribution sum pins the reif slot to `true`. -/
+def propLinLeReifB (st : State) (coeffs : List Int) (is : List Nat) (b : Int)
+    (r : Nat) : PropagationResult :=
+  if (domBoolPin st.domains r true || domBoolPin st.domains r false) = true then .stable
+  else if (domBoolOnlyB (st.domains.getD r []) && is.all (fun i => decide (i ≠ r))
+      && domsIntOnlyB st.domains is) = true then
+    if ((coeffs.zip is).all (fun p => (minContrib st p).isSome)) = true then
+      match sumMax st (coeffs.zip is) with
+      | some hr => if hr ≤ b then
+          .implied (posBool r true)
+            { clause := posBool r true
+                :: (linLeReifEscB is ++ linCausesMax st (coeffs.zip is)) }
+        else .stable
+      | none => .stable
+    else .stable
+  else .stable
+
+theorem propLinLeReifB_emission_inv {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {res : PropagationResult}
+    (h : propLinLeReifB st coeffs is b r = res) :
+    res = .stable ∨
+    ((domBoolPin st.domains r true || domBoolPin st.domains r false) = false ∧
+     domBoolOnlyB (st.domains.getD r []) = true ∧
+     (is.all (fun i => decide (i ≠ r))) = true ∧
+     domsIntOnlyB st.domains is = true ∧
+     (∀ p ∈ coeffs.zip is, (minContrib st p).isSome = true) ∧
+     ∃ hr, sumMax st (coeffs.zip is) = some hr ∧ hr ≤ b ∧
+       res = .implied (posBool r true)
+         { clause := posBool r true
+             :: (linLeReifEscB is ++ linCausesMax st (coeffs.zip is)) }) := by
+  unfold propLinLeReifB at h
+  by_cases h1 : (domBoolPin st.domains r true || domBoolPin st.domains r false) = true
+  · rw [if_pos h1] at h
+    exact Or.inl h.symm
+  · rw [if_neg h1] at h
+    by_cases h2 : (domBoolOnlyB (st.domains.getD r [])
+        && is.all (fun i => decide (i ≠ r))
+        && domsIntOnlyB st.domains is) = true
+    · rw [if_pos h2] at h
+      have h2' := h2
+      simp only [Bool.and_eq_true] at h2'
+      obtain ⟨⟨hb, hne⟩, hi⟩ := h2'
+      by_cases h3 : ((coeffs.zip is).all (fun p => (minContrib st p).isSome)) = true
+      · rw [if_pos h3] at h
+        cases hsm : sumMax st (coeffs.zip is) with
+        | none => simp only [hsm] at h; exact Or.inl h.symm
+        | some hr =>
+            simp only [hsm] at h
+            by_cases h4 : hr ≤ b
+            · rw [if_pos h4] at h
+              exact Or.inr ⟨Bool.eq_false_iff.mpr h1, hb, hne, hi,
+                fun p hp => List.all_eq_true.mp h3 p hp, hr, rfl, h4, h.symm⟩
+            · rw [if_neg h4] at h
+              exact Or.inl h.symm
+      · rw [if_neg h3] at h
+        exact Or.inl h.symm
+    · rw [if_neg h2] at h
+      exact Or.inl h.symm
+
+/-- The bounds arm never reports a conflict (its emission is `.stable` or an
+    implied pin). -/
+theorem propLinLeReifB_ne_conflict {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {c : Clause}
+    (h : propLinLeReifB st coeffs is b r = .conflict c) : False := by
+  rcases propLinLeReifB_emission_inv h with hst | ⟨-, -, -, -, -, hr, hsum, hle, hres⟩
+  · cases hst
+  · cases hres
+
+/-! ## The max-contribution sum bounds a fitting assignment's dot -/
+
+theorem slotInt_of_getElem_int {a : Assignment} {i : Nat} {x : Int}
+    (h : a[i]! = .int x) : slotInt a i = some x := by
+  show a[i]?.bind Value.intView = some x
+  by_cases hlt : i < a.length
+  · have hread : a[i]? = some a[i] := List.getElem?_eq_getElem hlt
+    have hget : a[i]! = a[i] := by
+      rw [List.getElem!_eq_getElem?_getD, hread]; rfl
+    rw [hget] at h
+    rw [hread, h]
+    rfl
+  · have hnone : a[i]? = none := List.getElem?_eq_none_iff.mpr (by omega)
+    have hdef : a[i]! = (default : Value) := by
+      rw [List.getElem!_eq_getElem?_getD, hnone]; rfl
+    rw [hdef] at h
+    rw [show (default : Value) = Value.bool false from rfl] at h
+    cases h
+
+theorem sumMax_exists_of_all {st : State} :
+    ∀ {pairs : List (Int × Nat)}, pairs ≠ [] →
+    (∀ p ∈ pairs, (minContrib st p).isSome = true) →
+      ∃ s, sumMax st pairs = some s
+  | [], hne, _ => absurd rfl hne
+  | (c, i) :: rest, _, hall => by
+      have hc : (maxContrib st (c, i)).isSome = true :=
+        maxContrib_isSome_of_minContrib (hall (c, i) (List.mem_cons_self))
+      have hrest : ∀ q ∈ rest, (minContrib st q).isSome = true :=
+        fun q hq => hall q (List.mem_cons_of_mem _ hq)
+      cases hmax : maxContrib st (c, i) with
+      | none => rw [hmax] at hc; exact absurd hc (by simp)
+      | some t =>
+          by_cases hne : rest = []
+          · subst hne
+            exact ⟨t.2.2, by simp only [sumMax, hmax]⟩
+          · obtain ⟨s', hs'⟩ := sumMax_exists_of_all hne hrest
+            exact ⟨s' + t.2.2, by simp only [sumMax, hmax, hs']⟩
+
+/-- The max-contribution sum bounds a fitting assignment's dot (with the
+    assignment's reads known to be integers). -/
+theorem dotOver_le_sumMax {st : State} {a : Assignment}
+    {pairs : List (Int × Nat)}
+    (hne : pairs ≠ [])
+    (hfit : Assignment.Fits st.domains a)
+    (hall : ∀ p ∈ pairs, (minContrib st p).isSome = true)
+    (hreads : ∀ p ∈ pairs, ∃ x : Int, a[p.2]! = .int x) :
+    ∃ s, sumMax st pairs = some s ∧
+      ∀ d, dotOver pairs a 0 = some d → d ≤ s := by
+  induction pairs with
+  | nil => exact absurd rfl hne
+  | cons p rest ih =>
+      obtain ⟨c, i⟩ := p
+      have hc : (minContrib st (c, i)).isSome = true :=
+        hall (c, i) (List.mem_cons_self)
+      have hrest : ∀ q ∈ rest, (minContrib st q).isSome = true :=
+        fun q hq => hall q (List.mem_cons_of_mem _ hq)
+      have hrreads : ∀ q ∈ rest, ∃ x : Int, a[q.2]! = .int x :=
+        fun q hq => hreads q (List.mem_cons_of_mem _ hq)
+      have hmaxsome : (maxContrib st (c, i)).isSome = true :=
+        maxContrib_isSome_of_minContrib hc
+      cases hmax : maxContrib st (c, i) with
+      | none => rw [hmax] at hmaxsome; exact absurd hmaxsome (by simp)
+      | some t =>
+          obtain ⟨mn, mx, hmn, hmx, ht⟩ := maxContrib_inv hmax
+          obtain ⟨x, hx⟩ := hreads (c, i) (List.mem_cons_self)
+          have hslot : slotInt a i = some x := slotInt_of_getElem_int hx
+          have hxb : x ≤ mx := fits_max_bound hfit hmx hslot
+          have hxb2 : mn ≤ x := fits_min_bound hfit hmn hslot
+          have hterm : c * x ≤ t.2.2 := by
+            rw [ht]
+            by_cases hcpos : c ≥ 0
+            · rw [if_pos hcpos]
+              exact Int.mul_le_mul_of_nonneg_left hxb hcpos
+            · rw [if_neg hcpos]
+              exact Int.mul_le_mul_of_nonpos_left (by omega) hxb2
+          by_cases hne : rest = []
+          · subst hne
+            refine ⟨t.2.2, by simp only [sumMax, hmax], ?_⟩
+            intro d hd
+            simp only [dotOver, hx] at hd
+            injection hd with hd
+            have hd' : d = 0 + c * x := hd.symm
+            omega
+          · obtain ⟨s', hs', hle'⟩ := ih hne hrest hrreads
+            refine ⟨s' + t.2.2, by simp only [sumMax, hmax, hs'], ?_⟩
+            intro d hd
+            simp only [dotOver, hx] at hd
+            rw [dotOver_shift] at hd
+            cases hd2 : dotOver rest a 0 with
+            | none => rw [hd2] at hd; cases hd
+            | some d' =>
+                rw [hd2] at hd
+                injection hd with hd
+                have hd' : d = d' + c * x := by simpa using hd.symm
+                have hrestle : d' ≤ s' := hle' d' hd2
+                omega
+
+/-! ## The cause-false max-contribution bound (PLAN L1b)
+
+The bounds arm's reason obligation needs the max-contribution sum to
+bound the dot at a solution where every emitted max-cause literal is
+FALSE (the state box need not contain the solution: the cause literals
+are exactly its bound facts). -/
+
+/-- A pair's term is bounded by its max-contribution when its max-cause is
+    false at the assignment and the pair's read is the recorded integer. -/
+theorem mul_le_maxContrib_of_cause_false {st : State} {p : Int × Nat}
+    {a : Assignment} {x : Int} {t : Nat × Int × Int}
+    (hslot : slotInt a p.2 = some x)
+    (hmin : (minContrib st p).isSome = true)
+    (hmax : maxContrib st p = some t)
+    (hfalse : ∀ q, linCauseMaxPair st p = some q → q.eval a = some false) :
+    p.1 * x ≤ t.2.2 := by
+  obtain ⟨mn, mx, hmn, hmx⟩ : ∃ mn mx,
+      domMinI (st.domains.getD p.2 []) = some mn ∧
+      domMaxI (st.domains.getD p.2 []) = some mx := by
+    cases hc : minContrib st p with
+    | none => rw [hc] at hmin; exact absurd hmin (by simp)
+    | some t0 =>
+        obtain ⟨mn, mx, hmn, hmx, -⟩ := minContrib_inv hc
+        exact ⟨mn, mx, hmn, hmx⟩
+  obtain ⟨mn', mx', hmn', hmx', ht⟩ := maxContrib_inv hmax
+  have hmn2 : mn' = mn := Option.some.inj (hmn'.symm.trans hmn)
+  have hmx2 : mx' = mx := Option.some.inj (hmx'.symm.trans hmx)
+  rw [ht]
+  show p.1 * x ≤ if p.1 ≥ 0 then p.1 * mx' else p.1 * mn'
+  by_cases hpos : p.1 > 0
+  · rw [if_pos (by omega : p.1 ≥ 0)]
+    have hcause : linCauseMaxPair st p = some (negLe p.2 mx') := by
+      unfold linCauseMaxPair
+      rw [if_pos hpos, hmx']
+      rfl
+    have hq := hfalse _ hcause
+    have hx : x ≤ mx' := by
+      by_cases hle : x ≤ mx'
+      · exact hle
+      · have htrue : (negLe p.2 mx').eval a = some true := by
+          rw [eval_negLe, hslot]
+          show Option.map (fun i => !(decide (i ≤ mx'))) (some x) = some true
+          rw [show Option.map (fun i => !(decide (i ≤ mx'))) (some x)
+                = some (!(decide (x ≤ mx'))) from rfl, decide_eq_false hle]
+          rfl
+        rw [htrue] at hq
+        exact absurd hq (by simp)
+    exact Int.mul_le_mul_of_nonneg_left hx (by omega)
+  · by_cases hzero : p.1 = 0
+    · rw [if_pos (by omega : p.1 ≥ 0), hzero]
+      show (0 : Int) * x ≤ 0 * mx'
+      omega
+    · have hneg : p.1 < 0 := by omega
+      rw [if_neg (by omega : ¬ p.1 ≥ 0)]
+      have hcause : linCauseMaxPair st p = some (posLe p.2 (mn' - 1)) := by
+        unfold linCauseMaxPair
+        rw [if_neg (by omega : ¬ p.1 > 0), if_pos hneg, hmn']
+        rfl
+      have hq := hfalse _ hcause
+      have hx : x ≥ mn' := by
+        by_cases hle : x ≤ mn' - 1
+        · have htrue : (posLe p.2 (mn' - 1)).eval a = some true := by
+            rw [eval_posLe, hslot]
+            show Option.map (fun i => decide (i ≤ mn' - 1)) (some x) = some true
+            rw [show Option.map (fun i => decide (i ≤ mn' - 1)) (some x)
+                  = some (decide (x ≤ mn' - 1)) from rfl, decide_eq_true hle]
+          rw [htrue] at hq
+          exact absurd hq (by simp)
+        · omega
+      exact Int.mul_le_mul_of_nonpos_left (by omega : p.1 ≤ 0) hx
+
+/-- The max-contribution sum bounds a dot whose reads are integers and whose
+    max-causes are all false at the assignment (the cause-false twin of
+    `dotOver_le_sumMax`). -/
+theorem dotOver_le_sumMax_of_causes_false {st : State} {a : Assignment}
+    {pairs : List (Int × Nat)}
+    (hne : pairs ≠ [])
+    (hall : ∀ p ∈ pairs, (minContrib st p).isSome = true)
+    (hreads : ∀ p ∈ pairs, ∃ x : Int, a[p.2]! = .int x)
+    (hcauses : ∀ q ∈ linCausesMax st pairs, q.eval a = some false) :
+    ∃ s, sumMax st pairs = some s ∧
+      ∀ d, dotOver pairs a 0 = some d → d ≤ s := by
+  induction pairs with
+  | nil => exact absurd rfl hne
+  | cons p rest ih =>
+      obtain ⟨c, i⟩ := p
+      have hc : (minContrib st (c, i)).isSome = true :=
+        hall (c, i) (List.mem_cons_self)
+      have hrest : ∀ q ∈ rest, (minContrib st q).isSome = true :=
+        fun q hq => hall q (List.mem_cons_of_mem _ hq)
+      have hrreads : ∀ q ∈ rest, ∃ x : Int, a[q.2]! = .int x :=
+        fun q hq => hreads q (List.mem_cons_of_mem _ hq)
+      have hmaxsome : (maxContrib st (c, i)).isSome = true :=
+        maxContrib_isSome_of_minContrib hc
+      cases hmax : maxContrib st (c, i) with
+      | none => rw [hmax] at hmaxsome; exact absurd hmaxsome (by simp)
+      | some t =>
+          obtain ⟨x, hx⟩ := hreads (c, i) (List.mem_cons_self)
+          have hslot : slotInt a i = some x := slotInt_of_getElem_int hx
+          have hhead : ∀ q, linCauseMaxPair st (c, i) = some q →
+              q.eval a = some false :=
+            fun q hq =>
+              hcauses q (List.mem_filterMap.mpr
+                ⟨(c, i), List.mem_cons_self, hq⟩)
+          have hterm : c * x ≤ t.2.2 :=
+            mul_le_maxContrib_of_cause_false hslot hc hmax hhead
+          have hrestcauses : ∀ q ∈ linCausesMax st rest,
+              q.eval a = some false := by
+            intro q hq
+            obtain ⟨p', hp'mem, hp'q⟩ := List.mem_filterMap.mp hq
+            exact hcauses q (List.mem_filterMap.mpr
+              ⟨p', List.mem_cons_of_mem _ hp'mem, hp'q⟩)
+          by_cases hne : rest = []
+          · subst hne
+            refine ⟨t.2.2, by simp only [sumMax, hmax], ?_⟩
+            intro d hd
+            simp only [dotOver, hx] at hd
+            injection hd with hd
+            have hd' : d = 0 + c * x := hd.symm
+            omega
+          · obtain ⟨s', hs', hle'⟩ := ih hne hrest hrreads hrestcauses
+            refine ⟨s' + t.2.2, by simp only [sumMax, hmax, hs'], ?_⟩
+            intro d hd
+            simp only [dotOver, hx] at hd
+            rw [dotOver_shift] at hd
+            cases hd2 : dotOver rest a 0 with
+            | none => rw [hd2] at hd; cases hd
+            | some d' =>
+                rw [hd2] at hd
+                injection hd with hd
+                have hd' : d = d' + c * x := by simpa using hd.symm
+                have hrestle : d' ≤ s' := hle' d' hd2
+                omega
+
+/-- The pinned-direction delegation propagator for
+    `int_lin_le_reif coeffs is b r`:
+    * the reif slot pinned `true`: propagate the underlying `Σ ≤ b` with the
+      escape `r = false` woven into every clause;
+    * the reif slot pinned `false` over integer-only operand domains: report
+      the underlying `Σ ≥ b+1` conflicts, with the escapes `r = true` and
+      the operand Boolean-value literals woven in;
+    * the reif slot unpinned: the bounds arm `propLinLeReifB` (PLAN L1b). -/
+def propLinLeReif (st : State) (coeffs : List Int) (is : List Nat) (b : Int)
+    (r : Nat) : PropagationResult :=
+  if coeffs.length == is.length then
+    if domBoolPin st.domains r true then
+      augmentRes (linLeReifEscTrue r) (propLinLe2 st coeffs is b)
+    else if domBoolPin st.domains r false && domsIntOnlyB st.domains is then
+      conflictsOnly (augmentRes (linLeReifEscFalse is r)
+        (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1))))
+    else propLinLeReifB st coeffs is b r
+  else .stable
+
+/-! ## Run equations -/
+
+theorem propLinLeReif_run_true {st : State} {coeffs : List Int} {is : List Nat}
+    {b : Int} {r : Nat} (hlenB : (coeffs.length == is.length) = true)
+    (h : domBoolPin st.domains r true = true) :
+    propLinLeReif st coeffs is b r
+      = augmentRes (linLeReifEscTrue r) (propLinLe2 st coeffs is b) := by
+  simp [propLinLeReif, hlenB, h]
+
+theorem propLinLeReif_run_false {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = true)
+    (h1 : ¬ (domBoolPin st.domains r true = true))
+    (h2 : (domBoolPin st.domains r false && domsIntOnlyB st.domains is) = true) :
+    propLinLeReif st coeffs is b r
+      = conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1)))) := by
+  simp [propLinLeReif, hlenB, h2, if_neg h1]
+
+/-- The unpinned arm's run equation: the delegation falls through to the
+    bounds arm `propLinLeReifB` (PLAN L1b). -/
+theorem propLinLeReif_run_b {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = true)
+    (h1 : ¬ (domBoolPin st.domains r true = true))
+    (h2 : ¬ ((domBoolPin st.domains r false && domsIntOnlyB st.domains is) = true)) :
+    propLinLeReif st coeffs is b r = propLinLeReifB st coeffs is b r := by
+  show (if (coeffs.length == is.length) = true then
+      (if (domBoolPin st.domains r true) = true then
+        augmentRes (linLeReifEscTrue r) (propLinLe2 st coeffs is b)
+      else if (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true then
+        conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1))))
+      else propLinLeReifB st coeffs is b r)
+    else .stable) = propLinLeReifB st coeffs is b r
+  rw [if_pos hlenB, if_neg h1, if_neg h2]
+
+theorem propLinLeReif_run_arity {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = false) :
+    propLinLeReif st coeffs is b r = .stable := by
+  simp [propLinLeReif, hlenB]
+
+/-- The two pin tests are exclusive. -/
+theorem domBoolPin_excl {doms : List Domain} {s : Nat} {b b' : Bool}
+    (h : domBoolPin doms s b = true) (hne : b' ≠ b) :
+    domBoolPin doms s b' = false := by
+  have hd := domBoolPin_eq h
+  unfold domBoolPin
+  rw [hd]
+  cases b <;> cases b' <;> simp_all [valueMemB, Value.eqB]
+
+/-! ## Membership algebra -/
+
+theorem mem_insertAfterHead {extras cl : Clause} {q : Literal}
+    (h : q ∈ insertAfterHead extras cl) : q ∈ cl ∨ q ∈ extras := by
+  cases cl with
+  | nil => exact Or.inr h
+  | cons hd tl =>
+      rw [insertAfterHead] at h
+      rcases List.mem_cons.mp h with rfl | h
+      · exact Or.inl List.mem_cons_self
+      · rcases List.mem_append.mp h with h | h
+        · exact Or.inr h
+        · exact Or.inl (List.mem_cons_of_mem _ h)
+
+theorem mem_insertAfterHead_of_mem {extras cl : Clause} {q : Literal}
+    (h : q ∈ cl) : q ∈ insertAfterHead extras cl := by
+  cases cl with
+  | nil => exact absurd h (by simp)
+  | cons hd tl =>
+      rw [insertAfterHead]
+      rcases List.mem_cons.mp h with rfl | h
+      · exact List.mem_cons_self
+      · exact List.mem_cons_of_mem _ (List.mem_append_right _ h)
+
+theorem mem_insertAfterHead_of_mem_extras {extras cl : Clause} {q : Literal}
+    (h : q ∈ extras) : q ∈ insertAfterHead extras cl := by
+  cases cl with
+  | nil => exact h
+  | cons hd tl =>
+      rw [insertAfterHead]
+      exact List.mem_cons_of_mem _ (List.mem_append_left _ h)
+
+/-! ## Emission inversions -/
+
+theorem augmentRes_implied_inv {extras : Clause} {res : PropagationResult}
+    {l : Literal} {rs : Reason} (h : augmentRes extras res = .implied l rs) :
+    ∃ rs0 : Reason, res = .implied l rs0
+      ∧ rs.clause = insertAfterHead extras rs0.clause := by
+  cases res with
+  | stable => cases h
+  | implied l0 rs0 =>
+      injection h with h1 h2
+      subst h1
+      exact ⟨rs0, rfl, by rw [← h2]⟩
+  | conflict c => cases h
+
+theorem augmentRes_conflict_inv {extras : Clause} {res : PropagationResult}
+    {c : Clause} (h : augmentRes extras res = .conflict c) :
+    ∃ c0 : Clause, res = .conflict c0 ∧ c = insertAfterHead extras c0 := by
+  cases res with
+  | stable => cases h
+  | implied l rs => cases h
+  | conflict c0 =>
+      injection h with h1
+      subst h1
+      exact ⟨c0, rfl, rfl⟩
+
+theorem conflictsOnly_implied_elim {res : PropagationResult} {l : Literal}
+    {rs : Reason} (h : conflictsOnly res = .implied l rs) : False := by
+  cases res with
+  | stable => cases h
+  | implied l0 rs0 => cases h
+  | conflict c => cases h
+
+theorem conflictsOnly_conflict_inv {res : PropagationResult} {c : Clause}
+    (h : conflictsOnly res = .conflict c) : res = .conflict c := by
+  cases res with
+  | stable => cases h
+  | implied l rs => cases h
+  | conflict c0 => injection h with h1; subst h1; rfl
+
+/-! ## The guard's semantics -/
+
+theorem domIntOnlyB_eq {d : List Value} (h : domIntOnlyB d = true) :
+    ∀ v ∈ d, ∃ k : Int, v = .int k := by
+  intro v hv
+  have hv' := List.all_eq_true.mp h v hv
+  cases v with
+  | int k => exact ⟨k, rfl⟩
+  | bool b => exact absurd hv' (by simp)
+  | setOfInt s => exact absurd hv' (by simp)
+  | array a => exact absurd hv' (by simp)
+
+theorem domsIntOnlyB_eq {doms : List Domain} {is : List Nat}
+    (h : domsIntOnlyB doms is = true) :
+    ∀ i ∈ is, i < doms.length ∧ 0 < (doms.getD i []).length
+      ∧ ∀ v ∈ doms.getD i [], ∃ k : Int, v = .int k := by
+  intro i hi
+  have h1 := List.all_eq_true.mp h i hi
+  rw [Bool.and_eq_true, Bool.and_eq_true] at h1
+  exact ⟨of_decide_eq_true h1.1.1, of_decide_eq_true h1.1.2, domIntOnlyB_eq h1.2⟩
+
+/-- The guard's per-slot read: at a fitting assignment every operand slot
+    reads an integer. -/
+theorem domsIntOnlyB_fits_read {doms : List Domain} {is : List Nat}
+    {a : Assignment} (hg : domsIntOnlyB doms is = true)
+    (hfit : Assignment.Fits doms a) :
+    ∀ i ∈ is, ∃ k : Int, a[i]! = .int k := by
+  intro i hi
+  obtain ⟨hrange, -, hint⟩ := domsIntOnlyB_eq hg i hi
+  have hlen : i < a.length := by rw [hfit.1]; exact hrange
+  have hread : a[i]? = some a[i] := List.getElem?_eq_getElem hlen
+  have hmem : a[i] ∈ doms.getD i [] := hfit.2 i (a[i]) hread
+  obtain ⟨k, hk⟩ := hint (a[i]) hmem
+  exact ⟨k, by rw [List.getElem!_eq_getElem?_getD, hread]; exact hk⟩
+
+/-- The guard's per-slot read at a faithful assignment. -/
+theorem domsIntOnlyB_faithful_read {doms : List Domain} {is : List Nat}
+    {a : Assignment} (hg : domsIntOnlyB doms is = true)
+    (hfaith : FrameFaithful doms a) :
+    ∀ i ∈ is, ∃ k : Int, a[i]! = .int k := by
+  intro i hi
+  obtain ⟨hrange, hne, hint⟩ := domsIntOnlyB_eq hg i hi
+  obtain ⟨v, hv⟩ := List.exists_mem_of_ne_nil (doms.getD i [])
+    (by intro h0; rw [h0] at hne; simp at hne)
+  obtain ⟨y, hy, -, hsort⟩ := hfaith i hrange
+  have hyint : ∃ k : Int, y = .int k := by
+    rcases hsort v hv with ⟨hintv, hyi⟩ | ⟨hbv, hyb⟩
+    · exact hyi
+    · obtain ⟨k, hk⟩ := hint v hv
+      rcases hbv with ⟨b, hb⟩
+      rw [hb] at hk
+      exact absurd hk (by simp)
+  obtain ⟨k, hk⟩ := hyint
+  exact ⟨k, by rw [List.getElem!_eq_getElem?_getD, hy, hk]; rfl⟩
+
+/-- At a faithful assignment every in-range slot has an integer view. -/
+theorem frameFaithful_slotInt {doms : List Domain} {a : Assignment}
+    (hfaith : FrameFaithful doms a) {i : Nat} (hi : i < doms.length) :
+    ∃ x, slotInt a i = some x := by
+  obtain ⟨y, hy, hyv, -⟩ := hfaith i hi
+  cases hv : y.intView with
+  | none => exact absurd hv hyv
+  | some x =>
+      refine ⟨x, ?_⟩
+      show a[i]?.bind Value.intView = some x
+      rw [hy]
+      show (some y).bind Value.intView = some x
+      rw [Option.bind_some]
+      exact hv
+
+/-! ## Dot-product algebra -/
+
+theorem intVals_length (cs : List Int) : (intVals cs).length = cs.length := by
+  induction cs with
+  | nil => rfl
+  | cons c cs ih => simp [intVals, ih]
+
+/-- The value-level negation map of `intVals`. -/
+def negIntVal : Value → Value
+  | .int k => .int (-k)
+  | v => v
+
+theorem intVals_map_neg (cs : List Int) :
+    intVals (cs.map (fun c => -c)) = (intVals cs).map negIntVal := by
+  induction cs with
+  | nil => rfl
+  | cons c cs ih => simp only [List.map_cons, intVals, negIntVal, ih]
+
+/-- Negation moves out of a left product. -/
+theorem neg_mul_eq (c x : Int) : (-c) * x = -(x * c) := by
+  rw [Int.neg_mul, Int.mul_comm]
+
+/-- Dot products with negated values negate. -/
+theorem dotProduct_negIntVal : ∀ (as xs : List Value),
+    dotProduct (as.map negIntVal) xs = (dotProduct as xs).map (fun d => -d)
+  | [], [] => rfl
+  | [], _ :: _ => rfl
+  | .int c :: as, [] => rfl
+  | .int c :: as, .int x :: xs => by
+      simp only [List.map_cons, negIntVal, dotProduct]
+      rw [dotProduct_negIntVal as xs]
+      cases hd : dotProduct as xs with
+      | none => rfl
+      | some d =>
+          simp only [Option.map_some]
+          congr 1
+          rw [neg_mul_eq, Int.mul_comm]
+          omega
+  | .int c :: as, .bool _ :: _ => rfl
+  | .int c :: as, .setOfInt _ :: _ => rfl
+  | .int c :: as, .array _ :: _ => rfl
+  | .bool _ :: _, _ => rfl
+  | .setOfInt _ :: _, _ => rfl
+  | .array _ :: _, _ => rfl
+
+theorem dotProduct_intVals_neg (cs : List Int) (xs : List Value) :
+    dotProduct (intVals (cs.map (fun c => -c))) xs
+      = (dotProduct (intVals cs) xs).map (fun d => -d) := by
+  rw [intVals_map_neg]
+  exact dotProduct_negIntVal (intVals cs) xs
+
+/-- An all-integer read list of matching length yields a dot product. -/
+theorem dotProduct_intVals_exists_of_length {cs : List Int} {xs : List Value}
+    (hlen : xs.length = (intVals cs).length)
+    (h : ∀ x ∈ xs, ∃ k : Int, x = .int k) :
+    ∃ d, dotProduct (intVals cs) xs = some d := by
+  induction cs generalizing xs with
+  | nil =>
+      cases xs with
+      | nil => exact ⟨0, rfl⟩
+      | cons x xs => simp [intVals] at hlen
+  | cons c cs ih =>
+      cases xs with
+      | nil => simp [intVals] at hlen
+      | cons x xs =>
+          obtain ⟨k, rfl⟩ := h x (List.mem_cons_self)
+          have hlen' : xs.length = (intVals cs).length := by
+            simp only [List.length_cons, intVals, intVals_length] at hlen
+            rw [intVals_length]
+            omega
+          have h' : ∀ y ∈ xs, ∃ k : Int, y = .int k :=
+            fun y hy => h y (List.mem_cons_of_mem _ hy)
+          obtain ⟨d, hd⟩ := ih hlen' h'
+          exact ⟨k * c + d, by simp only [intVals, dotProduct, hd, Int.mul_comm]⟩
+
+/-! ## Constraint-semantics bridges -/
+
+theorem linLeReif_satisfied_inv {coeffs : List Int} {is : List Nat} {b : Int}
+    {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a) :
+    ∃ rb : Bool, a[r]? = some (.bool rb)
+      ∧ (rb = true ↔ dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true) :=
+  h
+
+/-- The `r`-pinned-true bridge: the reified `Σ ≤ b` holds. -/
+theorem linLeReif_true_dot {coeffs : List Int} {is : List Nat} {b : Int}
+    {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a)
+    (hpin : a[r]? = some (.bool true)) :
+    (DomConstraint.linLe coeffs is b).SatisfiedBy a := by
+  obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv h
+  rw [hpin] at hread
+  have hrb : rb = true := by simpa using hread.symm
+  show dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+  exact hiff.mp hrb
+
+/-- The `r`-pinned-false bridge: with integer operand reads, the negated
+    `-Σ ≤ -(b+1)` holds. -/
+theorem linLeReif_false_dot {coeffs : List Int} {is : List Nat} {b : Int}
+    {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a)
+    (hpin : a[r]? = some (.bool false))
+    (hreads : ∀ i ∈ is, ∃ k : Int, a[i]! = .int k)
+    (hlen : coeffs.length = is.length) :
+    (DomConstraint.linLe (coeffs.map (fun c => -c)) is (-(b + 1))).SatisfiedBy a := by
+  obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv h
+  have hrbfalse : rb = false := by
+    rw [hpin] at hread
+    simpa using hread.symm
+  have hdot : dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = false := by
+    have h1 : ¬ (dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true) := by
+      intro hc
+      have : rb = true := hiff.mpr hc
+      rw [hrbfalse] at this
+      exact Bool.noConfusion this
+    cases hd : dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b with
+    | false => rfl
+    | true => exact absurd hd h1
+  have hreadsAll : ∀ x ∈ is.map (fun i => a[i]!), ∃ k : Int, x = .int k := by
+    intro x hx
+    obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hx
+    exact hreads i hi
+  have hlen2 : (is.map (fun i => a[i]!)).length = (intVals coeffs).length := by
+    rw [List.length_map, intVals_length]
+    omega
+  obtain ⟨d, hd⟩ := dotProduct_intVals_exists_of_length hlen2 hreadsAll
+  have hdle : b < d := by
+    have h1 : dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b
+        = decide (d ≤ b) := by
+      rw [dotLe, hd]
+    rw [h1] at hdot
+    by_cases hle : d ≤ b
+    · rw [decide_eq_true hle] at hdot
+      exact Bool.noConfusion hdot
+    · omega
+  show dotLe (intVals (coeffs.map (fun c => -c))) (is.map (fun i => a[i]!))
+    (-(b + 1)) = true
+  rw [dotLe, dotProduct_intVals_neg, hd]
+  show decide (-d ≤ -(b + 1)) = true
+  exact decide_eq_true (by omega)
+
+/-! ## Boolean literal evaluation helpers -/
+
+/-- A positive Boolean literal is true at a reading of its value. -/
+theorem posBool_eval_true {a : Assignment} {s : Nat} {b : Bool}
+    (h : a[s]? = some (.bool b)) : (posBool s b).eval a = some true := by
+  simp [posBool, Literal.eval, Atom.eval, h]
+
+/-- A Boolean reading DECIDES a positive Boolean literal (an undefined or
+    wrongly-typed read leaves it undecided). -/
+theorem posBool_eval_bool {a : Assignment} {s : Nat} {b b' : Bool}
+    (h : a[s]? = some (.bool b')) :
+    ∃ t, (posBool s b).eval a = some t :=
+  ⟨b' == b, by simp [posBool, Literal.eval, Atom.eval, h]⟩
+
+/-! ## The B arm's implied literal is true at fitting solutions -/
+
+/-- The bounds arm's implied pin is true at every fitting solution of the
+    reified constraint (the B-arm implied arm of the safe triple). -/
+theorem propLinLeReifB_implied_true {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {l : Literal} {rs : Reason}
+    (hlen : coeffs.length = is.length)
+    (hrun : propLinLeReifB st coeffs is b r = .implied l rs) :
+    ∀ a, Assignment.Fits st.domains a →
+      (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a →
+      l.eval a = some true := by
+  intro a hfit hcons
+  rcases propLinLeReifB_emission_inv hrun with hstable |
+    ⟨-, -, -, hint, hcomp, hr, hsum, hle, hres⟩
+  · exact absurd hstable (by intro hc; cases hc)
+  · have hl : l = posBool r true := by
+      injection hres
+    rw [hl]
+    obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv hcons
+    have hreads : ∀ p ∈ coeffs.zip is, ∃ x : Int, a[p.2]! = .int x :=
+      fun p hp => domsIntOnlyB_fits_read hint hfit p.2 (mem_zip_snd hp)
+    have hne : coeffs.zip is ≠ [] := by
+      intro h0
+      rw [h0] at hsum
+      exact absurd hsum (by simp [sumMax])
+    obtain ⟨s, hs, hleS⟩ := dotOver_le_sumMax hne hfit hcomp hreads
+    have hs' : s = hr := by
+      rw [hsum] at hs
+      injection hs with hs2
+      exact hs2.symm
+    have hlen2 : (is.map (fun i => a[i]!)).length = (intVals coeffs).length := by
+      rw [List.length_map, intVals_length]; omega
+    obtain ⟨d, hd⟩ := dotProduct_intVals_exists_of_length hlen2
+      (by intro x hx
+          obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hx
+          exact domsIntOnlyB_fits_read hint hfit i hi)
+    have hd' : dotOver (coeffs.zip is) a 0 = some d := by
+      rw [← dotProduct_eq_dotOver hlen]; exact hd
+    have hdle : d ≤ hr := by
+      rw [← hs']
+      exact hleS d hd'
+    have hdot : dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true := by
+      rw [dotLe, hd]
+      exact decide_eq_true (by omega)
+    have hrb : rb = true := hiff.mpr hdot
+    rw [hrb] at hread
+    exact posBool_eval_true hread
+
+/-! ## The safe triple at fitting solutions -/
+
+/-- The pinned-delegation propagator's safe triple w.r.t. the reified
+    family: implied-literal soundness, conflict exclusion, and conflict
+    entitlement, at every fitting solution of the reified constraint. -/
+theorem propLinLeReif_safe (st : State) (coeffs : List Int) (is : List Nat)
+    (b : Int) (r : Nat) :
+    (∀ l rs, propLinLeReif st coeffs is b r = .implied l rs →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a →
+        l.eval a = some true) ∧
+    (∀ c, propLinLeReif st coeffs is b r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a → False) ∧
+    (∀ c, propLinLeReif st coeffs is b r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    refine ⟨?_, ?_, ?_⟩
+    · intro l rs hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinLeReif_run_true hlenB h1] at hrun
+        obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+        have hle := linLeReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        exact (propLinLe2_safe st coeffs is b hlen).1 l rs0 hres a hfit hle
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
+          exact (conflictsOnly_implied_elim hrun).elim
+        · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
+          exact propLinLeReifB_implied_true hlen hrun a hfit hcons
+    · intro c hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinLeReif_run_true hlenB h1] at hrun
+        obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+        have hle := linLeReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        exact (propLinLe2_safe st coeffs is b hlen).2.1 c0 hres a hfit hle
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
+          have hrun2 := conflictsOnly_conflict_inv hrun
+          obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun2
+          have h2' := h2
+          rw [Bool.and_eq_true] at h2'
+          obtain ⟨hpf, hg⟩ := h2'
+          have hreads := domsIntOnlyB_fits_read hg hfit
+          have hcons' := linLeReif_false_dot hcons (fits_of_domBoolPin hfit hpf)
+            hreads hlen
+          exact (propLinLe2_safe st (coeffs.map (fun c => -c)) is (-(b + 1))
+            (by simp [hlen])).2.1 c0 hres a hfit hcons'
+        · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
+          exact (propLinLeReifB_ne_conflict hrun).elim
+    · intro c hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinLeReif_run_true hlenB h1] at hrun
+        obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+        have hle := linLeReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        obtain ⟨l, hl, hlt⟩ := (propLinLe2_safe st coeffs is b hlen).2.2 c0 hres
+          a hfit hle
+        exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
+          have hrun2 := conflictsOnly_conflict_inv hrun
+          obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun2
+          have h2' := h2
+          rw [Bool.and_eq_true] at h2'
+          obtain ⟨hpf, hg⟩ := h2'
+          have hreads := domsIntOnlyB_fits_read hg hfit
+          have hcons' := linLeReif_false_dot hcons (fits_of_domBoolPin hfit hpf)
+            hreads hlen
+          obtain ⟨l, hl, hlt⟩ := (propLinLe2_safe st (coeffs.map (fun c => -c))
+            is (-(b + 1)) (by simp [hlen])).2.2 c0 hres a hfit hcons'
+          exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+        · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
+          exact (propLinLeReifB_ne_conflict hrun).elim
+  · have hlenF : (coeffs.length == is.length) = false :=
+      Bool.eq_false_iff.mpr hlenB
+    refine ⟨?_, ?_, ?_⟩
+    · intro l rs hrun
+      rw [propLinLeReif_run_arity hlenF] at hrun
+      cases hrun
+    · intro c hrun
+      rw [propLinLeReif_run_arity hlenF] at hrun
+      cases hrun
+    · intro c hrun
+      rw [propLinLeReif_run_arity hlenF] at hrun
+      cases hrun
+
+/-! ## The conflict entitlement at faithful solutions -/
+
+/-- The delegated kernels at a solution of the underlying `linLe`: every
+    conflict clause of `propLinLe2` carries a true literal (the state-free
+    conflict entitlement, keyed on the dot rather than the constraint
+    membership). -/
+theorem propLinLe2_entitled_dot {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {cc : Clause} {a : Assignment}
+    (hlen : coeffs.length = is.length)
+    (hrun : propLinLe2 st coeffs is b = .conflict cc)
+    (hcons : (DomConstraint.linLe coeffs is b).SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  rcases propLinLe2_emission_inv hrun with hstable |
+    ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩
+  · exact absurd hstable (by intro hc; cases hc)
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowHi_conflict_inv hnarrow.symm
+    have hreads := linLe2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_le_hi_true hmem hrest hguard hsum hreads hcons hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowLo_conflict_inv hnarrow.symm
+    have hreads := linLe2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_le_lo_true hmem hrest hguard hsum hreads hcons hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowHi_conflict_inv hnarrow.symm
+    have hreads := linLe2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_gen_le_hi_true hmem hpos hrest hguard hsum hreads
+      hcons hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowLo_conflict_inv hnarrow.symm
+    have hreads := linLe2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_gen_le_lo_true hmem hneg hrest hguard hsum hreads
+      hcons hlen
+
+/-- A Boolean reading of an operand makes one of the bounds-arm operand
+    escapes true (the PROVABLE cover of the Boolean-read case in the
+    fallback reason obligation). -/
+theorem linLeReifEscB_true_of_bool_read {is : List Nat} {a : Assignment}
+    {i : Nat} {b' : Bool} (hi : i ∈ is) (hread : a[i]? = some (.bool b')) :
+    ∃ q ∈ linLeReifEscB is, q.eval a = some true := by
+  refine ⟨posBool i b', ?_, posBool_eval_true hread⟩
+  rw [linLeReifEscB, List.mem_flatMap]
+  refine ⟨i, hi, ?_⟩
+  cases b' <;> simp
+
+/-- Every conflict clause of the pinned delegation carries a true literal
+    at every faithful solution of the reified constraint. -/
+theorem propLinLeReif_entitled {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {cc : Clause}
+    {a : Assignment}
+    (hrun : propLinLeReif st coeffs is b r = .conflict cc)
+    (hfaith : FrameFaithful st.domains a)
+    (ha : (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv ha
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    by_cases h1 : domBoolPin st.domains r true = true
+    · -- the escape `r = false` is true at `rb = false`; `rb = true` runs
+      -- the delegated kernel off the reified dot
+      rw [propLinLeReif_run_true hlenB h1] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      cases rb with
+      | false =>
+          refine ⟨posBool r false, ?_, posBool_eval_true hread⟩
+          rw [hcl]
+          exact mem_insertAfterHead_of_mem_extras (by simp [linLeReifEscTrue])
+      | true =>
+          have hle : (DomConstraint.linLe coeffs is b).SatisfiedBy a := by
+            show dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+            exact hiff.mp rfl
+          obtain ⟨l, hl, hlt⟩ := propLinLe2_entitled_dot (cc := c0) hlen hres hle
+          exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
+        have hrun2 := conflictsOnly_conflict_inv hrun
+        obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun2
+        have h2' := h2
+        rw [Bool.and_eq_true] at h2'
+        obtain ⟨hpf, hg⟩ := h2'
+        cases rb with
+        | true =>
+            refine ⟨posBool r true, ?_, posBool_eval_true hread⟩
+            rw [hcl]
+            exact mem_insertAfterHead_of_mem_extras (by simp [linLeReifEscFalse])
+        | false =>
+            have hreads := domsIntOnlyB_faithful_read hg hfaith
+            have hcons' := linLeReif_false_dot ha hread hreads hlen
+            obtain ⟨l, hl, hlt⟩ := propLinLe2_entitled_dot
+              (coeffs := coeffs.map (fun c => -c)) (is := is) (b := -(b + 1))
+              (st := st) (cc := c0) (by simp [hlen]) hres hcons'
+            exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+      · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
+        exact (propLinLeReifB_ne_conflict hrun).elim
+  · have hlenF : (coeffs.length == is.length) = false :=
+      Bool.eq_false_iff.mpr hlenB
+    rw [propLinLeReif_run_arity hlenF] at hrun
+    cases hrun
+
+  /-! ## The delegated clause bundle: pivot, normalization, truth -/
+
+  /-- One arm analysis for the delegated implied emission: the pivot is in
+      the clause, every clause literal is normalized, and the clause is true
+      at every solution of the underlying `linLe`. -/
+  theorem propLinLe2_implied_clause_all {st : State} {coeffs : List Int}
+      {is : List Nat} {b : Int} {l : Literal} {rs : Reason}
+      (hlen : coeffs.length = is.length)
+      (hrun : propLinLe2 st coeffs is b = .implied l rs) :
+      l ∈ rs.clause ∧ (∀ q ∈ rs.clause, q = q.norm) ∧
+      (∀ a, (DomConstraint.linLe coeffs is b).SatisfiedBy a →
+        ∃ q ∈ rs.clause, q.eval a = some true) := by
+    rcases propLinLe2_emission_inv hrun with hstable |
+      ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+      ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+      ⟨m, i, rest, lr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
+      ⟨m, i, rest, lr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩
+    · exact absurd hstable (by intro hc; cases hc)
+    · obtain ⟨hl, hcl⟩ := narrowHi_implied_inv hnarrow.symm
+      subst hl
+      refine ⟨by rw [hcl]; exact List.mem_cons_self,
+        lin2_reason_clause_norm_sf hcl
+          (lin2_nogood_norm (posLe_norm m (b - lr)).symm
+            (lin2_causesMin_norm (st := st) (rest := rest))), ?_⟩
+      intro a hcons
+      have hreads := linLe2_reads_int hcons hlen
+      have hcl2 : rs.clause = [posLe m (b - lr)] ++ linCausesMin st rest := by
+        rw [hcl]
+      rw [hcl2]
+      exact lin2_nogood_le_hi_true hmem hrest hguard hsum hreads hcons hlen
+    · obtain ⟨hl, hcl⟩ := narrowLo_implied_inv hnarrow.symm
+      subst hl
+      refine ⟨by rw [hcl]; exact List.mem_cons_self,
+        lin2_reason_clause_norm_sf hcl
+          (lin2_nogood_norm (negLe_norm m (lr - b - 1)).symm
+            (lin2_causesMin_norm (st := st) (rest := rest))), ?_⟩
+      intro a hcons
+      have hreads := linLe2_reads_int hcons hlen
+      have hcl2 : rs.clause = [negLe m (lr - b - 1)] ++ linCausesMin st rest := by
+        rw [hcl]
+      rw [hcl2]
+      exact lin2_nogood_le_lo_true hmem hrest hguard hsum hreads hcons hlen
+    · obtain ⟨hl, hcl⟩ := narrowHi_implied_inv hnarrow.symm
+      subst hl
+      refine ⟨by rw [hcl]; exact List.mem_cons_self,
+        lin2_reason_clause_norm_sf hcl
+          (lin2_nogood_norm (posLe_norm m ((b - lr) / c)).symm
+            (lin2_causesMin_norm (st := st) (rest := rest))), ?_⟩
+      intro a hcons
+      have hreads := linLe2_reads_int hcons hlen
+      have hcl2 : rs.clause = [posLe m ((b - lr) / c)] ++ linCausesMin st rest := by
+        rw [hcl]
+      rw [hcl2]
+      exact lin2_nogood_gen_le_hi_true hmem hpos hrest hguard hsum hreads
+        hcons hlen
+    · obtain ⟨hl, hcl⟩ := narrowLo_implied_inv hnarrow.symm
+      subst hl
+      refine ⟨by rw [hcl]; exact List.mem_cons_self,
+        lin2_reason_clause_norm_sf hcl
+          (lin2_nogood_norm (negLe_norm m (-((b - lr) / (-c)) - 1)).symm
+            (lin2_causesMin_norm (st := st) (rest := rest))), ?_⟩
+      intro a hcons
+      have hreads := linLe2_reads_int hcons hlen
+      have hcl2 : rs.clause
+          = [negLe m (-((b - lr) / (-c)) - 1)] ++ linCausesMin st rest := by
+        rw [hcl]
+      rw [hcl2]
+      exact lin2_nogood_gen_le_lo_true hmem hneg hrest hguard hsum hreads
+        hcons hlen
+
+/-! ## The state-free reason validity -/
+
+/-- The bounds arm's implied literals carry valid, normalized reasons at
+    every internal solution of any problem containing the reified
+    constraint, provided the problem's operand slots are in range (the
+    problem-level gate `hlreif`): the pivot pins `r = true`; at
+    `r = false` the reif fact falsifies the dot, and the operand escapes
+    (Boolean reads) or the max-causes (integer reads: all-false would
+    force `Σ ≤ sumMax ≤ b`) supply a true clause literal. -/
+theorem propLinLeReifB_reason_valid {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int} {r : Nat}
+    {l : Literal} {rs : Reason}
+    (hview : IntViewedDoms problem.domains)
+    (hprob : DomConstraint.linLeReif coeffs is b r ∈ problem.constraints)
+    (hlreif : ∀ i ∈ is, i < problem.domains.length)
+    (hlen : coeffs.length = is.length)
+    (hrun : propLinLeReifB st coeffs is b r = .implied l rs) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
+      (∀ q ∈ rs.clause, q = q.norm) := by
+  rcases propLinLeReifB_emission_inv hrun with hstable |
+    ⟨-, -, -, -, hcomp, hr, hsum, hle, hres⟩
+  · exact absurd hstable (by intro hc; cases hc)
+  · have hl : l = posBool r true := by
+      injection hres
+    have hcl : rs.clause = posBool r true ::
+        (linLeReifEscB is ++ linCausesMax st (coeffs.zip is)) := by
+      injection hres with h1 h3
+      rw [h3]
+    refine ⟨lin2_reason_valid_of_clause_true ?_ ?_, ?_⟩
+    · rw [hl, hcl]
+      exact List.mem_cons_self
+    · intro a ha
+      obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv (ha.2 _ hprob)
+      rw [hcl]
+      cases rb with
+      | true =>
+          exact ⟨posBool r true, List.mem_cons_self, posBool_eval_true hread⟩
+      | false =>
+          have hdotnot : ¬ (dotLe (intVals coeffs)
+              (is.map (fun i => a[i]!)) b = true) := by
+            intro hc
+            have h1 : false = true := hiff.mpr hc
+            exact Bool.noConfusion h1
+          have hdot : dotLe (intVals coeffs)
+              (is.map (fun i => a[i]!)) b = false := by
+            cases hd2 : dotLe (intVals coeffs)
+                (is.map (fun i => a[i]!)) b with
+            | false => rfl
+            | true => exact absurd hd2 hdotnot
+          by_cases hbools : ∃ i ∈ is, ∃ bb : Bool, a[i]? = some (.bool bb)
+          · obtain ⟨i, hi, bb, hbi⟩ := hbools
+            obtain ⟨q, hq, hqt⟩ := linLeReifEscB_true_of_bool_read hi hbi
+            exact ⟨q, List.mem_cons_of_mem _
+              (List.mem_append_left _ hq), hqt⟩
+          · have hallint : ∀ i ∈ is, ∃ k : Int, a[i]! = .int k := by
+              intro i hi
+              have hlt : i < problem.domains.length := hlreif i hi
+              have hia : i < a.length := by rw [ha.1.1]; exact hlt
+              have hread' : a[i]? = some a[i] := List.getElem?_eq_getElem hia
+              have hmem : a[i] ∈ problem.domains.getD i [] :=
+                ha.1.2 i (a[i]) hread'
+              have hv := hview _ (getD_mem_of_lt hlt) _ hmem
+              cases hv' : a[i] with
+              | int k =>
+                  exact ⟨k, by
+                    rw [List.getElem!_eq_getElem?_getD, hread', hv']
+                    rfl⟩
+              | bool bb =>
+                  exact absurd ⟨i, hi, bb, by rw [hread', hv']⟩ hbools
+              | setOfInt s =>
+                  rw [hv'] at hv
+                  exact absurd rfl hv
+              | array s =>
+                  rw [hv'] at hv
+                  exact absurd rfl hv
+            have hneZip : coeffs.zip is ≠ [] := by
+              intro h0
+              rw [h0] at hsum
+              exact absurd hsum (by simp [sumMax])
+            have hreadsZip : ∀ p ∈ coeffs.zip is,
+                ∃ x : Int, a[p.2]! = .int x :=
+              fun p hp => hallint p.2 (mem_zip_snd hp)
+            by_cases hcause : ∃ q ∈ linCausesMax st (coeffs.zip is),
+                q.eval a = some true
+            · obtain ⟨q, hq, hqt⟩ := hcause
+              exact ⟨q, List.mem_cons_of_mem _
+                (List.mem_append_right _ hq), hqt⟩
+            · have hcf : ∀ q ∈ linCausesMax st (coeffs.zip is),
+                  q.eval a = some false := by
+                intro q hq
+                obtain ⟨bv, hbval⟩ := lin2_causesMax_eval_some
+                  (fun p hp => by
+                    obtain ⟨k, hk⟩ := hallint p.2 (mem_zip_snd hp)
+                    exact ⟨k, slotInt_of_getElem_int hk⟩) hq
+                cases bv with
+                | true => exact absurd ⟨q, hq, hbval⟩ hcause
+                | false => exact hbval
+              obtain ⟨s, hs, hles⟩ :=
+                dotOver_le_sumMax_of_causes_false hneZip hcomp hreadsZip hcf
+              have hs2 : s = hr := by
+                rw [hsum] at hs
+                injection hs with hs3
+                exact hs3.symm
+              have hlen2 : (is.map (fun i => a[i]!)).length
+                  = (intVals coeffs).length := by
+                rw [List.length_map, intVals_length]
+                omega
+              obtain ⟨d, hd⟩ := dotProduct_intVals_exists_of_length hlen2
+                (by intro x hx
+                    obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hx
+                    exact hallint i hi)
+              have hd' : dotOver (coeffs.zip is) a 0 = some d := by
+                rw [← dotProduct_eq_dotOver hlen]
+                exact hd
+              have hdle : d ≤ hr := by
+                rw [← hs2]
+                exact hles d hd'
+              have hdotT : dotLe (intVals coeffs)
+                  (is.map (fun i => a[i]!)) b = true := by
+                rw [dotLe, hd]
+                exact decide_eq_true (by omega)
+              rw [hdotT] at hdot
+              exact Bool.noConfusion hdot
+    · intro q hq
+      rw [hcl] at hq
+      rcases List.mem_cons.mp hq with rfl | hq
+      · rfl
+      · rcases List.mem_append.mp hq with hq | hq
+        · rw [linLeReifEscB] at hq
+          obtain ⟨i, -, hq2⟩ := List.mem_flatMap.mp hq
+          rcases List.mem_cons.mp hq2 with rfl | hq2
+          · rfl
+          · rw [List.mem_singleton.mp hq2]
+            rfl
+        · exact lin2_causesMax_norm q hq
+
+/-- The delegation's implied literals carry valid, normalized reasons at
+    every internal solution of any problem containing the reified
+    constraint (the pinned arms are state-free; the bounds arm needs the
+    problem-level operand-range gate `hlreif`). -/
+theorem propLinLeReif_reason_valid {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int} {r : Nat}
+    {l : Literal} {rs : Reason}
+    (hview : IntViewedDoms problem.domains)
+    (hprob : DomConstraint.linLeReif coeffs is b r ∈ problem.constraints)
+    (hlreif : ∀ dc ∈ problem.constraints, ∀ coeffs is b r,
+      dc = .linLeReif coeffs is b r → ∀ i ∈ is, i < problem.domains.length)
+    (hrun : propLinLeReif st coeffs is b r = .implied l rs) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
+      (∀ q ∈ rs.clause, q = q.norm) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    by_cases h1 : domBoolPin st.domains r true = true
+    · rw [propLinLeReif_run_true hlenB h1] at hrun
+      obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+      obtain ⟨hpiv, hnorm0, htrue0⟩ := propLinLe2_implied_clause_all hlen hres
+      refine ⟨lin2_reason_valid_of_clause_true ?hmem ?htrue, ?hnorm⟩
+      · rw [hcl]
+        exact mem_insertAfterHead_of_mem hpiv
+      · intro a ha
+        obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv (ha.2 _ hprob)
+        rw [hcl]
+        cases rb with
+        | false =>
+            exact ⟨posBool r false,
+              mem_insertAfterHead_of_mem_extras (by simp [linLeReifEscTrue]),
+              posBool_eval_true hread⟩
+        | true =>
+            have hle : (DomConstraint.linLe coeffs is b).SatisfiedBy a := by
+              show dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+              exact hiff.mp rfl
+            obtain ⟨q, hq, hqt⟩ := htrue0 a hle
+            exact ⟨q, mem_insertAfterHead_of_mem hq, hqt⟩
+      · intro q hq
+        rw [hcl] at hq
+        rcases mem_insertAfterHead hq with hq | hq
+        · exact hnorm0 q hq
+        · simp only [linLeReifEscTrue, List.mem_singleton] at hq
+          rw [hq]
+          simp [posBool, Literal.norm]
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
+        exact absurd hrun (conflictsOnly_implied_elim)
+      · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
+        exact propLinLeReifB_reason_valid hview hprob
+          (hlreif _ hprob coeffs is b r rfl) hlen hrun
+  · have hlenF : (coeffs.length == is.length) = false :=
+      Bool.eq_false_iff.mpr hlenB
+    rw [propLinLeReif_run_arity hlenF] at hrun
+    cases hrun
+
+
+/-! ## L2: the explained `int_lin_ne` propagator -/
+
+/-- The integer a slot is pinned to by its (singleton integer) domain. -/
+def pinInt (doms : List Domain) (s : Nat) : Option Int :=
+  match doms.getD s [] with
+  | [.int v] => some v
+  | _ => none
+
+/-- Sum of the pinned operands' contributions. -/
+def linNeSum (doms : List Domain) : List (Int × Nat) → Int
+  | [] => 0
+  | (c, s) :: rest =>
+      match pinInt doms s with
+      | some v => c * v + linNeSum doms rest
+      | none => linNeSum doms rest
+
+/-- The fix literals `x_s ≠ v_s` of the pinned operands. -/
+def linNeCauses (doms : List Domain) : List (Int × Nat) → Clause
+  | [] => []
+  | (c, s) :: rest =>
+      match pinInt doms s with
+      | some v => posNe s v :: linNeCauses doms rest
+      | none => linNeCauses doms rest
+
+/-- The unpinned operands. -/
+def linNeFree (doms : List Domain) : List (Int × Nat) → List (Int × Nat)
+  | [] => []
+  | (c, s) :: rest =>
+      match pinInt doms s with
+      | some _ => linNeFree doms rest
+      | none => (c, s) :: linNeFree doms rest
+
+/-- The explained `int_lin_ne` propagator. -/
+def propLinNe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
+    PropagationResult :=
+  if coeffs.length == is.length then
+    match linNeFree st.domains (coeffs.zip is) with
+    | [] =>
+        if linNeSum st.domains (coeffs.zip is) == b then
+          .conflict (linNeCauses st.domains (coeffs.zip is))
+        else .stable
+    | [(c, m)] =>
+        if c != 0 && (b - linNeSum st.domains (coeffs.zip is)) % c == 0
+            && valueMemB (.int ((b - linNeSum st.domains (coeffs.zip is)) / c))
+                (st.domains.getD m []) then
+          .implied (posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c))
+            { clause := posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c)
+                :: linNeCauses st.domains (coeffs.zip is) }
+        else .stable
+    | _ => .stable
+  else .stable
+
+theorem eq_of_pinInt {doms : List Domain} {s : Nat} {v : Int}
+    (h : pinInt doms s = some v) : doms.getD s [] = [.int v] := by
+  unfold pinInt at h
+  split at h
+  · rename_i v' heq
+    have := Option.some.inj h
+    subst this
+    exact heq
+  · cases h
+
+theorem pinInt_of_eq {doms : List Domain} {s : Nat} {v : Int}
+    (h : doms.getD s [] = [.int v]) : pinInt doms s = some v := by
+  unfold pinInt
+  rw [h]
+
+theorem linNeCauses_mem {doms : List Domain} {ps : List (Int × Nat)} {q : Literal} :
+    q ∈ linNeCauses doms ps ↔
+      ∃ c s v, (c, s) ∈ ps ∧ pinInt doms s = some v ∧ q = posNe s v := by
+  induction ps with
+  | nil => simp [linNeCauses]
+  | cons p rest ih =>
+      obtain ⟨c0, s0⟩ := p
+      unfold linNeCauses
+      cases hp : pinInt doms s0 with
+      | none =>
+          simp only []
+          rw [ih]
+          constructor
+          · rintro ⟨c, s, v, hm, hv, hq⟩
+            exact ⟨c, s, v, List.mem_cons_of_mem _ hm, hv, hq⟩
+          · rintro ⟨c, s, v, hm, hv, hq⟩
+            rcases List.mem_cons.mp hm with hm | hm
+            · injection hm with h1 h2
+              subst h2
+              rw [hp] at hv
+              cases hv
+            · exact ⟨c, s, v, hm, hv, hq⟩
+      | some v0 =>
+          simp only []
+          rw [List.mem_cons, ih]
+          constructor
+          · rintro (hq | ⟨c, s, v, hm, hv, hq⟩)
+            · exact ⟨c0, s0, v0, List.mem_cons_self, hp, hq⟩
+            · exact ⟨c, s, v, List.mem_cons_of_mem _ hm, hv, hq⟩
+          · rintro ⟨c, s, v, hm, hv, hq⟩
+            rcases List.mem_cons.mp hm with hm | hm
+            · injection hm with h1 h2
+              subst h2
+              rw [hp] at hv
+              cases hv
+              exact Or.inl hq
+            · exact Or.inr ⟨c, s, v, hm, hv, hq⟩
+
+theorem linNeFree_mem {doms : List Domain} {ps : List (Int × Nat)} {p : Int × Nat}
+    (h : p ∈ linNeFree doms ps) : p ∈ ps ∧ pinInt doms p.2 = none := by
+  induction ps with
+  | nil => simp [linNeFree] at h
+  | cons q rest ih =>
+      obtain ⟨c0, s0⟩ := q
+      unfold linNeFree at h
+      cases hp : pinInt doms s0 with
+      | some v0 =>
+          rw [hp] at h
+          obtain ⟨h1, h2⟩ := ih h
+          exact ⟨List.mem_cons_of_mem _ h1, h2⟩
+      | none =>
+          rw [hp] at h
+          rcases List.mem_cons.mp h with h | h
+          · subst h
+            exact ⟨List.mem_cons_self, hp⟩
+          · obtain ⟨h1, h2⟩ := ih h
+            exact ⟨List.mem_cons_of_mem _ h1, h2⟩
+
+/-- Pinned operands read their pins, so the dot product factors through the
+    unpinned operands. -/
+theorem dotOver_scan {doms : List Domain} {a : Assignment}
+    {ps : List (Int × Nat)}
+    (H : ∀ c s v, (c, s) ∈ ps → pinInt doms s = some v → a[s]! = .int v)
+    (acc : Int) :
+    dotOver ps a acc =
+      dotOver (linNeFree doms ps) a (acc + linNeSum doms ps) := by
+  induction ps generalizing acc with
+  | nil => simp [linNeFree, linNeSum, dotOver]
+  | cons p rest ih =>
+      obtain ⟨c0, s0⟩ := p
+      have ih' := ih (fun c s v hm hv => H c s v (List.mem_cons_of_mem _ hm) hv)
+      unfold linNeFree linNeSum
+      cases hp : pinInt doms s0 with
+      | some v0 =>
+          simp only []
+          have hread := H c0 s0 v0 List.mem_cons_self hp
+          rw [dotOver, hread]
+          simp only []
+          rw [ih' (acc + c0 * v0)]
+          congr 1
+          omega
+      | none =>
+          simp only []
+          rw [dotOver, dotOver]
+          cases hr : a[s0]! with
+          | int x =>
+              simp only []
+              rw [ih' (acc + c0 * x)]
+              congr 1
+              omega
+          | bool x => rfl
+          | setOfInt x => rfl
+          | array x => rfl
+
+theorem linNe_sat_dot {coeffs : List Int} {is : List Nat} {b : Int}
+    {a : Assignment} (hlen : coeffs.length = is.length)
+    (h : (DomConstraint.linNe coeffs is b).SatisfiedBy a) :
+    (∃ d, dotOver (coeffs.zip is) a 0 = some d ∧ d ≠ b) ∧
+      ∀ t ∈ is, ∃ x, a[t]! = .int x := by
+  have h' : dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true := h
+  obtain ⟨d, hd, hne⟩ := (dotNe_eq _ _ _).mp h'
+  refine ⟨⟨d, ?_, hne⟩, dotProduct_reads_int hd⟩
+  rw [← dotProduct_eq_dotOver hlen]
+  exact hd
+
+/-- Fitting assignments read the pins. -/
+theorem pinInt_read_of_fits {doms : List Domain} {a : Assignment}
+    (hfit : Assignment.Fits doms a) {s : Nat} {v : Int}
+    (h : pinInt doms s = some v) : a[s]! = .int v := by
+  have hg := eq_of_pinInt h
+  have hlt : s < doms.length := by
+    by_cases hlt : s < doms.length
+    · exact hlt
+    · rw [getD_nil_of_length_le hlt] at hg
+      cases hg
+  have hlen : s < a.length := by rw [hfit.1]; exact hlt
+  have hread : a[s]? = some a[s] := List.getElem?_eq_getElem hlen
+  have hmem : a[s] ∈ doms.getD s [] := hfit.2 s (a[s]) hread
+  rw [hg] at hmem
+  have : a[s] = .int v := List.mem_singleton.mp hmem
+  rw [List.getElem!_eq_getElem?_getD, hread]
+  exact this
+
+theorem slotBang_int' {a : List Value} {i : Nat} {p : Int}
+    (h : a[i]! = .int p) : a[i]? = some (.int p) := by
+  by_cases hi : i < a.length
+  · rw [getElem!_pos a i hi] at h
+    rw [List.getElem?_eq_getElem hi]; exact congrArg some h
+  · rw [getElem!_neg a i hi] at h
+    exact absurd h (by intro hc; cases hc)
+
+theorem posNe_true_of_read {a : Assignment} {s : Nat} {x v : Int}
+    (hx : a[s]! = .int x) (hne : x ≠ v) : (posNe s v).eval a = some true := by
+  rw [eval_posNe_iff]
+  exact ⟨x, by simp [slotInt, slotBang_int' hx, Value.intView], hne⟩
+
+theorem eq_of_posNe_not_true {a : Assignment} {s : Nat} {x v : Int}
+    (hx : a[s]! = .int x) (h : ¬ (posNe s v).eval a = some true) : x = v := by
+  by_cases hxv : x = v
+  · exact hxv
+  · exact absurd (posNe_true_of_read hx hxv) h
+
+
+theorem propLinNe_conflict_inv {st : State} {coeffs : List Int} {is : List Nat}
+    {b : Int} {cc : Clause}
+    (h : propLinNe st coeffs is b = .conflict cc) :
+    coeffs.length = is.length ∧
+      linNeFree st.domains (coeffs.zip is) = [] ∧
+      linNeSum st.domains (coeffs.zip is) = b ∧
+      cc = linNeCauses st.domains (coeffs.zip is) := by
+  unfold propLinNe at h
+  by_cases hl : (coeffs.length == is.length) = true
+  · rw [if_pos hl] at h
+    refine ⟨beq_iff_eq.mp hl, ?_⟩
+    split at h
+    · rename_i hfree
+      split at h
+      · rename_i hs
+        injection h with h
+        exact ⟨hfree, beq_iff_eq.mp hs, h.symm⟩
+      · cases h
+    · split at h
+      · cases h
+      · cases h
+    · cases h
+  · rw [if_neg hl] at h
+    cases h
+
+theorem propLinNe_implied_inv {st : State} {coeffs : List Int} {is : List Nat}
+    {b : Int} {l : Literal} {rs : Reason}
+    (h : propLinNe st coeffs is b = .implied l rs) :
+    coeffs.length = is.length ∧ ∃ c m,
+      linNeFree st.domains (coeffs.zip is) = [(c, m)] ∧ c ≠ 0 ∧
+      (b - linNeSum st.domains (coeffs.zip is)) % c = 0 ∧
+      Value.int ((b - linNeSum st.domains (coeffs.zip is)) / c) ∈
+        st.domains.getD m [] ∧
+      l = posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c) ∧
+      rs = { clause := posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c)
+              :: linNeCauses st.domains (coeffs.zip is) } := by
+  unfold propLinNe at h
+  by_cases hl : (coeffs.length == is.length) = true
+  · rw [if_pos hl] at h
+    refine ⟨beq_iff_eq.mp hl, ?_⟩
+    split at h
+    · split at h <;> cases h
+    · rename_i c m hfree
+      split at h
+      · rename_i hc
+        injection h with h1 h2
+        simp only [Bool.and_eq_true, bne_iff_ne, ne_eq, beq_iff_eq] at hc
+        obtain ⟨⟨hc0, hmod⟩, hmem⟩ := hc
+        exact ⟨c, m, hfree, hc0, hmod, valueMemB_iff.mp hmem, h1.symm, h2.symm⟩
+      · cases h
+    · cases h
+  · rw [if_neg hl] at h
+    cases h
+
+/-- All operands read their pins and nothing is free: the sum is `b`, so the
+    constraint fails. -/
+theorem linNe_conflict_false {st : State} {coeffs : List Int} {is : List Nat}
+    {b : Int} {a : Assignment} (hlen : coeffs.length = is.length)
+    (hsat : (DomConstraint.linNe coeffs is b).SatisfiedBy a)
+    (hfree : linNeFree st.domains (coeffs.zip is) = [])
+    (hsum : linNeSum st.domains (coeffs.zip is) = b)
+    (H : ∀ c s v, (c, s) ∈ coeffs.zip is → pinInt st.domains s = some v →
+      a[s]! = .int v) : False := by
+  obtain ⟨⟨d, hd, hne⟩, -⟩ := linNe_sat_dot hlen hsat
+  rw [dotOver_scan H, hfree] at hd
+  simp only [dotOver, Int.zero_add] at hd
+  exact hne (by rw [← Option.some.inj hd]; exact hsum)
+
+/-- All pinned operands read their pins and one operand is free: the free
+    slot avoids the forbidden value. -/
+theorem linNe_free_true {st : State} {coeffs : List Int} {is : List Nat}
+    {b : Int} {a : Assignment} (hlen : coeffs.length = is.length)
+    (hsat : (DomConstraint.linNe coeffs is b).SatisfiedBy a)
+    {c : Int} {m : Nat}
+    (hfree : linNeFree st.domains (coeffs.zip is) = [(c, m)])
+    (hmod : (b - linNeSum st.domains (coeffs.zip is)) % c = 0)
+    (H : ∀ c s v, (c, s) ∈ coeffs.zip is → pinInt st.domains s = some v →
+      a[s]! = .int v) :
+    (posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c)).eval a = some true := by
+  obtain ⟨⟨d, hd, hne⟩, hreads⟩ := linNe_sat_dot hlen hsat
+  rw [dotOver_scan H, hfree] at hd
+  have hm : m ∈ is := by
+    have := (linNeFree_mem (by rw [hfree]; exact List.mem_singleton_self (c, m))).1
+    exact (List.of_mem_zip this).2
+  obtain ⟨x, hx⟩ := hreads m hm
+  simp only [dotOver, hx, Int.zero_add] at hd
+  apply posNe_true_of_read hx
+  intro hxv
+  apply hne
+  have hdiv : c * ((b - linNeSum st.domains (coeffs.zip is)) / c)
+      = b - linNeSum st.domains (coeffs.zip is) :=
+    Int.mul_ediv_cancel' (Int.dvd_of_emod_eq_zero hmod)
+  rw [← Option.some.inj hd, hxv]
+  omega
+
+theorem propLinNe_safe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
+    (∀ l rs, propLinNe st coeffs is b = .implied l rs →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linNe coeffs is b).SatisfiedBy a →
+        l.eval a = some true) ∧
+    (∀ c, propLinNe st coeffs is b = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linNe coeffs is b).SatisfiedBy a → False) ∧
+    (∀ c, propLinNe st coeffs is b = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linNe coeffs is b).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  have hexcl : ∀ c, propLinNe st coeffs is b = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linNe coeffs is b).SatisfiedBy a → False := by
+    intro c hrun a hfit hsat
+    obtain ⟨hlen, hfree, hsum, -⟩ := propLinNe_conflict_inv hrun
+    exact linNe_conflict_false hlen hsat hfree hsum
+      (fun c s v _ hv => pinInt_read_of_fits hfit hv)
+  refine ⟨?_, hexcl, fun c hrun a hfit hsat => (hexcl c hrun a hfit hsat).elim⟩
+  intro l rs hrun a hfit hsat
+  obtain ⟨hlen, c, m, hfree, hc0, hmod, hmem, hl, -⟩ := propLinNe_implied_inv hrun
+  rw [hl]
+  exact linNe_free_true hlen hsat hfree hmod
+    (fun c s v _ hv => pinInt_read_of_fits hfit hv)
+
+/-- If no cause literal is true at a satisfying assignment, every pinned
+    operand reads its pin. -/
+theorem linNe_causes_read {st : State} {coeffs : List Int} {is : List Nat}
+    {b : Int} {a : Assignment} (hlen : coeffs.length = is.length)
+    (hsat : (DomConstraint.linNe coeffs is b).SatisfiedBy a)
+    (hnone : ∀ q ∈ linNeCauses st.domains (coeffs.zip is), ¬ q.eval a = some true) :
+    ∀ c s v, (c, s) ∈ coeffs.zip is → pinInt st.domains s = some v →
+      a[s]! = .int v := by
+  intro c s v hm hv
+  obtain ⟨-, hreads⟩ := linNe_sat_dot hlen hsat
+  obtain ⟨x, hx⟩ := hreads s (List.of_mem_zip hm).2
+  have hq : posNe s v ∈ linNeCauses st.domains (coeffs.zip is) :=
+    linNeCauses_mem.mpr ⟨c, s, v, hm, hv, rfl⟩
+  have := eq_of_posNe_not_true hx (hnone _ hq)
+  rw [hx, this]
+
+/-- The conflict clause is entitled at every satisfying assignment (state-free:
+    no fit or faithfulness needed). -/
+theorem propLinNe_entitled {st : State} {coeffs : List Int} {is : List Nat}
+    {b : Int} {cc : Clause} {a : Assignment}
+    (hrun : propLinNe st coeffs is b = .conflict cc)
+    (ha : (DomConstraint.linNe coeffs is b).SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  obtain ⟨hlen, hfree, hsum, hcl⟩ := propLinNe_conflict_inv hrun
+  refine Classical.byContradiction fun hno => ?_
+  have hno' : ∀ q ∈ linNeCauses st.domains (coeffs.zip is), ¬ q.eval a = some true :=
+    fun q hq hqt => hno ⟨q, by rw [hcl]; exact hq, hqt⟩
+  exact linNe_conflict_false hlen ha hfree hsum (linNe_causes_read hlen ha hno')
+
+/-- State-free reason validity of the implied literal. -/
+theorem propLinNe_reason_valid {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int}
+    {l : Literal} {rs : Reason}
+    (hprob : DomConstraint.linNe coeffs is b ∈ problem.constraints)
+    (hrun : propLinNe st coeffs is b = .implied l rs) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
+      (∀ q ∈ rs.clause, q = q.norm) := by
+  obtain ⟨hlen, c, m, hfree, hc0, hmod, hmem, hl, hrs⟩ := propLinNe_implied_inv hrun
+  have hmemc : l ∈ rs.clause := by rw [hrs, hl]; exact List.mem_cons_self
+  refine ⟨lin2_reason_valid_of_clause_true hmemc ?_, ?_⟩
+  · intro a ha
+    have hsat := ha.2 _ hprob
+    by_cases ht : (posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c)).eval a
+        = some true
+    · exact ⟨l, hmemc, by rw [hl]; exact ht⟩
+    · by_cases hex : ∃ q ∈ linNeCauses st.domains (coeffs.zip is),
+          q.eval a = some true
+      · obtain ⟨q, hq, hqt⟩ := hex
+        exact ⟨q, by rw [hrs]; exact List.mem_cons_of_mem _ hq, hqt⟩
+      · have H := linNe_causes_read hlen hsat (fun q hq hqt => hex ⟨q, hq, hqt⟩)
+        exact absurd (linNe_free_true hlen hsat hfree hmod H) ht
+  · intro q hq
+    rw [hrs] at hq
+    rcases List.mem_cons.mp hq with rfl | hq
+    · simp [posNe, Literal.norm]
+    · obtain ⟨c', s, v, -, -, rfl⟩ := linNeCauses_mem.mp hq
+      simp [posNe, Literal.norm]
+
+
+/-- The implied literal is decided at every solution of a problem containing
+    the constraint: the satisfied dot product forces an integer read of the
+    free operand. -/
+theorem propLinNe_implied_decided {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int}
+    {l : Literal} {rs : Reason} {a : Assignment}
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hprob : DomConstraint.linNe coeffs is b ∈ problem.constraints)
+    (hrun : propLinNe st coeffs is b = .implied l rs) :
+    ∃ t, l.eval a = some t := by
+  obtain ⟨hlen, c, m, hfree, -, -, -, hl, -⟩ := propLinNe_implied_inv hrun
+  obtain ⟨-, hreads⟩ := linNe_sat_dot hlen (ha.2 _ hprob)
+  have hm : m ∈ is := by
+    have := (linNeFree_mem (by rw [hfree]; exact List.mem_singleton_self (c, m))).1
+    exact (List.of_mem_zip this).2
+  obtain ⟨x, hx⟩ := hreads m hm
+  rw [hl, eval_posNe]
+  refine ⟨decide (x ≠ (b - linNeSum st.domains (coeffs.zip is)) / c), ?_⟩
+  simp [slotInt, slotBang_int' hx, Value.intView]
+
+
+/-! ## L5 local helper twins
+
+The three bound-extrema helpers of the "L1a consumers' helpers" section
+sit in the file's NESTED `namespace LeanFzn.Solver.Propagation` region
+(they are only used by the L1a obligations there); the L5 section below
+sits in the flat namespace, so it carries local, structurally identical
+twins (the module's usual "local copies of shared kernels" discipline). -/
+
+theorem linReifNarrowHi_bounds_of_implied {st : State} {s : Nat} {hi : Int}
+    {ng : Clause} {l : Literal} {rs : Reason}
+    (h : narrowHi st s hi ng = .implied l rs) :
+    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
+      domMaxI (st.domains.getD s []) = some mx := by
+  unfold narrowHi at h
+  split at h
+  · rename_i mn mx hmn hmx
+    exact ⟨mn, mx, hmn, hmx⟩
+  · cases h
+
+theorem linReifNarrowLo_bounds_of_implied {st : State} {s : Nat} {lo : Int}
+    {ng : Clause} {l : Literal} {rs : Reason}
+    (h : narrowLo st s lo ng = .implied l rs) :
+    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
+      domMaxI (st.domains.getD s []) = some mx := by
+  unfold narrowLo at h
+  split at h
+  · rename_i mn mx hmn hmx
+    exact ⟨mn, mx, hmn, hmx⟩
+  · cases h
+
+theorem linReif_getD_ne_nil_of_domMinI {d' : List Domain} {s : Nat}
+    {mn : Int} (h : domMinI (d'.getD s []) = some mn) :
+    d'.getD s [] ≠ [] := by
+  intro h0
+  rw [h0] at h
+  rw [show domMinI ([] : List Value) = none from rfl] at h
+  exact absurd h (by simp)
+
+/-! ## L5: the pinned reified linear equalities/disequalities
+
+`int_lin_eq_reif coeffs is b r` and `int_lin_ne_reif coeffs is b r`
+are the `linEq`/`linNe` twins of L1a's `linLeReif`: their
+`SatisfiedBy` reads the reif slot as a Boolean and reifies the
+underlying DOT predicate, with the same three-valued dot (`dotProduct`
+refuses Boolean operands; the clause literals read Booleans as 0/1).
+The pinned-direction delegation therefore mirrors L1a exactly:
+
+* r pinned `true`: delegate to the explained inner propagator
+  (`propLinEq2` resp. `propLinNe`), each emitted clause augmented
+  with the escape `posBool r false` (the reified fact holds only
+  when `r` reads `true`);
+* r pinned `false` over integer-only operand domains: the reif fact
+  FALSIFIES the inner predicate, whose complement is
+  `.linNe`/`.linEq` only when the dot exists; the delegation goes to
+  the complemented inner propagator with the escapes `posBool r true`
+  and the per-slot Boolean-read literals, and (as in L1a) reports
+  CONFLICTS ONLY — its bound implications would need the state-box /
+  problem-box slot-count premise that `PropagationContract.reason`
+  does not carry. -/
+
+/-- The pinned-direction delegation for `int_lin_eq_reif`. -/
+def propLinEqReif (st : State) (coeffs : List Int) (is : List Nat)
+    (b : Int) (r : Nat) : PropagationResult :=
+  if coeffs.length == is.length then
+    if domBoolPin st.domains r true then
+      augmentRes (linLeReifEscTrue r) (propLinEq2 st coeffs is b)
+    else if domBoolPin st.domains r false && domsIntOnlyB st.domains is then
+      conflictsOnly (augmentRes (linLeReifEscFalse is r)
+        (propLinNe st coeffs is b))
+    else .stable
+  else .stable
+
+/-- The pinned-direction delegation for `int_lin_ne_reif`. -/
+def propLinNeReif (st : State) (coeffs : List Int) (is : List Nat)
+    (b : Int) (r : Nat) : PropagationResult :=
+  if coeffs.length == is.length then
+    if domBoolPin st.domains r true then
+      augmentRes (linLeReifEscTrue r) (propLinNe st coeffs is b)
+    else if domBoolPin st.domains r false && domsIntOnlyB st.domains is then
+      conflictsOnly (augmentRes (linLeReifEscFalse is r)
+        (propLinEq2 st coeffs is b))
+    else .stable
+  else .stable
+
+/-! ## Run equations -/
+
+theorem propLinEqReif_run_true {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = true)
+    (h : domBoolPin st.domains r true = true) :
+    propLinEqReif st coeffs is b r
+      = augmentRes (linLeReifEscTrue r) (propLinEq2 st coeffs is b) := by
+  show (if (coeffs.length == is.length) = true then
+      (if (domBoolPin st.domains r true) = true then
+        augmentRes (linLeReifEscTrue r) (propLinEq2 st coeffs is b)
+      else if (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true then
+        conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinNe st coeffs is b))
+      else .stable)
+    else .stable) = augmentRes (linLeReifEscTrue r) (propLinEq2 st coeffs is b)
+  rw [if_pos hlenB, if_pos h]
+
+theorem propLinEqReif_run_false {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = true)
+    (h1 : ¬ (domBoolPin st.domains r true = true))
+    (h2 : (domBoolPin st.domains r false && domsIntOnlyB st.domains is) = true) :
+    propLinEqReif st coeffs is b r
+      = conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinNe st coeffs is b)) := by
+  show (if (coeffs.length == is.length) = true then
+      (if (domBoolPin st.domains r true) = true then
+        augmentRes (linLeReifEscTrue r) (propLinEq2 st coeffs is b)
+      else if (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true then
+        conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinNe st coeffs is b))
+      else .stable)
+    else .stable) = conflictsOnly (augmentRes (linLeReifEscFalse is r)
+      (propLinNe st coeffs is b))
+  rw [if_pos hlenB, if_neg h1, if_pos h2]
+
+theorem propLinEqReif_run_stable {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = true)
+    (h1 : ¬ (domBoolPin st.domains r true = true))
+    (h2 : ¬ ((domBoolPin st.domains r false && domsIntOnlyB st.domains is) = true)) :
+    propLinEqReif st coeffs is b r = .stable := by
+  show (if (coeffs.length == is.length) = true then
+      (if (domBoolPin st.domains r true) = true then
+        augmentRes (linLeReifEscTrue r) (propLinEq2 st coeffs is b)
+      else if (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true then
+        conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinNe st coeffs is b))
+      else .stable)
+    else .stable) = .stable
+  rw [if_pos hlenB, if_neg h1, if_neg h2]
+
+theorem propLinEqReif_run_arity {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = false) :
+    propLinEqReif st coeffs is b r = .stable := by
+  simp [propLinEqReif, hlenB]
+
+theorem propLinNeReif_run_true {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = true)
+    (h : domBoolPin st.domains r true = true) :
+    propLinNeReif st coeffs is b r
+      = augmentRes (linLeReifEscTrue r) (propLinNe st coeffs is b) := by
+  show (if (coeffs.length == is.length) = true then
+      (if (domBoolPin st.domains r true) = true then
+        augmentRes (linLeReifEscTrue r) (propLinNe st coeffs is b)
+      else if (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true then
+        conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinEq2 st coeffs is b))
+      else .stable)
+    else .stable) = augmentRes (linLeReifEscTrue r) (propLinNe st coeffs is b)
+  rw [if_pos hlenB, if_pos h]
+
+theorem propLinNeReif_run_false {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = true)
+    (h1 : ¬ (domBoolPin st.domains r true = true))
+    (h2 : (domBoolPin st.domains r false && domsIntOnlyB st.domains is) = true) :
+    propLinNeReif st coeffs is b r
+      = conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinEq2 st coeffs is b)) := by
+  show (if (coeffs.length == is.length) = true then
+      (if (domBoolPin st.domains r true) = true then
+        augmentRes (linLeReifEscTrue r) (propLinNe st coeffs is b)
+      else if (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true then
+        conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinEq2 st coeffs is b))
+      else .stable)
+    else .stable) = conflictsOnly (augmentRes (linLeReifEscFalse is r)
+      (propLinEq2 st coeffs is b))
+  rw [if_pos hlenB, if_neg h1, if_pos h2]
+
+theorem propLinNeReif_run_stable {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = true)
+    (h1 : ¬ (domBoolPin st.domains r true = true))
+    (h2 : ¬ ((domBoolPin st.domains r false && domsIntOnlyB st.domains is) = true)) :
+    propLinNeReif st coeffs is b r = .stable := by
+  show (if (coeffs.length == is.length) = true then
+      (if (domBoolPin st.domains r true) = true then
+        augmentRes (linLeReifEscTrue r) (propLinNe st coeffs is b)
+      else if (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true then
+        conflictsOnly (augmentRes (linLeReifEscFalse is r)
+          (propLinEq2 st coeffs is b))
+      else .stable)
+    else .stable) = .stable
+  rw [if_pos hlenB, if_neg h1, if_neg h2]
+
+theorem propLinNeReif_run_arity {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (hlenB : (coeffs.length == is.length) = false) :
+    propLinNeReif st coeffs is b r = .stable := by
+  simp [propLinNeReif, hlenB]
+
+/-! ## Constraint-semantics bridges -/
+
+theorem linEqReif_satisfied_inv {coeffs : List Int} {is : List Nat}
+    {b : Int} {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linEqReif coeffs is b r).SatisfiedBy a) :
+    ∃ rb : Bool, a[r]? = some (.bool rb)
+      ∧ (rb = true ↔
+          dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some b) :=
+  h
+
+theorem linNeReif_satisfied_inv {coeffs : List Int} {is : List Nat}
+    {b : Int} {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linNeReif coeffs is b r).SatisfiedBy a) :
+    ∃ rb : Bool, a[r]? = some (.bool rb)
+      ∧ (rb = true ↔
+          dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true) :=
+  h
+
+/-- The `r`-pinned-true bridge: the reified `Σ = b` holds. -/
+theorem linEqReif_true_dot {coeffs : List Int} {is : List Nat} {b : Int}
+    {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linEqReif coeffs is b r).SatisfiedBy a)
+    (hpin : a[r]? = some (.bool true)) :
+    (DomConstraint.linEq coeffs is b).SatisfiedBy a := by
+  obtain ⟨rb, hread, hiff⟩ := linEqReif_satisfied_inv h
+  rw [hpin] at hread
+  have hrb : rb = true := by simpa using hread.symm
+  show dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some b
+  exact hiff.mp hrb
+
+/-- The `r`-pinned-true bridge: the reified `Σ ≠ b` holds. -/
+theorem linNeReif_true_dot {coeffs : List Int} {is : List Nat} {b : Int}
+    {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linNeReif coeffs is b r).SatisfiedBy a)
+    (hpin : a[r]? = some (.bool true)) :
+    (DomConstraint.linNe coeffs is b).SatisfiedBy a := by
+  obtain ⟨rb, hread, hiff⟩ := linNeReif_satisfied_inv h
+  rw [hpin] at hread
+  have hrb : rb = true := by simpa using hread.symm
+  show dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+  exact hiff.mp hrb
+
+/-- Integer operand reads of matching arity yield a dot product. -/
+theorem dotProduct_exists_of_reads {coeffs : List Int} {is : List Nat}
+    {a : Assignment} (hlen : coeffs.length = is.length)
+    (hreads : ∀ i ∈ is, ∃ k : Int, a[i]! = .int k) :
+    ∃ d, dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some d := by
+  apply dotProduct_intVals_exists_of_length
+  · rw [List.length_map, intVals_length]
+    omega
+  · intro x hx
+    obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hx
+    exact hreads i hi
+
+/-- The `r`-pinned-false bridge for `linEqReif`: with integer operand
+    reads the dot product exists and differs from `b`, so the
+    disequality holds. -/
+theorem linEqReif_false_dot {coeffs : List Int} {is : List Nat} {b : Int}
+    {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linEqReif coeffs is b r).SatisfiedBy a)
+    (hpin : a[r]? = some (.bool false))
+    (hreads : ∀ i ∈ is, ∃ k : Int, a[i]! = .int k)
+    (hlen : coeffs.length = is.length) :
+    (DomConstraint.linNe coeffs is b).SatisfiedBy a := by
+  obtain ⟨rb, hread, hiff⟩ := linEqReif_satisfied_inv h
+  have hrbfalse : rb = false := by
+    rw [hpin] at hread
+    simpa using hread.symm
+  show dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+  obtain ⟨d, hd⟩ := dotProduct_exists_of_reads hlen hreads
+  rw [dotNe, hd]
+  have hne : d ≠ b := by
+    intro hdb
+    have h1 : rb = true := hiff.mpr (by rw [hd, hdb])
+    rw [hrbfalse] at h1
+    exact Bool.noConfusion h1
+  exact decide_eq_true hne
+
+/-- The `r`-pinned-false bridge for `linNeReif`: with integer operand
+    reads the dot product exists and equals `b`, so the equality
+    holds. -/
+theorem linNeReif_false_dot {coeffs : List Int} {is : List Nat} {b : Int}
+    {r : Nat} {a : Assignment}
+    (h : (DomConstraint.linNeReif coeffs is b r).SatisfiedBy a)
+    (hpin : a[r]? = some (.bool false))
+    (hreads : ∀ i ∈ is, ∃ k : Int, a[i]! = .int k)
+    (hlen : coeffs.length = is.length) :
+    (DomConstraint.linEq coeffs is b).SatisfiedBy a := by
+  obtain ⟨rb, hread, hiff⟩ := linNeReif_satisfied_inv h
+  have hrbfalse : rb = false := by
+    rw [hpin] at hread
+    simpa using hread.symm
+  show dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some b
+  obtain ⟨d, hd⟩ := dotProduct_exists_of_reads hlen hreads
+  have hdb : d = b := by
+    by_cases hdne : d = b
+    · exact hdne
+    · have h1 : rb = true := hiff.mpr (by rw [dotNe, hd]; exact decide_eq_true hdne)
+      rw [hrbfalse] at h1
+      exact absurd h1 (by simp)
+  rw [hd, hdb]
+
+
+
+/-! ## The safe triples at fitting solutions -/
+
+/-- The pinned-delegation propagator's safe triple w.r.t. the reified
+    family: implied-literal soundness, conflict exclusion, and conflict
+    entitlement, at every fitting solution of the reified constraint. -/
+theorem propLinEqReif_safe (st : State) (coeffs : List Int) (is : List Nat)
+    (b : Int) (r : Nat) :
+    (∀ l rs, propLinEqReif st coeffs is b r = .implied l rs →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linEqReif coeffs is b r).SatisfiedBy a →
+        l.eval a = some true) ∧
+    (∀ c, propLinEqReif st coeffs is b r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linEqReif coeffs is b r).SatisfiedBy a → False) ∧
+    (∀ c, propLinEqReif st coeffs is b r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linEqReif coeffs is b r).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    refine ⟨?_, ?_, ?_⟩
+    · intro l rs hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinEqReif_run_true hlenB h1] at hrun
+        obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+        have hle := linEqReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        exact (propLinEq2_safe st coeffs is b hlen).1 l rs0 hres a hfit hle
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinEqReif_run_false hlenB h1 h2] at hrun
+          exact (conflictsOnly_implied_elim hrun).elim
+        · rw [propLinEqReif_run_stable hlenB h1 h2] at hrun
+          cases hrun
+    · intro c hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinEqReif_run_true hlenB h1] at hrun
+        obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+        have hle := linEqReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        exact (propLinEq2_safe st coeffs is b hlen).2.1 c0 hres a hfit hle
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinEqReif_run_false hlenB h1 h2] at hrun
+          have hrun2 := conflictsOnly_conflict_inv hrun
+          obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun2
+          have h2' := h2
+          rw [Bool.and_eq_true] at h2'
+          obtain ⟨hpf, hg⟩ := h2'
+          have hreads := domsIntOnlyB_fits_read hg hfit
+          have hcons' := linEqReif_false_dot hcons
+            (fits_of_domBoolPin hfit hpf) hreads hlen
+          exact (propLinNe_safe st coeffs is b).2.1 c0 hres a hfit hcons'
+        · rw [propLinEqReif_run_stable hlenB h1 h2] at hrun
+          cases hrun
+    · intro c hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinEqReif_run_true hlenB h1] at hrun
+        obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+        have hle := linEqReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        obtain ⟨l, hl, hlt⟩ := (propLinEq2_safe st coeffs is b hlen).2.2 c0 hres
+          a hfit hle
+        exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinEqReif_run_false hlenB h1 h2] at hrun
+          have hrun2 := conflictsOnly_conflict_inv hrun
+          obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun2
+          have h2' := h2
+          rw [Bool.and_eq_true] at h2'
+          obtain ⟨hpf, hg⟩ := h2'
+          have hreads := domsIntOnlyB_fits_read hg hfit
+          have hcons' := linEqReif_false_dot hcons
+            (fits_of_domBoolPin hfit hpf) hreads hlen
+          obtain ⟨l, hl, hlt⟩ := (propLinNe_safe st coeffs is b).2.2 c0 hres
+            a hfit hcons'
+          exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+        · rw [propLinEqReif_run_stable hlenB h1 h2] at hrun
+          cases hrun
+  · have hlenF : (coeffs.length == is.length) = false :=
+      Bool.eq_false_iff.mpr hlenB
+    refine ⟨?_, ?_, ?_⟩
+    · intro l rs hrun
+      rw [propLinEqReif_run_arity hlenF] at hrun
+      cases hrun
+    · intro c hrun
+      rw [propLinEqReif_run_arity hlenF] at hrun
+      cases hrun
+    · intro c hrun
+      rw [propLinEqReif_run_arity hlenF] at hrun
+      cases hrun
+
+/-- The `int_lin_ne_reif` twin of `propLinEqReif_safe`. -/
+theorem propLinNeReif_safe (st : State) (coeffs : List Int) (is : List Nat)
+    (b : Int) (r : Nat) :
+    (∀ l rs, propLinNeReif st coeffs is b r = .implied l rs →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linNeReif coeffs is b r).SatisfiedBy a →
+        l.eval a = some true) ∧
+    (∀ c, propLinNeReif st coeffs is b r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linNeReif coeffs is b r).SatisfiedBy a → False) ∧
+    (∀ c, propLinNeReif st coeffs is b r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.linNeReif coeffs is b r).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    refine ⟨?_, ?_, ?_⟩
+    · intro l rs hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinNeReif_run_true hlenB h1] at hrun
+        obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+        have hne := linNeReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        exact (propLinNe_safe st coeffs is b).1 l rs0 hres a hfit hne
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinNeReif_run_false hlenB h1 h2] at hrun
+          exact (conflictsOnly_implied_elim hrun).elim
+        · rw [propLinNeReif_run_stable hlenB h1 h2] at hrun
+          cases hrun
+    · intro c hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinNeReif_run_true hlenB h1] at hrun
+        obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+        have hne := linNeReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        exact (propLinNe_safe st coeffs is b).2.1 c0 hres a hfit hne
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinNeReif_run_false hlenB h1 h2] at hrun
+          have hrun2 := conflictsOnly_conflict_inv hrun
+          obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun2
+          have h2' := h2
+          rw [Bool.and_eq_true] at h2'
+          obtain ⟨hpf, hg⟩ := h2'
+          have hreads := domsIntOnlyB_fits_read hg hfit
+          have hle := linNeReif_false_dot hcons
+            (fits_of_domBoolPin hfit hpf) hreads hlen
+          exact (propLinEq2_safe st coeffs is b hlen).2.1 c0 hres a hfit hle
+        · rw [propLinNeReif_run_stable hlenB h1 h2] at hrun
+          cases hrun
+    · intro c hrun a hfit hcons
+      by_cases h1 : domBoolPin st.domains r true = true
+      · rw [propLinNeReif_run_true hlenB h1] at hrun
+        obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+        have hne := linNeReif_true_dot hcons (fits_of_domBoolPin hfit h1)
+        obtain ⟨l, hl, hlt⟩ := (propLinNe_safe st coeffs is b).2.2 c0 hres
+          a hfit hne
+        exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+      · by_cases h2 : (domBoolPin st.domains r false
+            && domsIntOnlyB st.domains is) = true
+        · rw [propLinNeReif_run_false hlenB h1 h2] at hrun
+          have hrun2 := conflictsOnly_conflict_inv hrun
+          obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun2
+          have h2' := h2
+          rw [Bool.and_eq_true] at h2'
+          obtain ⟨hpf, hg⟩ := h2'
+          have hreads := domsIntOnlyB_fits_read hg hfit
+          have hle := linNeReif_false_dot hcons
+            (fits_of_domBoolPin hfit hpf) hreads hlen
+          obtain ⟨l, hl, hlt⟩ := (propLinEq2_safe st coeffs is b hlen).2.2 c0
+            hres a hfit hle
+          exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+        · rw [propLinNeReif_run_stable hlenB h1 h2] at hrun
+          cases hrun
+  · have hlenF : (coeffs.length == is.length) = false :=
+      Bool.eq_false_iff.mpr hlenB
+    refine ⟨?_, ?_, ?_⟩
+    · intro l rs hrun
+      rw [propLinNeReif_run_arity hlenF] at hrun
+      cases hrun
+    · intro c hrun
+      rw [propLinNeReif_run_arity hlenF] at hrun
+      cases hrun
+    · intro c hrun
+      rw [propLinNeReif_run_arity hlenF] at hrun
+      cases hrun
+
+
+/-! ## The conflict entitlement at faithful solutions -/
+
+/-- The delegated `propLinEq2` kernel at a solution of the underlying
+    `.linEq` (keyed on the equality rather than constraint membership):
+    every conflict clause carries a true literal. -/
+theorem propLinEq2_entitled_dot {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {cc : Clause} {a : Assignment}
+    (hlen : coeffs.length = is.length)
+    (hrun : propLinEq2 st coeffs is b = .conflict cc)
+    (hcons : (DomConstraint.linEq coeffs is b).SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  rcases propLinEq2_emission_inv hrun with hstable |
+    ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, hr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, hr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, hr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, hr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩
+  · exact absurd hstable (by intro hc; cases hc)
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowHi_conflict_inv hnarrow.symm
+    have hreads := linEq2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_le_hi_true hmem hrest hguard hsum hreads
+      (linEq_sat_le hcons) hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowLo_conflict_inv hnarrow.symm
+    have hreads := linEq2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_eq_lo_max_true hmem hrest hguard hsum hreads
+      hcons hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowLo_conflict_inv hnarrow.symm
+    have hreads := linEq2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_le_lo_true hmem hrest hguard hsum hreads
+      (linEq_sat_le hcons) hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowHi_conflict_inv hnarrow.symm
+    have hreads := linEq2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_eq_hi_max_true hmem hrest hguard hsum hreads
+      hcons hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowHi_conflict_inv hnarrow.symm
+    have hreads := linEq2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_gen_le_hi_true hmem hpos hrest hguard hsum
+      hreads (linEq_sat_le hcons) hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowLo_conflict_inv hnarrow.symm
+    have hreads := linEq2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_gen_eq_lo_max_true hmem hpos hrest hguard hsum
+      hreads hcons hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowLo_conflict_inv hnarrow.symm
+    have hreads := linEq2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_gen_le_lo_true hmem hneg hrest hguard hsum
+      hreads (linEq_sat_le hcons) hlen
+  · obtain ⟨_, _, _, _, _, hcc⟩ := narrowHi_conflict_inv hnarrow.symm
+    have hreads := linEq2_reads_int hcons hlen
+    rw [hcc]
+    exact lin2_nogood_gen_eq_hi_max_true hmem hneg hrest hguard hsum
+      hreads hcons hlen
+
+/-- Every conflict clause of the pinned `linEqReif` delegation carries a
+    true literal at every faithful solution of the reified constraint. -/
+theorem propLinEqReif_entitled {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {cc : Clause}
+    {a : Assignment}
+    (hrun : propLinEqReif st coeffs is b r = .conflict cc)
+    (hfaith : FrameFaithful st.domains a)
+    (ha : (DomConstraint.linEqReif coeffs is b r).SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  obtain ⟨rb, hread, hiff⟩ := linEqReif_satisfied_inv ha
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    by_cases h1 : domBoolPin st.domains r true = true
+    · rw [propLinEqReif_run_true hlenB h1] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      cases rb with
+      | false =>
+          refine ⟨posBool r false, ?_, posBool_eval_true hread⟩
+          rw [hcl]
+          exact mem_insertAfterHead_of_mem_extras (by simp [linLeReifEscTrue])
+      | true =>
+          have hle : (DomConstraint.linEq coeffs is b).SatisfiedBy a := by
+            show dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some b
+            exact hiff.mp rfl
+          obtain ⟨l, hl, hlt⟩ := propLinEq2_entitled_dot hlen hres hle
+          exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinEqReif_run_false hlenB h1 h2] at hrun
+        have hrun2 := conflictsOnly_conflict_inv hrun
+        obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun2
+        have h2' := h2
+        rw [Bool.and_eq_true] at h2'
+        obtain ⟨hpf, hg⟩ := h2'
+        cases rb with
+        | true =>
+            refine ⟨posBool r true, ?_, posBool_eval_true hread⟩
+            rw [hcl]
+            exact mem_insertAfterHead_of_mem_extras
+              (by simp [linLeReifEscFalse])
+        | false =>
+            have hreads := domsIntOnlyB_faithful_read hg hfaith
+            have hcons' := linEqReif_false_dot ha hread hreads hlen
+            obtain ⟨l, hl, hlt⟩ := propLinNe_entitled hres hcons'
+            exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+      · rw [propLinEqReif_run_stable hlenB h1 h2] at hrun
+        cases hrun
+  · have hlenF : (coeffs.length == is.length) = false :=
+      Bool.eq_false_iff.mpr hlenB
+    rw [propLinEqReif_run_arity hlenF] at hrun
+    cases hrun
+
+/-- Every conflict clause of the pinned `linNeReif` delegation carries a
+    true literal at every faithful solution of the reified constraint. -/
+theorem propLinNeReif_entitled {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {cc : Clause}
+    {a : Assignment}
+    (hrun : propLinNeReif st coeffs is b r = .conflict cc)
+    (hfaith : FrameFaithful st.domains a)
+    (ha : (DomConstraint.linNeReif coeffs is b r).SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  obtain ⟨rb, hread, hiff⟩ := linNeReif_satisfied_inv ha
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    by_cases h1 : domBoolPin st.domains r true = true
+    · rw [propLinNeReif_run_true hlenB h1] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      cases rb with
+      | false =>
+          refine ⟨posBool r false, ?_, posBool_eval_true hread⟩
+          rw [hcl]
+          exact mem_insertAfterHead_of_mem_extras (by simp [linLeReifEscTrue])
+      | true =>
+          have hne : (DomConstraint.linNe coeffs is b).SatisfiedBy a := by
+            show dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+            exact hiff.mp rfl
+          obtain ⟨l, hl, hlt⟩ := propLinNe_entitled hres hne
+          exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinNeReif_run_false hlenB h1 h2] at hrun
+        have hrun2 := conflictsOnly_conflict_inv hrun
+        obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun2
+        have h2' := h2
+        rw [Bool.and_eq_true] at h2'
+        obtain ⟨hpf, hg⟩ := h2'
+        cases rb with
+        | true =>
+            refine ⟨posBool r true, ?_, posBool_eval_true hread⟩
+            rw [hcl]
+            exact mem_insertAfterHead_of_mem_extras
+              (by simp [linLeReifEscFalse])
+        | false =>
+            have hreads := domsIntOnlyB_faithful_read hg hfaith
+            have hle' := linNeReif_false_dot ha hread hreads hlen
+            obtain ⟨l, hl, hlt⟩ := propLinEq2_entitled_dot hlen hres hle'
+            exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+      · rw [propLinNeReif_run_stable hlenB h1 h2] at hrun
+        cases hrun
+  · have hlenF : (coeffs.length == is.length) = false :=
+      Bool.eq_false_iff.mpr hlenB
+    rw [propLinNeReif_run_arity hlenF] at hrun
+    cases hrun
+
+/-! ## The implied literals: order shape and decidedness -/
+
+/-- The implied literal of the `linEqReif` delegation is either an order
+    literal on a slot whose state domain has both extrema (hence is
+    nonempty and in range), or a value-removal literal whose removed
+    value is a member of the slot's state domain. -/
+theorem propLinEqReif_implied_order {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {l : Literal} {rs : Reason}
+    (hrun : propLinEqReif st coeffs is b r = .implied l rs) :
+    (∃ m k mn mx, (l = posLe m k ∨ l = negLe m k) ∧
+      domMinI (st.domains.getD m []) = some mn ∧
+      domMaxI (st.domains.getD m []) = some mx) ∨
+    (∃ m v, l = posNe m v ∧ Value.int v ∈ st.domains.getD m []) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · by_cases h1 : domBoolPin st.domains r true = true
+    · rw [propLinEqReif_run_true hlenB h1] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      rcases propLinEq2_emission_inv hres with hstable |
+        ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, hr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, hr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, lr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, hr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, lr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, hr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩
+      · exact absurd hstable (by intro hc; cases hc)
+      · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := linReifNarrowHi_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, b - lr, mn, mx, Or.inl hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := linReifNarrowLo_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, b - hr - 1, mn, mx, Or.inr hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := linReifNarrowLo_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, lr - b - 1, mn, mx, Or.inr hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := linReifNarrowHi_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, hr - b, mn, mx, Or.inl hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := linReifNarrowHi_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, (b - lr) / c, mn, mx, Or.inl hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := linReifNarrowLo_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, -((hr - b) / c) - 1, mn, mx, Or.inr hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := linReifNarrowLo_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, -((b - lr) / (-c)) - 1, mn, mx, Or.inr hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := linReifNarrowHi_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, (hr - b) / (-c), mn, mx, Or.inl hl, hmn, hmx⟩
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinEqReif_run_false hlenB h1 h2] at hrun
+        exact (conflictsOnly_implied_elim hrun).elim
+      · rw [propLinEqReif_run_stable hlenB h1 h2] at hrun
+        cases hrun
+  · rw [propLinEqReif_run_arity (Bool.eq_false_iff.mpr hlenB)] at hrun
+    cases hrun
+
+/-- The `linNeReif` twin of `propLinEqReif_implied_order`: the delegated
+    `propLinNe` implied is a value-removal literal whose removed value
+    is a member of the slot's state domain. -/
+theorem propLinNeReif_implied_order {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {l : Literal} {rs : Reason}
+    (hrun : propLinNeReif st coeffs is b r = .implied l rs) :
+    (∃ m k mn mx, (l = posLe m k ∨ l = negLe m k) ∧
+      domMinI (st.domains.getD m []) = some mn ∧
+      domMaxI (st.domains.getD m []) = some mx) ∨
+    (∃ m v, l = posNe m v ∧ Value.int v ∈ st.domains.getD m []) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · by_cases h1 : domBoolPin st.domains r true = true
+    · rw [propLinNeReif_run_true hlenB h1] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      obtain ⟨-, c, m, -, -, -, hmem, hl, -⟩ := propLinNe_implied_inv hres
+      exact Or.inr ⟨m, (b - linNeSum st.domains (coeffs.zip is)) / c, hl, hmem⟩
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinNeReif_run_false hlenB h1 h2] at hrun
+        exact (conflictsOnly_implied_elim hrun).elim
+      · rw [propLinNeReif_run_stable hlenB h1 h2] at hrun
+        cases hrun
+  · rw [propLinNeReif_run_arity (Bool.eq_false_iff.mpr hlenB)] at hrun
+    cases hrun
+
+
+
+/-- A nonempty state slot is in range at the problem box (of equal
+    length), and the value the solution reads there has an integer view:
+    the slot's integer read exists. -/
+theorem slotInt_exists_of_state_ne_nil {problem : Problem DomConstraint Unit}
+    {st : State} {a : Assignment} {m : Nat}
+    (hview : IntViewedDoms problem.domains)
+    (hsub : DomSub st.domains problem.domains)
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hne : st.domains.getD m [] ≠ []) :
+    ∃ x, slotInt a m = some x := by
+  have hlt1 : m < st.domains.length := by
+    by_cases hlt : m < st.domains.length
+    · exact hlt
+    · exact absurd (getD_nil_of_length_le hlt) hne
+  have hlt2 : m < problem.domains.length := by rw [← hsub.1]; exact hlt1
+  have hlt3 : m < a.length := by rw [ha.1.1]; exact hlt2
+  have hread : a[m]? = some a[m] := List.getElem?_eq_getElem hlt3
+  have hmem : a[m] ∈ problem.domains.getD m [] := ha.1.2 m (a[m]) hread
+  have hx : Value.intView (a[m]) ≠ none :=
+    hview _ (getD_mem_of_lt hlt2) _ hmem
+  obtain ⟨x, hx2⟩ : ∃ x, Value.intView (a[m]) = some x := by
+    cases hv : Value.intView (a[m]) with
+    | none => exact absurd hv hx
+    | some x => exact ⟨x, rfl⟩
+  refine ⟨x, ?_⟩
+  show a[m]?.bind Value.intView = some x
+  rw [hread]
+  show (some a[m]).bind Value.intView = some x
+  rw [Option.bind_some]
+  exact hx2
+
+/-- The delegated implied literal is DECIDED at every solution of a
+    problem whose box has the state's slots in range and int-viewed: the
+    emission's own guard provides a nonempty state domain for the
+    literal's slot. -/
+theorem propLinEqReif_implied_decided {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int} {r : Nat}
+    {l : Literal} {rs : Reason} {a : Assignment}
+    (hview : IntViewedDoms problem.domains)
+    (hsub : DomSub st.domains problem.domains)
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hrun : propLinEqReif st coeffs is b r = .implied l rs) :
+    ∃ t, l.eval a = some t := by
+  rcases propLinEqReif_implied_order hrun with
+    ⟨m, k, mn, mx, hord, hmn, hmx⟩ | ⟨m, v, hpos, hmem⟩
+  · obtain ⟨x, hslot⟩ := slotInt_exists_of_state_ne_nil hview hsub ha
+      (linReif_getD_ne_nil_of_domMinI hmn)
+    rcases hord with rfl | rfl
+    · exact ⟨decide (x ≤ k), by
+        simp [posLe, Literal.eval, Atom.eval, hslot]⟩
+    · exact ⟨!(decide (x ≤ k)), by
+        simp [negLe, Literal.eval, Atom.eval, hslot]⟩
+  · obtain ⟨x, hslot⟩ := slotInt_exists_of_state_ne_nil hview hsub ha
+      (by intro h0; rw [h0] at hmem; exact absurd hmem (by simp))
+    rw [hpos, eval_posNe, hslot]
+    exact ⟨decide (x ≠ v), rfl⟩
+
+/-- The `linNeReif` twin of `propLinEqReif_implied_decided`. -/
+theorem propLinNeReif_implied_decided {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int} {r : Nat}
+    {l : Literal} {rs : Reason} {a : Assignment}
+    (hview : IntViewedDoms problem.domains)
+    (hsub : DomSub st.domains problem.domains)
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hrun : propLinNeReif st coeffs is b r = .implied l rs) :
+    ∃ t, l.eval a = some t := by
+  rcases propLinNeReif_implied_order hrun with
+    ⟨m, k, mn, mx, hord, hmn, hmx⟩ | ⟨m, v, hpos, hmem⟩
+  · obtain ⟨x, hslot⟩ := slotInt_exists_of_state_ne_nil hview hsub ha
+      (linReif_getD_ne_nil_of_domMinI hmn)
+    rcases hord with rfl | rfl
+    · exact ⟨decide (x ≤ k), by
+        simp [posLe, Literal.eval, Atom.eval, hslot]⟩
+    · exact ⟨!(decide (x ≤ k)), by
+        simp [negLe, Literal.eval, Atom.eval, hslot]⟩
+  · obtain ⟨x, hslot⟩ := slotInt_exists_of_state_ne_nil hview hsub ha
+      (by intro h0; rw [h0] at hmem; exact absurd hmem (by simp))
+    rw [hpos, eval_posNe, hslot]
+    exact ⟨decide (x ≠ v), rfl⟩
+
+/-! ## L1a consumers' helpers (order shape + decidedness) -/
+
+namespace LeanFzn.Solver.Propagation
+
+theorem narrowHi_bounds_of_implied {st : State} {s : Nat} {hi : Int}
+    {ng : Clause} {l : Literal} {rs : Reason}
+    (h : narrowHi st s hi ng = .implied l rs) :
+    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
+      domMaxI (st.domains.getD s []) = some mx := by
+  unfold narrowHi at h
+  split at h
+  · rename_i mn mx hmn hmx
+    exact ⟨mn, mx, hmn, hmx⟩
+  · cases h
+
+theorem narrowLo_bounds_of_implied {st : State} {s : Nat} {lo : Int}
+    {ng : Clause} {l : Literal} {rs : Reason}
+    (h : narrowLo st s lo ng = .implied l rs) :
+    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
+      domMaxI (st.domains.getD s []) = some mx := by
+  unfold narrowLo at h
+  split at h
+  · rename_i mn mx hmn hmx
+    exact ⟨mn, mx, hmn, hmx⟩
+  · cases h
+
+theorem domMinI_ne_none_of_some {d : List Value} {mn : Int}
+    (h : domMinI d = some mn) : domMinI d ≠ none := by
+  intro hc
+  rw [h] at hc
+  exact absurd hc (by simp)
+
+theorem getD_ne_nil_of_domMinI {d' : List Domain} {s : Nat}
+    {mn : Int} (h : domMinI (d'.getD s []) = some mn) :
+    d'.getD s [] ≠ [] := by
+  intro h0
+  rw [h0] at h
+  rw [show domMinI ([] : List Value) = none from rfl] at h
+  exact absurd h (by simp)
+
+/-- The implied literal of the delegation is either an order literal on a
+    slot whose state domain has both extrema (hence is nonempty and in
+    range), or the bounds arm's plain pin `posBool r true` (with the
+    Boolean-only state domain guard that justified it). -/
+theorem propLinLeReif_implied_order {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {l : Literal} {rs : Reason}
+    (hrun : propLinLeReif st coeffs is b r = .implied l rs) :
+    (∃ m k mn mx, (l = posLe m k ∨ l = negLe m k) ∧
+      domMinI (st.domains.getD m []) = some mn ∧
+      domMaxI (st.domains.getD m []) = some mx) ∨
+    (l = posBool r true ∧ domBoolOnlyB (st.domains.getD r []) = true) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    by_cases h1 : domBoolPin st.domains r true = true
+    · rw [propLinLeReif_run_true hlenB h1] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      rcases propLinLe2_emission_inv hres with hstable |
+        ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, lr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
+        ⟨m, i, rest, lr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩
+      · exact absurd hstable (by intro hc; cases hc)
+      · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := narrowHi_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, b - lr, mn, mx, Or.inl hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := narrowLo_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, lr - b - 1, mn, mx, Or.inr hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := narrowHi_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, (b - lr) / c, mn, mx, Or.inl hl, hmn, hmx⟩
+      · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
+        obtain ⟨mn, mx, hmn, hmx⟩ := narrowLo_bounds_of_implied hnarrow.symm
+        exact Or.inl ⟨m, -((b - lr) / (-c)) - 1, mn, mx, Or.inr hl, hmn, hmx⟩
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
+        exact (conflictsOnly_implied_elim hrun).elim
+      · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
+        rcases propLinLeReifB_emission_inv hrun with hstable |
+          ⟨-, hb, -, -, -, -, -, -, hres⟩
+        · exact absurd hstable (by intro hc; cases hc)
+        · refine Or.inr ⟨?_, hb⟩
+          injection hres
+  · rw [propLinLeReif_run_arity (Bool.eq_false_iff.mpr hlenB)] at hrun
+    cases hrun
+
+/-- The implied literal of the delegation is DECIDED at every solution
+    of a problem containing the reified constraint, provided the state box
+    is a sub-box of the problem box (the engine's `DomSub` invariant): an
+    order literal is read through the state slot's extrema, and the bounds
+    arm's pin reads the reif slot, which the constraint's satisfaction
+    types as a Boolean. -/
+theorem propLinLeReif_implied_decided {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int} {r : Nat}
+    {l : Literal} {rs : Reason} {a : Assignment}
+    (hview : IntViewedDoms problem.domains)
+    (hsub : DomSub st.domains problem.domains)
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hcons : (DomConstraint.linLeReif coeffs is b r).SatisfiedBy a)
+    (hrun : propLinLeReif st coeffs is b r = .implied l rs) :
+    ∃ t, l.eval a = some t := by
+  rcases propLinLeReif_implied_order hrun with
+    ⟨m, k, mn, mx, hord, hmn, hmx⟩ | ⟨hbool, -⟩
+  · have hgetD : st.domains.getD m [] ≠ [] := getD_ne_nil_of_domMinI hmn
+    have hlt1 : m < st.domains.length := by
+      by_cases hlt : m < st.domains.length
+      · exact hlt
+      · exact absurd (getD_nil_of_length_le hlt) hgetD
+    have hlt2 : m < problem.domains.length := by rw [← hsub.1]; exact hlt1
+    have hlt3 : m < a.length := by rw [ha.1.1]; exact hlt2
+    have hread : a[m]? = some a[m] := List.getElem?_eq_getElem hlt3
+    have hmem : a[m] ∈ problem.domains.getD m [] := ha.1.2 m (a[m]) hread
+    have hx : Value.intView (a[m]) ≠ none :=
+      hview _ (getD_mem_of_lt hlt2) _ hmem
+    obtain ⟨x, hx2⟩ : ∃ x, Value.intView (a[m]) = some x := by
+      cases hv : Value.intView (a[m]) with
+      | none => exact absurd hv hx
+      | some x => exact ⟨x, rfl⟩
+    have hslot : slotInt a m = some x := by
+      show a[m]?.bind Value.intView = some x
+      rw [hread]
+      show (some a[m]).bind Value.intView = some x
+      rw [Option.bind_some]
+      exact hx2
+    rcases hord with rfl | rfl
+    · exact ⟨decide (x ≤ k), by simp [posLe, Literal.eval, Atom.eval, hslot]⟩
+    · exact ⟨!(decide (x ≤ k)), by simp [negLe, Literal.eval, Atom.eval, hslot]⟩
+  · subst hbool
+    obtain ⟨rb, hread, -⟩ := linLeReif_satisfied_inv hcons
+    exact posBool_eval_bool hread
+
+
+end LeanFzn.Solver.Propagation
 
 end LeanFzn.Solver.Propagation

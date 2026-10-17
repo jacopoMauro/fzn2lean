@@ -728,6 +728,56 @@ theorem auxShape_pin_valued (sh : AuxShape) (v : Value)
       rw [AuxShape.pin] at h
       have hvv : Value.int k = v := (Option.some.inj h)
       exact Or.inl ⟨k, hvv.symm⟩
+  | eqReifRK x r k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | eqReifKR x r k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | leReifRK x r k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | leReifKR x r k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | neReifRK x r k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | neReifKR x r k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | minRK x z k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | minKR x z k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | maxRK x z k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | maxKR x z k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | minRRK x y k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | maxRRK x y k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | minGen2 e1 e2 r => rw [AuxShape.pin] at h; cases h
+  | maxGen2 e1 e2 r => rw [AuxShape.pin] at h; cases h
   | andFalse x y =>
       rw [AuxShape.pin] at h
       have hvv : Value.bool false = v := (Option.some.inj h)
@@ -761,6 +811,20 @@ theorem auxShape_pin2_valued (sh : AuxShape) (v : Value)
       exact Or.inl ⟨k2, hvv.symm⟩
   | neRK x k => simp [AuxShape.pin2] at h
   | neKR x k => simp [AuxShape.pin2] at h
+  | eqReifRK x r k => simp [AuxShape.pin2] at h
+  | eqReifKR x r k => simp [AuxShape.pin2] at h
+  | leReifRK x r k => simp [AuxShape.pin2] at h
+  | leReifKR x r k => simp [AuxShape.pin2] at h
+  | neReifRK x r k => simp [AuxShape.pin2] at h
+  | neReifKR x r k => simp [AuxShape.pin2] at h
+  | minRK x z k => simp [AuxShape.pin2] at h
+  | minKR x z k => simp [AuxShape.pin2] at h
+  | maxRK x z k => simp [AuxShape.pin2] at h
+  | maxKR x z k => simp [AuxShape.pin2] at h
+  | minRRK x y k => simp [AuxShape.pin2] at h
+  | maxRRK x y k => simp [AuxShape.pin2] at h
+  | minGen2 e1 e2 r => simp [AuxShape.pin2] at h
+  | maxGen2 e1 e2 r => simp [AuxShape.pin2] at h
   | andFalse x y => simp [AuxShape.pin2] at h
   | orTrue x y => simp [AuxShape.pin2] at h
   | andTrue x y => simp [AuxShape.pin2] at h

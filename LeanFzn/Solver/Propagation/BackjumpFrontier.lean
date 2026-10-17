@@ -70,6 +70,7 @@ import LeanFzn.Solver.Propagation.ConflictResolution
 import LeanFzn.Solver.Propagation.Frontier
 import LeanFzn.Solver.Propagation.ExplainedPropagation
 import LeanFzn.Solver.Propagation.FrameFilter
+import LeanFzn.Solver.Propagation.FrameSync
 open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation
 
 
@@ -95,6 +96,59 @@ structure BackjumpPlan (leaf : Assignment → Bool) where
   /-- the learned clause, used as the reason -/
   learned : Clause
 
+/-- The asserting entry to append: none when the normalized asserting literal is
+already the literal of a restored-trail entry (runtime guard keeping the trail
+literal-distinct). -/
+def BackjumpPlan.assertEntry (p : BackjumpPlan leaf) : TrailEntry :=
+  { literal := p.asserting.norm, level := p.target,
+    reason := some { clause := p.learned } }
+
+def BackjumpPlan.assertExtra (p : BackjumpPlan leaf) : List TrailEntry :=
+  if p.checkpoint.trail.any (fun e => decide (e.literal = p.asserting.norm)) then []
+  else [p.assertEntry]
+
+theorem BackjumpPlan.assertExtra_mem (p : BackjumpPlan leaf) {e : TrailEntry}
+    (h : e ∈ p.assertExtra) :
+    e = { literal := p.asserting.norm, level := p.target,
+          reason := some { clause := p.learned } } := by
+  unfold BackjumpPlan.assertExtra at h
+  split at h
+  · cases h
+  · simpa [BackjumpPlan.assertEntry] using h
+
+theorem BackjumpPlan.assertExtra_fresh (p : BackjumpPlan leaf)
+    {x : TrailEntry} (hx : x ∈ p.assertExtra) :
+    ∀ e ∈ p.checkpoint.trail, e.literal ≠ x.literal := by
+  have hx' := p.assertExtra_mem hx
+  unfold BackjumpPlan.assertExtra at hx
+  split at hx
+  · cases hx
+  · next hn =>
+    intro e he heq
+    apply hn
+    simp only [List.any_eq_true, decide_eq_true_eq]
+    refine ⟨e, he, ?_⟩
+    rw [heq, hx']
+
+theorem BackjumpPlan.assertExtra_ne_nil_of_fresh (p : BackjumpPlan leaf)
+    (h : ∀ e ∈ p.checkpoint.trail, e.literal ≠ p.asserting.norm) :
+    p.assertExtra ≠ [] := by
+  unfold BackjumpPlan.assertExtra
+  split
+  · next hn =>
+    exfalso
+    simp only [List.any_eq_true, decide_eq_true_eq] at hn
+    obtain ⟨e, he, heq⟩ := hn
+    exact h e he heq
+  · simp
+
+theorem BackjumpPlan.assertExtra_cases (p : BackjumpPlan leaf) :
+    p.assertExtra = [] ∨ p.assertExtra = [p.assertEntry] := by
+  unfold BackjumpPlan.assertExtra
+  split
+  · exact Or.inl rfl
+  · exact Or.inr rfl
+
 /-- Execute a plan: the frame, trail and level come from the checkpoint
 (exact restoration), the learned database is the *current* one (learned
 clauses are global and survive the jump), and exactly one entry — the
@@ -102,19 +156,15 @@ asserting consequence — is appended. -/
 def BackjumpPlan.execute (p : BackjumpPlan leaf) (bs : BranchState leaf) :
     BranchState leaf :=
   { frame := p.checkpoint.frame
-    trail := p.checkpoint.trail ++
-      [{ literal := p.asserting.norm, level := p.target,
-         reason := some { clause := p.learned } }]
+    trail := p.checkpoint.trail ++ p.assertExtra
     level := p.target
     learned := bs.learned }
 
-/-- The executed plan's trail is exactly the restored trail plus the
-single asserting entry. -/
+/-- The executed plan's trail is the restored trail plus the asserting entry
+(skipped when its literal is already on the restored trail). -/
 theorem BackjumpPlan.execute_trail (p : BackjumpPlan leaf)
     (bs : BranchState leaf) :
-    (p.execute bs).trail = p.checkpoint.trail ++
-      [{ literal := p.asserting.norm, level := p.target,
-         reason := some { clause := p.learned } }] := rfl
+    (p.execute bs).trail = p.checkpoint.trail ++ p.assertExtra := rfl
 
 /-- The executed plan's frame is the checkpoint's frame: restoration is
 exact, never rebuilt. -/
@@ -139,8 +189,10 @@ theorem BackjumpPlan.execute_mem (p : BackjumpPlan leaf)
     e ∈ p.checkpoint.trail ∨
       e = { literal := p.asserting.norm, level := p.target,
             reason := some { clause := p.learned } } := by
-  simpa only [BackjumpPlan.execute] using
-    (trail_append_entry_mem (bs := p.checkpoint) h)
+  simp only [BackjumpPlan.execute, List.mem_append] at h
+  rcases h with h | h
+  · exact Or.inl h
+  · exact Or.inr (p.assertExtra_mem h)
 
 /-! ## The permanent exhaustion record: rich dead regions
 
@@ -657,9 +709,9 @@ def rootCheckpoint (orig : List Domain) : DecisionCheckpoint leaf :=
 
 /-- The root checkpoint identifies the initial branch state at level 0. -/
 theorem rootCheckpoint_identifies_init (leaf : Assignment → Bool)
-    (orig : List Domain) :
+    (orig : List Domain) (db : List Clause := []) :
     (rootCheckpoint (leaf := leaf) orig).Identifies
-      (BranchState.init (orig, [])) 0 := by
+      ({ BranchState.init (leaf := leaf) (orig, []) with learned := db }) 0 := by
   refine ⟨rfl, ⟨[], rfl, ?_⟩, ?_⟩
   · intro e he
     cases he
@@ -785,11 +837,12 @@ def BackjumpPlan.restoreNarrow (p : BackjumpPlan leaf) (bs : BranchState leaf) :
   | some g => some ((p.execute (bs.learnGlobal p.learned)).narrowFrame g)
 
 /-- THE COMPLETE TRANSITION: insertion, restoration, assertion
-narrowing, and resumed explained propagation. -/
+narrowing, the frame/trail synchronisation of the restored frame, and
+resumed (synchronised) explained propagation. -/
 def BackjumpPlan.perform (p : BackjumpPlan leaf) (bs : BranchState leaf)
-    (original : List Clause) (props : List Propagator) :
+    (orig : List Domain) (original : List Clause) (props : List Propagator) :
     Option (BranchState leaf) :=
-  (p.restoreNarrow bs).map fun s => explainedClosure original props s
+  (p.restoreNarrow bs).map fun s => explainedClosure orig original props (syncAll orig s)
 
 /-- The restored-and-narrowed state's level is the target level: the level
 law comes from the checkpoint, never from a caller premise. -/
@@ -817,11 +870,11 @@ theorem BackjumpPlan.restoreNarrow_frame {p : BackjumpPlan leaf}
 
 /-- Resuming propagation preserves the level (the closure only appends
 trail entries and narrows the frame). -/
-theorem explainedClosure_level (original : List Clause)
+theorem explainedClosure_level (orig : List Domain) (original : List Clause)
     (props : List Propagator) (bs : BranchState leaf) :
-    (explainedClosure original props bs).level = bs.level := by
+    (explainedClosure orig original props bs).level = bs.level := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf), Frame.mass bs.frame ≤ fuel →
-      (explainedClosure original props bs).level = bs.level from
+      (explainedClosure orig original props bs).level = bs.level from
     h (Frame.mass bs.frame) bs (Nat.le_refl _)
   intro fuel
   induction fuel with
@@ -840,20 +893,19 @@ theorem explainedClosure_level (original : List Clause)
     split
     · rfl
     · rename_i d _
-      have hmass : Frame.mass
-          (narrowState bs d.frame d.literal d.reason d.learned).frame ≤ fuel := by
-        simp only [narrowState]
+      have hmass : Frame.mass (stepNarrowSync orig bs d).frame ≤ fuel := by
+        simp only [stepNarrowSync_frame]
         have := d.decreases
         omega
-      rw [ih (narrowState bs d.frame d.literal d.reason d.learned) hmass]
-      simp only [narrowState]
+      rw [ih (stepNarrowSync orig bs d) hmass]
+      simp only [stepNarrowSync_level]
 
 /-- Resuming propagation never increases the frame mass. -/
-theorem explainedClosure_mass (original : List Clause)
+theorem explainedClosure_mass (orig : List Domain) (original : List Clause)
     (props : List Propagator) (bs : BranchState leaf) :
-    Frame.mass (explainedClosure original props bs).frame ≤ Frame.mass bs.frame := by
+    Frame.mass (explainedClosure orig original props bs).frame ≤ Frame.mass bs.frame := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf), Frame.mass bs.frame ≤ fuel →
-      Frame.mass (explainedClosure original props bs).frame ≤ Frame.mass bs.frame from
+      Frame.mass (explainedClosure orig original props bs).frame ≤ Frame.mass bs.frame from
     h (Frame.mass bs.frame) bs (Nat.le_refl _)
   intro fuel
   induction fuel with
@@ -872,20 +924,20 @@ theorem explainedClosure_mass (original : List Clause)
     split
     · exact Nat.le_refl _
     · rename_i d _
-      have hmass : Frame.mass
-          (narrowState bs d.frame d.literal d.reason d.learned).frame ≤ fuel := by
-        simp only [narrowState]
+      have hmass : Frame.mass (stepNarrowSync orig bs d).frame ≤ fuel := by
+        simp only [stepNarrowSync_frame]
         have := d.decreases
         omega
-      have h1 := ih (narrowState bs d.frame d.literal d.reason d.learned) hmass
+      have h1 := ih (stepNarrowSync orig bs d) hmass
       have h2 := d.decreases
-      simp only [narrowState] at h1 h2 ⊢
+      simp only [stepNarrowSync_frame] at h1 h2 ⊢
       omega
 
 /-- The complete transition's level is the plan's target level. -/
 theorem BackjumpPlan.perform_level {p : BackjumpPlan leaf}
-    {bs : BranchState leaf} {original : List Clause} {props : List Propagator}
-    {s : BranchState leaf} (h : p.perform bs original props = some s) :
+    {bs : BranchState leaf} {orig : List Domain} {original : List Clause}
+    {props : List Propagator}
+    {s : BranchState leaf} (h : p.perform bs orig original props = some s) :
     s.level = p.target := by
   unfold BackjumpPlan.perform at h
   cases hr : p.restoreNarrow bs with
@@ -893,7 +945,7 @@ theorem BackjumpPlan.perform_level {p : BackjumpPlan leaf}
   | some t =>
       rw [hr] at h
       simp only [Option.map_some, Option.some.injEq] at h
-      rw [← h, explainedClosure_level]
+      rw [← h, explainedClosure_level, syncAll_level]
       exact BackjumpPlan.restoreNarrow_level hr
 
 /-! ## Repaired sibling resume (C2b, PLAN C2b)
@@ -1025,25 +1077,37 @@ def canonicalTrail (orig : List Domain) (f : BranchFrame) : List TrailEntry :=
 
 /-- R1 CANONICAL RESUME (the missing-checkpoint route): the pending frame
 is its own retained snapshot; the global learned database is carried. -/
-def resumePending (orig : List Domain) (bs : BranchState leaf)
+def resumePendingBase (orig : List Domain) (bs : BranchState leaf)
     (f : BranchFrame) : BranchState leaf :=
   { frame := f
     trail := canonicalTrail orig f
     level := f.2.length
     learned := bs.learned }
 
+/-- R1d: the resumed branch is frame/trail SYNCHRONISED: bounds and fixings
+the pending frame implies are recorded as explained trail literals. -/
+def resumePending (orig : List Domain) (bs : BranchState leaf)
+    (f : BranchFrame) : BranchState leaf :=
+  syncAll orig (resumePendingBase orig bs f)
+
 theorem resumePending_frame (orig : List Domain) (bs : BranchState leaf)
-    (f : BranchFrame) : (resumePending orig bs f).frame = f := rfl
+    (f : BranchFrame) : (resumePending orig bs f).frame = f := by
+  simp [resumePending, resumePendingBase]
 
 theorem resumePending_level (orig : List Domain) (bs : BranchState leaf)
-    (f : BranchFrame) : (resumePending orig bs f).level = f.2.length := rfl
+    (f : BranchFrame) : (resumePending orig bs f).level = f.2.length := by
+  simp [resumePending, resumePendingBase]
 
 theorem resumePending_learned (orig : List Domain) (bs : BranchState leaf)
-    (f : BranchFrame) : (resumePending orig bs f).learned = bs.learned := rfl
+    (f : BranchFrame) : (resumePending orig bs f).learned = bs.learned := by
+  simp [resumePending, resumePendingBase]
 
 theorem resumePending_trail (orig : List Domain) (bs : BranchState leaf)
     (f : BranchFrame) :
-    (resumePending orig bs f).trail = canonicalTrail orig f := rfl
+    ∃ ex, (resumePending orig bs f).trail = canonicalTrail orig f ++ ex ∧
+      ∀ e ∈ ex, e.level = f.2.length := by
+  obtain ⟨-, hl, -, ex, hex, hlev⟩ := syncAll_shape orig (resumePendingBase orig bs f)
+  exact ⟨ex, hex, hlev⟩
 
 /-- The retired value's pin holds for it: `valueLiteral slot v` accepts
 `v` itself. (Boolean pins and integer pins; the decision vocabulary of

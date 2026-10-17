@@ -47,10 +47,11 @@ Purpose:
 
   So the theorem proved here is the EMPTY-CONFLICT version
   (`propagateLoop_conflict_nofit_empty`): when the propagated
-  conflict clause is `[]` — exactly the `neSlot`/propNe shape of
-  the ph3/ph4 pigeonhole use case (propNe reports `.conflict []` on
-  equal raw singletons) — the fits-exclusion holds for all three
-  origins.
+  conflict clause is `[]` — the historical `neSlot`/propNe shape of
+  the ph3/ph4 pigeonhole use case (propNe used to report `.conflict []`
+  on equal raw singletons; it now reports the explained clause, and the
+  empty clause remains only for unusable sorts/hulls) — the
+  fits-exclusion holds for all three origins.
 
   Why the master theorem's own premises do not give emptiness:
   `analyzeConflict = none` HOLDS for empty conflicts
@@ -413,7 +414,7 @@ registration premise `hprops`) — so the exclusion transfers. -/
     propagator excludes every assignment fitting the state's
     domains from the internal problem solutions. Mirrors
     `propagatorsOfProved_safeUniv`'s dispatch (the conflict bullet
-    of each family's safety triple); the `neSlot` family's EMPTY
+    of each family's safety triple); the `neSlot` family's (explained)
     conflict clause is covered by `propNe_safe.2.1` like any other.
     linLe participates under the equal-length gate `hlin` (its
     conflict bullet is fits-only, unlike its reason side). -/
@@ -440,10 +441,18 @@ theorem propagatorsOfProved_fitexcl
     ⟨i, c2, hdc2, hrun2⟩ | ⟨i, c2, hdc2, hrun2⟩ |
     ⟨i, c2, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
     ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-    ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-    ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-    ⟨lc, li, lb2, hdcl, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-    ⟨ais, hdcai, hrunad⟩
+    ⟨ic, jc, kc, hdcc, hrunc⟩ |
+    ⟨lc, li, lb2, hdcl, hrunl⟩ |
+    ⟨ais, hdcai, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+    ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+    ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+    ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+    ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+    ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+    ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+    ⟨iab, kab, hdcAb, hrunAb⟩ |
+    ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+    ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
   · rw [hdc2] at hdc
     exact (propLe_safe st i j).2.1 c hrun2 a hfit (ha.2 _ hdc)
   · rw [hdc2] at hdc
@@ -477,22 +486,55 @@ theorem propagatorsOfProved_fitexcl
     exact (propBoolAnd_safe st ib jb kb).2.1 c hrunb a hfit (ha.2 _ hdc)
   · rw [hdcc] at hdc
     exact (propBoolOr_safe st ic jc kc).2.1 c hrunc a hfit (ha.2 _ hdc)
-  · rw [hdcd] at hdc
-    exact (propMin_safe st id jd kd).2.1 c hrund a hfit (ha.2 _ hdc)
-  · rw [hdce] at hdc
-    exact (propMax_safe st ie je ke).2.1 c hrune a hfit (ha.2 _ hdc)
-  · rw [hdcg] at hdc
-    exact (propAbs_safe st ig kg).2.1 c hrung a hfit (ha.2 _ hdc)
   · rw [hdcl] at hdc
     have hlenE : lc.length = li.length :=
       hlinE _ hdc lc li lb2 rfl
     exact (propLinEq2_safe st lc li lb2 hlenE).2.1 c hrunl a hfit
       (ha.2 _ hdc)
-  · rw [hdct] at hdc
-    exact (propTimes_safe st ti tj tk2).2.1 c hrunt a hfit
-      (ha.2 _ hdc)
   · rw [hdcai] at hdc
     exact propAllDiffLCG_fitexcl hdc st hrunad a hfit ha
+  · -- linLeReif: the pinned delegation's conflict exclusion
+    rw [hdcR] at hdc
+    exact (propLinLeReif_safe st lre lri lrb lrr).2.1 c hrunR a hfit
+      (ha.2 _ hdc)
+  · rw [hdcN] at hdc
+    exact (propLinNe_safe st lnc lni lnb).2.1 c hrunN a hfit
+      (ha.2 _ hdc)
+  · exact (propMin_safe st imn jmn kmn).2.1 c hrunMn a hfit
+      (hdcMn _ (ha.2 _ hdc))
+  · exact (propMax_safe st imx jmx kmx).2.1 c hrunMx a hfit
+      (hdcMx _ (ha.2 _ hdc))
+  · rw [hdcLR] at hdc
+    exact (propLeReifSlot_safe st ilr jlr rlr).2.1 c hrunLR a hfit
+      (ha.2 _ hdc)
+  · rw [hdcE] at hdc
+    have hviewst := intViewedDoms_of_coherent hview hcoh
+    exact (propEqReifSlot_safe st ieq jeq req hviewst).2.1 c hrunE a hfit
+      (ha.2 _ hdc)
+  · rw [hdcNE] at hdc
+    have hviewst := intViewedDoms_of_coherent hview hcoh
+    exact (propNeReifSlot_safe st ine jne rne hviewst).2.1 c hrunNE a hfit
+      (ha.2 _ hdc)
+  · rw [hdcEqR] at hdc
+    exact (propLinEqReif_safe st lq1 leqs leqb leqr).2.1 c hrunEqR a hfit
+      (ha.2 _ hdc)
+  · rw [hdcNeR] at hdc
+    exact (propLinNeReif_safe st lq2 lnis lnib lnir).2.1 c hrunNeR a hfit
+      (ha.2 _ hdc)
+  · rw [hdcTt] at hdc
+    exact (propTimes_safe st itt jtt ktt).2.1 c hrunTt a hfit
+      (ha.2 _ hdc)
+  · rw [hdcAb] at hdc
+    exact (propAbs_safe st iab kab).2.1 c hrunAb a hfit (ha.2 _ hdc)
+  · rw [hdcD] at hdc
+    exact (propDiv_safe st od1 od2 od3).2.1 c hrunD a hfit (ha.2 _ hdc)
+  · rw [hdcM] at hdc
+    exact (propMod_safe st om1 om2 om3).2.1 c hrunM a hfit (ha.2 _ hdc)
+  · exact propCheck_conflict_false hrunLn hfit (ha.2 _ hdc)
+  · rw [hdcG] at hdc
+    exact (propMaxGen_safe st osG rG).2.1 c hrunG a hfit (ha.2 _ hdc)
+  · rw [hdcH] at hdc
+    exact (propMinGen_safe st osH rH).2.1 c hrunH a hfit (ha.2 _ hdc)
 
 /-- The ten-family specialization under the front door's no-linLe
     registration premise (the shape `propagatorsOfProved_fallbackng`
@@ -524,10 +566,18 @@ theorem propagatorsOfProved_fitexcl_nolinle
     ⟨i, c2, hdc2, hrun2⟩ | ⟨i, c2, hdc2, hrun2⟩ |
     ⟨i, c2, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
     ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-    ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-    ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-    ⟨lc, li, lb2, hdcl, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-    ⟨ais, hdcai, hrunad⟩
+    ⟨ic, jc, kc, hdcc, hrunc⟩ |
+    ⟨lc, li, lb2, hdcl, hrunl⟩ |
+    ⟨ais, hdcai, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+    ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+    ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+    ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+    ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+    ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+    ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+    ⟨iab, kab, hdcAb, hrunAb⟩ |
+    ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+    ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
   · rw [hdc2] at hdc
     exact (propLe_safe st i j).2.1 c hrun2 a hfit (ha.2 _ hdc)
   · rw [hdc2] at hdc
@@ -561,22 +611,55 @@ theorem propagatorsOfProved_fitexcl_nolinle
     exact (propBoolAnd_safe st ib jb kb).2.1 c hrunb a hfit (ha.2 _ hdc)
   · rw [hdcc] at hdc
     exact (propBoolOr_safe st ic jc kc).2.1 c hrunc a hfit (ha.2 _ hdc)
-  · rw [hdcd] at hdc
-    exact (propMin_safe st id jd kd).2.1 c hrund a hfit (ha.2 _ hdc)
-  · rw [hdce] at hdc
-    exact (propMax_safe st ie je ke).2.1 c hrune a hfit (ha.2 _ hdc)
-  · rw [hdcg] at hdc
-    exact (propAbs_safe st ig kg).2.1 c hrung a hfit (ha.2 _ hdc)
   · rw [hdcl] at hdc
     have hlenE : lc.length = li.length :=
       hlinE _ hdc lc li lb2 rfl
     exact (propLinEq2_safe st lc li lb2 hlenE).2.1 c hrunl a hfit
       (ha.2 _ hdc)
-  · rw [hdct] at hdc
-    exact (propTimes_safe st ti tj tk2).2.1 c hrunt a hfit
-      (ha.2 _ hdc)
   · rw [hdcai] at hdc
     exact propAllDiffLCG_fitexcl hdc st hrunad a hfit ha
+  · -- linLeReif: the pinned delegation's conflict exclusion
+    rw [hdcR] at hdc
+    exact (propLinLeReif_safe st lre lri lrb lrr).2.1 c hrunR a hfit
+      (ha.2 _ hdc)
+  · rw [hdcN] at hdc
+    exact (propLinNe_safe st lnc lni lnb).2.1 c hrunN a hfit
+      (ha.2 _ hdc)
+  · exact (propMin_safe st imn jmn kmn).2.1 c hrunMn a hfit
+      (hdcMn _ (ha.2 _ hdc))
+  · exact (propMax_safe st imx jmx kmx).2.1 c hrunMx a hfit
+      (hdcMx _ (ha.2 _ hdc))
+  · rw [hdcLR] at hdc
+    exact (propLeReifSlot_safe st ilr jlr rlr).2.1 c hrunLR a hfit
+      (ha.2 _ hdc)
+  · rw [hdcE] at hdc
+    have hviewst := intViewedDoms_of_coherent hview hcoh
+    exact (propEqReifSlot_safe st ieq jeq req hviewst).2.1 c hrunE a hfit
+      (ha.2 _ hdc)
+  · rw [hdcNE] at hdc
+    have hviewst := intViewedDoms_of_coherent hview hcoh
+    exact (propNeReifSlot_safe st ine jne rne hviewst).2.1 c hrunNE a hfit
+      (ha.2 _ hdc)
+  · rw [hdcEqR] at hdc
+    exact (propLinEqReif_safe st lq1 leqs leqb leqr).2.1 c hrunEqR a hfit
+      (ha.2 _ hdc)
+  · rw [hdcNeR] at hdc
+    exact (propLinNeReif_safe st lq2 lnis lnib lnir).2.1 c hrunNeR a hfit
+      (ha.2 _ hdc)
+  · rw [hdcTt] at hdc
+    exact (propTimes_safe st itt jtt ktt).2.1 c hrunTt a hfit
+      (ha.2 _ hdc)
+  · rw [hdcAb] at hdc
+    exact (propAbs_safe st iab kab).2.1 c hrunAb a hfit (ha.2 _ hdc)
+  · rw [hdcD] at hdc
+    exact (propDiv_safe st od1 od2 od3).2.1 c hrunD a hfit (ha.2 _ hdc)
+  · rw [hdcM] at hdc
+    exact (propMod_safe st om1 om2 om3).2.1 c hrunM a hfit (ha.2 _ hdc)
+  · exact propCheck_conflict_false hrunLn hfit (ha.2 _ hdc)
+  · rw [hdcG] at hdc
+    exact (propMaxGen_safe st osG rG).2.1 c hrunG a hfit (ha.2 _ hdc)
+  · rw [hdcH] at hdc
+    exact (propMinGen_safe st osH rH).2.1 c hrunH a hfit (ha.2 _ hdc)
 
 /-! ## The composed front door
 

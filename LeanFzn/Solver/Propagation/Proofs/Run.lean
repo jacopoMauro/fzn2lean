@@ -2308,13 +2308,18 @@ theorem a2_Q_step : ∀ (doms : List (List Value)) (l : Literal)
             exact h
   | ⟨.boolEq s' b, positive⟩ =>
       have hd : domOfLit doms ⟨.boolEq s' b, positive⟩ =
-          updateSlot doms s' (fun _ => [.bool (if positive then b else !b)]) := rfl
+          updateSlot doms s' (fun d => d.filter
+            (fun v => v.eqB (.bool (if positive then b else !b)))) := rfl
       by_cases hslot : s' = s
       · subst hslot
         rw [hd]
         by_cases hin : s' < doms.length
         · rw [updateSlot_getD_eq doms s' _ hin]
-          exact Or.inl (by simp)
+          rcases h with h1 | h2
+          · exact Or.inl (Nat.le_trans (List.length_filter_le _ _) h1)
+          · refine Or.inr ?_
+            intro v hv i hvi
+            exact h2 v (List.mem_filter.mp hv).1 i hvi
         · rw [a2_updateSlot_getD_nil doms s' _
             (Nat.le_of_not_gt (fun hlt => hin hlt))]
           exact Or.inl (by simp)

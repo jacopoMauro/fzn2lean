@@ -277,7 +277,7 @@ theorem absentCountSortedWith_stepLearnBackjumpAssert_lt
     {ev : ConflictEvidence} {restored : BranchState leaf}
     {an : ConflictAnalysis} {props : List Propagator}
     (hnov : SortedNoveltyWith extra orig cfg.branch.learned an)
-    (hperf : p.perform cfg.branch cfg.original props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original props = some restored)
     (hm : PlanMatchesAnalysis p an) :
     absentCountSortedWith extra orig
         (stepLearnBackjumpAssert cfg p ev restored).branch.learned
@@ -307,7 +307,7 @@ theorem phaseLtSortedWith_stepLearnBackjumpAssert
     {ev : ConflictEvidence} {restored : BranchState leaf}
     {an : ConflictAnalysis} {props : List Propagator}
     (hnov : SortedNoveltyWith extra orig cfg.branch.learned an)
-    (hperf : p.perform cfg.branch cfg.original props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original props = some restored)
     (hm : PlanMatchesAnalysis p an) :
     PhaseLt (PhaseRankSortedWith extra orig
         (stepLearnBackjumpAssert cfg p ev restored))
@@ -349,6 +349,11 @@ theorem phaseRankSortedWith_lt_propagate (extra : List Atom)
   · refine Or.inr ⟨heq, ?_⟩
     have hcost : branchCost d.frame.1 ≤ branchCost cfg.branch.frame.1 :=
       filterFrame_cost_le d.filtered
+    have e1 : (PhaseRankSortedWith extra orig (stepPropagate cfg d)).snd =
+        (frontierCost (d.frame :: cfg.pending), Frame.mass d.frame,
+          statusWeight (stepPropagate cfg d).status) := by
+      simp [PhaseRankSortedWith, SchedulerConfig.frontier, narrowState]
+    rw [e1]
     rcases Nat.lt_or_eq_of_le hcost with hclt | hceq
     · exact Or.inl (C3a.frontierCost_frame_lt hclt cfg.pending)
     · exact Or.inr ⟨C3a.frontierCost_frame_congr hceq cfg.pending,
@@ -528,6 +533,11 @@ theorem phaseRankWith_lt_propagate (extra : List Atom) (orig : List Domain)
   · refine Or.inr ⟨heq, ?_⟩
     have hcost : branchCost d.frame.1 ≤ branchCost cfg.branch.frame.1 :=
       filterFrame_cost_le d.filtered
+    have e1 : (PhaseRankWith extra orig (stepPropagate cfg d)).snd =
+        (frontierCost (d.frame :: cfg.pending), Frame.mass d.frame,
+          statusWeight (stepPropagate cfg d).status) := by
+      simp [PhaseRankWith, SchedulerConfig.frontier, narrowState]
+    rw [e1]
     rcases Nat.lt_or_eq_of_le hcost with hclt | hceq
     · exact Or.inl (C3a.frontierCost_frame_lt hclt cfg.pending)
     · exact Or.inr ⟨C3a.frontierCost_frame_congr hceq cfg.pending,

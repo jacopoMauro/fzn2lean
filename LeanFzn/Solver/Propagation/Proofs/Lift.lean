@@ -365,49 +365,55 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           -- membership needs value to BE the forced Boolean, which the
           -- satisfied literal pins exactly
           show value ∈ (updateSlot doms s
-            (fun _ => [Value.bool (if pos then b else !b)])).getD s []
+            (fun d => d.filter (fun v => v.eqB (.bool (if pos then b else !b))))).getD s []
           refine mem_updateSlot_of_mem doms s _ value (by
             rw [show (doms.length : Nat) = a.length from hfitlen.symm]; exact hin) ?_
-          show value ∈ [Value.bool (if pos then b else !b)]
-          -- the satisfiable literal: posBool / negBool truth at a
-          cases pos with
-          | true =>
-              -- l = ⟨boolEq s b, true⟩ = posBool s b
-              -- eval true ⟺ a[s] = bool b (eval_posBool_iff)
-              show value ∈ [Value.bool b]
-              have hp : a[(⟨Atom.boolEq s b, true⟩ : Literal).atom.slot]? =
-                  some (Value.bool b) :=
-                (eval_posBool_iff a s b).mp hsat
-              rw [hp] at hv
-              injection hv with hv'
-              rw [hv']
-              exact List.mem_cons_self ..
-          | false =>
-              -- l = ⟨boolEq s b, false⟩; eval true ⟺ ¬(a[s] = bool b),
-              -- and since a[s] IS value, value ≠ bool b, so value is
-              -- bool (some x ≠ b)... but domOfLit pins to bool (!b):
-              -- the truthful eval for negative Boolean is
-              -- a[s] = bool (!b) (only a Boolean atom has bool eval);
-              -- conveniently the norm lemma: ⟨boolEq s b, false⟩.norm =
-              -- posBool s (!b), and eval equality gives
-              -- a[s] = bool (!b)
-              show value ∈ [Value.bool (!b)]
-              -- norm of the negative Boolean literal is the positive
-              -- pinned one: ⟨boolEq s b, false⟩.norm = ⟨boolEq s (!b), true⟩
-              have hsatNorm : (Literal.norm
-                  (⟨Atom.boolEq s b, false⟩ : Literal)).eval a = some true := by
-                rw [Literal.norm_eval]
-                exact hsat
-              -- unfold the norm shape: ⟨boolEq s b, false⟩.norm = ⟨boolEq s (!b), true⟩
-              have hsatNorm' : (⟨Atom.boolEq s (!b), true⟩ : Literal).eval a
-                  = some true := hsatNorm
-              have hp : a[(⟨Atom.boolEq s b, false⟩ : Literal).atom.slot]? =
-                  some (Value.bool (!b)) :=
-                (eval_posBool_iff a s (!b)).mp hsatNorm'
-              rw [hp] at hv
-              injection hv with hv'
-              rw [hv']
-              exact List.mem_cons_self ..
+          have key : value ∈ [Value.bool (if pos then b else !b)] := by
+            show value ∈ [Value.bool (if pos then b else !b)]
+            -- the satisfiable literal: posBool / negBool truth at a
+            cases pos with
+            | true =>
+                -- l = ⟨boolEq s b, true⟩ = posBool s b
+                -- eval true ⟺ a[s] = bool b (eval_posBool_iff)
+                show value ∈ [Value.bool b]
+                have hp : a[(⟨Atom.boolEq s b, true⟩ : Literal).atom.slot]? =
+                    some (Value.bool b) :=
+                  (eval_posBool_iff a s b).mp hsat
+                rw [hp] at hv
+                injection hv with hv'
+                rw [hv']
+                exact List.mem_cons_self ..
+            | false =>
+                -- l = ⟨boolEq s b, false⟩; eval true ⟺ ¬(a[s] = bool b),
+                -- and since a[s] IS value, value ≠ bool b, so value is
+                -- bool (some x ≠ b)... but domOfLit pins to bool (!b):
+                -- the truthful eval for negative Boolean is
+                -- a[s] = bool (!b) (only a Boolean atom has bool eval);
+                -- conveniently the norm lemma: ⟨boolEq s b, false⟩.norm =
+                -- posBool s (!b), and eval equality gives
+                -- a[s] = bool (!b)
+                show value ∈ [Value.bool (!b)]
+                -- norm of the negative Boolean literal is the positive
+                -- pinned one: ⟨boolEq s b, false⟩.norm = ⟨boolEq s (!b), true⟩
+                have hsatNorm : (Literal.norm
+                    (⟨Atom.boolEq s b, false⟩ : Literal)).eval a = some true := by
+                  rw [Literal.norm_eval]
+                  exact hsat
+                -- unfold the norm shape: ⟨boolEq s b, false⟩.norm = ⟨boolEq s (!b), true⟩
+                have hsatNorm' : (⟨Atom.boolEq s (!b), true⟩ : Literal).eval a
+                    = some true := hsatNorm
+                have hp : a[(⟨Atom.boolEq s b, false⟩ : Literal).atom.slot]? =
+                    some (Value.bool (!b)) :=
+                  (eval_posBool_iff a s (!b)).mp hsatNorm'
+                rw [hp] at hv
+                injection hv with hv'
+                rw [hv']
+                exact List.mem_cons_self ..
+          have key' : value = Value.bool (if pos then b else !b) := List.mem_singleton.mp key
+          refine List.mem_filter.mpr ⟨hfitmem s value hv, ?_⟩
+          rw [key']
+          cases (if pos then b else !b) <;> rfl
+
   · -- untouched slot: case on the atom; each shape is an updateSlot at
     -- a different slot, so the untouched-slot rule applies directly
     cases l with
@@ -447,8 +453,9 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
               exact hfitmem slot value hv
       | boolEq s' b =>
           show value ∈ (updateSlot doms s'
-            (fun _ => [Value.bool (if pos then b else !b)])).getD slot []
-          rw [updateSlot_getD_ne doms s' (fun _ => [Value.bool (if pos then b else !b)]) slot
+            (fun d => d.filter (fun v => v.eqB (.bool (if pos then b else !b))))).getD slot []
+          rw [updateSlot_getD_ne doms s'
+            (fun d => d.filter (fun v => v.eqB (.bool (if pos then b else !b)))) slot
             (fun hcon => hsl hcon)]
           exact hfitmem slot value hv
 

@@ -24,6 +24,7 @@ NO `sorry`, NO custom axiom. Registration owes the umbrella import line
 import LeanFzn.Solver.UIP.Proofs.SupportedRunAssembly
 import LeanFzn.Solver.UIP.Proofs.SchedulerDeadSites
 import LeanFzn.Solver.UIP.Proofs.SupportedProviders
+import LeanFzn.Solver.UIP.Proofs.UnitRunSupported
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler
 
 
@@ -90,7 +91,7 @@ theorem supportedFrameDead_of_recordedEvidence {orig : List Domain}
                 cases hconf
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hs
                     simp only [] at hs
@@ -137,7 +138,8 @@ theorem supportedFrameDead_of_recordedEvidence {orig : List Domain}
           subst hs
           rw [stepPropagate_conflict] at hconf
           intro a ha hcov
-          exact ih hconf a ha (filterFrame_refines d.filtered hcov)
+          exact ih hconf a ha (filterFrame_refines d.filtered
+            (by simpa [stepPropagate, narrowState] using hcov))
         · -- ARM 2 / ARM 3 / ARM 6: the guarded stable dispatch
           rw [hnt] at hs
           unfold stableStepGuarded at hs
@@ -199,7 +201,8 @@ theorem supportedFrameDead_of_recordedEvidence {orig : List Domain}
                   Option.some.injEq] at hs
                 subst hs
                 show ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
-                exact frameDead_of_terminalConflict (hclos hrec) (hbr hrec) ht
+                exact frameDead_of_terminalConflict (hclos hrec) (hbr hrec)
+                  (by rw [← SupportedReach.orig_eq hrec]; exact ht)
         · -- ARM 6: localExcluded → localExclude (clears)
           rw [hnt] at hs
           simp only [successor_localExclude, Option.some.injEq] at hs
@@ -221,7 +224,7 @@ theorem supportedHdeadStableNone_of_shape {orig : List Domain}
         ReachableState leaf orig cfg.branch) :
     ∀ {cfg : SchedulerConfig leaf} {bs : BranchState leaf},
       SupportedReach orig original props cfg →
-      terminalResult cfg.original cfg.props cfg.branch = .stable bs →
+      terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs →
       leafWitness leaf cfg = none →
       splitData cfg.branch.frame = none →
         ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False := by
@@ -297,7 +300,7 @@ theorem supportedDeadEvidence_of_premises {orig : List Domain}
                 exact supportedFrameDead_of_recordedEvidence hclos hbr hrec hc₀
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hs
                     simp only [] at hs
@@ -389,8 +392,8 @@ theorem supportedDeadEvidence_of_premises {orig : List Domain}
               simp only [successor_localExclude, Option.some.injEq] at hs
               subst hs
               show ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
-              exact deadConflictNil_of_terminalEvent (hclos hrec) (hbr hrec) ht
-                rfl
+              exact deadConflictNil_of_terminalEvent (hclos hrec) (hbr hrec)
+                (by rw [← SupportedReach.orig_eq hrec]; exact ht) rfl
           | cons c rest =>
               by_cases hlv : cfg.branch.level = 0
               · -- level 0: terminal, no successor
@@ -411,7 +414,8 @@ theorem supportedDeadEvidence_of_premises {orig : List Domain}
           simp only [successor_localExclude, Option.some.injEq] at hs
           subst hs
           show ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
-          exact deadLocalExcluded_of_terminalEvent (hclos hrec) (hbr hrec) ht
+          exact deadLocalExcluded_of_terminalEvent (hclos hrec) (hbr hrec)
+            (by rw [← SupportedReach.orig_eq hrec]; exact ht)
 
 /-! ## §5 The supported core-gate assembly (exact residual view) -/
 
@@ -488,7 +492,7 @@ theorem supportedCoreGates_of_producers {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch)
@@ -498,7 +502,7 @@ theorem supportedCoreGates_of_producers {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp))
     (hconsumeInv : ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
       {rest : List BranchFrame},
@@ -532,7 +536,7 @@ theorem supportedCoreGates_of_producers {orig : List Domain}
       SupportedReach orig original props cfg →
       cfg.pending = f :: rest → stepConsume cfg = some next →
         ReachableState leaf orig next.branch :=
-    supportedHconsume_of_premises hshape hbrF
+    supportedHconsume_of_premises hshape hbrF (fun hreach => (hclosF hreach).leafFits)
   exact
   { hclos := hclosF
     hunit := hunit
@@ -576,12 +580,12 @@ theorem supportedHunit_of_unitRun {orig : List Domain} {original : List Clause}
     {props : List Propagator} {leaf : Assignment → Bool}
     {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       UnitDB cfg.branch.learned :=
   fun hreach =>
-    (unitRunInvariant_of_reachable (leaf := leaf) hSupp hreach.reachable
-      (by rw [SupportedReach.props_eq hreach, hprops])).db
+    (unitRunInvariant_of_supported hprops hSupp hgate hreach).db
 
 /-- The kit profile supplies the deduction-payload maintenance. -/
 theorem supportedHpay_of_unitRun {original : List Clause}
@@ -598,15 +602,15 @@ theorem supportedHplanU_of_unitRun {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props) :
     ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis},
       SupportedReach orig original props cfg → cfg.conflict = some ev →
         ev.analysis = some an → UnitDB [an.learned] := by
   intro cfg ev an hreach hc ha
   obtain ⟨⟨q, hq, hqn⟩, -⟩ :=
-    (unitRunInvariant_of_reachable (leaf := leaf) hSupp hreach.reachable
-      (by rw [SupportedReach.props_eq hreach, hprops])).recorded ev hc
+    (unitRunInvariant_of_supported hprops hSupp hgate hreach).recorded ev hc
   obtain ⟨below, uip, hrun, heq⟩ :=
     reachable_analysis_success leaf cfg ev an hreach.reachable hc ha
   rw [hq] at hrun

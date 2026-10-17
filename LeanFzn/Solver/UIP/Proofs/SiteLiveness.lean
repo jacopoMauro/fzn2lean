@@ -106,7 +106,7 @@ theorem cxDcs_unitFamily : ∀ dc ∈ cxDcs, unitFamilyB dc = true := by
 
 /-- The registered kit is the single `LeanFzn.Solver.Propagation.propConstEq`-at-slot-1 runner. -/
 theorem cxProps_eq :
-    cxProps = [{ watches := [], run := fun st => LeanFzn.Solver.Propagation.propConstEq st 1 (Value.bool true) }] :=
+    cxProps = [{ watches := [.intLe 1 0], run := fun st => LeanFzn.Solver.Propagation.propConstEq st 1 (Value.bool true) }] :=
   rfl
 
 /-! ## §2 The witness run (five real `schedulerNext` successors)
@@ -164,7 +164,7 @@ def cx4 : SchedulerConfig cxLeaf :=
 /-- Step 4's successor: the recorded conflict at the coverless frame. -/
 def cx5 : SchedulerConfig cxLeaf :=
   stepAnalyzeConflictCounted cx4 [posBool 1 true] [[posBool 1 true]]
-    (analyzeEventsExpansions cx4.branch.trail cx4.branch.level [posBool 1 true])
+    (analyzeEventsExpansions cx4.orig cx4.branch.trail cx4.branch.level [posBool 1 true])
 
 theorem cx1_branch : cx1.branch = cxBs1 := rfl
 
@@ -178,7 +178,7 @@ theorem cx_step0 : (schedulerNext cx0).successor = some cx1 := by
     unfold explainedDeduction nextPruningEvent scanDatabase scanPropagators
       frameViewedB frameLiveB frameState Frame.domains
     rfl
-  have ht : terminalResult [] cxProps cx0.branch = .stable cx0.branch := by
+  have ht : terminalResult cxOrig [] cxProps cx0.branch = .stable cx0.branch := by
     unfold terminalResult nextPruningEvent scanDatabase scanPropagators
       frameViewedB frameLiveB frameState Frame.domains
     rfl
@@ -193,7 +193,7 @@ theorem cx_step1 : (schedulerNext cx1).successor = some cx2 := by
     unfold explainedDeduction nextPruningEvent scanDatabase scanPropagators
       frameViewedB frameLiveB frameState Frame.domains
     rfl
-  have ht : terminalResult [] cxProps cx1.branch = .stable cx1.branch := by
+  have ht : terminalResult cxOrig [] cxProps cx1.branch = .stable cx1.branch := by
     rw [cx1_branch]
     unfold terminalResult nextPruningEvent scanDatabase scanPropagators
       frameViewedB frameLiveB frameState Frame.domains
@@ -208,7 +208,7 @@ theorem cx_step2 : (schedulerNext cx2).successor = some cx3 := by
     unfold explainedDeduction nextPruningEvent scanDatabase scanPropagators
       frameViewedB frameLiveB frameState Frame.domains
     rfl
-  have ht : terminalResult [] cxProps cx2.branch = .stable cx2.branch := by
+  have ht : terminalResult cxOrig [] cxProps cx2.branch = .stable cx2.branch := by
     unfold terminalResult nextPruningEvent scanDatabase scanPropagators
       frameViewedB frameLiveB frameState Frame.domains
     rfl
@@ -227,7 +227,7 @@ theorem cx_step4 : (schedulerNext cx4).successor = some cx5 := by
     unfold explainedDeduction nextPruningEvent scanDatabase scanPropagators
       frameViewedB frameLiveB frameState Frame.domains
     rfl
-  have ht : terminalResult [] cxProps cx4.branch =
+  have ht : terminalResult cxOrig [] cxProps cx4.branch =
       .conflict cx4.branch [[posBool 1 true]] [[posBool 1 true]] := by
     unfold terminalResult nextPruningEvent scanDatabase scanPropagators
       frameViewedB frameLiveB frameState Frame.domains
@@ -241,7 +241,7 @@ theorem cx_step4 : (schedulerNext cx4).successor = some cx5 := by
 
 /-- The witness run is a genuine supported execution. -/
 theorem cx_reach : SupportedReach cxOrig [] cxProps cx5 :=
-  .step (.step (.step (.step (.step .init cx_step0) cx_step1) cx_step2)
+  .step (.step (.step (.step (.step (.init (fun _ hc => absurd hc (List.not_mem_nil))) cx_step0) cx_step1) cx_step2)
     cx_step3) cx_step4
 
 /-- The final configuration carries recorded evidence. -/
@@ -326,61 +326,84 @@ site (when it exists, as §1 shows for the unit kit) happens EXACTLY when
 the propagator scan reports a nonempty conflict at a coverless frame.
 This is the exact shape of `hinhab`'s residual. -/
 
+/-- R1c: the ROUTED recording sources. Conflict routing records, besides
+the propagator conflict, (i) a falsified stored clause (the clause itself),
+(ii) the reason of an implied literal the frame filter rejects, and (iii) the
+wipe-out clause of an emptied domain. -/
+def RoutedRecordedSite (orig : List Domain) (original : List Clause)
+    (props : List Propagator) (bs : BranchState leaf) (ev : ConflictEvidence) : Prop :=
+  (∃ c ∈ bs.learned, scanDatabase original bs.frame bs.learned = .conflict [c] ∧
+      ev.clause = c) ∨
+    (∃ (l : Literal) (c : Clause) (lr fl : Bool),
+      nextPruningEvent original props bs.frame bs.learned = .implied l c lr fl ∧
+        filterFrame l bs.frame = none ∧ ev.clause = c) ∨
+    (∃ w : Clause, nextPruningEvent original props bs.frame bs.learned = .stable ∧
+      wipeoutClause orig bs.trail bs.frame = some w ∧ ev.clause = w)
+
 /-- A recorded successor of an evidence-free predecessor is the recording
-site of a nonempty propagator conflict on the predecessor's own branch
-(and the branch is untouched by the recording). -/
+site of EITHER a nonempty propagator conflict on the predecessor's own branch
+(with the database scan stable) OR (R1c) one of the routed sources; in both
+cases the branch is untouched by the recording. (Restated: before conflict
+routing only the first alternative existed.) -/
 theorem recordedStep_is_propagatorConflict {leaf : Assignment → Bool}
     {cfg cfg' : SchedulerConfig leaf} {t : SchedulerTransition leaf}
     {ev : ConflictEvidence}
     (hc : cfg.conflict = none) (hnext : schedulerNext cfg = t)
     (hsucc : t.successor = some cfg') (hconf : cfg'.conflict = some ev) :
-    ∃ (p : Propagator) (_ : p ∈ cfg.props) (q : Clause),
+    (∃ (p : Propagator) (_ : p ∈ cfg.props) (q : Clause),
       q ≠ [] ∧ p.run (frameState cfg.branch.frame) = .conflict q ∧
         scanDatabase cfg.original cfg.branch.frame cfg.branch.learned = .stable ∧
         frameViewedB cfg.branch.frame = true ∧
-        ev.clause = q ∧ cfg'.branch = cfg.branch := by
+        ev.clause = q ∧ cfg'.branch = cfg.branch) ∨
+    (RoutedRecordedSite cfg.orig cfg.original cfg.props cfg.branch ev ∧
+      cfg'.branch = cfg.branch) := by
   rcases schedulerNext_successor_recording_or_none hc hnext hsucc with
     hnone | ⟨cs, learned, c, rest, htr, hcs, hcfg'⟩
   · rw [hnone] at hconf
     cases hconf
-  · have hevnt : nextPruningEvent cfg.original cfg.props cfg.branch.frame
-        cfg.branch.learned = .conflict cs :=
-      (nextPruningEvent_of_terminalResult_conflict htr).1
-    rw [hcs] at hevnt
-    rw [hcfg'] at hconf
-    rcases nextPruningEvent_conflict_cases hevnt with hdb | ⟨hsd, hview, hprop⟩
-    · -- the database's conflict carries NO clause: the recorded payload
-      -- `c :: rest` is nonempty, so this route cannot record
-      obtain ⟨_, _, _, hnil⟩ := scanDatabase_conflict_facts hdb
-      cases hnil
-    · obtain ⟨p, hp, q, hrun, hpayload⟩ := scanPropagators_conflict_facts hprop
-      have hqne : q ≠ [] := by
-        intro hq
-        rw [hq] at hpayload
-        cases hpayload
-      have hqisEmpty : q.isEmpty = false := by
-        cases q with
-        | nil => exact (hqne rfl).elim
-        | cons a t => rfl
-      have hcsq : c :: rest = [q] := by
-        rw [hqisEmpty] at hpayload
-        simpa using hpayload
-      have hcq : c = q := by
-        cases hcsq
-        rfl
-      have hclause : ev.clause = q := by
-        rw [← hcq]
-        exact (stepAnalyzeConflictCounted_evidence hconf).1
-      exact ⟨p, hp, q, hqne, hrun, hsd, hview, hclause,
-        by rw [hcfg', stepAnalyzeConflictCounted_branch]⟩
+  · rw [hcfg'] at hconf
+    have hclause : ev.clause = c := (stepAnalyzeConflictCounted_evidence hconf).1
+    have hbranch : cfg'.branch = cfg.branch := by
+      rw [hcfg', stepAnalyzeConflictCounted_branch]
+    rw [hcs] at htr
+    obtain ⟨-, hcase⟩ := terminalResult_conflict_cases htr
+    rcases hcase with ⟨hevnt, -⟩ | ⟨l, c', lr, fl, hevnt, hf, hcs', -⟩ |
+        ⟨w, hevnt, hw, hcs', -⟩
+    · rcases nextPruningEvent_conflict_cases hevnt with hdb | ⟨hsd, hview, hprop⟩
+      · -- the database's own conflict: the stored clause is reported
+        obtain ⟨d, hd, -, hcd⟩ := scanDatabase_conflict_facts hdb
+        injection hcd with hcd' hrest
+        exact Or.inr ⟨Or.inl ⟨d, hd, by rw [← hcd', ← hrest]; exact hdb, by rw [hclause, hcd']⟩, hbranch⟩
+      · obtain ⟨p, hp, q, hrun, hpayload⟩ := scanPropagators_conflict_facts hprop
+        have hqne : q ≠ [] := by
+          intro hq
+          rw [hq] at hpayload
+          cases hpayload
+        have hqisEmpty : q.isEmpty = false := by
+          cases q with
+          | nil => exact (hqne rfl).elim
+          | cons a t => rfl
+        have hcsq : c :: rest = [q] := by
+          rw [hqisEmpty] at hpayload
+          simpa using hpayload
+        have hcq : c = q := by
+          cases hcsq
+          rfl
+        have hclause' : ev.clause = q := by
+          rw [← hcq]
+          exact hclause
+        exact Or.inl ⟨p, hp, q, hqne, hrun, hsd, hview, hclause', hbranch⟩
+    · injection hcs' with hcc' hrest
+      exact Or.inr ⟨Or.inr (Or.inl ⟨l, c', lr, fl, hevnt, hf, by rw [hclause, hcc']⟩),
+        hbranch⟩
+    · injection hcs' with hcw hrest
+      exact Or.inr ⟨Or.inr (Or.inr ⟨w, hevnt, hw, by rw [hclause, hcw]⟩), hbranch⟩
 
-/-- **THE HONEST RECORDED-SITE FORM (kit-free, run level)**: at every
-supported configuration carrying recorded evidence, either the frame is
+/-- **THE HONEST RECORDED-SITE FORM (kit-free, one step)**: at every
+supported successor carrying recorded evidence, either the frame is
 inhabited, or the recorded clause is a genuine nonempty propagator
-conflict on the site's own frame, with the database scan stable and the
-frame int-viewed. This is the exact replacement for the recorded-site
-`hinhab` family; the coverless case (the second disjunct with a coverless
-frame) is REALIZED by §1-§2 on the unit kit. -/
+conflict on the site's own frame (database scan stable, frame int-viewed),
+or (R1c) the site is one of the routed sources. -/
 theorem supportedRecorded_or_propagatorConflict_step {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {cfg cfg' : SchedulerConfig leaf}
@@ -389,11 +412,12 @@ theorem supportedRecorded_or_propagatorConflict_step {orig : List Domain}
     (hs : (schedulerNext cfg).successor = some cfg')
     (hconf : cfg'.conflict = some ev) :
     (∃ a : Assignment, FrameCovers cfg'.branch.frame a) ∨
-      ∃ (p : Propagator) (_ : p ∈ props) (q : Clause),
+      (∃ (p : Propagator) (_ : p ∈ props) (q : Clause),
         q ≠ [] ∧ p.run (frameState cfg'.branch.frame) = .conflict q ∧
           ev.clause = q ∧
           scanDatabase original cfg'.branch.frame cfg'.branch.learned = .stable ∧
-          frameViewedB cfg'.branch.frame = true := by
+          frameViewedB cfg'.branch.frame = true) ∨
+      RoutedRecordedSite orig original props cfg'.branch ev := by
   cases hcf : cfg.conflict with
   | some ev₀ =>
       have hnext : schedulerNext cfg = backjumpStep cfg ev₀ := by
@@ -403,34 +427,37 @@ theorem supportedRecorded_or_propagatorConflict_step {orig : List Domain}
       rw [hnone] at hconf
       cases hconf
   | none =>
-      obtain ⟨p, hp, q, hqne, hrun, hsd, hview, hclause, hbr⟩ :=
-        recordedStep_is_propagatorConflict hcf rfl hs hconf
-      rw [SupportedReach.props_eq hrec] at hp
-      rw [SupportedReach.original_eq hrec] at hsd
-      rw [hbr]
-      exact Or.inr ⟨p, hp, q, hqne, hrun, hclause, hsd, hview⟩
+      rcases recordedStep_is_propagatorConflict hcf rfl hs hconf with
+        ⟨p, hp, q, hqne, hrun, hsd, hview, hclause, hbr⟩ | ⟨hrt, hbr⟩
+      · rw [SupportedReach.props_eq hrec] at hp
+        rw [SupportedReach.original_eq hrec] at hsd
+        rw [hbr]
+        exact Or.inr (Or.inl ⟨p, hp, q, hqne, hrun, hclause, hsd, hview⟩)
+      · rw [hbr, ← SupportedReach.orig_eq hrec, ← SupportedReach.original_eq hrec,
+          ← SupportedReach.props_eq hrec]
+        exact Or.inr (Or.inr hrt)
 
 /-- **THE HONEST RECORDED-SITE FORM (kit-free, run level)**: at every
 supported configuration carrying recorded evidence, either the frame is
 inhabited, or the recorded clause is a genuine nonempty propagator
-conflict on the site's own frame, with the database scan stable and the
-frame int-viewed. This is the exact replacement for the recorded-site
-`hinhab` family; the coverless case (the second disjunct with a coverless
-frame) is REALIZED by §1-§2 on the unit kit. -/
+conflict on the site's own frame (database scan stable, frame int-viewed),
+or (R1c) the site is one of the routed sources. The coverless case of the
+second alternative is REALIZED by §1-§2 on the unit kit. -/
 theorem supportedRecorded_or_propagatorConflict {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ∀ {ev : ConflictEvidence}, cfg.conflict = some ev →
         (∃ a : Assignment, FrameCovers cfg.branch.frame a) ∨
-          ∃ (p : Propagator) (_ : p ∈ props) (q : Clause),
+          (∃ (p : Propagator) (_ : p ∈ props) (q : Clause),
             q ≠ [] ∧ p.run (frameState cfg.branch.frame) = .conflict q ∧
               ev.clause = q ∧
               scanDatabase original cfg.branch.frame cfg.branch.learned = .stable ∧
-              frameViewedB cfg.branch.frame = true := by
+              frameViewedB cfg.branch.frame = true) ∨
+          RoutedRecordedSite orig original props cfg.branch ev := by
   intro cfg hreach
   induction hreach with
-  | init =>
+  | init _ =>
       intro ev hconf
       simp [SchedulerConfig.init] at hconf
   | step hrec hs ih =>
@@ -440,7 +467,7 @@ theorem supportedRecorded_or_propagatorConflict {orig : List Domain}
 /-- **THE UNIT-KIT RECORDED-SITE FORM, with the conflicting constraint
 named**: under the unit-kit premises, the recording propagator is the
 proved-propagator image of a constraint OF THE PROBLEM — the exact handle
-the per-family table of §4 classifies. -/
+the per-family table of §4 classifies. (R1c: plus the routed alternative.) -/
 theorem supportedRecorded_or_dcsConflict {orig : List Domain}
     {original : List Clause} {leaf : Assignment → Bool}
     {dcs : List DomConstraint} {props : List Propagator}
@@ -448,19 +475,21 @@ theorem supportedRecorded_or_dcsConflict {orig : List Domain}
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ∀ {ev : ConflictEvidence}, cfg.conflict = some ev →
         (∃ a : Assignment, FrameCovers cfg.branch.frame a) ∨
-          ∃ (dc : DomConstraint) (_ : dc ∈ dcs) (p : Propagator) (q : Clause),
+          (∃ (dc : DomConstraint) (_ : dc ∈ dcs) (p : Propagator) (q : Clause),
             propagatorOfProved dc = some p ∧ q ≠ [] ∧
               p.run (frameState cfg.branch.frame) = .conflict q ∧
               ev.clause = q ∧
               scanDatabase original cfg.branch.frame cfg.branch.learned = .stable ∧
-              frameViewedB cfg.branch.frame = true := by
+              frameViewedB cfg.branch.frame = true) ∨
+          RoutedRecordedSite orig original props cfg.branch ev := by
   intro cfg hreach ev hconf
   rcases supportedRecorded_or_propagatorConflict hreach hconf with
-    hinhab | ⟨p, hp, q, hqne, hrun, hclause, hsd, hview⟩
+    hinhab | ⟨p, hp, q, hqne, hrun, hclause, hsd, hview⟩ | hrouted
   · exact Or.inl hinhab
   · rw [hprops] at hp
     obtain ⟨dc, hdc, hdcp⟩ := propagatorsOfProved_mem hp
-    exact Or.inr ⟨dc, hdc, p, q, hdcp, hqne, hrun, hclause, hsd, hview⟩
+    exact Or.inr (Or.inl ⟨dc, hdc, p, q, hdcp, hqne, hrun, hclause, hsd, hview⟩)
+  · exact Or.inr (Or.inr hrouted)
 
 /-! ## §4 The unit-family conflict shapes (the per-family split)
 

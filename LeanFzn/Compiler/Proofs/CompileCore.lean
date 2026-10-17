@@ -724,6 +724,296 @@ theorem eval_lin_args {m : Model}
   rw [h1, h2]
   rfl
 
+/-- The `Expr.eval` of one identifier-array argument at the assembled
+    store: the evaluated array is the assignment's reads at the
+    extracted positions (the array-argument bridge of `bool_clause`). -/
+theorem eval_array_arg {m : Model}
+    {slots : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {elems : ArrayLiteral} {is : List Nat}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (hidx : linIndices (slots.map Prod.fst) elems = some is)
+    (hin : ∀ i, i ∈ is → i < a.length) :
+    (Expr.array elems).eval ((assemble m slots dcs).toStore a) =
+      some (.array (is.map (fun i => a[i]!))) := by
+  have hlength : (slots.map Prod.fst).length = slots.length := by simp
+  have hvals : ∀ (i : Nat), i < (slots.map Prod.fst).length →
+      ∀ (v : Value), a[i]? = some v →
+      (assemble m slots dcs).toStore a (Ident.mk (slots.map Prod.fst)[i]!)
+        = some v := by
+    intro i hilt v hv
+    have hislt : i < slots.length := by omega
+    have ha5 : i < a.length := by rw [halt]; exact hislt
+    have hread : (assemble m slots dcs).toStore a
+        (Ident.mk (slots.map Prod.fst)[i]!) = some a[i]! :=
+      toStore_slot (m := m) (dcs := dcs) hnu hislt ha5
+    have hsome : a[i]? = some a[i]! := getElem_as_some ha5
+    have hvv : v = a[i]! := by
+      rw [hsome] at hv
+      exact (Option.some.inj hv).symm
+    rw [hvv]
+    exact hread
+  show ((elems.mapM
+      (BasicExpr.eval ((assemble m slots dcs).toStore a))).map
+    Value.array) = _
+  rw [linIndices_eval hvals elems is hidx hin]
+  rfl
+
+/-- The `Expr.eval` of a two-slot-array argument list at the assembled
+    store (the `bool_clause` converse bridge). -/
+theorem eval_two_arrays {m : Model}
+    {slots : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {elems1 elems2 : ArrayLiteral} {is1 is2 : List Nat}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (hidx1 : linIndices (slots.map Prod.fst) elems1 = some is1)
+    (hidx2 : linIndices (slots.map Prod.fst) elems2 = some is2)
+    (hin1 : ∀ i, i ∈ is1 → i < a.length)
+    (hin2 : ∀ i, i ∈ is2 → i < a.length) :
+    ([Expr.array elems1, Expr.array elems2].mapM
+      (Expr.eval ((assemble m slots dcs).toStore a)))
+      = some [.array (is1.map (fun i => a[i]!)),
+        .array (is2.map (fun i => a[i]!))] := by
+  have h1 := eval_array_arg (m := m) (dcs := dcs) hnu halt hidx1 hin1
+  have h2 := eval_array_arg (m := m) (dcs := dcs) hnu halt hidx2 hin2
+  show (do
+      let v1 ← (Expr.array elems1).eval ((assemble m slots dcs).toStore a)
+      let v2 ← (Expr.array elems2).eval ((assemble m slots dcs).toStore a)
+      pure [v1, v2]) = _
+  rw [h1, h2]
+  rfl
+
+/-- The `Expr.eval` of an array-then-identifier argument list. -/
+theorem eval_arr_ident {m : Model}
+    {slots : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {elems : ArrayLiteral} {is : List Nat} {r : Ident} {k : Nat}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (his : linIndices (slots.map Prod.fst) elems = some is)
+    (hr : nameIndex (slots.map Prod.fst) r.name = some k)
+    (hin : ∀ i, i ∈ is → i < a.length) :
+    ([Expr.array elems, Expr.basic (.ident r)].mapM
+      (Expr.eval ((assemble m slots dcs).toStore a)))
+      = some [.array (is.map (fun i => a[i]!)), a[k]!] := by
+  have hR : k < (slots.map Prod.fst).length :=
+    (nameIndex_some (slots.map Prod.fst) r.name k hr).1
+  have hlen : (slots.map Prod.fst).length = slots.length := by simp
+  have hak : k < a.length := by omega
+  show (do
+      let v1 ← (Expr.array elems).eval ((assemble m slots dcs).toStore a)
+      let v2 ← (assemble m slots dcs).toStore a r
+      pure [v1, v2]) = _
+  rw [eval_array_arg (m := m) (dcs := dcs) hnu halt his hin]
+  rw [toStore_read (m := m) hnu hr halt]
+  rfl
+
+/-- The `Expr.eval` of a constant integer array argument that produced
+    `xs` via `intLits`. -/
+theorem eval_intLits_arg {m : Model}
+    {slots : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {elems : ArrayLiteral} {xs : List Int}
+    (hxs : intLits elems = some xs) :
+    (Expr.array elems).eval ((assemble m slots dcs).toStore a) =
+      some (.array (xs.map Value.int)) := by
+  show ((elems.mapM
+      (BasicExpr.eval ((assemble m slots dcs).toStore a))).map
+    Value.array) = _
+  rw [intLits_eval elems xs hxs]
+  rfl
+
+/-- The `Expr.eval` of an identifier-array-identifier argument list at
+    the assembled store, with the array evaluated by `intLits` (the
+    `array_int_element` converse bridge). -/
+theorem eval_ident_arr_lits {m : Model}
+    {slots : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {x y : Ident} {elems : ArrayLiteral} {xs : List Int}
+    {i k : Nat}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
+    (hyk : nameIndex (slots.map Prod.fst) y.name = some k)
+    (hxs : intLits elems = some xs) :
+    ([Expr.basic (.ident x), Expr.array elems, Expr.basic (.ident y)].mapM
+      (Expr.eval ((assemble m slots dcs).toStore a)))
+      = some [a[i]!, .array (xs.map Value.int), a[k]!] := by
+  have hA : (Expr.array elems).eval ((assemble m slots dcs).toStore a) =
+      some (.array (xs.map Value.int)) :=
+    eval_intLits_arg (m := m) (dcs := dcs) hxs
+  show (do
+      let v1 ← (assemble m slots dcs).toStore a x
+      let v2 ← (Expr.array elems).eval ((assemble m slots dcs).toStore a)
+      let v3 ← (assemble m slots dcs).toStore a y
+      pure [v1, v2, v3]) = _
+  rw [toStore_read (m := m) hnu hxi halt]
+  rw [hA]
+  rw [toStore_read (m := m) hnu hyk halt]
+  rfl
+
+/-- The `Expr.eval` of an identifier-array-identifier argument list at
+    the assembled store, with the array evaluated by `linIndices` (the
+    `array_var_int_element`/`array_var_bool_element` converse
+    bridge). -/
+theorem eval_ident_arr_ident {m : Model}
+    {slots : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {x y : Ident} {elems : ArrayLiteral} {is : List Nat}
+    {i k : Nat}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (hxi : nameIndex (slots.map Prod.fst) x.name = some i)
+    (hyk : nameIndex (slots.map Prod.fst) y.name = some k)
+    (his : linIndices (slots.map Prod.fst) elems = some is)
+    (hin : ∀ j, j ∈ is → j < a.length) :
+    ([Expr.basic (.ident x), Expr.array elems, Expr.basic (.ident y)].mapM
+      (Expr.eval ((assemble m slots dcs).toStore a)))
+      = some [a[i]!, .array (is.map (fun j => a[j]!)), a[k]!] := by
+  have hA : (Expr.array elems).eval ((assemble m slots dcs).toStore a) =
+      some (.array (is.map (fun j => a[j]!))) :=
+    eval_array_arg (m := m) (dcs := dcs) hnu halt his hin
+  show (do
+      let v1 ← (assemble m slots dcs).toStore a x
+      let v2 ← (Expr.array elems).eval ((assemble m slots dcs).toStore a)
+      let v3 ← (assemble m slots dcs).toStore a y
+      pure [v1, v2, v3]) = _
+  rw [toStore_read (m := m) hnu hxi halt]
+  rw [hA]
+  rw [toStore_read (m := m) hnu hyk halt]
+  rfl
+
+/-- The `Expr.eval` of a linear argument list followed by a reification
+    identifier (the `int_lin_*_reif` converse bridge). -/
+theorem eval_lin_reif_args {m : Model}
+    {slots : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value}
+    {ks elems : ArrayLiteral} {coeffs : List Int} {is : List Nat}
+    {b : Int} {r : Ident} {k : Nat}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (hcoeffs : linCoeffs ks = some coeffs)
+    (hidx : linIndices (slots.map Prod.fst) elems = some is)
+    (hin : ∀ i, i ∈ is → i < a.length)
+    (hrk : nameIndex (slots.map Prod.fst) r.name = some k) :
+    ([Expr.array ks, Expr.array elems, Expr.basic (.lit (.int b)),
+       Expr.basic (.ident r)].mapM
+      (Expr.eval ((assemble m slots dcs).toStore a)))
+      = some [.array (intVals coeffs), .array (is.map (fun i => a[i]!)),
+        .int b, a[k]!] := by
+  have hlength : (slots.map Prod.fst).length = slots.length := by simp
+  have hvals : ∀ (i : Nat), i < (slots.map Prod.fst).length →
+      ∀ (v : Value), a[i]? = some v →
+      (assemble m slots dcs).toStore a (Ident.mk (slots.map Prod.fst)[i]!)
+        = some v := by
+    intro i hilt v hv
+    have hislt : i < slots.length := by omega
+    have ha5 : i < a.length := by rw [halt]; exact hislt
+    have hread : (assemble m slots dcs).toStore a
+        (Ident.mk (slots.map Prod.fst)[i]!) = some a[i]! :=
+      toStore_slot (m := m) (dcs := dcs) hnu hislt ha5
+    have hsome : a[i]? = some a[i]! := getElem_as_some ha5
+    have hvv : v = a[i]! := by
+      rw [hsome] at hv
+      exact (Option.some.inj hv).symm
+    rw [hvv]
+    exact hread
+  have h1 : (Expr.array ks).eval ((assemble m slots dcs).toStore a) =
+      some (.array (intVals coeffs)) := by
+    show ((ks.mapM
+        (BasicExpr.eval ((assemble m slots dcs).toStore a))).map
+      Value.array) = _
+    rw [linCoeffs_eval ks coeffs hcoeffs]
+    rfl
+  have h2 : (Expr.array elems).eval ((assemble m slots dcs).toStore a) =
+      some (.array (is.map (fun i => a[i]!))) := by
+    show ((elems.mapM
+        (BasicExpr.eval ((assemble m slots dcs).toStore a))).map
+      Value.array) = _
+    rw [linIndices_eval hvals elems is hidx hin]
+    rfl
+  show (do
+      let v1 ← (Expr.array ks).eval ((assemble m slots dcs).toStore a)
+      let v2 ← (Expr.array elems).eval ((assemble m slots dcs).toStore a)
+      let v3 ← (Expr.basic (.lit (.int b))).eval
+          ((assemble m slots dcs).toStore a)
+      let v4 ← (assemble m slots dcs).toStore a r
+      pure [v1, v2, v3, v4]) = _
+  rw [h1, h2]
+  rw [toStore_read (m := m) hnu hrk halt]
+  rfl
+
+/-- The `BasicExpr.eval` of one general integer operand (`intArgOf`
+    resolved) at the assembled store: the store's value of the source
+    expression IS the operand's read — an identifier reads the
+    assignment's slot value, an integer literal denotes itself. -/
+theorem eval_basic_arg {m : Model} {slots : List (String × List Value)}
+    {dcs : List DomConstraint} {a : List Value} {e : BasicExpr} {o : DomIntArg}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (ho : intArgOf (slots.map Prod.fst) e = some o) :
+    BasicExpr.eval ((assemble m slots dcs).toStore a) e =
+      some (DomIntArg.read a o) := by
+  cases e with
+  | lit l =>
+      cases l with
+      | int k =>
+          have ho' : o = .lit k :=
+            (Option.some.inj (by simpa [intArgOf] using ho)).symm
+          subst ho'
+          rfl
+      | bool b => exact absurd ho (by simp [intArgOf])
+      | set s => exact absurd ho (by simp [intArgOf])
+  | ident x =>
+      simp only [intArgOf] at ho
+      cases hn : nameIndex (slots.map Prod.fst) x.name with
+      | none => rw [hn] at ho; exact absurd ho (by simp)
+      | some i =>
+          rw [hn] at ho
+          have ho' : o = .slot i := (Option.some.inj (by simpa using ho)).symm
+          subst ho'
+          exact toStore_read (m := m) hnu hn halt
+
+/-- The `Expr.eval` of a three-general-basic-argument list at the
+    assembled store: the evaluated arguments are the operands' reads. -/
+theorem eval_three_basic {m : Model} {slots : List (String × List Value)}
+    {dcs : List DomConstraint} {a : List Value} {a₀ a₁ a₂ : BasicExpr}
+    {o₀ o₁ o₂ : DomIntArg}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (ho₀ : intArgOf (slots.map Prod.fst) a₀ = some o₀)
+    (ho₁ : intArgOf (slots.map Prod.fst) a₁ = some o₁)
+    (ho₂ : intArgOf (slots.map Prod.fst) a₂ = some o₂) :
+    ([Expr.basic a₀, Expr.basic a₁, Expr.basic a₂].mapM
+      (Expr.eval ((assemble m slots dcs).toStore a)))
+      = some [DomIntArg.read a o₀, DomIntArg.read a o₁,
+        DomIntArg.read a o₂] := by
+  have h1 := eval_basic_arg (m := m) (dcs := dcs) hnu halt ho₀
+  have h2 := eval_basic_arg (m := m) (dcs := dcs) hnu halt ho₁
+  have h3 := eval_basic_arg (m := m) (dcs := dcs) hnu halt ho₂
+  show (do
+      let v1 ← BasicExpr.eval ((assemble m slots dcs).toStore a) a₀
+      let v2 ← BasicExpr.eval ((assemble m slots dcs).toStore a) a₁
+      let v3 ← BasicExpr.eval ((assemble m slots dcs).toStore a) a₂
+      pure [v1, v2, v3]) = _
+  rw [h1, h2, h3]
+  rfl
+
+/-- The `Expr.eval` of a result-slot-then-slot-array argument list at
+    the assembled store (the `array_int_maximum(m, xs)` shape): the
+    array evaluates to the assignment's reads at the extracted
+    positions. -/
+theorem eval_ident_slot_array {m : Model}
+    {slots : List (String × List Value)} {dcs : List DomConstraint}
+    {a : List Value} {x : Ident} {elems : ArrayLiteral} {is : List Nat}
+    {k : Nat}
+    (hnu : (slots.map Prod.fst).Nodup) (halt : a.length = slots.length)
+    (hk : nameIndex (slots.map Prod.fst) x.name = some k)
+    (his : linIndices (slots.map Prod.fst) elems = some is) :
+    ([Expr.basic (.ident x), Expr.array elems].mapM
+      (Expr.eval ((assemble m slots dcs).toStore a)))
+      = some [a[k]!, .array (is.map (fun i => a[i]!))] := by
+  have hin : ∀ i, i ∈ is → i < a.length := by
+    intro i hi
+    have hlt := linIndices_lt elems is his i hi
+    have hlen : (slots.map Prod.fst).length = slots.length := by simp
+    omega
+  have harr := eval_array_arg (m := m) (dcs := dcs) hnu halt his hin
+  show (do
+      let v1 ← (assemble m slots dcs).toStore a x
+      let v2 ← (Expr.array elems).eval ((assemble m slots dcs).toStore a)
+      pure [v1, v2]) = _
+  rw [toStore_read (m := m) hnu hk halt, harr]
+  rfl
+
 /-- int_ne(x, y) converse under int-valued reads: two INTEGER slot
     arguments reading DIFFERENT values make the source constraint hold
     at the assembled store. -/
@@ -915,7 +1205,30 @@ theorem extractConstraint_holds_converse {m : Model}
     ⟨k, y, i, hname, hargs, hyi, hdc'⟩ |
     ⟨x, y, i, j, hname, hargs, hxi, hyi, hdc'⟩ |
     ⟨x, y, z, i, j, k, hname, hargs, hxi, hyi, hzi, hdc'⟩ |
-    ⟨x, y, z, i, j, k, hname, hargs, hxi, hyi, hzi, hdc'⟩
+    ⟨x, y, z, i, j, k, hname, hargs, hxi, hyi, hzi, hdc'⟩ |
+    ⟨ks, elems, coeffs, is, b, hname, hargs, hcoeffs, his, hlen, hdc'⟩ |
+    ⟨elems1, elems2, ps, ns, hname, hargs, hidx1, hidx2, hdc'⟩ |
+    ⟨elems, r, is, k, hname, hargs, his, hr, hdc'⟩ |
+    ⟨x, y, i, k, hname, hargs, hxi, hyi, hdc'⟩ |
+    ⟨x, y, i, j, hname, hargs, hxi, hyi, hdc'⟩ |
+    ⟨elems, xs, x, y, i, k, hname, hargs, hxs, hxi, hyk, hdc'⟩ |
+    ⟨elems, is, x, y, i, k, hname, hargs, his, hxi, hyk, hdc'⟩ |
+    ⟨elems, is, x, y, i, k, hname, hargs, his, hxi, hyk, hdc'⟩ |
+    ⟨x, y, r, i, j, k, hname, hargs, hxi, hyi, hrk, hdc'⟩ |
+    ⟨x, y, r, i, j, k, hname, hargs, hxi, hyi, hrk, hdc'⟩ |
+    ⟨x, y, r, i, j, k, hname, hargs, hxi, hyi, hrk, hdc'⟩ |
+    ⟨ks, elems, coeffs, is, b, r, k, hname, hargs, hcoeffs, his, hlen, hrk,
+      hdc'⟩ |
+    ⟨ks, elems, coeffs, is, b, r, k, hname, hargs, hcoeffs, his, hlen, hrk,
+      hdc'⟩ |
+    ⟨ks, elems, coeffs, is, b, r, k, hname, hargs, hcoeffs, his, hlen, hrk,
+      hdc'⟩ |
+    ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
+    ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
+    ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
+    ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
+    ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩ |
+    ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩
   · -- int_eq(x, y): the dedicated reads lemma
     subst hdc'
     have hmemx : Expr.basic (.ident x) ∈ c.args := by
@@ -1215,7 +1528,378 @@ theorem extractConstraint_holds_converse {m : Model}
         | _ => False)
       rw [hib, hjb, hkb]
       exact hpqr.symm
-
+  · -- int_lin_ne
+    subst hdc'
+    have hin : ∀ i, i ∈ is → i < a.length := by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      have hlen : (slots.map Prod.fst).length = slots.length := by simp
+      have halt2 : a.length = (slots.map Prod.fst).length := by
+        rw [halt]; exact hlen.symm
+      omega
+    refine ⟨[.array (intVals coeffs), .array (is.map (fun i => a[i]!)),
+      .int b], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_lin_args (m := m) hnu halt hcoeffs his hin
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show LeanFzn.Semantics.dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+      exact hsat
+  · -- bool_clause
+    subst hdc'
+    have hlen : (slots.map Prod.fst).length = slots.length := by simp
+    have hin1 : ∀ i, i ∈ ps → i < a.length := by
+      intro i hi
+      have hilt := linIndices_lt elems1 ps hidx1 i hi
+      simp only [List.length_map] at hilt
+      omega
+    have hin2 : ∀ j, j ∈ ns → j < a.length := by
+      intro j hj
+      have hilt := linIndices_lt elems2 ns hidx2 j hj
+      simp only [List.length_map] at hilt
+      omega
+    refine ⟨[.array (ps.map (fun i => a[i]!)),
+      .array (ns.map (fun j => a[j]!))], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_two_arrays (m := m) hnu halt hidx1 hidx2 hin1 hin2
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (((ps.map (fun i => a[i]!)).any (fun x => x.eqB (.bool true))) ||
+        ((ns.map (fun j => a[j]!)).any (fun y => y.eqB (.bool false)))) = true
+      rw [Bool.or_eq_true]
+      rcases hsat with hsat | hsat
+      · exact Or.inl ((bang_any_eqB_iff_slotIsBoolB hin1).mpr hsat)
+      · exact Or.inr ((bang_any_eqB_iff_slotIsBoolB hin2).mpr hsat)
+  · -- array_bool_and
+    subst hdc'
+    have hlen : (slots.map Prod.fst).length = slots.length := by simp
+    have hin : ∀ i, i ∈ is → i < a.length := by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      simp only [List.length_map] at hilt
+      omega
+    have hkb : a[k]! = Value.bool (is.all (fun i => slotIsBoolB a i true)) :=
+      bang_of_getElem? hsat
+    refine ⟨[.array (is.map (fun i => a[i]!)), a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_arr_ident (m := m) hnu halt his hr hin
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [Value.array (is.map (fun i => a[i]!)), a[k]!] with
+        | [Value.array xs, Value.bool r] =>
+            r = (xs.all fun x => x.eqB (Value.bool true))
+        | _ => False)
+      rw [hkb]
+      show (is.all fun i => slotIsBoolB a i true)
+          = ((is.map fun i => a[i]!).all fun x => x.eqB (Value.bool true))
+      rw [List.all_map]
+      exact (Bool.eq_iff_iff.mpr
+        (bang_all_eqB_iff_slotIsBoolB (b := true) hin)).symm
+  · -- bool2int
+    subst hdc'
+    obtain ⟨p, hb, hka⟩ := hsat
+    have hib : a[i]! = Value.bool p := bang_of_getElem? hb
+    have hkb : a[k]! = Value.int (if p then 1 else 0) := bang_of_getElem? hka
+    refine ⟨[a[i]!, a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_two_ident (m := m) hnu halt hxi hyi
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, a[k]!] with
+        | [Value.bool b, Value.int j] => j = (if b then 1 else 0)
+        | _ => False)
+      rw [hib, hkb]
+  · -- bool_eq
+    subst hdc'
+    obtain ⟨p, q, hb, hc, hpq⟩ := hsat
+    have hib : a[i]! = Value.bool p := bang_of_getElem? hb
+    have hjb : a[j]! = Value.bool q := bang_of_getElem? hc
+    refine ⟨[a[i]!, a[j]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_two_ident (m := m) hnu halt hxi hyi
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, a[j]!] with
+        | [Value.bool p, Value.bool q] => p = q
+        | _ => False)
+      rw [hib, hjb]
+      exact hpq
+  · -- array_int_element on a constant integer array
+    subst hdc'
+    obtain ⟨idx, e, hi, hk, hget⟩ := hsat
+    have hib : a[i]! = Value.int idx := bang_of_getElem? hi
+    have hkb : a[k]! = Value.int e := bang_of_getElem? hk
+    refine ⟨[a[i]!, .array (xs.map Value.int), a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_ident_arr_lits (m := m) hnu halt hxi hyk hxs
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, Value.array (xs.map Value.int), a[k]!] with
+        | [Value.int i, Value.array ys, Value.int e] =>
+            valuesGet1 ys i = some (.int e)
+        | _ => False)
+      rw [hib, hkb]
+      exact hget
+  · -- array_var_int_element on an explicit slot array
+    subst hdc'
+    obtain ⟨idx, e, hi, hk, hall, hget⟩ := hsat
+    have hib : a[i]! = Value.int idx := bang_of_getElem? hi
+    have hkb : a[k]! = Value.int e := bang_of_getElem? hk
+    have hin : ∀ j, j ∈ is → j < a.length := by
+      intro j hj
+      obtain ⟨v, hv⟩ := hall j hj
+      exact (List.getElem?_eq_some_iff.mp hv).choose
+    refine ⟨[a[i]!, .array (is.map (fun j => a[j]!)), a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_ident_arr_ident (m := m) hnu halt hxi hyk his hin
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, Value.array (is.map (fun j => a[j]!)), a[k]!] with
+        | [Value.int i, Value.array ys, Value.int e] =>
+            valuesGet1 ys i = some (.int e)
+        | _ => False)
+      rw [hib, hkb]
+      exact hget
+  · -- array_var_bool_element on an explicit slot array
+    subst hdc'
+    obtain ⟨idx, e, hi, hk, hall, hget⟩ := hsat
+    have hib : a[i]! = Value.int idx := bang_of_getElem? hi
+    have hkb : a[k]! = Value.bool e := bang_of_getElem? hk
+    have hin : ∀ j, j ∈ is → j < a.length := by
+      intro j hj
+      obtain ⟨v, hv⟩ := hall j hj
+      exact (List.getElem?_eq_some_iff.mp hv).choose
+    refine ⟨[a[i]!, .array (is.map (fun j => a[j]!)), a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_ident_arr_ident (m := m) hnu halt hxi hyk his hin
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, Value.array (is.map (fun j => a[j]!)), a[k]!] with
+        | [Value.int i, Value.array ys, Value.bool e] =>
+            valuesGet1 ys i = some (.bool e)
+        | _ => False)
+      rw [hib, hkb]
+      exact hget
+  · -- int_eq_reif(x, y, r): the reification slot agrees with equality
+    subst hdc'
+    obtain ⟨p, q, rb, hi, hj, hr, hiff⟩ := hsat
+    have hib : a[i]! = Value.int p := bang_of_getElem? hi
+    have hjb : a[j]! = Value.int q := bang_of_getElem? hj
+    have hkb : a[k]! = Value.bool rb := bang_of_getElem? hr
+    refine ⟨[a[i]!, a[j]!, a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_three_ident (m := m) hnu halt hxi hyi hrk
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, a[j]!, a[k]!] with
+        | [Value.int a, Value.int b, Value.bool rb] =>
+            (rb = true ∧ a = b) ∨ (rb = false ∧ a ≠ b)
+        | _ => False)
+      rw [hib, hjb, hkb]
+      exact (reif_disj_iff (p = q) rb).mpr hiff
+  · -- int_le_reif(x, y, r): the reification slot agrees with ≤
+    subst hdc'
+    obtain ⟨p, q, rb, hi, hj, hr, hiff⟩ := hsat
+    have hib : a[i]! = Value.int p := bang_of_getElem? hi
+    have hjb : a[j]! = Value.int q := bang_of_getElem? hj
+    have hkb : a[k]! = Value.bool rb := bang_of_getElem? hr
+    refine ⟨[a[i]!, a[j]!, a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_three_ident (m := m) hnu halt hxi hyi hrk
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, a[j]!, a[k]!] with
+        | [Value.int a, Value.int b, Value.bool rb] =>
+            (rb = true ∧ a ≤ b) ∨ (rb = false ∧ a > b)
+        | _ => False)
+      rw [hib, hjb, hkb]
+      rcases (reif_disj_iff (p ≤ q) rb).mpr hiff with
+        ⟨hrb, hle⟩ | ⟨hrb, hnle⟩
+      · exact Or.inl ⟨hrb, hle⟩
+      · exact Or.inr ⟨hrb, by omega⟩
+  · -- int_ne_reif(x, y, r): the reification slot agrees with ≠
+    subst hdc'
+    obtain ⟨p, q, rb, hi, hj, hr, hiff⟩ := hsat
+    have hib : a[i]! = Value.int p := bang_of_getElem? hi
+    have hjb : a[j]! = Value.int q := bang_of_getElem? hj
+    have hkb : a[k]! = Value.bool rb := bang_of_getElem? hr
+    refine ⟨[a[i]!, a[j]!, a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_three_ident (m := m) hnu halt hxi hyi hrk
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, a[j]!, a[k]!] with
+        | [Value.int a, Value.int b, Value.bool rb] =>
+            (rb = true ∧ a ≠ b) ∨ (rb = false ∧ a = b)
+        | _ => False)
+      rw [hib, hjb, hkb]
+      rcases (reif_disj_iff (p ≠ q) rb).mpr hiff with
+        ⟨hrb, hne⟩ | ⟨hrb, hnne⟩
+      · exact Or.inl ⟨hrb, hne⟩
+      · exact Or.inr ⟨hrb,
+          Decidable.byContradiction (fun hne => hnne hne)⟩
+  · -- int_lin_eq_reif(coeffs, xs, b, r)
+    subst hdc'
+    obtain ⟨rb, hk, hiff⟩ := hsat
+    have hkb : a[k]! = Value.bool rb := bang_of_getElem? hk
+    refine ⟨[.array (intVals coeffs), .array (is.map (fun i => a[i]!)),
+      .int b, a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_lin_reif_args (m := m) hnu halt hcoeffs his
+        (by
+          intro i hi
+          have hilt := linIndices_lt elems is his i hi
+          have hlen : (slots.map Prod.fst).length = slots.length := by simp
+          have halt2 : a.length = (slots.map Prod.fst).length := by
+            rw [halt]; exact hlen.symm
+          omega) hrk
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [.array (intVals coeffs),
+          .array (is.map (fun i => a[i]!)), .int b, a[k]!] with
+        | [Value.array as_, Value.array xs, Value.int b', Value.bool rb'] =>
+            (rb' = true ∧ dotProduct as_ xs = some b') ∨
+              (rb' = false ∧ dotProduct as_ xs ≠ some b')
+        | _ => False)
+      rw [hkb]
+      exact (reif_disj_iff (dotProduct (intVals coeffs)
+        (is.map (fun i => a[i]!)) = some b) rb).mpr hiff
+  · -- int_lin_le_reif(coeffs, xs, b, r)
+    subst hdc'
+    obtain ⟨rb, hk, hiff⟩ := hsat
+    have hkb : a[k]! = Value.bool rb := bang_of_getElem? hk
+    refine ⟨[.array (intVals coeffs), .array (is.map (fun i => a[i]!)),
+      .int b, a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_lin_reif_args (m := m) hnu halt hcoeffs his
+        (by
+          intro i hi
+          have hilt := linIndices_lt elems is his i hi
+          have hlen : (slots.map Prod.fst).length = slots.length := by simp
+          have halt2 : a.length = (slots.map Prod.fst).length := by
+            rw [halt]; exact hlen.symm
+          omega) hrk
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [.array (intVals coeffs),
+          .array (is.map (fun i => a[i]!)), .int b, a[k]!] with
+        | [Value.array as_, Value.array xs, Value.int b', Value.bool rb'] =>
+            (rb' = true ∧ dotLe as_ xs b' = true) ∨
+              (rb' = false ∧ dotLe as_ xs b' = false)
+        | _ => False)
+      rw [hkb]
+      rcases (reif_disj_iff (dotLe (intVals coeffs)
+        (is.map (fun i => a[i]!)) b = true) rb).mpr hiff with
+        ⟨hrb, hle⟩ | ⟨hrb, hnle⟩
+      · exact Or.inl ⟨hrb, hle⟩
+      · refine Or.inr ⟨hrb, ?_⟩
+        cases hd2 : dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b with
+        | false => rfl
+        | true => exact absurd hd2 hnle
+  · -- int_lin_ne_reif(coeffs, xs, b, r)
+    subst hdc'
+    obtain ⟨rb, hk, hiff⟩ := hsat
+    have hkb : a[k]! = Value.bool rb := bang_of_getElem? hk
+    refine ⟨[.array (intVals coeffs), .array (is.map (fun i => a[i]!)),
+      .int b, a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_lin_reif_args (m := m) hnu halt hcoeffs his
+        (by
+          intro i hi
+          have hilt := linIndices_lt elems is his i hi
+          have hlen : (slots.map Prod.fst).length = slots.length := by simp
+          have halt2 : a.length = (slots.map Prod.fst).length := by
+            rw [halt]; exact hlen.symm
+          omega) hrk
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [.array (intVals coeffs),
+          .array (is.map (fun i => a[i]!)), .int b, a[k]!] with
+        | [Value.array as_, Value.array xs, Value.int b', Value.bool rb'] =>
+            (rb' = true ∧ dotNe as_ xs b' = true) ∨
+              (rb' = false ∧ dotNe as_ xs b' = false)
+        | _ => False)
+      rw [hkb]
+      rcases (reif_disj_iff (dotNe (intVals coeffs)
+        (is.map (fun i => a[i]!)) b = true) rb).mpr hiff with
+        ⟨hrb, hne⟩ | ⟨hrb, hnne⟩
+      · exact Or.inl ⟨hrb, hne⟩
+      · refine Or.inr ⟨hrb, ?_⟩
+        cases hd2 : dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b with
+        | false => rfl
+        | true => exact absurd hd2 hnne
+  · -- int_min in the general two-operand shape
+    subst hdc'
+    obtain ⟨p, q, hp, hq, hr⟩ := hsat
+    refine ⟨[DomIntArg.read a o₀, DomIntArg.read a o₁, DomIntArg.read a o₂],
+      ?_, ?_⟩
+    · rw [hargs]
+      exact eval_three_basic (m := m) (dcs := dcs) hnu halt ho₀ ho₁ ho₂
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [DomIntArg.read a o₀, DomIntArg.read a o₁,
+          DomIntArg.read a o₂] with
+        | [Value.int p', Value.int q', Value.int w] => w = min p' q'
+        | _ => False)
+      rw [hp, hq, hr]
+  · -- int_max in the general two-operand shape
+    subst hdc'
+    obtain ⟨p, q, hp, hq, hr⟩ := hsat
+    refine ⟨[DomIntArg.read a o₀, DomIntArg.read a o₁, DomIntArg.read a o₂],
+      ?_, ?_⟩
+    · rw [hargs]
+      exact eval_three_basic (m := m) (dcs := dcs) hnu halt ho₀ ho₁ ho₂
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [DomIntArg.read a o₀, DomIntArg.read a o₁,
+          DomIntArg.read a o₂] with
+        | [Value.int p', Value.int q', Value.int w] => w = max p' q'
+        | _ => False)
+      rw [hp, hq, hr]
+  · -- int_div in the general shape
+    subst hdc'
+    obtain ⟨p, q, hp, hq, hq0, hr⟩ := hsat
+    refine ⟨[DomIntArg.read a o₀, DomIntArg.read a o₁, DomIntArg.read a o₂],
+      ?_, ?_⟩
+    · rw [hargs]
+      exact eval_three_basic (m := m) (dcs := dcs) hnu halt ho₀ ho₁ ho₂
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [DomIntArg.read a o₀, DomIntArg.read a o₁,
+          DomIntArg.read a o₂] with
+        | [Value.int p', Value.int q', Value.int w] => q' ≠ 0 ∧ w = Int.tdiv p' q'
+        | _ => False)
+      rw [hp, hq, hr]
+      exact ⟨hq0, rfl⟩
+  · -- int_mod in the general shape
+    subst hdc'
+    obtain ⟨p, q, hp, hq, hq0, hr⟩ := hsat
+    refine ⟨[DomIntArg.read a o₀, DomIntArg.read a o₁, DomIntArg.read a o₂],
+      ?_, ?_⟩
+    · rw [hargs]
+      exact eval_three_basic (m := m) (dcs := dcs) hnu halt ho₀ ho₁ ho₂
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [DomIntArg.read a o₀, DomIntArg.read a o₁,
+          DomIntArg.read a o₂] with
+        | [Value.int p', Value.int q', Value.int w] => q' ≠ 0 ∧ w = Int.tmod p' q'
+        | _ => False)
+      rw [hp, hq, hr]
+      exact ⟨hq0, rfl⟩
+  · -- array_int_maximum
+    subst hdc'
+    obtain ⟨mv, hm, hmax⟩ := hsat
+    rw [DomIntArg.read_slot a k] at hm
+    have hmax' : maxValue (is.map (fun i => a[i]!)) = some mv := by
+      rw [← hmax, List.map_map]
+      rfl
+    refine ⟨[a[k]!, .array (is.map (fun i => a[i]!))], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_ident_slot_array (m := m) (dcs := dcs) hnu halt hk his
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[k]!, .array (is.map (fun i => a[i]!))] with
+        | [Value.int m', Value.array xs] => maxValue xs = some m'
+        | _ => False)
+      rw [hm]
+      exact hmax'
+  · -- array_int_minimum
+    subst hdc'
+    obtain ⟨mv, hm, hmin⟩ := hsat
+    rw [DomIntArg.read_slot a k] at hm
+    have hmin' : minValue (is.map (fun i => a[i]!)) = some mv := by
+      rw [← hmin, List.map_map]
+      rfl
+    refine ⟨[a[k]!, .array (is.map (fun i => a[i]!))], ?_, ?_⟩
+    · rw [hargs]
+      exact eval_ident_slot_array (m := m) (dcs := dcs) hnu halt hk his
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[k]!, .array (is.map (fun i => a[i]!))] with
+        | [Value.int m', Value.array xs] => minValue xs = some m'
+        | _ => False)
+      rw [hm]
+      exact hmin'
 
 
 /-! ## The slot/typing chain (the int-reads premises) -/

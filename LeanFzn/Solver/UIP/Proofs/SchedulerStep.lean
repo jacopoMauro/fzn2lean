@@ -111,7 +111,7 @@ theorem schedulerNext_eq_stable_sat {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {bs : BranchState leaf} {w : Assignment}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .stable bs)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs)
     (hw : leafWitness leaf cfg = some w) :
     schedulerNext cfg = .sat w := by
   simp only [schedulerNext, hconf, hstatus, hd, ht, stableStepGuarded, hw]
@@ -123,7 +123,7 @@ theorem schedulerNext_eq_stable_decide {leaf : Assignment → Bool}
     {l : Literal} {v : Value} {vs : Domain} {doms : List Domain}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .stable bs)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs)
     (hw : leafWitness leaf cfg = none)
     (hsplit : splitData cfg.branch.frame = some (l, v, vs, doms))
     (hred : TrailRedundant cfg.branch.trail l = false) :
@@ -142,7 +142,7 @@ theorem schedulerNext_eq_stable_decideSkip {leaf : Assignment → Bool}
     {l : Literal} {v : Value} {vs : Domain} {doms : List Domain}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .stable bs)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs)
     (hw : leafWitness leaf cfg = none)
     (hsplit : splitData cfg.branch.frame = some (l, v, vs, doms))
     (hred : TrailRedundant cfg.branch.trail l = true) :
@@ -157,7 +157,7 @@ theorem schedulerNext_eq_stable_localExclude {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .stable bs)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs)
     (hw : leafWitness leaf cfg = none)
     (hsplit : splitData cfg.branch.frame = none) :
     schedulerNext cfg =
@@ -171,11 +171,11 @@ theorem schedulerNext_eq_conflict_analyze {leaf : Assignment → Bool}
     {c : Clause} {rest : List Clause} {learned : List Clause}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch =
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .conflict bs (c :: rest) learned)
     (hlevel : cfg.branch.level ≠ 0) :
     schedulerNext cfg = .analyzeConflict (stepAnalyzeConflictCounted cfg c learned
-      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) c := by
+      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) c := by
   simp only [schedulerNext, hconf, hstatus, hd, ht, conflictStep, hlevel]
   split <;> simp_all
 
@@ -186,7 +186,7 @@ theorem schedulerNext_eq_conflict_unsat {leaf : Assignment → Bool}
     {c : Clause} {rest : List Clause} {learned : List Clause}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch =
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .conflict bs (c :: rest) learned)
     (hlevel : cfg.branch.level = 0) :
     schedulerNext cfg = .unsat := by
@@ -200,7 +200,7 @@ theorem schedulerNext_eq_conflict_local {leaf : Assignment → Bool}
     {learned : List Clause}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch =
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .conflict bs [] learned) :
     schedulerNext cfg =
       .localExclude (stepLocalExclude cfg learned (branchRegion cfg)) := by
@@ -213,7 +213,7 @@ theorem schedulerNext_eq_localExcluded {leaf : Assignment → Bool}
     {lit : Option Literal} {reason : Option Clause} {learned : List Clause}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch =
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .localExcluded bs lit reason learned) :
     schedulerNext cfg =
       .localExclude (stepLocalExclude cfg learned (branchRegion cfg)) := by
@@ -274,7 +274,7 @@ theorem schedulerNext_eq_backjump_perform_none {leaf : Assignment → Bool}
     (h : cfg.conflict = some ev) (ha : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-      cfg.branch cfg.original cfg.props = none) :
+      cfg.branch cfg.orig cfg.original cfg.props = none) :
     schedulerNext cfg =
       .localExclude (stepLocalExclude cfg ev.learned (checkpointRegion cp)) := by
   simp only [schedulerNext, h, backjumpStep, ha, hcp, hp]
@@ -288,7 +288,7 @@ theorem schedulerNext_eq_backjump_jump {leaf : Assignment → Bool}
     (h : cfg.conflict = some ev) (ha : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-      cfg.branch cfg.original cfg.props = some restored) :
+      cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     schedulerNext cfg =
       .learnBackjumpAssert
         (stepLearnBackjumpAssert cfg
@@ -313,13 +313,13 @@ theorem schedulerNext_cases {leaf : Assignment → Bool}
     (cfg.conflict = none ∧ cfg.status = .active ∧
       ((∃ d, explainedDeduction cfg.original cfg.props cfg.branch = some d ∧
         schedulerNext cfg = .propagate (stepPropagate cfg d)) ∨
-      (∃ bs, terminalResult cfg.original cfg.props cfg.branch = .stable bs ∧
+      (∃ bs, terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs ∧
         schedulerNext cfg = stableStepGuarded cfg) ∨
       (∃ bs cs learned,
-        terminalResult cfg.original cfg.props cfg.branch = .conflict bs cs learned ∧
+        terminalResult cfg.orig cfg.original cfg.props cfg.branch = .conflict bs cs learned ∧
         schedulerNext cfg = conflictStep cfg cs learned) ∨
       (∃ bs lit reason learned,
-        terminalResult cfg.original cfg.props cfg.branch =
+        terminalResult cfg.orig cfg.original cfg.props cfg.branch =
           .localExcluded bs lit reason learned ∧
         schedulerNext cfg =
           .localExclude (stepLocalExclude cfg learned (branchRegion cfg))))) := by
@@ -334,7 +334,7 @@ theorem schedulerNext_cases {leaf : Assignment → Bool}
               exact Or.inr (Or.inr ⟨rfl, rfl,
                 Or.inl ⟨d, rfl, schedulerNext_eq_deduction hc hs hd⟩⟩)
           | none =>
-              cases ht : terminalResult cfg.original cfg.props cfg.branch with
+              cases ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch with
               | stable bs =>
                   exact Or.inr (Or.inr ⟨rfl, rfl, Or.inr (Or.inl
                     ⟨bs, rfl, by simp only [schedulerNext, hc, hs, hd, ht]⟩)⟩)
@@ -599,7 +599,7 @@ theorem arm_learnBackjumpAssert_invariant {leaf : Assignment → Bool}
     (hpre : RestorationPreReachable leaf cfg.orig p cfg.branch)
     (hsr : SurvivorRestoration cfg p restored)
     (hana : ev.analysis = some an) (hplan : p.learned = an.learned)
-    (hperform : p.perform cfg.branch cfg.original cfg.props = some restored)
+    (hperform : p.perform cfg.branch cfg.orig cfg.original cfg.props = some restored)
     (hfals : FalsifiedByTrail cfg.branch an.learned) -- owner: falsified-wiring
     (hent : LearnedEntailed leaf ev.learned) : -- owner: S4/D0
     SchedulerInvariant (stepLearnBackjumpAssert cfg p ev restored) := by

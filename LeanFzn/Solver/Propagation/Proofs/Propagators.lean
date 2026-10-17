@@ -51,7 +51,10 @@ import LeanFzn.Solver.Propagation.Proofs.Fam.Bool
 import LeanFzn.Solver.Propagation.Proofs.Fam.Arith
 import LeanFzn.Solver.Propagation.Proofs.Fam.Lin
 import LeanFzn.Solver.Propagation.Proofs.Fam.Times
+import LeanFzn.Solver.Propagation.Proofs.Fam.Reif
 import LeanFzn.Solver.Propagation.Proofs.Fam.AllDiff
+import LeanFzn.Solver.Propagation.Proofs.Fam.MinGen
+import LeanFzn.Solver.Propagation.Proofs.PropCheck
 open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Reference
 
 
@@ -274,13 +277,11 @@ theorem propagatorsOf_mem : ∀ (dcs : List DomConstraint)
       intro p hp
       cases hpdc : propagatorOf dc with
       | none =>
-          simp only [propagatorsOf, List.filterMap_cons, hpdc,
-            Option.map_none] at hp
+          simp only [propagatorsOf, List.filterMap_cons, hpdc] at hp
           obtain ⟨dc2, hdc2mem, hdc2⟩ := ih p hp
           exact ⟨dc2, List.mem_cons_of_mem _ hdc2mem, hdc2⟩
       | some p0 =>
-          simp only [propagatorsOf, List.filterMap_cons, hpdc,
-            Option.map_some] at hp
+          simp only [propagatorsOf, List.filterMap_cons, hpdc] at hp
           rcases List.mem_cons.mp hp with hp2 | hp2
           · rw [hp2]
             exact ⟨dc, List.mem_cons_self, hpdc⟩
@@ -446,6 +447,57 @@ theorem propLt_safe (st : State) (i j : Nat) :
             exact ⟨y, hy, by omega⟩
       next => exact absurd hrun (by intro hc; simp at hc)
 
+
+/-- PLAN L4: the result contract of `propLeReifSlot` at fitting solutions of
+    the reified constraint (delegation to `propLe`/`propLt` through the pin). -/
+theorem propLeReifSlot_safe (st : State) (i j r : Nat) :
+    (∀ l rs, propLeReifSlot st i j r = .implied l rs →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.leReifSlot i j r).SatisfiedBy a →
+        l.eval a = some true) ∧
+    (∀ c, propLeReifSlot st i j r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.leReifSlot i j r).SatisfiedBy a → False) ∧
+    (∀ c, propLeReifSlot st i j r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.leReifSlot i j r).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro l rs hrun a hfit hs
+    rcases propLeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      exact (propLe_safe st i j).1 l rs0 hres a hfit
+        (leReif_true_sat hs (fits_of_domBoolPin hfit h1))
+    · rw [he] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      exact (propLt_safe st j i).1 l rs0 hres a hfit
+        (leReif_false_sat hs (fits_of_domBoolPin hfit h2))
+    · rw [he] at hrun; cases hrun
+  · intro c hrun a hfit hs
+    rcases propLeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+      exact (propLe_safe st i j).2.1 c0 hres a hfit
+        (leReif_true_sat hs (fits_of_domBoolPin hfit h1))
+    · rw [he] at hrun
+      obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+      exact (propLt_safe st j i).2.1 c0 hres a hfit
+        (leReif_false_sat hs (fits_of_domBoolPin hfit h2))
+    · rw [he] at hrun; cases hrun
+  · intro c hrun a hfit hs
+    rcases propLeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      obtain ⟨l, hl, hlt⟩ := (propLe_safe st i j).2.2 c0 hres a hfit
+        (leReif_true_sat hs (fits_of_domBoolPin hfit h1))
+      exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · rw [he] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      obtain ⟨l, hl, hlt⟩ := (propLt_safe st j i).2.2 c0 hres a hfit
+        (leReif_false_sat hs (fits_of_domBoolPin hfit h2))
+      exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · rw [he] at hrun; cases hrun
 
 /-- At an int-viewed domain list, every fitting read has an
     integer view. -/
@@ -753,54 +805,174 @@ theorem intViewedDoms_of_coherent {problem : Problem DomConstraint Unit}
 
 /-! ## The proved-propagator packaging -/
 
-/-- The propagator of a constraint whose family soundness is proved
-    (the seventeen registered families: `leSlot`, `ltSlot`, `eqSlot`,
-    `neSlot`, `plusSlot`, `linLe`, the constant-bound and
-    constant-equality families `leConstHi`, `leConstLo`, `ltConstHi`,
-    `ltConstLo`, `constEq` from ConstFamilies, the Boolean families
-    `boolNotSlot`, `boolAndSlot`, `boolOrSlot` from Fam/Bool, and the
-    arithmetic families `minSlot`, `maxSlot`, `absSlot` from
-    Fam/Arith). -/
+/-- The identity propagator: narrows nothing and emits nothing. It is the
+    registered `linNe` propagator (PLAN C1 stage 1): `linNe` models stay on
+    the certified chronological fallback, where the leaf `satisfiedB` check
+    enforces the constraint, so no pruning is sound (and not yet required). -/
+def propIdentity : Propagator := { watches := [], run := fun _ => .stable }
+
+/-- The identity propagator's run equation. -/
+theorem propIdentity_run (st : State) : propIdentity.run st = .stable := rfl
+
+/-- The identity propagator never emits an implied literal. -/
+theorem propIdentity_implied_elim {st : State} {l : Literal} {r : Reason}
+    (h : propIdentity.run st = .implied l r) : False := by
+  rw [propIdentity_run] at h
+  cases h
+
+/-- The identity propagator never emits a conflict clause. -/
+theorem propIdentity_conflict_elim {st : State} {c : Clause}
+    (h : propIdentity.run st = .conflict c) : False := by
+  rw [propIdentity_run] at h
+  cases h
+
+/-- The families registered with the generic checking propagator
+    `propCheck` (PLAN L0b1): every family with no dedicated proved
+    pruning propagator except the seven leaf-enforced ones,
+    `linLeReif` (PLAN L1a, the pinned-direction delegation), `linNe`
+    (PLAN L2, `propLinNe`), `minSlot`/`maxSlot` (PLAN L3, the bound
+    propagators `propMin`/`propMax`), `eqReifSlot`/`leReifSlot`/
+    `neReifSlot` (PLAN L4, the pinned-direction reified delegations),
+    `linEqReif`/`linNeReif` (PLAN L5, the pinned-direction linear
+    reified delegations `propLinEqReif`/`propLinNeReif`), `timesSlot`
+    (PLAN L6, the bound propagator `propTimes`) and `absSlot`/`divGen`/
+    `modGen` (PLAN L7, the bound propagators `propAbs`/`propDiv`/
+    `propMod`). -/
+def propCheckFamB : DomConstraint → Bool
+  | .minPair (.slot _) (.slot _) (.slot _) => false
+  | .minPair .. => true
+  | .maxPair (.slot _) (.slot _) (.slot _) => false
+  | .maxPair .. => true
+  | _ => false
+
+/-- The propagator of a constraint: the dedicated proved propagators for
+    `leSlot`, `ltSlot`, `eqSlot`, `neSlot`, `plusSlot`, `linLe`, `linEq`,
+    `allDiff`, the constant-bound/equality families and the Boolean
+    families, and `propCheck dc` for the remaining `propCheckFamB`
+    families.  The seven leaf-enforced families (`boolClauseSlot`,
+    `arrayBoolAndSlot`, `bool2intSlot`, `boolEqSlot`,
+    `arrayIntElementSlot`, `arrayVarIntElementSlot`,
+    `arrayVarBoolElementSlot`) have none. -/
 def propagatorOfProved : DomConstraint → Option Propagator
-  | .leSlot i j => some { watches := [], run := fun st => propLe st i j }
-  | .ltSlot i j => some { watches := [], run := fun st => propLt st i j }
-  | .eqSlot i j => some { watches := [], run := fun st => propEq st i j }
-  | .neSlot i j => some { watches := [], run := fun st => propNe st i j }
+  | .leSlot i j => some { watches := [.intLe i 0, .intLe j 0], run := fun st => propLe st i j }
+  | .ltSlot i j => some { watches := [.intLe i 0, .intLe j 0], run := fun st => propLt st i j }
+  | .eqSlot i j => some { watches := [.intLe i 0, .intLe j 0], run := fun st => propEq st i j }
+  | .neSlot i j => some { watches := [.intLe i 0, .intLe j 0], run := fun st => propNe st i j }
   | .plusSlot i j k =>
-      some { watches := [], run := fun st => propPlus st i j k }
+      some { watches := [.intLe i 0, .intLe j 0, .intLe k 0], run := fun st => propPlus st i j k }
   | .linLe coeffs is b =>
       some { watches := [], run := fun st =>
         propLinLe2 st coeffs is b }
   | .leConstHi i c =>
-      some { watches := [], run := fun st => propLeConstHi st i c }
+      some { watches := [.intLe i 0], run := fun st => propLeConstHi st i c }
   | .leConstLo i c =>
-      some { watches := [], run := fun st => propLeConstLo st i c }
+      some { watches := [.intLe i 0], run := fun st => propLeConstLo st i c }
   | .ltConstHi i c =>
-      some { watches := [], run := fun st => propLtConstHi st i c }
+      some { watches := [.intLe i 0], run := fun st => propLtConstHi st i c }
   | .ltConstLo i c =>
-      some { watches := [], run := fun st => propLtConstLo st i c }
+      some { watches := [.intLe i 0], run := fun st => propLtConstLo st i c }
   | .constEq i v =>
-      some { watches := [], run := fun st => propConstEq st i v }
+      some { watches := [.intLe i 0], run := fun st => propConstEq st i v }
   | .boolNotSlot i j =>
-      some { watches := [], run := fun st => propBoolNot st i j }
+      some { watches := [.intLe i 0, .intLe j 0], run := fun st => propBoolNot st i j }
   | .boolAndSlot i j k =>
-      some { watches := [], run := fun st => propBoolAnd st i j k }
+      some { watches := [.intLe i 0, .intLe j 0, .intLe k 0], run := fun st => propBoolAnd st i j k }
   | .boolOrSlot i j k =>
-      some { watches := [], run := fun st => propBoolOr st i j k }
+      some { watches := [.intLe i 0, .intLe j 0, .intLe k 0], run := fun st => propBoolOr st i j k }
+  | .linEq coeffs is b =>
+      some { watches := [], run := fun st =>
+        propLinEq2 st coeffs is b }
+  | .allDiff is =>
+      some { watches := [], run := fun st =>
+        propAllDiffLCG st is }
+  -- PLAN L3: `minSlot`/`maxSlot` re-register the proved bound propagators
+  -- `propMin`/`propMax` (obligation triples in `Fam/Arith.lean`); like
+  -- `linLe`/`linEq`/`allDiff` they declare no watch footprint.
   | .minSlot i j k =>
       some { watches := [], run := fun st => propMin st i j k }
   | .maxSlot i j k =>
       some { watches := [], run := fun st => propMax st i j k }
-  | .absSlot i k =>
-      some { watches := [], run := fun st => propAbs st i k }
-  | .linEq coeffs is b =>
-      some { watches := [], run := fun st =>
-        propLinEq2 st coeffs is b }
+  -- PLAN L6: `timesSlot` re-registers the proved bound propagator
+  -- `propTimes` (obligation package in `Fam/Times.lean`); like
+  -- `minSlot`/`maxSlot` it declares no watch footprint.
   | .timesSlot i j k =>
       some { watches := [], run := fun st => propTimes st i j k }
-  | .allDiff is =>
-      some { watches := [], run := fun st =>
-        propAllDiffLCG st is }
+  -- PLAN L7: `absSlot`/`divGen`/`modGen` re-register the proved bound
+  -- propagators `propAbs`/`propDiv`/`propMod` (obligation triples in
+  -- `Fam/Arith.lean`); like the other bound propagators they declare no
+  -- watch footprint.
+  | .absSlot i k =>
+      some { watches := [], run := fun st => propAbs st i k }
+  | .divGen o₁ o₂ r =>
+      some { watches := [], run := fun st => propDiv st o₁ o₂ r }
+  | .modGen o₁ o₂ r =>
+      some { watches := [], run := fun st => propMod st o₁ o₂ r }
+  -- PLAN L0b1: the remaining `propCheckFamB` families register the generic
+  -- checking propagator `propCheck` (L0a); it never prunes and only reports
+  -- a conflict once every slot is a singleton and `satisfiedB` fails.
+  -- `int_lin_ne` (PLAN L2): the explained single-value-removal propagator.
+  | .linNe coeffs is b =>
+      some { watches := [], run := fun st => propLinNe st coeffs is b }
+  -- `boolClauseSlot` (PLAN C2): NO propagator; the constraint is
+  -- enforced at the leaf and its original clause is seeded into the
+  -- compiled problem's clause database (`WireClauses`/
+  -- `Compiler.seedClauses`), so the LCG engine propagates it from the
+  -- DB.
+  | .boolClauseSlot _ _ => none
+  -- `array_bool_and`, `bool2int`, `bool_eq` (PLAN C3): NO propagator
+  -- is registered (stage 1, mirroring C1's `linNe` and C2's
+  -- `boolClauseSlot`); the constraints are enforced at the leaf by
+  -- the `satisfiedB` check of the chronological/reference engine and
+  -- the LCG route keeps them at their local fallback, where the
+  -- propagated leaf check remains the arbiter.
+  | .arrayBoolAndSlot _ _ => none
+  | .bool2intSlot _ _ => none
+  | .boolEqSlot _ _ => none
+  -- `array_int_element`, `array_var_int_element`,
+  -- `array_var_bool_element` (PLAN C4): NO propagator is registered
+  -- (stage 1, mirroring C1's `linNe`, C2's `boolClauseSlot` and C3's
+  -- Boolean families); the constraints are enforced at the leaf by the
+  -- `satisfiedB` check of the chronological/reference engine and the
+  -- LCG route keeps them at their local fallback.
+  | .arrayIntElementSlot _ _ _ => none
+  | .arrayVarIntElementSlot _ _ _ => none
+  | .arrayVarBoolElementSlot _ _ _ => none
+  -- `int_eq_reif`, `int_le_reif`, `int_ne_reif` (PLAN L4): the
+  -- pinned-direction reified delegations.
+  | .eqReifSlot i j r =>
+      some { watches := [], run := fun st => propEqReifSlot st i j r }
+  | .leReifSlot i j r =>
+      some { watches := [], run := fun st => propLeReifSlot st i j r }
+  | .neReifSlot i j r =>
+      some { watches := [], run := fun st => propNeReifSlot st i j r }
+  -- `int_lin_eq_reif`, `int_lin_le_reif`, `int_lin_ne_reif` (PLAN C5).
+  -- `int_lin_eq_reif`/`int_lin_ne_reif` (PLAN L5) and
+  -- `int_lin_le_reif` (PLAN L1a) register the pinned-direction linear
+  -- reified delegations (the checking propagator is retired for them).
+  | .linEqReif coeffs is b r =>
+      some { watches := [], run := fun st => propLinEqReif st coeffs is b r }
+  | .linLeReif coeffs is b r =>
+      some { watches := [], run := fun st => propLinLeReif st coeffs is b r }
+  | .linNeReif coeffs is b r =>
+      some { watches := [], run := fun st => propLinNeReif st coeffs is b r }
+  -- `int_min`/`int_max` (general two-operand shapes, PLAN C6) and
+  -- `int_div`/`int_mod`.
+  -- PLAN L3: the all-slot pair shapes ride `propMin`/`propMax` (their
+  -- satisfaction implies the slot form, `minPair_imp_minSlot`); a literal
+  -- operand keeps the checking propagator.
+  | .minPair (.slot i) (.slot j) (.slot k) =>
+      some { watches := [], run := fun st => propMin st i j k }
+  | .maxPair (.slot i) (.slot j) (.slot k) =>
+      some { watches := [], run := fun st => propMax st i j k }
+  | dc@(.minPair ..) => some (propCheck dc)
+  | dc@(.maxPair ..) => some (propCheck dc)
+  -- `array_int_maximum`/`array_int_minimum` (PLAN C9c): the n-ary
+  -- attained-operand result propagators (no watch footprint); the
+  -- checking propagator is retired for them.
+  | .maxGen os r =>
+      some { watches := [], run := fun st => propMaxGen st os r }
+  | .minGen os r =>
+      some { watches := [], run := fun st => propMinGen st os r }
 
 /-- Membership inversion for the proved registration. -/
 
@@ -812,16 +984,37 @@ theorem propagatorsOfProved_mem {dcs : List DomConstraint}
   | cons dc rest ih =>
       cases hpdc : propagatorOfProved dc with
       | none =>
-          simp only [List.filterMap_cons, hpdc, Option.map_none] at hp
+          simp only [List.filterMap_cons, hpdc] at hp
           obtain ⟨dc2, hdc2mem, hdc2⟩ := ih hp
           exact ⟨dc2, List.mem_cons_of_mem _ hdc2mem, hdc2⟩
       | some p0 =>
-          simp only [List.filterMap_cons, hpdc, Option.map_some] at hp
+          simp only [List.filterMap_cons, hpdc] at hp
           rcases List.mem_cons.mp hp with hp2 | hp2
           · rw [hp2]
             exact ⟨dc, List.mem_cons_self, hpdc⟩
           · obtain ⟨dc2, hdc2mem, hdc2⟩ := ih hp2
             exact ⟨dc2, List.mem_cons_of_mem _ hdc2mem, hdc2⟩
+
+/-- The registered propagator of a `propCheckFamB` family is `propCheck dc`. -/
+theorem propagatorOfProved_check_eq {dc : DomConstraint} {p : Propagator}
+    (hf : propCheckFamB dc = true)
+    (hprop : propagatorOfProved dc = some p) : p = propCheck dc := by
+  have hp : propagatorOfProved dc = some (propCheck dc) := by
+    cases dc <;> first | rfl | (simp [propCheckFamB] at hf; done) |
+      (rename_i o0 o1 r
+       cases o0 <;> cases o1 <;> cases r <;>
+         first | rfl | (simp [propCheckFamB] at hf))
+  rw [hp] at hprop
+  exact (Option.some.inj hprop).symm
+
+/-- Run equation of the registered `propCheck` arm. -/
+theorem propagatorOfProved_run_check {dc : DomConstraint} {p : Propagator}
+    {st : State} {res : PropagationResult}
+    (hf : propCheckFamB dc = true)
+    (hprop : propagatorOfProved dc = some p)
+    (hrun : p.run st = res) : (propCheck dc).run st = res := by
+  rw [propagatorOfProved_check_eq hf hprop] at hrun
+  exact hrun
 
 theorem propagatorOfProved_run {dc : DomConstraint} {p : Propagator}
     {st : State} {res : PropagationResult}
@@ -842,48 +1035,65 @@ theorem propagatorOfProved_run {dc : DomConstraint} {p : Propagator}
     (∃ i j, dc = .boolNotSlot i j ∧ propBoolNot st i j = res) ∨
     (∃ i j k, dc = .boolAndSlot i j k ∧ propBoolAnd st i j k = res) ∨
     (∃ i j k, dc = .boolOrSlot i j k ∧ propBoolOr st i j k = res) ∨
-    (∃ i j k, dc = .minSlot i j k ∧ propMin st i j k = res) ∨
-    (∃ i j k, dc = .maxSlot i j k ∧ propMax st i j k = res) ∨
-    (∃ i k, dc = .absSlot i k ∧ propAbs st i k = res) ∨
     (∃ coeffs is b, dc = .linEq coeffs is b ∧
       propLinEq2 st coeffs is b = res) ∨
-    (∃ i j k, dc = .timesSlot i j k ∧
-      propTimes st i j k = res) ∨
     (∃ is, dc = .allDiff is ∧
-      propAllDiffLCG st is = res) := by
+      propAllDiffLCG st is = res) ∨
+    (∃ coeffs is b r, dc = .linLeReif coeffs is b r ∧
+      propLinLeReif st coeffs is b r = res) ∨
+    (∃ coeffs is b, dc = .linNe coeffs is b ∧
+      propLinNe st coeffs is b = res) ∨
+    (∃ i j k, (∀ a, dc.SatisfiedBy a → (DomConstraint.minSlot i j k).SatisfiedBy a) ∧
+      propMin st i j k = res) ∨
+    (∃ i j k, (∀ a, dc.SatisfiedBy a → (DomConstraint.maxSlot i j k).SatisfiedBy a) ∧
+      propMax st i j k = res) ∨
+    (∃ i j r, dc = .leReifSlot i j r ∧ propLeReifSlot st i j r = res) ∨
+    (∃ i j r, dc = .eqReifSlot i j r ∧ propEqReifSlot st i j r = res) ∨
+    (∃ i j r, dc = .neReifSlot i j r ∧ propNeReifSlot st i j r = res) ∨
+    (∃ coeffs is b r, dc = .linEqReif coeffs is b r ∧
+      propLinEqReif st coeffs is b r = res) ∨
+    (∃ coeffs is b r, dc = .linNeReif coeffs is b r ∧
+      propLinNeReif st coeffs is b r = res) ∨
+    (∃ i j k, dc = .timesSlot i j k ∧ propTimes st i j k = res) ∨
+    (∃ i k, dc = .absSlot i k ∧ propAbs st i k = res) ∨
+    (∃ o₁ o₂ r, dc = .divGen o₁ o₂ r ∧ propDiv st o₁ o₂ r = res) ∨
+    (∃ o₁ o₂ r, dc = .modGen o₁ o₂ r ∧ propMod st o₁ o₂ r = res) ∨
+    (propCheckFamB dc = true ∧ (propCheck dc).run st = res) ∨
+    (∃ os r, dc = .maxGen os r ∧ propMaxGen st os r = res) ∨
+    (∃ os r, dc = .minGen os r ∧ propMinGen st os r = res) := by
   match hdc : dc with
   | .leSlot i j =>
       simp only [propagatorOfProved] at hprop
       refine Or.inl ⟨i, j, rfl, ?_⟩
-      have hp2 : p = { watches := [], run := fun st => propLe st i j } :=
+      have hp2 : p = { watches := [.intLe i 0, .intLe j 0], run := fun st => propLe st i j } :=
         (Option.some.inj hprop).symm
       rw [hp2] at hrun
       exact hrun
   | .ltSlot i j =>
       simp only [propagatorOfProved] at hprop
       refine Or.inr (Or.inl ⟨i, j, rfl, ?_⟩)
-      have hp2 : p = { watches := [], run := fun st => propLt st i j } :=
+      have hp2 : p = { watches := [.intLe i 0, .intLe j 0], run := fun st => propLt st i j } :=
         (Option.some.inj hprop).symm
       rw [hp2] at hrun
       exact hrun
   | .eqSlot i j =>
       simp only [propagatorOfProved] at hprop
       refine Or.inr (Or.inr (Or.inl ⟨i, j, rfl, ?_⟩))
-      have hp2 : p = { watches := [], run := fun st => propEq st i j } :=
+      have hp2 : p = { watches := [.intLe i 0, .intLe j 0], run := fun st => propEq st i j } :=
         (Option.some.inj hprop).symm
       rw [hp2] at hrun
       exact hrun
   | .neSlot i j =>
       simp only [propagatorOfProved] at hprop
       refine Or.inr (Or.inr (Or.inr (Or.inl ⟨i, j, rfl, ?_⟩)))
-      have hp2 : p = { watches := [], run := fun st => propNe st i j } :=
+      have hp2 : p = { watches := [.intLe i 0, .intLe j 0], run := fun st => propNe st i j } :=
         (Option.some.inj hprop).symm
       rw [hp2] at hrun
       exact hrun
   | .plusSlot i j k =>
       simp only [propagatorOfProved] at hprop
       refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨i, j, k, rfl, ?_⟩))))
-      have hp2 : p = { watches := [], run := fun st => propPlus st i j k } :=
+      have hp2 : p = { watches := [.intLe i 0, .intLe j 0, .intLe k 0], run := fun st => propPlus st i j k } :=
         (Option.some.inj hprop).symm
       rw [hp2] at hrun
       exact hrun
@@ -937,35 +1147,175 @@ theorem propagatorOfProved_run {dc : DomConstraint} {p : Propagator}
       refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨i, j, k, rfl, ?_⟩)))))))))))))
       rw [(Option.some.inj hprop).symm] at hrun
       exact hrun
-  | .minSlot i j k =>
-      simp only [propagatorOfProved] at hprop
-      refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨i, j, k, rfl, ?_⟩))))))))))))))
-      rw [(Option.some.inj hprop).symm] at hrun
-      exact hrun
-  | .maxSlot i j k =>
-      simp only [propagatorOfProved] at hprop
-      refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨i, j, k, rfl, ?_⟩)))))))))))))))
-      rw [(Option.some.inj hprop).symm] at hrun
-      exact hrun
-  | .absSlot i k =>
-      simp only [propagatorOfProved] at hprop
-      refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨i, k, rfl, ?_⟩))))))))))))))))
-      rw [(Option.some.inj hprop).symm] at hrun
-      exact hrun
   | .linEq coeffs is b =>
       simp only [propagatorOfProved] at hprop
-      refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨coeffs, is, b, rfl, ?_⟩)))))))))))))))))
-      rw [(Option.some.inj hprop).symm] at hrun
-      exact hrun
-  | .timesSlot i j k =>
-      simp only [propagatorOfProved] at hprop
-      refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨i, j, k, rfl, ?_⟩))))))))))))))))))
+      iterate 14 (apply Or.inr)
+      refine Or.inl ⟨coeffs, is, b, rfl, ?_⟩
       rw [(Option.some.inj hprop).symm] at hrun
       exact hrun
   | .allDiff is =>
       simp only [propagatorOfProved] at hprop
-      refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (⟨is, rfl, ?_⟩)))))))))))))))))))
+      iterate 15 (apply Or.inr)
+      refine Or.inl ⟨is, rfl, ?_⟩
       rw [(Option.some.inj hprop).symm] at hrun
+      exact hrun
+  | .minSlot i j k =>
+      iterate 18 (apply Or.inr)
+      refine Or.inl ⟨i, j, k, fun _ h => h, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .maxSlot i j k =>
+      iterate 19 (apply Or.inr)
+      refine Or.inl ⟨i, j, k, fun _ h => h, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .absSlot i k =>
+      -- PLAN L7: the `absSlot` bound propagator.
+      iterate 26 (apply Or.inr)
+      refine Or.inl ⟨i, k, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .timesSlot i j k =>
+      iterate 25 (apply Or.inr)
+      refine Or.inl ⟨i, j, k, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .linNe coeffs is b =>
+      iterate 17 (apply Or.inr)
+      refine Or.inl ⟨coeffs, is, b, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .boolClauseSlot ps ns =>
+      simp only [propagatorOfProved] at hprop
+      exact absurd hprop (by intro hc; cases hc)
+  | .arrayBoolAndSlot is k =>
+      simp only [propagatorOfProved] at hprop
+      exact absurd hprop (by intro hc; cases hc)
+  | .bool2intSlot i k =>
+      simp only [propagatorOfProved] at hprop
+      exact absurd hprop (by intro hc; cases hc)
+  | .boolEqSlot i j =>
+      simp only [propagatorOfProved] at hprop
+      exact absurd hprop (by intro hc; cases hc)
+  | .arrayIntElementSlot xs i k =>
+      simp only [propagatorOfProved] at hprop
+      exact absurd hprop (by intro hc; cases hc)
+  | .arrayVarIntElementSlot is i k =>
+      simp only [propagatorOfProved] at hprop
+      exact absurd hprop (by intro hc; cases hc)
+  | .arrayVarBoolElementSlot is i k =>
+      simp only [propagatorOfProved] at hprop
+      exact absurd hprop (by intro hc; cases hc)
+  | .eqReifSlot i j r =>
+      iterate 21 (apply Or.inr)
+      refine Or.inl ⟨i, j, r, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .leReifSlot i j r =>
+      iterate 20 (apply Or.inr)
+      refine Or.inl ⟨i, j, r, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .neReifSlot i j r =>
+      iterate 22 (apply Or.inr)
+      refine Or.inl ⟨i, j, r, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .linEqReif coeffs is b r =>
+      iterate 23 (apply Or.inr)
+      refine Or.inl ⟨coeffs, is, b, r, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .linLeReif coeffs is b r =>
+      iterate 16 (apply Or.inr)
+      refine Or.inl ⟨coeffs, is, b, r, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .linNeReif coeffs is b r =>
+      iterate 24 (apply Or.inr)
+      refine Or.inl ⟨coeffs, is, b, r, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .minPair o0 o1 r =>
+      cases o0 with
+      | slot i =>
+        cases o1 with
+        | slot j =>
+          cases r with
+          | slot k =>
+              iterate 18 (apply Or.inr)
+              refine Or.inl ⟨i, j, k, minPair_imp_minSlot i j k, ?_⟩
+              simp only [propagatorOfProved, Option.some.injEq] at hprop
+              subst hprop
+              exact hrun
+          | lit k =>
+              iterate 29 (apply Or.inr)
+              exact Or.inl ⟨rfl, propagatorOfProved_run_check rfl hprop hrun⟩
+        | lit j =>
+            iterate 29 (apply Or.inr)
+            exact Or.inl ⟨rfl, propagatorOfProved_run_check rfl hprop hrun⟩
+      | lit i =>
+          iterate 29 (apply Or.inr)
+          exact Or.inl ⟨rfl, propagatorOfProved_run_check rfl hprop hrun⟩
+  | .maxPair o0 o1 r =>
+      cases o0 with
+      | slot i =>
+        cases o1 with
+        | slot j =>
+          cases r with
+          | slot k =>
+              iterate 19 (apply Or.inr)
+              refine Or.inl ⟨i, j, k, maxPair_imp_maxSlot i j k, ?_⟩
+              simp only [propagatorOfProved, Option.some.injEq] at hprop
+              subst hprop
+              exact hrun
+          | lit k =>
+              iterate 29 (apply Or.inr)
+              exact Or.inl ⟨rfl, propagatorOfProved_run_check rfl hprop hrun⟩
+        | lit j =>
+            iterate 29 (apply Or.inr)
+            exact Or.inl ⟨rfl, propagatorOfProved_run_check rfl hprop hrun⟩
+      | lit i =>
+          iterate 29 (apply Or.inr)
+          exact Or.inl ⟨rfl, propagatorOfProved_run_check rfl hprop hrun⟩
+  | .divGen o₁ o₂ r =>
+      -- PLAN L7: the `divGen` bound propagator.
+      iterate 27 (apply Or.inr)
+      refine Or.inl ⟨o₁, o₂, r, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .modGen o₁ o₂ r =>
+      -- PLAN L7: the `modGen` bound propagator.
+      iterate 28 (apply Or.inr)
+      refine Or.inl ⟨o₁, o₂, r, rfl, ?_⟩
+      simp only [propagatorOfProved, Option.some.injEq] at hprop
+      subst hprop
+      exact hrun
+  | .maxGen os r =>
+      iterate 30 (apply Or.inr)
+      refine Or.inl ⟨os, r, rfl, ?_⟩
+      have hp2 : p = { watches := [], run := fun st => propMaxGen st os r } :=
+        (Option.some.inj hprop).symm
+      rw [hp2] at hrun
+      exact hrun
+  | .minGen os r =>
+      iterate 31 (apply Or.inr)
+      refine ⟨os, r, rfl, ?_⟩
+      have hp2 : p = { watches := [], run := fun st => propMinGen st os r } :=
+        (Option.some.inj hprop).symm
+      rw [hp2] at hrun
       exact hrun
 
 
@@ -1465,15 +1815,15 @@ theorem propNe_implied_inv {st : State} {i j : Nat} {l : Literal}
     (∃ x c, st.domains.getD i [] = [x] ∧
         l = posNe j c ∧ r = { clause :=
           [posNe j c, posLe i (c - 1), negLe i c,
-            posBool i (decide (c = 1)), posBool j (decide (c = 1))] } ∧
+            neBoolLit i i c, neBoolLit i j c] } ∧
         domSingletonI [x] = some c ∧ valueMemB x (st.domains.getD j []) ∧
-        domNeGate x c (st.domains.getD j [])) ∨
+        domNeGate x c (st.domains.getD j []) ∧ ∃ k, x = Value.int k) ∨
     (∃ y c, st.domains.getD j [] = [y] ∧
         l = posNe i c ∧ r = { clause :=
           [posNe i c, posLe j (c - 1), negLe j c,
-            posBool j (decide (c = 1)), posBool i (decide (c = 1))] } ∧
+            neBoolLit j j c, neBoolLit j i c] } ∧
         domSingletonI [y] = some c ∧ valueMemB y (st.domains.getD i []) ∧
-        domNeGate y c (st.domains.getD i [])) := by
+        domNeGate y c (st.domains.getD i []) ∧ ∃ k, y = Value.int k) := by
   unfold propNe at hrun
   split at hrun
   · -- both singletons: never implied
@@ -1487,9 +1837,12 @@ theorem propNe_implied_inv {st : State} {i j : Nat} {l : Literal}
         split at hrun
         · rename_i hcond
           injection hrun with hlit hreason
-          have ⟨hmem, hgate⟩ := (Bool.and_eq_true _ _).mp hcond
+          have ⟨h12, hint⟩ := (Bool.and_eq_true _ _).mp hcond
+          have ⟨hmem, hgate⟩ := (Bool.and_eq_true _ _).mp h12
+          have hk : ∃ k, x = Value.int k := by
+            cases x <;> simp [isIntValue] at hint ⊢
           exact Or.inl ⟨x, c, hdi, hlit.symm, hreason.symm, hc,
-            hmem, hgate⟩
+            hmem, hgate, hk⟩
         · exact absurd hrun (by simp)
     · exact absurd hrun (by simp)
   · -- j singleton, i multi-value: the symmetric arm
@@ -1499,20 +1852,23 @@ theorem propNe_implied_inv {st : State} {i j : Nat} {l : Literal}
         split at hrun
         · rename_i hcond
           injection hrun with hlit hreason
-          have ⟨hmem, hgate⟩ := (Bool.and_eq_true _ _).mp hcond
+          have ⟨h12, hint⟩ := (Bool.and_eq_true _ _).mp hcond
+          have ⟨hmem, hgate⟩ := (Bool.and_eq_true _ _).mp h12
+          have hk : ∃ k, y = Value.int k := by
+            cases y <;> simp [isIntValue] at hint ⊢
           exact Or.inr ⟨y, c, hdj, hlit.symm, hreason.symm, hc,
-            hmem, hgate⟩
+            hmem, hgate, hk⟩
         · exact absurd hrun (by simp)
     · exact absurd hrun (by simp)
   · -- both multi-value: never implied
     exact absurd hrun (by simp)
 
 /-- `propNe`'s conflict reports come only from the both-singleton
-    raw-equal arm, with the EMPTY clause. -/
+    raw-equal arm, with the explained clause `neConflictClause`. -/
 theorem propNe_conflict_inv {st : State} {i j : Nat}
     {c : Clause} (hrun : propNe st i j = .conflict c) :
     ∃ x y, st.domains.getD i [] = [x] ∧ st.domains.getD j [] = [y] ∧
-      x.eqB y = true ∧ c = [] := by
+      x.eqB y = true ∧ c = neConflictClause i j x := by
   unfold propNe at hrun
   split at hrun
   · split at hrun
@@ -1619,8 +1975,8 @@ theorem propNe_safe (st : State) (i j : Nat)
   · -- implied: the two value-removal arms
     intro l r hrun a hfit hcons
     rcases propNe_implied_inv hrun with
-      ⟨x, c, hsi, hlit, hcl, hc, hmem, hgate⟩ |
-      ⟨y, c, hsj, hlit, hcl, hc, hmem, hgate⟩
+      ⟨x, c, hsi, hlit, hcl, hc, hmem, hgate, hk⟩ |
+      ⟨y, c, hsj, hlit, hcl, hc, hmem, hgate, hk⟩
     · subst hlit
       exact propNe_implied_true_of_fits hsi hgate hview hfit hcons
     · subst hlit
@@ -1655,6 +2011,203 @@ theorem propNe_safe (st : State) (i j : Nat)
       obtain ⟨x2, y2, hx2, hy2, hne⟩ := hcons
       rw [← Option.some.inj hx2, ← Option.some.inj hy2] at hne
       exact absurd hcd hne
+
+/-! ### The explained `propNe` conflict clause: falsification and entailment -/
+
+theorem sortAgree_int {c : Int} {p : Value} (h : SortAgree (.int c) p) :
+    ∃ k : Int, p = .int k := by
+  rcases h with ⟨_, hp⟩ | ⟨⟨b, hb⟩, _⟩
+  · exact hp
+  · cases hb
+
+theorem sortAgree_bool {b : Bool} {p : Value} (h : SortAgree (.bool b) p) :
+    ∃ k : Bool, p = .bool k := by
+  rcases h with ⟨⟨k, hk⟩, _⟩ | ⟨_, hp⟩
+  · cases hk
+  · exact hp
+
+theorem lt_length_of_getD_singleton {doms : List Domain} {i : Nat} {x : Value}
+    (h : doms.getD i [] = [x]) : i < doms.length := by
+  refine Classical.byContradiction fun hlt => ?_
+  have : doms[i]? = none := List.getElem?_eq_none (by omega)
+  rw [List.getD_eq_getElem?_getD, this] at h
+  simp at h
+
+/-- **The reported `propNe` conflict clause is FALSE at every assignment
+    fitting the state's domains**: each literal evaluates to `some false`
+    (the pins the clause was read from). -/
+theorem propNe_conflict_falsified {st : State} {i j : Nat} {c : Clause}
+    (hrun : propNe st i j = .conflict c) {a : Assignment}
+    (hfit : Core.Assignment.Fits st.domains a) :
+    ∀ q ∈ c, q.eval a = some false := by
+  obtain ⟨x, y, hx, hy, hcond, hc⟩ := propNe_conflict_inv hrun
+  have hri : a[i]? = some x := fits_singleton_read hx hfit
+  have hrj : a[j]? = some y := fits_singleton_read hy hfit
+  have hxy : x = y := Value_eqB_true hcond
+  subst hxy
+  subst hc
+  intro q hq
+  cases x with
+  | bool b =>
+      simp only [neConflictClause, List.mem_cons, List.not_mem_nil, or_false] at hq
+      rcases hq with rfl | rfl <;>
+        · simp [posBool, Literal.eval, Atom.eval, hri, hrj] <;> cases b <;> rfl
+  | int k =>
+      simp only [neConflictClause, List.mem_cons, List.not_mem_nil, or_false] at hq
+      rcases hq with rfl | rfl <;>
+        simp [posNe, Literal.eval, Atom.eval, slotInt, hri, hrj, Value.intView]
+  | setOfInt _ => simp [neConflictClause] at hq
+  | array _ => simp [neConflictClause] at hq
+
+/-- **The reported `propNe` conflict clause is ENTAILED by the disequality**:
+    at every assignment satisfying the raw `x ≠ y` that is faithful to the
+    state's domains (sort-agreeing, int-viewed reads), a non-empty reported
+    clause has a true literal. -/
+theorem propNe_conflict_entailed {st : State} {i j : Nat} {c : Clause}
+    (hrun : propNe st i j = .conflict c) (hne : c ≠ []) {a : Assignment}
+    (hsat : (DomConstraint.neSlot i j).SatisfiedBy a)
+    (hfaith : FrameFaithful st.domains a) :
+    ∃ q ∈ c, q.eval a = some true := by
+  obtain ⟨x, y, hx, hy, hcond, hc⟩ := propNe_conflict_inv hrun
+  have hxy : x = y := Value_eqB_true hcond
+  subst hxy
+  obtain ⟨py, hpy, _, hps⟩ := hfaith i (lt_length_of_getD_singleton hx)
+  obtain ⟨qy, hqy, _, hqs⟩ := hfaith j (lt_length_of_getD_singleton hy)
+  have hsx := hps x (by rw [hx]; exact List.mem_singleton_self _)
+  have hsy := hqs x (by rw [hy]; exact List.mem_singleton_self _)
+  obtain ⟨p, q, hp, hq, hpq⟩ := hsat
+  have e1 : p = py := Option.some.inj (hp.symm.trans hpy)
+  have e2 : q = qy := Option.some.inj (hq.symm.trans hqy)
+  subst e1 e2
+  subst hc
+  cases x with
+  | int k =>
+      obtain ⟨k1, rfl⟩ := sortAgree_int hsx
+      obtain ⟨k2, rfl⟩ := sortAgree_int hsy
+      by_cases h1 : k1 = k
+      · have h2 : k2 ≠ k := fun h => hpq (by rw [h1, h])
+        refine ⟨posNe j k, by simp [neConflictClause], ?_⟩
+        simp [posNe, Literal.eval, Atom.eval, slotInt, hq, Value.intView, h2]
+      · refine ⟨posNe i k, by simp [neConflictClause], ?_⟩
+        simp [posNe, Literal.eval, Atom.eval, slotInt, hp, Value.intView, h1]
+  | bool b =>
+      obtain ⟨k1, rfl⟩ := sortAgree_bool hsx
+      obtain ⟨k2, rfl⟩ := sortAgree_bool hsy
+      by_cases h1 : k1 = !b
+      · refine ⟨posBool i (!b), by simp [neConflictClause], ?_⟩
+        simp [posBool, Literal.eval, Atom.eval, hp, h1]
+      · have h2 : k2 = !b := by
+          cases b <;> cases k1 <;> cases k2 <;> simp_all
+        refine ⟨posBool j (!b), by simp [neConflictClause], ?_⟩
+        simp [posBool, Literal.eval, Atom.eval, hq, h2]
+  | setOfInt _ => exact absurd rfl hne
+  | array _ => exact absurd rfl hne
+
+/-- PLAN L4: the result contract of `propEqReifSlot` at fitting solutions of
+    the reified equality (delegation to `propEq`/`propNe` through the pin;
+    the delegated propagators' own contracts need the state's int views). -/
+theorem propEqReifSlot_safe (st : State) (i j r : Nat)
+    (hview : IntViewedDoms st.domains) :
+    (∀ l rs, propEqReifSlot st i j r = .implied l rs →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.eqReifSlot i j r).SatisfiedBy a →
+        l.eval a = some true) ∧
+    (∀ c, propEqReifSlot st i j r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.eqReifSlot i j r).SatisfiedBy a → False) ∧
+    (∀ c, propEqReifSlot st i j r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.eqReifSlot i j r).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro l rs hrun a hfit hs
+    rcases propEqReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      exact (propEq_safe st i j hview).1 l rs0 hres a hfit
+        (eqReif_true_sat hs (fits_of_domBoolPin hfit h1))
+    · rw [he] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      exact (propNe_safe st i j hview).1 l rs0 hres a hfit
+        (eqReif_false_sat hs (fits_of_domBoolPin hfit h2))
+    · rw [he] at hrun; cases hrun
+  · intro c hrun a hfit hs
+    rcases propEqReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+      exact (propEq_safe st i j hview).2.1 c0 hres a hfit
+        (eqReif_true_sat hs (fits_of_domBoolPin hfit h1))
+    · rw [he] at hrun
+      obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+      exact (propNe_safe st i j hview).2.1 c0 hres a hfit
+        (eqReif_false_sat hs (fits_of_domBoolPin hfit h2))
+    · rw [he] at hrun; cases hrun
+  · intro c hrun a hfit hs
+    rcases propEqReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      obtain ⟨l, hl, hlt⟩ := (propEq_safe st i j hview).2.2 c0 hres a hfit
+        (eqReif_true_sat hs (fits_of_domBoolPin hfit h1))
+      exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · rw [he] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      obtain ⟨l, hl, hlt⟩ := (propNe_safe st i j hview).2.2 c0 hres a hfit
+        (eqReif_false_sat hs (fits_of_domBoolPin hfit h2))
+      exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · rw [he] at hrun; cases hrun
+
+/-- PLAN L4: the result contract of `propNeReifSlot` at fitting solutions of
+    the reified disequality (delegation to `propNe`/`propEq` through the
+    pin). -/
+theorem propNeReifSlot_safe (st : State) (i j r : Nat)
+    (hview : IntViewedDoms st.domains) :
+    (∀ l rs, propNeReifSlot st i j r = .implied l rs →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.neReifSlot i j r).SatisfiedBy a →
+        l.eval a = some true) ∧
+    (∀ c, propNeReifSlot st i j r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.neReifSlot i j r).SatisfiedBy a → False) ∧
+    (∀ c, propNeReifSlot st i j r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.neReifSlot i j r).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro l rs hrun a hfit hs
+    rcases propNeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      exact (propNe_safe st i j hview).1 l rs0 hres a hfit
+        (neReif_true_sat hs (fits_of_domBoolPin hfit h1))
+    · rw [he] at hrun
+      obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+      exact (propEq_safe st i j hview).1 l rs0 hres a hfit
+        (neReif_false_sat hs (fits_of_domBoolPin hfit h2))
+    · rw [he] at hrun; cases hrun
+  · intro c hrun a hfit hs
+    rcases propNeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+      exact (propNe_safe st i j hview).2.1 c0 hres a hfit
+        (neReif_true_sat hs (fits_of_domBoolPin hfit h1))
+    · rw [he] at hrun
+      obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
+      exact (propEq_safe st i j hview).2.1 c0 hres a hfit
+        (neReif_false_sat hs (fits_of_domBoolPin hfit h2))
+    · rw [he] at hrun; cases hrun
+  · intro c hrun a hfit hs
+    rcases propNeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+    · rw [he] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      obtain ⟨l, hl, hlt⟩ := (propNe_safe st i j hview).2.2 c0 hres a hfit
+        (neReif_true_sat hs (fits_of_domBoolPin hfit h1))
+      exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · rw [he] at hrun
+      obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+      obtain ⟨l, hl, hlt⟩ := (propEq_safe st i j hview).2.2 c0 hres a hfit
+        (neReif_false_sat hs (fits_of_domBoolPin hfit h2))
+      exact ⟨l, by rw [hcl]; exact mem_insertAfterHead_of_mem hl, hlt⟩
+    · rw [he] at hrun; cases hrun
 
 /-! ### zipIdx and dotOver list infrastructure -/
 
@@ -2694,10 +3247,18 @@ theorem propagatorsOfProved_safeUniv
       ⟨i, c, hdc2, hrun2⟩ | ⟨i, c, hdc2, hrun2⟩ |
       ⟨i, c, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
       ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-      ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-      ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-      ⟨lc, li, lb2, ldca, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-      ⟨ais, hadca, hrunad⟩
+      ⟨ic, jc, kc, hdcc, hrunc⟩ |
+      ⟨lc, li, lb2, ldca, hrunl⟩ |
+      ⟨ais, hadca, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+      ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+      ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+      ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+      ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+      ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+      ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+      ⟨iab, kab, hdcAb, hrunAb⟩ |
+      ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+      ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
     · rw [hdc2] at hdc
       exact propagatorOf_leSlot_implied (problem := problem)
         (i := i) (j := j) hdc hrun2 a hsol hrep
@@ -2743,26 +3304,56 @@ theorem propagatorsOfProved_safeUniv
     · rw [hdcc] at hdc
       exact (propBoolOr_safe st ic jc kc).1 l r hrunc a hrep.1
         (hsol.2 _ hdc)
-    · rw [hdcd] at hdc
-      exact (propMin_safe st id jd kd).1 l r hrund a hrep.1
-        (hsol.2 _ hdc)
-    · rw [hdce] at hdc
-      exact (propMax_safe st ie je ke).1 l r hrune a hrep.1
-        (hsol.2 _ hdc)
-    · rw [hdcg] at hdc
-      exact (propAbs_safe st ig kg).1 l r hrung a hrep.1
-        (hsol.2 _ hdc)
     · rw [ldca] at hdc
       have hlenL : lc.length = li.length :=
         hlinE _ hdc lc li lb2 rfl
       exact (propLinEq2_safe st lc li lb2 hlenL).1 l r hrunl a hrep.1
         (hsol.2 _ hdc)
-    · rw [hdct] at hdc
-      exact (propTimes_safe st ti tj tk2).1 l r hrunt a hrep.1
-        (hsol.2 _ hdc)
     · rw [hadca] at hdc
       exact (propAllDiffLCG_safe st ais).1 l r hrunad a hrep.1
         (hsol.2 _ hdc)
+    · rw [hdcR] at hdc
+      exact (propLinLeReif_safe st lre lri lrb lrr).1 l r hrunR a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcN] at hdc
+      exact (propLinNe_safe st lnc lni lnb).1 l r hrunN a hrep.1
+        (hsol.2 _ hdc)
+    · exact (propMin_safe st imn jmn kmn).1 l r hrunMn a hrep.1
+        (hdcMn _ (hsol.2 _ hdc))
+    · exact (propMax_safe st imx jmx kmx).1 l r hrunMx a hrep.1
+        (hdcMx _ (hsol.2 _ hdc))
+    · rw [hdcLR] at hdc
+      exact (propLeReifSlot_safe st ilr jlr rlr).1 l r hrunLR a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcE] at hdc
+      have hviewst := intViewedDoms_of_coherent hview hcoh
+      exact (propEqReifSlot_safe st ieq jeq req hviewst).1 l r hrunE a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcNE] at hdc
+      have hviewst := intViewedDoms_of_coherent hview hcoh
+      exact (propNeReifSlot_safe st ine jne rne hviewst).1 l r hrunNE a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcEqR] at hdc
+      exact (propLinEqReif_safe st lq1 leqs leqb leqr).1 l r hrunEqR a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcNeR] at hdc
+      exact (propLinNeReif_safe st lq2 lnis lnib lnir).1 l r hrunNeR a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcTt] at hdc
+      exact (propTimes_safe st itt jtt ktt).1 l r hrunTt a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcAb] at hdc
+      exact (propAbs_safe st iab kab).1 l r hrunAb a hrep.1 (hsol.2 _ hdc)
+    · rw [hdcD] at hdc
+      exact (propDiv_safe st od1 od2 od3).1 l r hrunD a hrep.1 (hsol.2 _ hdc)
+    · rw [hdcM] at hdc
+      exact (propMod_safe st om1 om2 om3).1 l r hrunM a hrep.1 (hsol.2 _ hdc)
+    · -- `propCheck` never emits implied literals.
+      exact (propCheck_implied_elim hrunLn).elim
+    · rw [hdcG] at hdc
+      exact (propMaxGen_safe st osG rG).1 l r hrunG a hrep.1 (hsol.2 _ hdc)
+    · rw [hdcH] at hdc
+      exact (propMinGen_safe st osH rH).1 l r hrunH a hrep.1 (hsol.2 _ hdc)
   · intro p hp c hrun a ⟨hsol, hrep⟩
     obtain ⟨dc, hdc, hprop⟩ := hprops p hp
     rcases propagatorOfProved_run hprop hrun with
@@ -2772,10 +3363,18 @@ theorem propagatorsOfProved_safeUniv
       ⟨i, k, hdc2, hrun2⟩ | ⟨i, k, hdc2, hrun2⟩ |
       ⟨i, k, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
       ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-      ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-      ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-      ⟨lc, li, lb2, ldca, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-      ⟨ais, hadca, hrunad⟩
+      ⟨ic, jc, kc, hdcc, hrunc⟩ |
+      ⟨lc, li, lb2, ldca, hrunl⟩ |
+      ⟨ais, hadca, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+      ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+      ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+      ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+      ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+      ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+      ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+      ⟨iab, kab, hdcAb, hrunAb⟩ |
+      ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+      ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
     · rw [hdc2] at hdc
       exact propagatorOf_leSlot_conflict (problem := problem)
         (i := i) (j := j) hdc hrun2 a hsol hrep
@@ -2836,32 +3435,74 @@ theorem propagatorsOfProved_safeUniv
       intro hcsat
       exact (propBoolOr_safe st ic jc kc).2.1 c hrunc a hrep.1
         (hsol.2 _ hdc)
-    · rw [hdcd] at hdc
-      intro hcsat
-      exact (propMin_safe st id jd kd).2.1 c hrund a hrep.1
-        (hsol.2 _ hdc)
-    · rw [hdce] at hdc
-      intro hcsat
-      exact (propMax_safe st ie je ke).2.1 c hrune a hrep.1
-        (hsol.2 _ hdc)
-    · rw [hdcg] at hdc
-      intro hcsat
-      exact (propAbs_safe st ig kg).2.1 c hrung a hrep.1
-        (hsol.2 _ hdc)
     · rw [ldca] at hdc
       intro hcsat
       have hlenL : lc.length = li.length :=
         hlinE _ hdc lc li lb2 rfl
       exact (propLinEq2_safe st lc li lb2 hlenL).2.1 c hrunl a hrep.1
         (hsol.2 _ hdc)
-    · rw [hdct] at hdc
-      intro hcsat
-      exact (propTimes_safe st ti tj tk2).2.1 c hrunt a hrep.1
-        (hsol.2 _ hdc)
     · rw [hadca] at hdc
       intro hcsat
       exact (propAllDiffLCG_safe st ais).2.1 c hrunad a hrep.1
         (hsol.2 _ hdc)
+    · rw [hdcR] at hdc
+      intro hcsat
+      exact (propLinLeReif_safe st lre lri lrb lrr).2.1 c hrunR a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcN] at hdc
+      intro hcsat
+      exact (propLinNe_safe st lnc lni lnb).2.1 c hrunN a hrep.1
+        (hsol.2 _ hdc)
+    · intro hcsat
+      exact (propMin_safe st imn jmn kmn).2.1 c hrunMn a hrep.1
+        (hdcMn _ (hsol.2 _ hdc))
+    · intro hcsat
+      exact (propMax_safe st imx jmx kmx).2.1 c hrunMx a hrep.1
+        (hdcMx _ (hsol.2 _ hdc))
+    · rw [hdcLR] at hdc
+      intro hcsat
+      exact (propLeReifSlot_safe st ilr jlr rlr).2.1 c hrunLR a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcE] at hdc
+      intro hcsat
+      have hviewst := intViewedDoms_of_coherent hview hcoh
+      exact (propEqReifSlot_safe st ieq jeq req hviewst).2.1 c hrunE a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcNE] at hdc
+      intro hcsat
+      have hviewst := intViewedDoms_of_coherent hview hcoh
+      exact (propNeReifSlot_safe st ine jne rne hviewst).2.1 c hrunNE a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcEqR] at hdc
+      intro hcsat
+      exact (propLinEqReif_safe st lq1 leqs leqb leqr).2.1 c hrunEqR a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcNeR] at hdc
+      intro hcsat
+      exact (propLinNeReif_safe st lq2 lnis lnib lnir).2.1 c hrunNeR a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcTt] at hdc
+      intro hcsat
+      exact (propTimes_safe st itt jtt ktt).2.1 c hrunTt a hrep.1
+        (hsol.2 _ hdc)
+    · rw [hdcAb] at hdc
+      intro hcsat
+      exact (propAbs_safe st iab kab).2.1 c hrunAb a hrep.1 (hsol.2 _ hdc)
+    · rw [hdcD] at hdc
+      intro hcsat
+      exact (propDiv_safe st od1 od2 od3).2.1 c hrunD a hrep.1 (hsol.2 _ hdc)
+    · rw [hdcM] at hdc
+      intro hcsat
+      exact (propMod_safe st om1 om2 om3).2.1 c hrunM a hrep.1 (hsol.2 _ hdc)
+    · -- `propCheck`: its forced check fails on every fitting assignment.
+      intro hcsat
+      exact propCheck_conflict_false hrunLn hrep.1 (hsol.2 _ hdc)
+    · rw [hdcG] at hdc
+      intro hcsat
+      exact (propMaxGen_safe st osG rG).2.1 c hrunG a hrep.1 (hsol.2 _ hdc)
+    · rw [hdcH] at hdc
+      intro hcsat
+      exact (propMinGen_safe st osH rH).2.1 c hrunH a hrep.1 (hsol.2 _ hdc)
 
 /-- **The relativized entitlement for the proved-propagator list**:
     every conflict clause carries a true literal at every solution
@@ -2892,10 +3533,18 @@ theorem propagatorsOfProved_entitled
     ⟨i, c, hdc2, hrun2⟩ | ⟨i, c, hdc2, hrun2⟩ |
     ⟨i, c, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
     ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-    ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-    ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-    ⟨lc, li, lb2, ldca, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-    ⟨ais, hadca, hrunad⟩
+    ⟨ic, jc, kc, hdcc, hrunc⟩ |
+    ⟨lc, li, lb2, ldca, hrunl⟩ |
+    ⟨ais, hadca, hrunad⟩ | ⟨lre2, lri2, lrb2, lrr2, hdcR2, hrunR2⟩ |
+    ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+    ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+    ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+    ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+    ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+    ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+    ⟨iab, kab, hdcAb, hrunAb⟩ |
+    ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+    ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
   · rw [hdc2] at hdc
     exact propagatorOf_leSlot_entitled (problem := problem)
       (i := i) (j := j) hdc hrun2 hsol a ha
@@ -2933,20 +3582,50 @@ theorem propagatorsOfProved_entitled
     exact propBoolAnd_entitled hdc hrunb a ha
   · rw [hdcc] at hdc
     exact propBoolOr_entitled hdc hrunc a ha
-  · rw [hdcd] at hdc
-    exact propMin_entitled hdc hrund a ha
-  · rw [hdce] at hdc
-    exact propMax_entitled hdc hrune a ha
-  · rw [hdcg] at hdc
-    exact propAbs_entitled hdc hrung a ha
   · rw [ldca] at hdc
     have hlenL : lc.length = li.length :=
       hlinE _ hdc lc li lb2 rfl
     exact propLinEq2_entitled hdc hlenL hrunl a ha
-  · rw [hdct] at hdc
-    exact propTimes_entitled hdc hrunt a ha
   · rw [hadca] at hdc
     exact propAllDiffLCG_entitled hdc hrunad hsol a ha
+  · rw [hdcR2] at hdc
+    exact (propLinLeReif_safe st lre2 lri2 lrb2 lrr2).2.2 c hrunR2 a
+      (hsol a ha).1 (ha.2 _ hdc)
+  · rw [hdcN] at hdc
+    exact propLinNe_entitled hrunN (ha.2 _ hdc)
+  · exact propMin_entitled (fun a ha => hdcMn _ (ha.2 _ hdc)) hrunMn a ha
+  · exact propMax_entitled (fun a ha => hdcMx _ (ha.2 _ hdc)) hrunMx a ha
+  · rw [hdcLR] at hdc
+    exact (propLeReifSlot_safe st ilr jlr rlr).2.2 c hrunLR a
+      (hsol a ha).1 (ha.2 _ hdc)
+  · rw [hdcE] at hdc
+    have hviewst := intViewedDoms_of_coherent hview hcoh
+    exact (propEqReifSlot_safe st ieq jeq req hviewst).2.2 c hrunE a
+      (hsol a ha).1 (ha.2 _ hdc)
+  · rw [hdcNE] at hdc
+    have hviewst := intViewedDoms_of_coherent hview hcoh
+    exact (propNeReifSlot_safe st ine jne rne hviewst).2.2 c hrunNE a
+      (hsol a ha).1 (ha.2 _ hdc)
+  · rw [hdcEqR] at hdc
+    exact (propLinEqReif_safe st lq1 leqs leqb leqr).2.2 c hrunEqR a
+      (hsol a ha).1 (ha.2 _ hdc)
+  · rw [hdcNeR] at hdc
+    exact (propLinNeReif_safe st lq2 lnis lnib lnir).2.2 c hrunNeR a
+      (hsol a ha).1 (ha.2 _ hdc)
+  · rw [hdcTt] at hdc
+    exact propTimes_entitled hdc hrunTt a ha
+  · rw [hdcAb] at hdc
+    exact propAbs_entitled hdc hrunAb a ha
+  · rw [hdcD] at hdc
+    exact propDiv_entitled hdc hrunD a ha
+  · rw [hdcM] at hdc
+    exact propMod_entitled hdc hrunM a ha
+  · -- `propCheck`: its forced check fails on every fitting assignment.
+    exact (propCheck_conflict_false hrunLn (hsol a ha).1 (ha.2 _ hdc)).elim
+  · rw [hdcG] at hdc
+    exact propMaxGen_entitled (fun a ha => ha.2 _ hdc) hrunG a ha
+  · rw [hdcH] at hdc
+    exact propMinGen_entitled (fun a ha => ha.2 _ hdc) hrunH a ha
 
 
 /-! ### The linLe min-sum bound -/

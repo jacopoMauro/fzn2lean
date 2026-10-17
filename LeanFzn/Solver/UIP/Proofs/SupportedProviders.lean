@@ -191,7 +191,7 @@ theorem supportedHentEv_of_premises {orig : List Domain}
                 cases hconf
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hs
                     simp only [] at hs
@@ -286,6 +286,7 @@ theorem supportedHentEv_of_premises {orig : List Domain}
                 injection hconf with hev
                 subst hev
                 have hspec := terminalResult_spec (hclos hrec) (hbr hrec)
+                rw [SupportedReach.orig_eq hrec] at ht
                 rw [ht] at hspec
                 exact fun c' hc' a ha =>
                   hspec.entailed c' hc' c' (List.mem_singleton_self c') a ha
@@ -338,12 +339,6 @@ theorem supportedHpre_of_premises {orig : List Domain} {original : List Clause}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
         ∀ e ∈ cfg.branch.trail, e.level ≤ an.backjumpLevel → e ∈ cp.trail)
-    (hfresh : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
-      {an : ConflictAnalysis} {cp : DecisionCheckpoint leaf},
-      SupportedReach orig original props cfg → cfg.conflict = some ev →
-      ev.analysis = some an →
-      checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
-        ∀ e ∈ cp.trail, e.literal ≠ an.asserting.norm)
     (hrange : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       cfg.conflict = some ev → ev.analysis = some an →
@@ -356,7 +351,7 @@ theorem supportedHpre_of_premises {orig : List Domain} {original : List Clause}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch := by
@@ -368,7 +363,7 @@ theorem supportedHpre_of_premises {orig : List Domain} {original : List Clause}
   exact restorationPreReachable_of_success_avoiding hsnap hbs
     (hcert hreach hconf hana)
     (hstable hreach hconf hana) (hneg hreach hconf hana)
-    (hsurv hreach hconf hana hcp) (hfresh hreach hconf hana hcp)
+    (hsurv hreach hconf hana hcp)
     (hrange hreach hconf hana) hp
 
 /-! ## §4-bis The supported snapshot-bundle producer (J1/E1) -/
@@ -447,7 +442,7 @@ theorem supportedHlevel_of_reach {orig : List Domain} {original : List Clause}
                 exact checkpointsBelow_chronologicalFallback ih
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hs
                     simp only [] at hs
@@ -561,7 +556,7 @@ theorem supportedIdentifiesChain_of_premises {orig : List Domain}
         simp only [SchedulerConfig.init, List.mem_singleton] at hcp
         subst hcp
         simpa only [SchedulerConfig.init, rootCheckpoint] using
-          rootCheckpoint_identifies_init leaf orig
+          rootCheckpoint_identifies_init leaf orig original
       · exact ⟨fun cp' h => by simp at h, trivial⟩
   | step hrec hs ih =>
       clear cfg
@@ -598,7 +593,7 @@ theorem supportedIdentifiesChain_of_premises {orig : List Domain}
                 · simpa only [stepChronologicalFallback] using ih.2
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hs
                     simp only [] at hs
@@ -751,7 +746,7 @@ theorem supportedHident_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         ∀ cp' ∈ (stepLearnBackjumpAssert cfg
             (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
             ev restored).checkpoints,
@@ -781,7 +776,7 @@ theorem supportedHbc_of_recorded_analysis {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         BackjumpCovers leaf orig cfg
           (stepLearnBackjumpAssert cfg
             (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)

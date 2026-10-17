@@ -200,7 +200,47 @@ theorem compileConstraint_int_times3_inv {env : Store} {names : List String}
       -- bool_and: name mismatch
       ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
       -- bool_or: name mismatch
-      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_lin_ne: name mismatch
+      ⟨-, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- bool_clause: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- array_bool_and: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- bool2int: name mismatch
+      ⟨-, -, -, -, hname, -, -, -⟩ |
+      -- bool_eq: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- array_int_element: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- array_var_int_element: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- array_var_bool_element: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_eq_reif: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_le_reif: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_ne_reif: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_lin_eq_reif: name mismatch
+      ⟨-, -, -, -, -, -, -, hname, -, -, -, -, -, -, -⟩ |
+      -- int_lin_le_reif: name mismatch
+      ⟨-, -, -, -, -, -, -, hname, -, -, -, -, -, -, -⟩ |
+      -- int_lin_ne_reif: name mismatch
+      ⟨-, -, -, -, -, -, -, hname, -, -, -, -, -, -, -⟩ |
+      -- int_min (general pair): name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_max (general pair): name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_div (general): name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_mod (general): name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- array_int_maximum: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- array_int_minimum: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩
     all_goals
       first
         | (simp only [Ident.mk] at hname; exact absurd hname (by decide))
@@ -358,7 +398,46 @@ theorem compileConstraint_int_ne2_inv {env : Store} {names : List String}
       ⟨-, -, -, hname, -, -, -⟩ |
       ⟨-, -, -, -, hname, -, -, -, -⟩ |
       ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
-      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      ⟨-, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- bool_clause: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- array_bool_and: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- bool2int: name mismatch
+      ⟨-, -, -, -, hname, -, -, -⟩ |
+      -- bool_eq: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- array_int_element: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- array_var_int_element: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- array_var_bool_element: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_eq_reif: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_le_reif: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_ne_reif: name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_lin_eq_reif: name mismatch
+      ⟨-, -, -, -, -, -, -, hname, -, -, -, -, -, -, -⟩ |
+      -- int_lin_le_reif: name mismatch
+      ⟨-, -, -, -, -, -, -, hname, -, -, -, -, -, -, -⟩ |
+      -- int_lin_ne_reif: name mismatch
+      ⟨-, -, -, -, -, -, -, hname, -, -, -, -, -, -, -⟩ |
+      -- int_min (general pair): name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_max (general pair): name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_div (general): name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- int_mod (general): name mismatch
+      ⟨-, -, -, -, -, -, hname, -, -, -, -, -⟩ |
+      -- array_int_maximum: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- array_int_minimum: name mismatch
+      ⟨-, -, -, -, hname, -, -, -, -⟩
     · exact absurd hname (by simp)
     · exact absurd hname (by simp)
     · exact absurd hname (by simp)
@@ -375,6 +454,26 @@ theorem compileConstraint_int_ne2_inv {env : Store} {names : List String}
       · rw [← hxi]
       · rw [← hyi]
       · exact hcdc.symm.trans h'
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
     · exact absurd hname (by simp)
     · exact absurd hname (by simp)
     · exact absurd hname (by simp)
@@ -785,5 +884,505 @@ theorem compileConstraint_bool_not_lit_inv {env : Store} {names : List String}
           simp only [henv] at hcc'
           cases hcc'
 
+
+
+/-- The successful compile of a 3-identifier `int_eq_reif` piece. -/
+theorem compileConstraint_int_eq_reif_inv {env : Store} {names : List String}
+    {x y r : Ident} {dc : DomConstraint}
+    (hcc : compileConstraint env names
+        { name := Ident.mk "int_eq_reif"
+        , args := [.basic (.ident x), .basic (.ident y), .basic (.ident r)]
+        , anns := [] } = .ok dc) :
+    ∃ i j k, nameIndex names x.name = some i ∧
+      nameIndex names y.name = some j ∧ nameIndex names r.name = some k ∧
+      dc = .eqReifSlot i j k := by
+  simp only [compileConstraint, extractConstraint] at hcc
+  cases hx : nameIndex names x.name <;> cases hy : nameIndex names y.name <;>
+    cases hr : nameIndex names r.name <;> simp [hx, hy, hr] at hcc
+  exact ⟨_, _, _, rfl, rfl, rfl, hcc.symm⟩
+
+/-- The successful compile of a 3-identifier `int_le_reif` piece. -/
+theorem compileConstraint_int_le_reif_inv {env : Store} {names : List String}
+    {x y r : Ident} {dc : DomConstraint}
+    (hcc : compileConstraint env names
+        { name := Ident.mk "int_le_reif"
+        , args := [.basic (.ident x), .basic (.ident y), .basic (.ident r)]
+        , anns := [] } = .ok dc) :
+    ∃ i j k, nameIndex names x.name = some i ∧
+      nameIndex names y.name = some j ∧ nameIndex names r.name = some k ∧
+      dc = .leReifSlot i j k := by
+  simp only [compileConstraint, extractConstraint] at hcc
+  cases hx : nameIndex names x.name <;> cases hy : nameIndex names y.name <;>
+    cases hr : nameIndex names r.name <;> simp [hx, hy, hr] at hcc
+  exact ⟨_, _, _, rfl, rfl, rfl, hcc.symm⟩
+
+/-- The successful compile of a 3-identifier `int_ne_reif` piece. -/
+theorem compileConstraint_int_ne_reif_inv {env : Store} {names : List String}
+    {x y r : Ident} {dc : DomConstraint}
+    (hcc : compileConstraint env names
+        { name := Ident.mk "int_ne_reif"
+        , args := [.basic (.ident x), .basic (.ident y), .basic (.ident r)]
+        , anns := [] } = .ok dc) :
+    ∃ i j k, nameIndex names x.name = some i ∧
+      nameIndex names y.name = some j ∧ nameIndex names r.name = some k ∧
+      dc = .neReifSlot i j k := by
+  simp only [compileConstraint, extractConstraint] at hcc
+  cases hx : nameIndex names x.name <;> cases hy : nameIndex names y.name <;>
+    cases hr : nameIndex names r.name <;> simp [hx, hy, hr] at hcc
+  exact ⟨_, _, _, rfl, rfl, rfl, hcc.symm⟩
+
+/-- The eqReifRK shape's name and argument inversion. -/
+theorem auxShapeOf_eqReifRK_inv {c : ConstraintItem} {x r : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.eqReifRK x r k)) :
+    c.name.name = "int_eq_reif" ∧ c.args = [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident r)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The eqReifKR shape's name and argument inversion. -/
+theorem auxShapeOf_eqReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.eqReifKR x r k)) :
+    c.name.name = "int_eq_reif" ∧ c.args = [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident r)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The leReifRK shape's name and argument inversion. -/
+theorem auxShapeOf_leReifRK_inv {c : ConstraintItem} {x r : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.leReifRK x r k)) :
+    c.name.name = "int_le_reif" ∧ c.args = [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident r)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The leReifKR shape's name and argument inversion. -/
+theorem auxShapeOf_leReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.leReifKR x r k)) :
+    c.name.name = "int_le_reif" ∧ c.args = [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident r)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The neReifRK shape's name and argument inversion. -/
+theorem auxShapeOf_neReifRK_inv {c : ConstraintItem} {x r : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.neReifRK x r k)) :
+    c.name.name = "int_ne_reif" ∧ c.args = [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident r)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The neReifKR shape's name and argument inversion. -/
+theorem auxShapeOf_neReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.neReifKR x r k)) :
+    c.name.name = "int_ne_reif" ∧ c.args = [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident r)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The minRK shape's name and argument inversion. -/
+theorem auxShapeOf_minRK_inv {c : ConstraintItem} {x z : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.minRK x z k)) :
+    c.name.name = "int_min" ∧ c.args = [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident z)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The minKR shape's name and argument inversion. -/
+theorem auxShapeOf_minKR_inv {c : ConstraintItem} {x z : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.minKR x z k)) :
+    c.name.name = "int_min" ∧ c.args = [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident z)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The maxRK shape's name and argument inversion. -/
+theorem auxShapeOf_maxRK_inv {c : ConstraintItem} {x z : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.maxRK x z k)) :
+    c.name.name = "int_max" ∧ c.args = [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident z)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The maxKR shape's name and argument inversion. -/
+theorem auxShapeOf_maxKR_inv {c : ConstraintItem} {x z : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.maxKR x z k)) :
+    c.name.name = "int_max" ∧ c.args = [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident z)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The minRRK shape's name and argument inversion (PLAN C9 remainder:
+    the LITERAL is the RESULT operand). -/
+theorem auxShapeOf_minRRK_inv {c : ConstraintItem} {x y : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.minRRK x y k)) :
+    c.name.name = "int_min" ∧ c.args = [.basic (.ident x), .basic (.ident y), .basic (.lit (.int k))] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The maxRRK shape's name and argument inversion (PLAN C9 remainder:
+    the LITERAL is the RESULT operand). -/
+theorem auxShapeOf_maxRRK_inv {c : ConstraintItem} {x y : Ident} {k : Int}
+    (h : auxShapeOf c = some (AuxShape.maxRRK x y k)) :
+    c.name.name = "int_max" ∧ c.args = [.basic (.ident x), .basic (.ident y), .basic (.lit (.int k))] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- Argument evaluation of `[ident x, ident y, int literal k]` (the
+    PLAN C9 remainder literal-RESULT shapes). -/
+theorem mapM_ident_ident_const {store : Store} {c : ConstraintItem}
+    {x y : Ident} {k : Int} {args : List Value}
+    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y),
+      Expr.basic (.lit (.int k))])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ vx vy, store x = some vx ∧ store y = some vy ∧
+      args = [vx, vy, .int k] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval,
+    BasicLiteral.denote] at hmap
+  cases hsx : store x with
+  | none => rw [hsx] at hmap; simp at hmap
+  | some vx =>
+      rw [hsx] at hmap
+      cases hsy : store y with
+      | none => rw [hsy] at hmap; simp at hmap
+      | some vy =>
+          rw [hsy] at hmap
+          exact ⟨vx, vy, rfl, rfl, by simpa using hmap.symm⟩
+
+/-- The successful compile of a 3-identifier `int_min` piece. -/
+theorem compileConstraint_int_min_inv {env : Store} {names : List String}
+    {x y r : Ident} {dc : DomConstraint}
+    (hcc : compileConstraint env names
+        { name := Ident.mk "int_min"
+        , args := [.basic (.ident x), .basic (.ident y), .basic (.ident r)]
+        , anns := [] } = .ok dc) :
+    ∃ i j k, nameIndex names x.name = some i ∧
+      nameIndex names y.name = some j ∧ nameIndex names r.name = some k ∧
+      dc = .minSlot i j k := by
+  simp only [compileConstraint, extractConstraint] at hcc
+  cases hx : nameIndex names x.name <;> cases hy : nameIndex names y.name <;>
+    cases hr : nameIndex names r.name <;> simp [hx, hy, hr] at hcc
+  exact ⟨_, _, _, rfl, rfl, rfl, hcc.symm⟩
+
+/-- The successful compile of a 3-identifier `int_max` piece. -/
+theorem compileConstraint_int_max_inv {env : Store} {names : List String}
+    {x y r : Ident} {dc : DomConstraint}
+    (hcc : compileConstraint env names
+        { name := Ident.mk "int_max"
+        , args := [.basic (.ident x), .basic (.ident y), .basic (.ident r)]
+        , anns := [] } = .ok dc) :
+    ∃ i j k, nameIndex names x.name = some i ∧
+      nameIndex names y.name = some j ∧ nameIndex names r.name = some k ∧
+      dc = .maxSlot i j k := by
+  simp only [compileConstraint, extractConstraint] at hcc
+  cases hx : nameIndex names x.name <;> cases hy : nameIndex names y.name <;>
+    cases hr : nameIndex names r.name <;> simp [hx, hy, hr] at hcc
+  exact ⟨_, _, _, rfl, rfl, rfl, hcc.symm⟩
+
+theorem fullInterp_int_min_iff (p q r : Int) :
+    fullInterp (Ident.mk "int_min") [.int p, .int q, .int r] ↔ r = min p q := by
+  rw [fullInterp_std (by decide)]; rfl
+
+theorem fullInterp_int_max_iff (p q r : Int) :
+    fullInterp (Ident.mk "int_max") [.int p, .int q, .int r] ↔ r = max p q := by
+  rw [fullInterp_std (by decide)]; rfl
+
+/-- The reified interpretations as truth-value agreement (PLAN C5b). -/
+theorem fullInterp_int_eq_reif_iff (p q : Int) (rb : Bool) :
+    fullInterp (Ident.mk "int_eq_reif") [.int p, .int q, .bool rb] ↔
+      (rb = true ↔ p = q) := by
+  rw [fullInterp_of_extracted_reif "int_eq_reif" (Or.inl rfl)]
+  show ((rb = true ∧ p = q) ∨ (rb = false ∧ p ≠ q)) ↔ _
+  exact reif_disj_iff (p = q) rb
+
+theorem fullInterp_int_ne_reif_iff (p q : Int) (rb : Bool) :
+    fullInterp (Ident.mk "int_ne_reif") [.int p, .int q, .bool rb] ↔
+      (rb = true ↔ p ≠ q) := by
+  rw [fullInterp_of_extracted_reif "int_ne_reif"
+    (Or.inr (Or.inr (Or.inl rfl)))]
+  show ((rb = true ∧ p ≠ q) ∨ (rb = false ∧ p = q)) ↔ _
+  rw [← reif_disj_iff (p ≠ q) rb]
+  constructor
+  · rintro (h | ⟨h1, h2⟩)
+    · exact Or.inl h
+    · exact Or.inr ⟨h1, fun h => h h2⟩
+  · rintro (h | ⟨h1, h2⟩)
+    · exact Or.inl h
+    · exact Or.inr ⟨h1, Classical.not_not.mp h2⟩
+
+theorem fullInterp_int_le_reif_iff (p q : Int) (rb : Bool) :
+    fullInterp (Ident.mk "int_le_reif") [.int p, .int q, .bool rb] ↔
+      (rb = true ↔ p ≤ q) := by
+  rw [fullInterp_of_extracted_reif "int_le_reif" (Or.inr (Or.inl rfl))]
+  show ((rb = true ∧ p ≤ q) ∨ (rb = false ∧ p > q)) ↔ _
+  rw [← reif_disj_iff (p ≤ q) rb]
+  constructor
+  · rintro (h | ⟨h1, h2⟩)
+    · exact Or.inl h
+    · exact Or.inr ⟨h1, fun h => by omega⟩
+  · rintro (h | ⟨h1, h2⟩)
+    · exact Or.inl h
+    · exact Or.inr ⟨h1, by omega⟩
+
+/-- Argument evaluation of `[ident x, int literal k, ident r]`. -/
+theorem mapM_ident_const_ident {store : Store} {c : ConstraintItem}
+    {x r : Ident} {k : Int} {args : List Value}
+    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.int k)),
+      Expr.basic (.ident r)])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ vx vr, store x = some vx ∧ store r = some vr ∧
+      args = [vx, .int k, vr] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval,
+    BasicLiteral.denote] at hmap
+  cases hsx : store x with
+  | none => rw [hsx] at hmap; simp at hmap
+  | some vx =>
+      rw [hsx] at hmap
+      cases hsr : store r with
+      | none => rw [hsr] at hmap; simp at hmap
+      | some vr =>
+          rw [hsr] at hmap
+          exact ⟨vx, vr, rfl, rfl, by simpa using hmap.symm⟩
+
+/-- Argument evaluation of `[int literal k, ident x, ident r]`. -/
+theorem mapM_const_ident_ident {store : Store} {c : ConstraintItem}
+    {x r : Ident} {k : Int} {args : List Value}
+    (hargs : c.args = [Expr.basic (.lit (.int k)), Expr.basic (.ident x),
+      Expr.basic (.ident r)])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ vx vr, store x = some vx ∧ store r = some vr ∧
+      args = [.int k, vx, vr] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval,
+    BasicLiteral.denote] at hmap
+  cases hsx : store x with
+  | none => rw [hsx] at hmap; simp at hmap
+  | some vx =>
+      rw [hsx] at hmap
+      cases hsr : store r with
+      | none => rw [hsr] at hmap; simp at hmap
+      | some vr =>
+          rw [hsr] at hmap
+          exact ⟨vx, vr, rfl, rfl, by simpa using hmap.symm⟩
+
+/-- The minGen2 shape's name and argument inversion (PLAN C9
+    remainder: the two-element `array_int_minimum` chain). -/
+theorem auxShapeOf_minGen2_inv {c : ConstraintItem} {e1 e2 r : Ident}
+    (h : auxShapeOf c = some (AuxShape.minGen2 e1 e2 r)) :
+    c.name.name = "array_int_minimum" ∧
+      c.args = [.basic (.ident r),
+        .array [BasicExpr.ident e1, BasicExpr.ident e2]] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- The maxGen2 shape's name and argument inversion (PLAN C9
+    remainder: the two-element `array_int_maximum` chain). -/
+theorem auxShapeOf_maxGen2_inv {c : ConstraintItem} {e1 e2 r : Ident}
+    (h : auxShapeOf c = some (AuxShape.maxGen2 e1 e2 r)) :
+    c.name.name = "array_int_maximum" ∧
+      c.args = [.basic (.ident r),
+        .array [BasicExpr.ident e1, BasicExpr.ident e2]] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+
+/-- Argument evaluation of `[ident r, [ident e₁, ident e₂]]` (the
+    two-element array shapes): the reads of `r`, `e₁` and `e₂` exist
+    and the evaluated argument list is `[r's read, [e₁'s read,
+    e₂'s read]]`. -/
+theorem mapM_ident_ident_arr {store : Store} {c : ConstraintItem}
+    {e1 e2 r : Ident} {args : List Value}
+    (hargs : c.args = [Expr.basic (.ident r),
+      Expr.array [BasicExpr.ident e1, BasicExpr.ident e2]])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ vr v1 v2, store r = some vr ∧ store e1 = some v1 ∧
+      store e2 = some v2 ∧ args = [vr, .array [v1, v2]] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval]
+    at hmap
+  cases hr : store r with
+  | none => rw [hr] at hmap; simp at hmap
+  | some vr =>
+      rw [hr] at hmap
+      cases h1 : store e1 with
+      | none => rw [h1] at hmap; simp at hmap
+      | some v1 =>
+          rw [h1] at hmap
+          cases h2 : store e2 with
+          | none => rw [h2] at hmap; simp at hmap
+          | some v2 =>
+              rw [h2] at hmap
+              exact ⟨vr, v1, v2, rfl, rfl, rfl, by simpa using hmap.symm⟩
+
+/-- The finite min of two integer values: the executable `minValue`
+    at an all-integer two-element list (the array shapes' reading). -/
+theorem minValue_int_int (p q : Int) :
+    minValue [Value.int p, Value.int q] = some (min p q) := rfl
+
+/-- The finite max of two integer values. -/
+theorem maxValue_int_int (p q : Int) :
+    maxValue [Value.int p, Value.int q] = some (max p q) := rfl
+
+/-- **The two-element `minValue` reading with an INTEGER tail is
+    integer-headed**: `minValue [v, .int k] = some m` forces
+    `v = .int p` with `m = min p k`. (Note the asymmetry of the
+    declared semantics: a non-integer TAIL leaves the head's reading
+    intact, so this lemma — not the tail — is what the exactness proof
+    needs; the `compile_covers_agree` direction obtains the integer
+    tail from the WF-typed element slot.) -/
+theorem minValue_pair_int_tail {v : Value} {k m : Int}
+    (h : minValue [v, Value.int k] = some m) :
+    ∃ p, v = Value.int p ∧ min p k = m := by
+  cases v with
+  | int p =>
+      rw [minValue_int_int] at h
+      exact ⟨p, rfl, Option.some.inj h⟩
+  | bool b => simp [minValue] at h
+  | setOfInt s => simp [minValue] at h
+  | array xs => simp [minValue] at h
+
+/-- The two-element `maxValue` reading with an INTEGER tail. -/
+theorem maxValue_pair_int_tail {v : Value} {k m : Int}
+    (h : maxValue [v, Value.int k] = some m) :
+    ∃ p, v = Value.int p ∧ max p k = m := by
+  cases v with
+  | int p =>
+      rw [maxValue_int_int] at h
+      exact ⟨p, rfl, Option.some.inj h⟩
+  | bool b => simp [maxValue] at h
+  | setOfInt s => simp [maxValue] at h
+  | array xs => simp [maxValue] at h
+
+/-- **The semantics audit of the two-element array rewrite**: the
+    rewrite `array_int_minimum(r, [e₁, e₂]) → int_min(e₁, e₂, r)` (and
+    its maximum twin) is NOT semantics-preserving on arbitrary value
+    stores: the declared `minValue` reading IGNORES a non-integer TAIL
+    element (`minValue [x, ·] = some x`), so a store reading `e₂` as a
+    Boolean keeps the SOURCE predicate true while the rewritten
+    `int_min` is false. The rewrite is therefore sound only under the
+    TYPING obligation: the array's elements are WF-typed `var int`s,
+    so an honest store reads them as integers — the two
+    kernel-checked guards `checkBase_int_of_array_elem` (the element
+    arguments check against the signature's int element type) and
+    `store_int_read_of_slot_checkArg` (a declared-type-respecting
+    store at an int-typed slot reads an integer), used by
+    `compile_covers_agree`. The `int_min` ⇒ source direction needs no
+    typing at all (`holds_array_int_minimum_of_minSlot`). -/
+theorem array_int_minimum_rewrite_gap :
+    fullInterp (Ident.mk "array_int_minimum")
+        [Value.int 3, .array [Value.int 3, .bool true]] ∧
+      ¬ fullInterp (Ident.mk "int_min")
+        [Value.int 3, .bool true, Value.int 3] := by
+  constructor
+  · rw [fullInterp_std (by decide)]
+    show minValue [Value.int 3, Value.bool true] = some 3
+    rfl
+  · rw [fullInterp_std (by decide)]
+    show ¬ (match [Value.int 3, Value.bool true, Value.int 3] with
+      | [.int a, .int b, .int c] => c = min a b
+      | _ => False)
+    simp
 
 end LeanFzn.Compiler

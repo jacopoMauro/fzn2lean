@@ -58,6 +58,7 @@ DAG:
 import LeanFzn.Solver.UIP.Proofs.SchedulerFalsified
 import LeanFzn.Solver.UIP.Proofs.SchedulerStep
 import LeanFzn.Solver.UIP.Proofs.SchedulerVocabulary
+import LeanFzn.Solver.UIP.Proofs.SyncVocabulary
 import LeanFzn.Solver.Propagation.RestorationCertificate
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.UIP
 
@@ -132,7 +133,7 @@ real `perform` shape (no monotonicity premise). -/
 theorem plan_learned_mem_of_perform {leaf : Assignment → Bool}
     {p : BackjumpPlan leaf} {bs s : BranchState leaf}
     {original : List Clause} {props : List Propagator}
-    (h : p.perform bs original props = some s) :
+    (h : p.perform bs orig original props = some s) :
     p.learned ∈ s.learned := by
   unfold BackjumpPlan.perform at h
   cases hr : p.restoreNarrow bs with
@@ -149,8 +150,9 @@ theorem plan_learned_mem_of_perform {leaf : Assignment → Bool}
       · next g _ =>
           simp only [Option.some.injEq] at hr
           subst hr
-          refine explainedClosure_learned_mono original props
-            ((p.execute (bs.learnGlobal p.learned)).narrowFrame g) p.learned ?_
+          refine explainedClosure_learned_mono orig original props
+            (syncAll orig ((p.execute (bs.learnGlobal p.learned)).narrowFrame g)) p.learned ?_
+          rw [syncAll_learned]
           change p.learned ∈ (p.execute (bs.learnGlobal p.learned)).learned
           rw [BackjumpPlan.execute_learned]
           change p.learned ∈ p.learned :: bs.learned
@@ -192,9 +194,10 @@ for the NEW case follows from `perform`'s own insertion chain. -/
 theorem jumpNovelty_progress_of_perform {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {p : BackjumpPlan leaf}
     {ev : ConflictEvidence} {restored : BranchState leaf}
-    {an : ConflictAnalysis} {original : List Clause} {props : List Propagator}
+    {an : ConflictAnalysis} {dom : List Domain} {original : List Clause}
+    {props : List Propagator}
     (hm : PlanMatchesAnalysis p an)
-    (hperf : p.perform cfg.branch original props = some restored)
+    (hperf : p.perform cfg.branch dom original props = some restored)
     (hn : JumpNovelty cfg.branch.learned an) :
     ∃ c ∈ canonicalDB (stepLearnBackjumpAssert cfg p ev restored).branch.learned,
       c ∉ canonicalDB cfg.branch.learned :=
@@ -299,15 +302,17 @@ theorem branchTrailVocabulary_init {leaf : Assignment → Bool}
     literal is pooled. (The arm-level discharge of `hl` from
     `SchedulerReachable` is P1-c vocabulary, owner P2/S3.) -/
 theorem stepPropagate_branchTrailVocabulary {leaf : Assignment → Bool}
-    {orig : List Domain} {cfg : SchedulerConfig leaf}
+    {cfg : SchedulerConfig leaf}
     {d : ProductiveDeduction leaf cfg.branch}
-    (hv : BranchTrailVocabulary orig cfg.branch)
-    (hl : d.literal.norm ∈ litPool orig) :
-    BranchTrailVocabulary orig (stepPropagate cfg d).branch := by
-  change TrailVocabulary orig (stepPropagate cfg d).branch.trail
-  have hv' : TrailVocabulary orig cfg.branch.trail := hv
+    (hv : BranchTrailVocabulary cfg.orig cfg.branch)
+    (hl : d.literal.norm ∈ litPool cfg.orig) :
+    BranchTrailVocabulary cfg.orig (stepPropagate cfg d).branch := by
+  change TrailVocabulary cfg.orig (stepPropagate cfg d).branch.trail
+  have hv' : TrailVocabulary cfg.orig cfg.branch.trail := hv
+  refine syncSlot_trail_vocab (orig := cfg.orig) _ d.literal.atom.slot (P := litPool cfg.orig)
+    (fun l hl => hl) ?_
   intro e he
-  simp only [stepPropagate, narrowState] at he
+  simp only [narrowState] at he
   rcases List.mem_append.mp he with h1 | h1
   · exact hv' e h1
   · rw [List.mem_singleton] at h1

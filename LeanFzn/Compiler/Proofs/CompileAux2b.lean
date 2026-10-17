@@ -297,8 +297,10 @@ theorem auxShapeOf_andTrue_args {c : ConstraintItem} {x y : Ident}
     -- bool_or: clash
     exfalso
     split at h <;> exact absurd h (by simp)
-  · -- other names
-    exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso; split at h <;> exact absurd h (by simp))
 
 /-- The andFalse shape's argument inversion. -/
 theorem auxShapeOf_andFalse_args {c : ConstraintItem} {x y : Ident}
@@ -333,8 +335,10 @@ theorem auxShapeOf_andFalse_args {c : ConstraintItem} {x y : Ident}
     -- bool_or: clash
     exfalso
     split at h <;> exact absurd h (by simp)
-  · -- other names
-    exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso; split at h <;> exact absurd h (by simp))
 
 /-- The orTrue shape's argument inversion. -/
 theorem auxShapeOf_orTrue_args {c : ConstraintItem} {x y : Ident}
@@ -369,8 +373,10 @@ theorem auxShapeOf_orTrue_args {c : ConstraintItem} {x y : Ident}
         cases h1
     · -- no pattern
       exact absurd h (by simp)
-  · -- other names
-    exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso; split at h <;> exact absurd h (by simp))
 
 /-- The orFalse shape's argument inversion. -/
 theorem auxShapeOf_orFalse_args {c : ConstraintItem} {x y : Ident}
@@ -405,8 +411,10 @@ theorem auxShapeOf_orFalse_args {c : ConstraintItem} {x y : Ident}
         exact heq2
     · -- no pattern
       exact absurd h (by simp)
-  · -- other names
-    exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso; split at h <;> exact absurd h (by simp))
 
 
 end LeanFzn.Compiler

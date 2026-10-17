@@ -185,13 +185,13 @@ theorem unitLearned_deduction_learned {original : List Clause}
 unit-learned, provided the propagator kit has the unit profile. The
 recursion learns only the payload of selected deductions (never on
 `.conflict` events). -/
-theorem unitLearned_explainedClosure (original : List Clause)
+theorem unitLearned_explainedClosure (orig : List Domain) (original : List Clause)
     (props : List Propagator) (bs : BranchState leaf)
     (hProps : UnitRunProfile props) (h : UnitLearned bs.learned) :
-    UnitLearned (explainedClosure original props bs).learned := by
+    UnitLearned (explainedClosure orig original props bs).learned := by
   suffices hmain : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel → UnitLearned bs.learned →
-      UnitLearned (explainedClosure original props bs).learned from
+      UnitLearned (explainedClosure orig original props bs).learned from
     hmain (Frame.mass bs.frame) bs (Nat.le_refl _) h
   intro fuel
   induction fuel with
@@ -212,13 +212,12 @@ theorem unitLearned_explainedClosure (original : List Clause)
       · rename_i d hd
         have hpay := unitLearned_deduction_learned hd
           (deduction_reason_unit hProps h hd)
-        have hnew : UnitLearned
-            (narrowState bs d.frame d.literal d.reason d.learned).learned := by
-          show UnitLearned (d.learned ++ bs.learned)
+        have hnew : UnitLearned (stepNarrowSync orig bs d).learned := by
+          rw [stepNarrowSync_learned]
           exact unitLearned_append hpay h
-        refine ih (narrowState bs d.frame d.literal d.reason d.learned) ?_ hnew
+        refine ih (stepNarrowSync orig bs d) ?_ hnew
         have hdec := d.decreases
-        simp only [narrowState] at hdec ⊢
+        simp only [stepNarrowSync_frame]
         omega
 
 /-- MAINTENANCE (conflict row): the learned payload of an `.excluded`
@@ -231,7 +230,10 @@ theorem unitLearned_excluded_learned {original : List Clause}
     UnitLearned (cs.filter fun c => !(bs.learned.contains c)) := by
   rcases nextPruningEvent_conflict_cases hev with hsrc | ⟨hsd, hview, hprop⟩
   · obtain ⟨c, hmem, hunit, hcs⟩ := scanDatabase_conflict_facts hsrc
-    rw [hcs, List.filter_nil]
+    -- the database conflict clause is already stored: nothing is learned
+    have hfilt : [c].filter (fun c => !(bs.learned.contains c)) = [] := by
+      simp [List.elem_eq_mem, hmem]
+    rw [hcs, hfilt]
     exact unitLearned_nil
   · obtain ⟨p, hpm, c, hrun, hcs⟩ := scanPropagators_conflict_facts hprop
     rw [hcs]
@@ -265,6 +267,24 @@ theorem unitLearned_implied_payload {leaf : Assignment → Bool}
       scanPropagators_implied_facts hprop
     obtain ⟨q, hq, hqn⟩ := hProps.1 p hpm (frameState bs.frame) l r hrun
     exact unitLearned_if_single ⟨q, by rw [hcl, hq], hqn⟩ _
+
+/-- N1 (implied row, reason): the REASON clause of an `.implied` event is a
+normalized unit for a unit-profile kit and a unit-learned database (R1c: a
+filter-rejected implied literal is reported as a conflict on this clause). -/
+theorem implied_reason_unit {leaf : Assignment → Bool}
+    {original : List Clause} {props : List Propagator} {bs : BranchState leaf}
+    {l : Literal} {c : Clause} {lr fl : Bool}
+    (hProps : UnitRunProfile props) (hdb : UnitLearned bs.learned)
+    (hev : nextPruningEvent original props bs.frame bs.learned
+      = .implied l c lr fl) :
+    ∃ q : Literal, c = [q] ∧ q = q.norm := by
+  rcases nextPruningEvent_implied_cases hev with hsrc | ⟨-, -, hprop⟩
+  · obtain ⟨hmem, -, -⟩ := scanDatabase_implied_facts hsrc
+    exact hdb c hmem
+  · obtain ⟨p, hpm, r, hrun, hcl, _, _⟩ :=
+      scanPropagators_implied_facts hprop
+    obtain ⟨q, hq, hqn⟩ := hProps.1 p hpm (frameState bs.frame) l r hrun
+    exact ⟨q, by rw [hcl, hq], hqn⟩
 
 /-! ## N1: the unit profile discharges `hProv` and `hShape` -/
 
@@ -399,7 +419,7 @@ theorem slot_lt_frameState {f : BranchFrame} {s : Nat}
 
 /-- The `leConstHi` family: unit reason `[posLe i c]`. -/
 theorem unitEvidence_leConstHi (i : Nat) (c : Int) :
-    UnitEvidence ({ watches := [], run := fun st => LeanFzn.Solver.Propagation.propLeConstHi st i c } :
+    UnitEvidence ({ watches := [.intLe i 0], run := fun st => LeanFzn.Solver.Propagation.propLeConstHi st i c } :
       Propagator) where
   reason_unit := by
     intro st l r hrun
@@ -439,7 +459,7 @@ theorem unitEvidence_leConstHi (i : Nat) (c : Int) :
 
 /-- The `leConstLo` family: unit reason `[negLe i (c−1)]`. -/
 theorem unitEvidence_leConstLo (i : Nat) (c : Int) :
-    UnitEvidence ({ watches := [], run := fun st => LeanFzn.Solver.Propagation.propLeConstLo st i c } :
+    UnitEvidence ({ watches := [.intLe i 0], run := fun st => LeanFzn.Solver.Propagation.propLeConstLo st i c } :
       Propagator) where
   reason_unit := by
     intro st l r hrun
@@ -479,7 +499,7 @@ theorem unitEvidence_leConstLo (i : Nat) (c : Int) :
 
 /-- The `ltConstHi` family: unit reason `[posLe i (c−1)]`. -/
 theorem unitEvidence_ltConstHi (i : Nat) (c : Int) :
-    UnitEvidence ({ watches := [], run := fun st => LeanFzn.Solver.Propagation.propLtConstHi st i c } :
+    UnitEvidence ({ watches := [.intLe i 0], run := fun st => LeanFzn.Solver.Propagation.propLtConstHi st i c } :
       Propagator) where
   reason_unit := by
     intro st l r hrun
@@ -520,7 +540,7 @@ theorem unitEvidence_ltConstHi (i : Nat) (c : Int) :
 /-- The `ltConstLo` family: unit reason `[negLe i c]` (the implied head is
 `negLe i ((c+1)−1)`, the same literal by integer arithmetic). -/
 theorem unitEvidence_ltConstLo (i : Nat) (c : Int) :
-    UnitEvidence ({ watches := [], run := fun st => LeanFzn.Solver.Propagation.propLtConstLo st i c } :
+    UnitEvidence ({ watches := [.intLe i 0], run := fun st => LeanFzn.Solver.Propagation.propLtConstLo st i c } :
       Propagator) where
   reason_unit := by
     intro st l r hrun
@@ -576,7 +596,7 @@ theorem narrowHi_or_narrowLo_of_firstEvent {st : State} {s : Nat} {k : Int}
 /-- The `constEq` family (integer constants): the firstEvent of the two
 bound arms. -/
 theorem unitEvidence_constEqInt (i : Nat) (k : Int) :
-    UnitEvidence ({ watches := [], run := fun st => LeanFzn.Solver.Propagation.propConstEq st i (.int k) } :
+    UnitEvidence ({ watches := [.intLe i 0], run := fun st => LeanFzn.Solver.Propagation.propConstEq st i (.int k) } :
       Propagator) where
   reason_unit := by
     intro st l r hrun
@@ -659,7 +679,7 @@ theorem unitEvidence_constEqInt (i : Nat) (k : Int) :
 /-- The `constEq` family (Boolean constants): the direct unit clause
 `[posBool i b]`. -/
 theorem unitEvidence_constEqBool (i : Nat) (b : Bool) :
-    UnitEvidence ({ watches := [], run := fun st => LeanFzn.Solver.Propagation.propConstEq st i (.bool b) } :
+    UnitEvidence ({ watches := [.intLe i 0], run := fun st => LeanFzn.Solver.Propagation.propConstEq st i (.bool b) } :
       Propagator) where
   reason_unit := by
     intro st l r hrun
@@ -707,7 +727,7 @@ theorem unitEvidence_constEqBool (i : Nat) (b : Bool) :
 
 /-- The `constEq` family with a set constant never implies or conflicts. -/
 theorem unitEvidence_constEqSet (i : Nat) (x : IntSetValue) :
-    UnitEvidence ({ watches := [], run := fun st => LeanFzn.Solver.Propagation.propConstEq st i (.setOfInt x) } :
+    UnitEvidence ({ watches := [.intLe i 0], run := fun st => LeanFzn.Solver.Propagation.propConstEq st i (.setOfInt x) } :
       Propagator) where
   reason_unit := by
     intro st l r hrun
@@ -725,7 +745,7 @@ theorem unitEvidence_constEqSet (i : Nat) (x : IntSetValue) :
 /-- The `constEq` family with an array constant never implies or conflicts. -/
 theorem unitEvidence_constEqArray (i : Nat) (x : List Value) :
     UnitEvidence
-      ({ watches := [], run := fun st => LeanFzn.Solver.Propagation.propConstEq st i (.array x) } :
+      ({ watches := [.intLe i 0], run := fun st => LeanFzn.Solver.Propagation.propConstEq st i (.array x) } :
       Propagator) where
   reason_unit := by
     intro st l r hrun
@@ -791,10 +811,44 @@ theorem propagatorOfProved_unitEvidence (dc : DomConstraint)
   | absSlot i k => simp [unitFamilyB] at h
   | linEq coeffs is b => simp [unitFamilyB] at h
   | linLe coeffs is b => simp [unitFamilyB] at h
+  | linNe coeffs is b => simp [unitFamilyB] at h
   | ltSlot i j => simp [unitFamilyB] at h
   | boolNotSlot i j => simp [unitFamilyB] at h
   | boolAndSlot i j k => simp [unitFamilyB] at h
   | boolOrSlot i j k => simp [unitFamilyB] at h
+  | boolClauseSlot ps ns =>
+      simp only [propagatorOfProved] at hp
+      exact absurd hp (by intro hc; cases hc)
+  | arrayBoolAndSlot is k =>
+      simp only [propagatorOfProved] at hp
+      exact absurd hp (by intro hc; cases hc)
+  | bool2intSlot i k =>
+      simp only [propagatorOfProved] at hp
+      exact absurd hp (by intro hc; cases hc)
+  | boolEqSlot i j =>
+      simp only [propagatorOfProved] at hp
+      exact absurd hp (by intro hc; cases hc)
+  | arrayIntElementSlot xs i k =>
+      simp only [propagatorOfProved] at hp
+      exact absurd hp (by intro hc; cases hc)
+  | arrayVarIntElementSlot is i k =>
+      simp only [propagatorOfProved] at hp
+      exact absurd hp (by intro hc; cases hc)
+  | arrayVarBoolElementSlot is i k =>
+      simp only [propagatorOfProved] at hp
+      exact absurd hp (by intro hc; cases hc)
+  | eqReifSlot i j r => simp [unitFamilyB] at h
+  | leReifSlot i j r => simp [unitFamilyB] at h
+  | neReifSlot i j r => simp [unitFamilyB] at h
+  | linEqReif coeffs is b r => simp [unitFamilyB] at h
+  | linLeReif coeffs is b r => simp [unitFamilyB] at h
+  | linNeReif coeffs is b r => simp [unitFamilyB] at h
+  | minPair o₀ o₁ r => simp [unitFamilyB] at h
+  | maxPair o₀ o₁ r => simp [unitFamilyB] at h
+  | divGen o₁ o₂ r => simp [unitFamilyB] at h
+  | modGen o₁ o₂ r => simp [unitFamilyB] at h
+  | maxGen os r => simp [unitFamilyB] at h
+  | minGen os r => simp [unitFamilyB] at h
 
 /-- THE SUPPORTED KIT'S PROFILE: `dcs.filterMap propagatorOfProved` with
 all constraints supported has the unit run profile — every implied
@@ -860,23 +914,26 @@ theorem propagatorEvidence_unit {leaf : Assignment → Bool}
 /-! ## N1: the supported conflict payload is a normalized unit clause -/
 
 /-- **N1 CONFLICT-UNIT LEMMA**: for the supported fragment, every ANALYZED
-conflict of the closure carries a NORMALIZED UNIT clause: a nonempty
-reported list can only come from the propagator scan (a database conflict
-reports `[]`), where the payload is exactly the singleton of the
-propagator's conflict clause — and the `UnitRunProfile` of the supported
-kit makes that clause a normalized unit. -/
+conflict of the closure carries a NORMALIZED UNIT clause: a database
+conflict reports the stored clause itself (R1c routing), which is a
+normalized unit under the unit-learned database discipline `hdb`; a
+propagator conflict's payload is exactly the singleton of the propagator's
+conflict clause — and the `UnitRunProfile` of the supported kit makes that
+clause a normalized unit. -/
 theorem supported_conflict_clause_unit {leaf : Assignment → Bool}
     {dcs : List DomConstraint}
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
     {original : List Clause} {bs : BranchState leaf} {c : Clause}
-    {rest : List Clause}
+    {rest : List Clause} (hdb : UnitLearned bs.learned)
     (hev : nextPruningEvent original (dcs.filterMap propagatorOfProved)
         bs.frame bs.learned = .conflict (c :: rest)) :
     rest = [] ∧ ∃ q : Literal, c = [q] ∧ q = q.norm := by
   rcases nextPruningEvent_conflict_cases hev with hsd | ⟨-, -, hprop⟩
-  · -- DATABASE conflict: the payload is `[]`, but the event carries `c :: rest`
-    obtain ⟨-, -, -, hnil⟩ := scanDatabase_conflict_facts hsd
-    simp at hnil
+  · -- DATABASE conflict: the payload is the stored (unit) clause
+    obtain ⟨d, hd, -, hcs⟩ := scanDatabase_conflict_facts hsd
+    injection hcs with hcd hrest
+    obtain ⟨q, hdq, hqn⟩ := hdb d hd
+    exact ⟨hrest, q, by rw [hcd, hdq], hqn⟩
   · -- PROPAGATOR conflict: the payload is `if c'.isEmpty then [] else [c']`
     obtain ⟨p, hpm, c', hrun, hcs⟩ := scanPropagators_conflict_facts hprop
     cases hb : c'.isEmpty with
@@ -914,12 +971,14 @@ theorem domExplainedContract_units
     {original : List Clause} {props : List Propagator}
     (hOriginal : ∀ c ∈ original, ∀ a, leaf a = true → c.SatisfiedBy a)
     (hViewed : ∀ d ∈ orig, IntViewedDomain d)
+    (hSorts : DomsShapeTyped orig)
+    (hLeafFits : ∀ a, leaf a = true → a.Fits orig)
     (hp : PropagationContract leaf props)
     (hEvidence : PropagatorEvidence leaf props)
     (hDisc : ∀ bs : BranchState leaf, ReachableState leaf orig bs →
       UnitDB bs.learned → LearnedExplained leaf bs) :
     ClosureContract leaf orig original props :=
-  domExplainedContract hOriginal hViewed hp hEvidence
+  domExplainedContract hOriginal hViewed hSorts hLeafFits hp hEvidence
     (unitClauseEvidence_of hDisc)
 
 /-- THE EXPORTED CONCRETE CONSTRUCTOR at the problem level: the supported
@@ -935,11 +994,13 @@ theorem domExplainedContract_of_problem
     (hSupp : ∀ dc ∈ problem.constraints, unitFamilyB dc = true)
     (hOriginal : ∀ c ∈ problem.clauses, ∀ a, leaf a = true → c.SatisfiedBy a)
     (hViewed : ∀ d ∈ problem.domains, IntViewedDomain d)
+    (hSorts : DomsShapeTyped problem.domains)
+    (hLeafFits : ∀ a, leaf a = true → a.Fits problem.domains)
     (hDisc : ∀ bs : BranchState leaf, ReachableState leaf problem.domains bs →
       UnitDB bs.learned → LearnedExplained leaf bs) :
     ClosureContract leaf problem.domains problem.clauses
       (problem.constraints.filterMap propagatorOfProved) :=
-  domExplainedContract_units hOriginal hViewed hp
+  domExplainedContract_units hOriginal hViewed hSorts hLeafFits hp
     (propagatorEvidence_unit problem.constraints hSupp) hDisc
 
 /-- The same constructor with the WEAKER, purely syntactic discipline:
@@ -952,11 +1013,13 @@ theorem domExplainedContract_of_problem_unitLearned
     (hSupp : ∀ dc ∈ problem.constraints, unitFamilyB dc = true)
     (hOriginal : ∀ c ∈ problem.clauses, ∀ a, leaf a = true → c.SatisfiedBy a)
     (hViewed : ∀ d ∈ problem.domains, IntViewedDomain d)
+    (hSorts : DomsShapeTyped problem.domains)
+    (hLeafFits : ∀ a, leaf a = true → a.Fits problem.domains)
     (hDisc : ∀ bs : BranchState leaf, ReachableState leaf problem.domains bs →
       UnitLearned bs.learned) :
     ClosureContract leaf problem.domains problem.clauses
       (problem.constraints.filterMap propagatorOfProved) :=
-  domExplainedContract_of_problem problem hp hSupp hOriginal hViewed
+  domExplainedContract_of_problem problem hp hSupp hOriginal hViewed hSorts hLeafFits
     (fun bs hreach _ => learnedExplained_of_unitLearned (hDisc bs hreach))
 
 /-! ## Per-state slices and the closure coverage/conflict theorems -/
@@ -1082,6 +1145,8 @@ theorem domExplainedClosureResult_spec {leaf : Assignment → Bool}
     (hSupp : ∀ dc ∈ problem.constraints, unitFamilyB dc = true)
     (hOriginal : ∀ c ∈ problem.clauses, ∀ a, leaf a = true → c.SatisfiedBy a)
     (hViewed : ∀ d ∈ problem.domains, IntViewedDomain d)
+    (hSorts : DomsShapeTyped problem.domains)
+    (hLeafFits : ∀ a, leaf a = true → a.Fits problem.domains)
     (hDisc : ∀ bs : BranchState leaf, ReachableState leaf problem.domains bs →
       UnitDB bs.learned → LearnedExplained leaf bs)
     (hpay : UnitPayload problem.clauses
@@ -1089,10 +1154,10 @@ theorem domExplainedClosureResult_spec {leaf : Assignment → Bool}
     {bs : BranchState leaf} (hreach : ReachableState leaf problem.domains bs)
     (hu : UnitDB bs.learned) :
     ClosureResult.Spec leaf problem.domains bs
-      (explainedClosureResult problem.clauses
+      (explainedClosureResult problem.domains problem.clauses
         (problem.constraints.filterMap propagatorOfProved) bs) :=
   explainedClosureResult_spec
-    (domExplainedContract_of_problem problem hp hSupp hOriginal hViewed hDisc)
+    (domExplainedContract_of_problem problem hp hSupp hOriginal hViewed hSorts hLeafFits hDisc)
     bs hpay hreach hu
 
 /-- The conflict-classification corollary at the supported problem: every
@@ -1105,6 +1170,8 @@ def domExplainedConflict_sound {leaf : Assignment → Bool}
     (hSupp : ∀ dc ∈ problem.constraints, unitFamilyB dc = true)
     (hOriginal : ∀ c ∈ problem.clauses, ∀ a, leaf a = true → c.SatisfiedBy a)
     (hViewed : ∀ d ∈ problem.domains, IntViewedDomain d)
+    (hSorts : DomsShapeTyped problem.domains)
+    (hLeafFits : ∀ a, leaf a = true → a.Fits problem.domains)
     (hDisc : ∀ bs : BranchState leaf, ReachableState leaf problem.domains bs →
       UnitDB bs.learned → LearnedExplained leaf bs)
     {bs : BranchState leaf} (hreach : ReachableState leaf problem.domains bs)
@@ -1114,7 +1181,7 @@ def domExplainedConflict_sound {leaf : Assignment → Bool}
         = .conflict cs) :
     DomConflictEvidence leaf bs cs :=
   conflictEvidence_at
-    (domExplainedContract_of_problem problem hp hSupp hOriginal hViewed hDisc)
+    (domExplainedContract_of_problem problem hp hSupp hOriginal hViewed hSorts hLeafFits hDisc)
     hreach hev
 
 /-! ## Worked examples (PLAN A3 done criteria) -/

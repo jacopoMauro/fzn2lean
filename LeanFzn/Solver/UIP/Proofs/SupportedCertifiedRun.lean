@@ -36,16 +36,13 @@ open LeanFzn.Solver.Propagation LeanFzn.Solver.UIP LeanFzn.Solver.Reference Lean
 /-! ## §1 The supported premise bundle -/
 
 /-- The explicit premise bundle of ONE supported run: database-side literal
-pool alignment (C1), unfalsified database (C1/S5), branch reachability
+pool alignment (C1), novelty of the recorded analysis (restated by R1c from the unfalsified database, C1/S5), branch reachability
 (B4 via `supportedHbr_of_gates`). All self-indexed, so each has a producer
 for the run. -/
 structure SupportedPhasePremises (orig : List Domain) (original : List Clause)
     (props : List Propagator) (leaf : Assignment → Bool) : Prop where
   halignDB : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
     ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPool orig
-  hdb : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence},
-    SupportedReach orig original props cfg → cfg.conflict = some ev →
-    DatabaseUnfalsified cfg.branch
   hbr : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
     ReachableState leaf orig cfg.branch
 
@@ -58,7 +55,7 @@ def supportedPhaseKernelOf {orig : List Domain} {original : List Clause}
     SupportedPhaseKernel orig original props leaf :=
   supportedPhaseKernelSorted
     (supportedPhaseProgressSorted_of_premises orig original props
-      P.halignDB P.hdb P.hbr)
+      P.halignDB P.hbr)
 
 /-! ## §3 The computable supported entry -/
 
@@ -67,10 +64,11 @@ supported kernel, started at the run's real initializer. No fuel, no axiom;
 the kernel's proof fields are erased. -/
 def solveSupportedPhase {orig : List Domain} {original : List Clause}
     {props : List Propagator} {leaf : Assignment → Bool}
-    (P : SupportedPhasePremises orig original props leaf) : DriverResult leaf :=
+    (P : SupportedPhasePremises orig original props leaf)
+    (hent : LearnedEntailed leaf original) : DriverResult leaf :=
   runSupportedPhase (supportedPhaseKernelOf P)
     (SchedulerConfig.init (leaf := leaf) orig original props)
-    SupportedReach.init
+    (SupportedReach.init hent)
 
 /-! ## §4 The verdict transfers -/
 
@@ -81,37 +79,40 @@ assembly once the gate record exists). -/
 theorem solveSupportedPhase_sat_solution {orig : List Domain}
     {original : List Clause} {props : List Propagator} {leaf : Assignment → Bool}
     (P : SupportedPhasePremises orig original props leaf)
+    (hent : LearnedEntailed leaf original)
     (hterm_sat : ∀ (cfg : SchedulerConfig leaf) (w : Assignment),
       SupportedReach orig original props cfg → cfg.orig = orig →
         (supportedPhaseKernelOf P).step cfg = .sat w →
           SolutionWitness leaf orig w)
-    {w : Assignment} (hrun : solveSupportedPhase P = .sat w) :
+    {w : Assignment} (hrun : solveSupportedPhase P hent = .sat w) :
     SolutionWitness leaf orig w :=
   runSupportedPhase_sat_solution (supportedPhaseKernelOf P) hterm_sat
     (SchedulerConfig.init (leaf := leaf) orig original props)
-    SupportedReach.init hrun
+    (SupportedReach.init hent) hrun
 
 /-- **SUPPORTED UNSAT TRANSFER**: a `.unsat` verdict of the supported entry
 excludes every leaf solution of the run's box. -/
 theorem solveSupportedPhase_unsat_excludes {orig : List Domain}
     {original : List Clause} {props : List Propagator} {leaf : Assignment → Bool}
     (P : SupportedPhasePremises orig original props leaf)
+    (hent : LearnedEntailed leaf original)
     (hterm_unsat : ∀ (cfg : SchedulerConfig leaf),
       SupportedReach orig original props cfg → cfg.orig = orig →
         (supportedPhaseKernelOf P).step cfg = .unsat →
           ∀ a, OriginalLeaves leaf orig a → False)
-    (hrun : solveSupportedPhase P = .unsat) :
+    (hrun : solveSupportedPhase P hent = .unsat) :
     ∀ a, OriginalLeaves leaf orig a → False :=
   runSupportedPhase_unsat_excludes (supportedPhaseKernelOf P) hterm_unsat
     (SchedulerConfig.init (leaf := leaf) orig original props)
-    SupportedReach.init hrun
+    (SupportedReach.init hent) hrun
 
 /-- **TOTALITY**: the supported entry returns a verdict on every premise
 bundle — pure well-founded recursion, no fuel and no runtime contract. -/
 theorem solveSupportedPhase_total {orig : List Domain} {original : List Clause}
     {props : List Propagator} {leaf : Assignment → Bool}
-    (P : SupportedPhasePremises orig original props leaf) :
-    ∃ r : DriverResult leaf, solveSupportedPhase P = r :=
+    (P : SupportedPhasePremises orig original props leaf)
+    (hent : LearnedEntailed leaf original) :
+    ∃ r : DriverResult leaf, solveSupportedPhase P hent = r :=
   ⟨_, rfl⟩
 
 /-- The entry's kernel steps by the REAL phase dispatcher (definitional). -/

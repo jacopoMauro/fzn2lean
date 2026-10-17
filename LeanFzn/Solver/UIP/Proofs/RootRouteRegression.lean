@@ -57,7 +57,7 @@ theorem not_rootRouteExcludesOld :
   have hreach : SchedulerReachable
       (SchedulerConfig.init (leaf := fun _ => true) ([] : List Domain)
         ([] : List Clause) ([] : List Propagator)) :=
-    SchedulerReachable.init [] [] []
+    SchedulerReachable.init [] [] [] (fun _ hc => absurd hc (List.not_mem_nil))
   exact h hreach rfl rfl ([] : Assignment)
     ⟨rfl, rfl, fun slot value hget => by simp_all⟩
 

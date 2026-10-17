@@ -94,7 +94,7 @@ theorem pendingSideInv_supportedStep {orig : List Domain}
                 exact ih.stepChronologicalFallback (r := branchRegion cfg)
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     -- perform rejected → local exclusion (stack kept)
                     rw [ha] at hs
@@ -232,12 +232,13 @@ theorem stepConsume_reachable_of_inv {leaf : Assignment → Bool}
     {rest : List BranchFrame}
     (hp : cfg.pending = f :: rest) (h : stepConsume cfg = some next)
     (hreach : ReachableState leaf orig cfg.branch)
-    (hpinv : PendingSideInv orig cfg) (horig : cfg.orig = orig) :
+    (hpinv : PendingSideInv orig cfg) (horig : cfg.orig = orig)
+    (hfits : ∀ a, leaf a = true → a.Fits orig) :
     ReachableState leaf orig next.branch := by
-  rw [← horig] at hreach hpinv ⊢
+  rw [← horig] at hreach hpinv hfits ⊢
   rw [stepConsume_branch hp h]
   exact resumePending_reachable hreach
-    (hpinv.pending f (by rw [hp]; exact List.mem_cons_self ..))
+    (hpinv.pending f (by rw [hp]; exact List.mem_cons_self ..)) hfits
 
 /-- COMPATIBILITY WRAPPER (retained name): route (b) is no longer a route
 — every consume is the canonical resume — so the old checkpoint-absent
@@ -248,9 +249,10 @@ theorem stepConsume_reachable_of_inv_missing_checkpoint {leaf : Assignment → B
     (hp : cfg.pending = f :: rest) (h : stepConsume cfg = some next)
     (_hcp : checkpointAt cfg.checkpoints f.2.length = none)
     (hreach : ReachableState leaf orig cfg.branch)
-    (hpinv : PendingSideInv orig cfg) (horig : cfg.orig = orig) :
+    (hpinv : PendingSideInv orig cfg) (horig : cfg.orig = orig)
+    (hfits : ∀ a, leaf a = true → a.Fits orig) :
     ReachableState leaf orig next.branch :=
-  stepConsume_reachable_of_inv hp h hreach hpinv horig
+  stepConsume_reachable_of_inv hp h hreach hpinv horig hfits
 
 /-- **THE SUPPORTED `hconsume` GATE PRODUCER** (R2 deliverable, route (a)
 retired): at the supported index, every consume of a supported run
@@ -264,7 +266,9 @@ theorem supportedHconsume_of_premises {orig : List Domain}
     {leaf : Assignment → Bool}
     (hshape : ShapeTypedDomains orig)
     (hbr : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      ReachableState leaf orig cfg.branch) :
+      ReachableState leaf orig cfg.branch)
+    (hfits : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
+      ∀ a, leaf a = true → a.Fits orig) :
     ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
       {rest : List BranchFrame},
       SupportedReach orig original props cfg → cfg.pending = f :: rest →
@@ -272,7 +276,7 @@ theorem supportedHconsume_of_premises {orig : List Domain}
   fun hreach hp h =>
     stepConsume_reachable_of_inv hp h (hbr hreach)
       (pendingSideInv_of_premises hshape hbr hreach)
-      (SupportedReach.orig_eq hreach)
+      (SupportedReach.orig_eq hreach) (hfits hreach)
 
 /-! ## §3 The route-(a) audit (RETIRED ROUTE — see §4's verdict)
 
@@ -550,7 +554,7 @@ def shadowInit : SchedulerConfig shadowLeaf :=
   SchedulerConfig.init shadowBox [] [shadowProp]
 -- cfg1 = stepDecide shadowInit (int 1) [int 2] [] (negNe 0 1)
 -- cfg2 = stepAnalyzeConflictCounted cfg1 (posNe 0 1) [posNe 0 1]
---          (analyzeEventsExpansions cfg1.branch.trail cfg1.branch.level (posNe 0 1))
+--          (analyzeEventsExpansions cfg1.orig cfg1.branch.trail cfg1.branch.level (posNe 0 1))
 -- cfg3 = stepLearnBackjumpAssert cfg2 (BackjumpPlan.ofCheckpoint … ) … (…)
 -- cfg4 = stepDecide cfg3 (int 2) [] [] (negNe 0 2)          -- pushes cp*
 -- cfg5 = stepLocalExclude cfg4 [] (branchRegion cfg4)

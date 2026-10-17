@@ -73,29 +73,12 @@ over `nextPruningEvent` / `filterFrame`; the `.implied`/empty-filter arm
 extracts the carried state by injection, the other three arms are
 constructor-impossible. -/
 theorem terminalResult_localExcluded_state_eq {leaf : Assignment → Bool}
-    {original : List Clause} {props : List Propagator}
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
     {bs s : BranchState leaf} {lit : Option Literal} {reason : Option Clause}
     {learned : List Clause}
-    (ht : terminalResult original props bs = .localExcluded s lit reason learned) :
-    s = bs := by
-  unfold terminalResult at ht
-  cases hne : nextPruningEvent original props bs.frame bs.learned with
-  | stable =>
-      simp only [hne] at ht
-      cases ht
-  | conflict cs' =>
-      simp only [hne] at ht
-      cases ht
-  | implied l c lr fl =>
-      simp only [hne] at ht
-      cases hff : filterFrame l bs.frame with
-      | none =>
-          simp only [hff] at ht
-          injection ht with h _ _ _
-          exact h.symm
-      | some g =>
-          simp only [hff] at ht
-          cases ht
+    (ht : terminalResult orig original props bs = .localExcluded s lit reason learned) :
+    s = bs :=
+  absurd ht terminalResult_ne_localExcluded
 
 /-! ## §2 The dead-site producers -/
 
@@ -112,7 +95,7 @@ theorem deadConflictNil_of_terminalEvent {leaf : Assignment → Bool}
     {cs learned : List Clause}
     (hc : ClosureContract leaf orig original props)
     (hreach : ReachableState leaf orig cfg.branch)
-    (ht : terminalResult original props cfg.branch = .conflict bs cs learned)
+    (ht : terminalResult orig original props cfg.branch = .conflict bs cs learned)
     (hcs : cs = []) :
     ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False := by
   -- the gate's runtime premise: normalize the payload to `[]` (the
@@ -142,7 +125,7 @@ theorem deadLocalExcluded_of_terminalEvent {leaf : Assignment → Bool}
     {lit : Option Literal} {reason : Option Clause} {learned : List Clause}
     (hc : ClosureContract leaf orig original props)
     (hreach : ReachableState leaf orig cfg.branch)
-    (ht : terminalResult original props cfg.branch =
+    (ht : terminalResult orig original props cfg.branch =
       .localExcluded bs lit reason learned) :
     ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False := by
   have hspec := terminalResult_spec hc hreach
@@ -164,7 +147,7 @@ theorem frameDead_of_terminalConflict {leaf : Assignment → Bool}
     {cs learned : List Clause}
     (hc : ClosureContract leaf orig original props)
     (hreach : ReachableState leaf orig cfg.branch)
-    (ht : terminalResult original props cfg.branch = .conflict bs cs learned) :
+    (ht : terminalResult orig original props cfg.branch = .conflict bs cs learned) :
     ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False := by
   have hspec := terminalResult_spec hc hreach
   rw [ht] at hspec

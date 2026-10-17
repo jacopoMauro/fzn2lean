@@ -32,11 +32,13 @@ Purpose:
   * the run-scoped conflict entitlement (hconfent, the cc ≠ []
     version): every NONEMPTY conflict clause reported by the
     propagation loop at a RunInv state is entailed. The neSlot
-    family's conflict clause is the EMPTY clause (Propagate.lean:
-    `| [x], [y] => if x.eqB y then .conflict []`) — never entailed
-    at decision-narrowed states — but also never analyzed
-    (`analyzeConflict_empty_none` in Proofs/Run.lean), which is
-    exactly why the master theorem's hconfent carries `cc ≠ []`.
+    and allDiff families report EXPLAINED clauses (`[x ≠ c, y ≠ c]` /
+    `[x = ¬b, y = ¬b]`, resp. the Hall clause); their entitlement needs
+    the shape premise (`DomsShapeTyped`, state domains a sub-box of the
+    problem's) threaded through the loop-level theorems. An EMPTY
+    clause is still never entailed at decision-narrowed states and never
+    analyzed (`analyzeConflict_empty_none` in Proofs/Run.lean), which is
+    why the master theorem's hconfent carries `cc ≠ []`.
 
   Also here: the initial-state seeds for the master theorem's
   application (`initialStateWithRoots_runInv`,
@@ -641,7 +643,7 @@ theorem ne_nogood_true {a : Assignment} {i j : Nat} {c : Int}
     (hxi : ∃ x, slotInt a i = some x)
     (hyj : ∃ y, slotInt a j = some y) :
     ∃ l ∈ [posNe j c, posLe i (c - 1), negLe i c,
-        posBool i (decide (c = 1)), posBool j (decide (c = 1))],
+        neBoolLit i i c, neBoolLit i j c],
       l.eval a = some true := by
   obtain ⟨x, hx⟩ := hxi
   obtain ⟨y, hy⟩ := hyj
@@ -658,20 +660,20 @@ theorem ne_nogood_true {a : Assignment} {i j : Nat} {c : Int}
   -- membership helpers for the five-element disjunction
   have mem1 : posNe j c ∈
       [posNe j c, posLe i (c - 1), negLe i c,
-        posBool i (decide (c = 1)), posBool j (decide (c = 1))] :=
+        neBoolLit i i c, neBoolLit i j c] :=
     List.mem_cons_self
   have mem3 : negLe i c ∈
       [posNe j c, posLe i (c - 1), negLe i c,
-        posBool i (decide (c = 1)), posBool j (decide (c = 1))] :=
+        neBoolLit i i c, neBoolLit i j c] :=
     List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self)
-  have mem4 : posBool i (decide (c = 1)) ∈
+  have mem4 : neBoolLit i i c ∈
       [posNe j c, posLe i (c - 1), negLe i c,
-        posBool i (decide (c = 1)), posBool j (decide (c = 1))] :=
+        neBoolLit i i c, neBoolLit i j c] :=
     List.mem_cons_of_mem _ (List.mem_cons_of_mem _
       (List.mem_cons_of_mem _ List.mem_cons_self))
-  have mem5 : posBool j (decide (c = 1)) ∈
+  have mem5 : neBoolLit i j c ∈
       [posNe j c, posLe i (c - 1), negLe i c,
-        posBool i (decide (c = 1)), posBool j (decide (c = 1))] :=
+        neBoolLit i i c, neBoolLit i j c] :=
     List.mem_cons_of_mem _ (List.mem_cons_of_mem _
       (List.mem_cons_of_mem _ (List.mem_cons_of_mem _
         List.mem_cons_self)))
@@ -715,8 +717,12 @@ theorem ne_nogood_true {a : Assignment} {i j : Nat} {c : Int}
                       have h0 : (0 : Int) = c := by simpa using hbc
                       omega
                     rw [decide_eq_false (by omega : c ≠ 1)]
-              exact ⟨posBool j (decide (c = 1)), mem5, by
-                rw [eval_posBool_iff, ← hbdec, hrawj, hq]⟩
+              have hc01 : c = 0 ∨ c = 1 := by
+                cases b2 with
+                | true => right; simpa using hbc.symm
+                | false => left; simpa using hbc.symm
+              exact ⟨neBoolLit i j c, mem5, by
+                rw [neBoolLit, if_pos hc01, eval_posBool_iff, ← hbdec, hrawj, hq]⟩
             · exact ⟨posNe j c, mem1, by
                 rw [eval_posNe_iff]
                 refine ⟨(if b2 then 1 else 0), ?_, hbc⟩
@@ -749,8 +755,12 @@ theorem ne_nogood_true {a : Assignment} {i j : Nat} {c : Int}
                 have h0 : (0 : Int) = c := by simpa using hxc'
                 omega
               rw [decide_eq_false (by omega : c ≠ 1)]
-        exact ⟨posBool i (decide (c = 1)), mem4, by
-          rw [eval_posBool_iff, ← hbdec, hrawi, hp]⟩
+        have hc01 : c = 0 ∨ c = 1 := by
+          cases bi with
+          | true => right; simpa using hxc'.symm
+          | false => left; simpa using hxc'.symm
+        exact ⟨neBoolLit i i c, mem4, by
+          rw [neBoolLit, if_pos hc01, eval_posBool_iff, ← hbdec, hrawi, hp]⟩
     | setOfInt s =>
         rw [hp] at hviewi
         exact absurd hviewi (by simp [Value.intView])
@@ -764,6 +774,10 @@ theorem ne_nogood_true {a : Assignment} {i j : Nat} {c : Int}
         rw [eval_posLe_iff]; exact ⟨x, hx, by omega⟩⟩
     · exact ⟨negLe i c, mem3, by
         rw [eval_negLe_iff]; exact ⟨x, hx, by omega⟩⟩
+
+theorem neBoolLit_norm (p s : Nat) (c : Int) : (neBoolLit p s c).norm = neBoolLit p s c := by
+  unfold neBoolLit
+  split <;> rfl
 
 /-- The state-free reason-validity lemma for the `neSlot` family:
     the emitted nogood is raw-valid under the constraint at every
@@ -803,8 +817,8 @@ theorem propNe_reason_valid
       | none => exact absurd hv hvj
       | some w => exact ⟨w, by rw [Option.bind_some]; exact hv⟩
   rcases propNe_implied_inv hrun with
-    ⟨x, c, hsi, hlit, hcl, hc, hmem, hgate⟩ |
-    ⟨y, c, hsj, hlit, hcl, hc, hmem, hgate⟩
+    ⟨x, c, hsi, hlit, hcl, hc, hmem, hgate, hk⟩ |
+    ⟨y, c, hsj, hlit, hcl, hc, hmem, hgate, hk⟩
   · subst hlit
     rw [hcl]
     refine ⟨⟨?_, by simp⟩, ?_⟩
@@ -819,8 +833,8 @@ theorem propNe_reason_valid
         · rcases List.mem_cons.mp hrest with rfl | hrest
           · rfl
           · rcases List.mem_cons.mp hrest with rfl | hrest
-            · rfl
-            · cases List.mem_singleton.mp hrest; rfl
+            · exact (neBoolLit_norm _ _ _).symm
+            · cases List.mem_singleton.mp hrest; exact (neBoolLit_norm _ _ _).symm
   · subst hlit
     rw [hcl]
     refine ⟨⟨?_, by simp⟩, ?_⟩
@@ -839,8 +853,8 @@ theorem propNe_reason_valid
         · rcases List.mem_cons.mp hrest with rfl | hrest
           · rfl
           · rcases List.mem_cons.mp hrest with rfl | hrest
-            · rfl
-            · cases List.mem_singleton.mp hrest; rfl
+            · exact (neBoolLit_norm _ _ _).symm
+            · cases List.mem_singleton.mp hrest; exact (neBoolLit_norm _ _ _).symm
 
 /-- The state-free reason-validity lemma for the `plusSlot` family
     (`x + y = z`): all six nogoods are integer-valid under the
@@ -1006,7 +1020,7 @@ For each family that can report `.conflict` with a NONEMPTY clause:
 the conflict clause is the SAME nogood, so the same two-case
 disjunction gives a true literal at every internal solution. neSlot
 is EXCLUDED: `propNe`'s conflict clause is `[]`
-(`propNe_conflict_clause_empty` below) — the master theorem's
+(`propNe_conflict_clause_shape` below) — the master theorem's
 `cc ≠ []` gate is exactly for it. -/
 
 /-- The state-free conflict entitlement for the `leSlot` family: the
@@ -1172,21 +1186,28 @@ theorem propPlus_conflict_entitled
                 exact plus_nogood_6_true (ha.2 _ hprob)
   next => exact absurd hrun (by intro hc; simp at hc)
 
-/-! ### neSlot's exclusion
+/-! ### neSlot's explained conflict
 
-`propNe`'s only conflict report is the EMPTY clause: its entitlement
-is exactly "no internal solution exists", which is a genuinely
-state-dependent fact (the raw both-singleton comparison reads the
-STATE's narrowed domains). This is precisely why the master theorem's
-`hconfent` carries `cc ≠ []`. -/
+`propNe`'s only conflict report is the EXPLAINED clause
+`neConflictClause i j x` (`[x ≠ c, y ≠ c]` for the integer shape,
+`[x = ¬b, y = ¬b]` for the Boolean shape): its entitlement is the
+sort-faithfulness-gated `propNe_conflict_entailed`
+(`Proofs/Propagators.lean`), its falsification
+`propNe_conflict_falsified`. This replaces the former
+`propNe_conflict_clause_empty` (the clause used to be `[]`, which is why the
+master theorem's `hconfent` carries `cc ≠ []`; the gate stays for the empty
+payload that unusable sorts / hulls still produce). -/
 
-/-- `propNe`'s conflict report is the empty clause (so its
-    nonempty-clause entitlement is vacuous — and its unconstrained
-    form is FALSE, which is why it is excluded from Task B). -/
-theorem propNe_conflict_clause_empty {st : State} {i j : Nat}
-    {c : Clause} (hrun : propNe st i j = .conflict c) : c = [] := by
+/-- `propNe`'s conflict report is `neConflictClause` of the common pinned
+    value of the two sides. -/
+theorem propNe_conflict_clause_shape {st : State} {i j : Nat}
+    {c : Clause} (hrun : propNe st i j = .conflict c) :
+    ∃ x, st.domains.getD i [] = [x] ∧ st.domains.getD j [] = [x] ∧
+      c = neConflictClause i j x := by
   obtain ⟨x, y, hx, hy, hcond, hc2⟩ := propNe_conflict_inv hrun
-  exact hc2
+  have hxy : x = y := Value_eqB_true hcond
+  subst hxy
+  exact ⟨x, hx, hy, hc2⟩
 
 /-! ### The five const families' conflict entitlement (reuse)
 
@@ -1293,12 +1314,687 @@ theorem posBool_decided {a : Assignment} {s : Nat} {b : Bool}
   simp only [Atom.eval, hx]
 
 
+/-! ## PLAN L4: the reified comparisons
+
+The reified constraint reads its operands as integers and `r` as a Boolean
+unconditionally, so the delegated clause of the unreified propagator, augmented
+with the pin escape, is entailed at every solution of the REIFIED problem: the
+escape holds when `r` reads against the pin, and otherwise the unreified
+constraint holds. The unreified lemmas are applied to the problem with the
+single unreified constraint. -/
+
+theorem reifAug_reason_valid {problem : Problem DomConstraint Unit}
+    {c : DomConstraint} {extras : Clause} {l : Literal} {rs0 : Reason}
+    (hinner : Reason.Valid { problem with constraints := [c] }
+      DomConstraint.SatisfiedBy rs0 l)
+    (hnorm : ∀ q ∈ rs0.clause, q = q.norm)
+    (hext : ∀ q ∈ extras, q = q.norm)
+    (hsplit : ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
+      (∃ q ∈ extras, q.eval a = some true) ∨ c.SatisfiedBy a) :
+    Reason.Valid problem DomConstraint.SatisfiedBy
+        { clause := insertAfterHead extras rs0.clause } l ∧
+      (∀ q ∈ ({ clause := insertAfterHead extras rs0.clause } : Reason).clause,
+        q = q.norm) := by
+  refine ⟨⟨?_, ?_⟩, ?_⟩
+  · intro a ha
+    rcases hsplit a ha with ⟨q, hq, hqt⟩ | hc
+    · exact ⟨q, mem_insertAfterHead_of_mem_extras hq, hqt⟩
+    · obtain ⟨q, hq, hqt⟩ := hinner.1 a ⟨ha.1, by
+        intro c' hc'
+        rw [List.mem_singleton] at hc'
+        subst hc'
+        exact hc⟩
+      exact ⟨q, mem_insertAfterHead_of_mem hq, hqt⟩
+  · exact decide_eq_true (mem_insertAfterHead_of_mem (of_decide_eq_true hinner.2))
+  · intro q hq
+    rcases mem_insertAfterHead hq with hq | hq
+    · exact hnorm q hq
+    · exact hext q hq
+
+theorem reifAug_conflict_entitled {problem : Problem DomConstraint Unit}
+    {c : DomConstraint} {extras : Clause} {c0 : Clause}
+    (hinner : ∀ a, ProblemSolution { problem with constraints := [c] }
+      DomConstraint.SatisfiedBy a → ∃ l ∈ c0, l.eval a = some true)
+    (a : Assignment) (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hsplit : (∃ q ∈ extras, q.eval a = some true) ∨ c.SatisfiedBy a) :
+    ∃ l ∈ insertAfterHead extras c0, l.eval a = some true := by
+  rcases hsplit with ⟨q, hq, hqt⟩ | hc
+  · exact ⟨q, mem_insertAfterHead_of_mem_extras hq, hqt⟩
+  · obtain ⟨q, hq, hqt⟩ := hinner a ⟨ha.1, by
+      intro c' hc'
+      rw [List.mem_singleton] at hc'
+      subst hc'
+      exact hc⟩
+    exact ⟨q, mem_insertAfterHead_of_mem hq, hqt⟩
+
+/-- State-free reason validity of the `leReifSlot` delegation. -/
+theorem propLeReifSlot_reason_valid {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {l : Literal} {rs : Reason}
+    (hprob : DomConstraint.leReifSlot i j r ∈ problem.constraints)
+    (hrun : propLeReifSlot st i j r = .implied l rs) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
+      (∀ q ∈ rs.clause, q = q.norm) := by
+  rcases propLeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+    have hv := propLe_reason_valid
+      (problem := { problem with constraints := [DomConstraint.leSlot i j] })
+      (List.mem_singleton_self _) hres
+    have := reifAug_reason_valid hv.1 hv.2
+      (extras := [posBool r false]) (fun q hq => by
+        rw [List.mem_singleton.mp hq]; exact (posBool_norm _ _).symm)
+      (fun a ha => leReif_split_true (ha.2 _ hprob))
+    have hrs : rs = { clause := insertAfterHead [posBool r false] rs0.clause } := by
+      cases rs; simp_all
+    rw [hrs]; exact this
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+    have hv := propLt_reason_valid
+      (problem := { problem with constraints := [DomConstraint.ltSlot j i] })
+      (List.mem_singleton_self _) hres
+    have := reifAug_reason_valid hv.1 hv.2
+      (extras := [posBool r true]) (fun q hq => by
+        rw [List.mem_singleton.mp hq]; exact (posBool_norm _ _).symm)
+      (fun a ha => leReif_split_false (ha.2 _ hprob))
+    have hrs : rs = { clause := insertAfterHead [posBool r true] rs0.clause } := by
+      cases rs; simp_all
+    rw [hrs]; exact this
+  · rw [he] at hrun; cases hrun
+
+/-- Conflict entitlement of the `leReifSlot` delegation at every solution. -/
+theorem propLeReifSlot_entitled {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {cc : Clause}
+    (hprob : DomConstraint.leReifSlot i j r ∈ problem.constraints)
+    (hrun : propLeReifSlot st i j r = .conflict cc)
+    (a : Assignment) (ha : ProblemSolution problem DomConstraint.SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  rcases propLeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+    rw [hcl]
+    exact reifAug_conflict_entitled (c := DomConstraint.leSlot i j)
+      (fun a' ha' => propLe_conflict_entitled
+        (problem := { problem with constraints := [DomConstraint.leSlot i j] })
+        (List.mem_singleton_self _) hres a' ha') a ha (leReif_split_true (ha.2 _ hprob))
+  · rw [he] at hrun
+    obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+    rw [hcl]
+    exact reifAug_conflict_entitled (c := DomConstraint.ltSlot j i)
+      (fun a' ha' => propLt_conflict_entitled
+        (problem := { problem with constraints := [DomConstraint.ltSlot j i] })
+        (List.mem_singleton_self _) hres a' ha') a ha (leReif_split_false (ha.2 _ hprob))
+  · rw [he] at hrun; cases hrun
+
+theorem propLe_implied_decided_views {st : State} {i j : Nat} {a : Assignment}
+    {x y : Int} {lg : Literal} {rsn : Reason}
+    (hx : slotInt a i = some x) (hy : slotInt a j = some y)
+    (hrun : propLe st i j = .implied lg rsn) : ∃ b, lg.eval a = some b := by
+  unfold propLe at hrun
+  split at hrun
+  · rcases firstEvent_mem
+      [narrowHi st i _ [posLe i _, negLe j _],
+       narrowLo st j _ [negLe j _, posLe i _]]
+      (.implied lg rsn) hrun with hstable | hmem
+    · exact absurd hstable (by intro hc; cases hc)
+    · rcases List.mem_cons.mp hmem with harm | harm
+      · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm harm)
+        subst hl
+        exact posLe_decided ⟨x, hx⟩
+      · obtain ⟨hl, _⟩ := narrowLo_implied_inv
+          (Eq.symm (List.mem_singleton.mp harm))
+        subst hl
+        exact negLe_decided ⟨y, hy⟩
+  · exact absurd hrun (by intro hc; simp at hc)
+
+theorem propLt_implied_decided_views {st : State} {i j : Nat} {a : Assignment}
+    {x y : Int} {lg : Literal} {rsn : Reason}
+    (hx : slotInt a i = some x) (hy : slotInt a j = some y)
+    (hrun : propLt st i j = .implied lg rsn) : ∃ b, lg.eval a = some b := by
+  unfold propLt at hrun
+  split at hrun
+  · rcases firstEvent_mem
+      [narrowHi st i _ [posLe i _, negLe j _],
+       narrowLo st j _ [negLe j _, posLe i _]]
+      (.implied lg rsn) hrun with hstable | hmem
+    · exact absurd hstable (by intro hc; cases hc)
+    · rcases List.mem_cons.mp hmem with harm | harm
+      · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm harm)
+        subst hl
+        exact posLe_decided ⟨x, hx⟩
+      · obtain ⟨hl, _⟩ := narrowLo_implied_inv
+          (Eq.symm (List.mem_singleton.mp harm))
+        subst hl
+        exact negLe_decided ⟨y, hy⟩
+  · exact absurd hrun (by intro hc; simp at hc)
+
+/-- PLAN L7: the implied literal of the `absSlot` bound propagator `propAbs`
+    is an order literal on `i` or `k`, both of which the constraint's
+    semantics force to carry integer reads (`absSlot_views`), so it is
+    decided at every internal solution. -/
+theorem propAbs_implied_decided_views {st : State} {i k : Nat}
+    {a : Assignment} {x rv : Int} {lg : Literal} {rsn : Reason}
+    (hx : slotInt a i = some x) (hr : slotInt a k = some rv)
+    (hrun : propAbs st i k = .implied lg rsn) : ∃ b, lg.eval a = some b := by
+  unfold propAbs at hrun
+  split at hrun
+  next _ _ _ xi' xi rk hxi' hxi hrk =>
+    rcases firstEvent_mem
+        [narrowLo st k 0 [negLe k (-1)],
+         narrowLo st k (absCornerMin xi' xi)
+            [negLe k (absCornerMin xi' xi - 1), posLe i (xi' - 1), negLe i xi],
+         narrowHi st k (max (absValue xi') (absValue xi))
+            [posLe k (max (absValue xi') (absValue xi)),
+              posLe i (xi' - 1), negLe i xi],
+         narrowHi st i rk [posLe i rk, negLe k rk],
+         narrowLo st i (-rk) [negLe i (-rk - 1), negLe k rk]]
+        (.implied lg rsn) hrun with hstable | hmem
+    · exact absurd hstable (by intro hc; cases hc)
+    · rcases List.mem_cons.mp hmem with harm | hrest1
+      · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm harm)
+        subst hl
+        exact negLe_decided ⟨rv, hr⟩
+      · rcases List.mem_cons.mp hrest1 with harm | hrest2
+        · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm harm)
+          subst hl
+          exact negLe_decided ⟨rv, hr⟩
+        · rcases List.mem_cons.mp hrest2 with harm | hrest3
+          · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm harm)
+            subst hl
+            exact posLe_decided ⟨rv, hr⟩
+          · rcases List.mem_cons.mp hrest3 with harm | hrest4
+            · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm harm)
+              subst hl
+              exact posLe_decided ⟨x, hx⟩
+            · obtain ⟨hl, _⟩ := narrowLo_implied_inv
+                (Eq.symm (List.mem_singleton.mp hrest4))
+              subst hl
+              exact negLe_decided ⟨x, hx⟩
+  next => exact absurd hrun (by intro hc; simp at hc)
+
+/-- PLAN L7: the implied literal of the general `int_div` bound propagator
+    `propDiv` is an order literal on the result slot, whose integer read
+    the constraint's semantics forces (`Int.tdiv` of the two operand
+    reads), so it is decided at every internal solution. -/
+theorem propDiv_implied_decided {st : State} {o₁ o₂ r : DomIntArg}
+    {a : Assignment} {lg : Literal} {rsn : Reason}
+    (hcons : (DomConstraint.divGen o₁ o₂ r).SatisfiedBy a)
+    (hrun : propDiv st o₁ o₂ r = .implied lg rsn) :
+    ∃ b, lg.eval a = some b := by
+  obtain ⟨p, q, _hp, _hq, _hq0, hr⟩ := hcons
+  unfold propDiv at hrun
+  split at hrun
+  · rename_i x d hpin
+    split at hrun
+    · exact absurd hrun (by intro hc; cases hc)
+    · split at hrun
+      · rename_i i k
+        split at hrun
+        · rename_i pl ph hpl hph
+          rcases firstEvent_mem
+              [narrowLo st k (divResLo d pl ph) (divReasonLo o₂ i k d pl ph),
+               narrowHi st k (divResHi d pl ph) (divReasonHi o₂ i k d pl ph)]
+              (.implied lg rsn) hrun with hstable | hmem
+          · exact absurd hstable (by intro hc; cases hc)
+          · have hrs' : slotInt a k = some (Int.tdiv p q) :=
+              slotInt_of_read_slot hr
+            rcases List.mem_cons.mp hmem with h1 | hrest
+            · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1)
+              subst hl
+              exact negLe_decided ⟨_, hrs'⟩
+            · obtain ⟨hl, _⟩ := narrowHi_implied_inv
+                (Eq.symm (List.mem_singleton.mp hrest))
+              subst hl
+              exact posLe_decided ⟨_, hrs'⟩
+        · exact absurd hrun (by intro hc; simp at hc)
+      · exact absurd hrun (by intro hc; simp at hc)
+  · exact absurd hrun (by intro hc; simp at hc)
+
+/-- PLAN L7: the implied literal of the general `int_mod` bound propagator
+    `propMod` is an order literal on the result slot, whose integer read
+    the constraint's semantics forces (`Int.tmod` of the two operand
+    reads), so it is decided at every internal solution. -/
+theorem propMod_implied_decided {st : State} {o₁ o₂ r : DomIntArg}
+    {a : Assignment} {lg : Literal} {rsn : Reason}
+    (hcons : (DomConstraint.modGen o₁ o₂ r).SatisfiedBy a)
+    (hrun : propMod st o₁ o₂ r = .implied lg rsn) :
+    ∃ b, lg.eval a = some b := by
+  obtain ⟨p, q, _hp, _hq, _hq0, hr⟩ := hcons
+  unfold propMod at hrun
+  split at hrun
+  · rename_i x d hpin
+    split at hrun
+    · exact absurd hrun (by intro hc; cases hc)
+    · split at hrun
+      · rename_i i k
+        split at hrun
+        · rename_i pl ph hpl hph
+          rcases firstEvent_mem
+              [narrowLo st k (modHullLo d pl ph) (modReasonLo o₂ i k d pl ph),
+               narrowHi st k (modHullHi d pl ph) (modReasonHi o₂ i k d pl ph)]
+              (.implied lg rsn) hrun with hstable | hmem
+          · exact absurd hstable (by intro hc; cases hc)
+          · have hrs' : slotInt a k = some (Int.tmod p q) :=
+              slotInt_of_read_slot hr
+            rcases List.mem_cons.mp hmem with h1 | hrest
+            · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1)
+              subst hl
+              exact negLe_decided ⟨_, hrs'⟩
+            · obtain ⟨hl, _⟩ := narrowHi_implied_inv
+                (Eq.symm (List.mem_singleton.mp hrest))
+              subst hl
+              exact posLe_decided ⟨_, hrs'⟩
+        · exact absurd hrun (by intro hc; simp at hc)
+      · exact absurd hrun (by intro hc; simp at hc)
+  · exact absurd hrun (by intro hc; simp at hc)
+
+/-- The implied literal of the `leReifSlot` delegation is decided at every
+    solution (both operand reads are integers). -/
+theorem propLeReifSlot_implied_decided {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {lg : Literal} {rsn : Reason} {a : Assignment}
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hprob : DomConstraint.leReifSlot i j r ∈ problem.constraints)
+    (hrun : propLeReifSlot st i j r = .implied lg rsn) :
+    ∃ b, lg.eval a = some b := by
+  obtain ⟨p, q, -, hp, hq, -⟩ := leReif_reads (ha.2 _ hprob)
+  have hx : slotInt a i = some p := slotInt_of_int_read hp
+  have hy : slotInt a j = some q := slotInt_of_int_read hq
+  rcases propLeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+    exact propLe_implied_decided_views hx hy hres
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+    exact propLt_implied_decided_views hy hx hres
+  · rw [he] at hrun; cases hrun
+
+/-! ### PLAN L4: the reified equality and disequality
+
+The same delegation shape, with `propEq`/`propNe` as the delegated
+propagators. Their contracts (unlike `propLe`/`propLt`'s) consume the
+problem-level `IntViewedDoms` premise, and their conflict clauses carry the
+`r`-escape too. -/
+
+/-- A faithful read has an integer view and agrees in sort with every
+    domain value of its slot, so a set-of-int singleton has no faithful
+    read: its empty `neConflictClause` cannot arise at a faithful
+    solution. -/
+theorem not_sortAgree_setOfInt {s : IntSetValue} {y : Value} :
+    ¬ SortAgree (.setOfInt s) y := by
+  intro h
+  rcases h with ⟨⟨k, hk⟩, -⟩ | ⟨⟨b, hb⟩, -⟩
+  · cases hk
+  · cases hb
+
+/-- The array twin of `not_sortAgree_setOfInt`. -/
+theorem not_sortAgree_array {xs : List Value} {y : Value} :
+    ¬ SortAgree (.array xs) y := by
+  intro h
+  rcases h with ⟨⟨k, hk⟩, -⟩ | ⟨⟨b, hb⟩, -⟩
+  · cases hk
+  · cases hb
+
+/-- The `propNe`-delegated conflict of a reified comparison: the escape-
+    augmented clause is entailed at every faithful solution of `x_i ≠ x_j`,
+    with NO nonemptiness side condition on the raw clause (an empty
+    `neConflictClause` needs a set/array singleton, which faithfulness
+    excludes). -/
+theorem propNe_conflict_entailed_any {st : State} {i j : Nat} {cc0 : Clause}
+    {extras : Clause} {a : Assignment}
+    (hrun : propNe st i j = .conflict cc0)
+    (hsat : (DomConstraint.neSlot i j).SatisfiedBy a)
+    (hfaith : FrameFaithful st.domains a) :
+    ∃ l ∈ insertAfterHead extras cc0, l.eval a = some true := by
+  have hne0 : cc0 ≠ [] := by
+    intro hnil
+    obtain ⟨x, hx, -, hc2⟩ := propNe_conflict_clause_shape hrun
+    have hempty : neConflictClause i j x = [] := by rw [← hc2]; exact hnil
+    cases x with
+    | int k => simp [neConflictClause] at hempty
+    | bool b => simp [neConflictClause] at hempty
+    | setOfInt s =>
+        obtain ⟨v, -, -, hs⟩ := hfaith i (lt_length_of_getD_singleton hx)
+        exact not_sortAgree_setOfInt (s := s)
+          (hs (.setOfInt s) (by rw [hx]; exact List.mem_singleton_self _))
+    | array ys =>
+        obtain ⟨v, -, -, hs⟩ := hfaith i (lt_length_of_getD_singleton hx)
+        exact not_sortAgree_array (xs := ys)
+          (hs (.array ys) (by rw [hx]; exact List.mem_singleton_self _))
+  obtain ⟨l, hl, hlt⟩ := propNe_conflict_entailed hrun hne0 hsat hfaith
+  exact ⟨l, mem_insertAfterHead_of_mem hl, hlt⟩
+
+/-- Conflict entitlement of the `eqReifSlot` delegation at every faithful
+    solution. -/
+theorem propEqReifSlot_entitled {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {cc : Clause}
+    (hview : IntViewedDoms problem.domains)
+    (hprob : DomConstraint.eqReifSlot i j r ∈ problem.constraints)
+    (hrun : propEqReifSlot st i j r = .conflict cc)
+    (a : Assignment) (hfaith : FrameFaithful st.domains a)
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  rcases propEqReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+    rw [hcl]
+    rcases eqReif_split_true (ha.2 _ hprob) with ⟨q, hq, hqt⟩ | hsat
+    · exact ⟨q, mem_insertAfterHead_of_mem_extras hq, hqt⟩
+    · obtain ⟨l, hl, hlt⟩ := propEq_conflict_entitled hview
+        (problem := { problem with constraints := [DomConstraint.eqSlot i j] })
+        (List.mem_singleton_self _) hres a
+        ⟨ha.1, fun c' hc' => by
+          rw [List.mem_singleton] at hc'
+          subst hc'
+          exact hsat⟩
+      exact ⟨l, mem_insertAfterHead_of_mem hl, hlt⟩
+  · rw [he] at hrun
+    obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+    rw [hcl]
+    rcases eqReif_split_false (ha.2 _ hprob) with ⟨q, hq, hqt⟩ | hsat
+    · exact ⟨q, mem_insertAfterHead_of_mem_extras hq, hqt⟩
+    · exact propNe_conflict_entailed_any hres hsat hfaith
+  · rw [he] at hrun; cases hrun
+
+/-- Conflict entitlement of the `neReifSlot` delegation at every faithful
+    solution. -/
+theorem propNeReifSlot_entitled {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {cc : Clause}
+    (hview : IntViewedDoms problem.domains)
+    (hprob : DomConstraint.neReifSlot i j r ∈ problem.constraints)
+    (hrun : propNeReifSlot st i j r = .conflict cc)
+    (a : Assignment) (hfaith : FrameFaithful st.domains a)
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a) :
+    ∃ l ∈ cc, l.eval a = some true := by
+  rcases propNeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+    rw [hcl]
+    rcases neReif_split_true (ha.2 _ hprob) with ⟨q, hq, hqt⟩ | hsat
+    · exact ⟨q, mem_insertAfterHead_of_mem_extras hq, hqt⟩
+    · exact propNe_conflict_entailed_any hres hsat hfaith
+  · rw [he] at hrun
+    obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
+    rw [hcl]
+    rcases neReif_split_false (ha.2 _ hprob) with ⟨q, hq, hqt⟩ | hsat
+    · exact ⟨q, mem_insertAfterHead_of_mem_extras hq, hqt⟩
+    · obtain ⟨l, hl, hlt⟩ := propEq_conflict_entitled hview
+        (problem := { problem with constraints := [DomConstraint.eqSlot i j] })
+        (List.mem_singleton_self _) hres a
+        ⟨ha.1, fun c' hc' => by
+          rw [List.mem_singleton] at hc'
+          subst hc'
+          exact hsat⟩
+      exact ⟨l, mem_insertAfterHead_of_mem hl, hlt⟩
+  · rw [he] at hrun; cases hrun
+
+/-- State-free reason validity of the `eqReifSlot` delegation. -/
+theorem propEqReifSlot_reason_valid {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {l : Literal} {rs : Reason}
+    (hview : IntViewedDoms problem.domains)
+    (hprob : DomConstraint.eqReifSlot i j r ∈ problem.constraints)
+    (hrun : propEqReifSlot st i j r = .implied l rs) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
+      (∀ q ∈ rs.clause, q = q.norm) := by
+  rcases propEqReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+    have hv := propEq_reason_valid
+      (problem := { problem with constraints := [DomConstraint.eqSlot i j] })
+      hview (List.mem_singleton_self _) hres
+    have := reifAug_reason_valid hv.1 hv.2
+      (extras := [posBool r false]) (fun q hq => by
+        rw [List.mem_singleton.mp hq]; exact (posBool_norm _ _).symm)
+      (fun a ha => eqReif_split_true (ha.2 _ hprob))
+    have hrs : rs = { clause := insertAfterHead [posBool r false] rs0.clause } := by
+      cases rs; simp_all
+    rw [hrs]; exact this
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+    have hv := propNe_reason_valid
+      (problem := { problem with constraints := [DomConstraint.neSlot i j] })
+      hview (List.mem_singleton_self _) hres
+    have := reifAug_reason_valid hv.1 hv.2
+      (extras := [posBool r true]) (fun q hq => by
+        rw [List.mem_singleton.mp hq]; exact (posBool_norm _ _).symm)
+      (fun a ha => eqReif_split_false (ha.2 _ hprob))
+    have hrs : rs = { clause := insertAfterHead [posBool r true] rs0.clause } := by
+      cases rs; simp_all
+    rw [hrs]; exact this
+  · rw [he] at hrun; cases hrun
+
+/-- State-free reason validity of the `neReifSlot` delegation. -/
+theorem propNeReifSlot_reason_valid {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {l : Literal} {rs : Reason}
+    (hview : IntViewedDoms problem.domains)
+    (hprob : DomConstraint.neReifSlot i j r ∈ problem.constraints)
+    (hrun : propNeReifSlot st i j r = .implied l rs) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
+      (∀ q ∈ rs.clause, q = q.norm) := by
+  rcases propNeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+    have hv := propNe_reason_valid
+      (problem := { problem with constraints := [DomConstraint.neSlot i j] })
+      hview (List.mem_singleton_self _) hres
+    have := reifAug_reason_valid hv.1 hv.2
+      (extras := [posBool r false]) (fun q hq => by
+        rw [List.mem_singleton.mp hq]; exact (posBool_norm _ _).symm)
+      (fun a ha => neReif_split_true (ha.2 _ hprob))
+    have hrs : rs = { clause := insertAfterHead [posBool r false] rs0.clause } := by
+      cases rs; simp_all
+    rw [hrs]; exact this
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+    have hv := propEq_reason_valid
+      (problem := { problem with constraints := [DomConstraint.eqSlot i j] })
+      hview (List.mem_singleton_self _) hres
+    have := reifAug_reason_valid hv.1 hv.2
+      (extras := [posBool r true]) (fun q hq => by
+        rw [List.mem_singleton.mp hq]; exact (posBool_norm _ _).symm)
+      (fun a ha => neReif_split_false (ha.2 _ hprob))
+    have hrs : rs = { clause := insertAfterHead [posBool r true] rs0.clause } := by
+      cases rs; simp_all
+    rw [hrs]; exact this
+  · rw [he] at hrun; cases hrun
+
+/-- Every implied literal of `propEq` is an order literal on one of its two
+    slots, so it is decided whenever both reads carry integer views. -/
+theorem propEq_implied_decided_views {st : State} {i j : Nat} {a : Assignment}
+    {x y : Int} {lg : Literal} {rsn : Reason}
+    (hx : slotInt a i = some x) (hy : slotInt a j = some y)
+    (hrun : propEq st i j = .implied lg rsn) : ∃ b, lg.eval a = some b := by
+  unfold propEq at hrun
+  split at hrun
+  · rcases firstEvent_mem
+      [narrowLo st i _ [negLe i _, posLe j _],
+       narrowHi st i _ [posLe i _, negLe j _],
+       narrowLo st j _ [negLe j _, posLe i _],
+       narrowHi st j _ [posLe j _, negLe i _]]
+      (.implied lg rsn) hrun with hstable | hmem
+    · exact absurd hstable (by intro hc; cases hc)
+    · rcases List.mem_cons.mp hmem with harm1 | hrest1
+      · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm harm1)
+        subst hl
+        exact negLe_decided ⟨x, hx⟩
+      · rcases List.mem_cons.mp hrest1 with harm2 | hrest2
+        · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm harm2)
+          subst hl
+          exact posLe_decided ⟨x, hx⟩
+        · rcases List.mem_cons.mp hrest2 with harm3 | hrest3
+          · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm harm3)
+            subst hl
+            exact negLe_decided ⟨y, hy⟩
+          · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm
+              (List.mem_singleton.mp hrest3))
+            subst hl
+            exact posLe_decided ⟨y, hy⟩
+  · exact absurd hrun (by intro hc; simp at hc)
+
+/-- Every implied literal of `propNe` is a value-removal literal `posNe`, so
+    it is decided whenever both reads carry integer views. -/
+theorem propNe_implied_decided_views {st : State} {i j : Nat} {a : Assignment}
+    {x y : Int} {lg : Literal} {rsn : Reason}
+    (hx : slotInt a i = some x) (hy : slotInt a j = some y)
+    (hrun : propNe st i j = .implied lg rsn) : ∃ b, lg.eval a = some b := by
+  rcases propNe_implied_inv hrun with
+    ⟨_, _, _, hl, _, _, _, _, _⟩ | ⟨_, _, _, hl, _, _, _, _, _⟩
+  · subst hl
+    exact posNe_decided ⟨y, hy⟩
+  · subst hl
+    exact posNe_decided ⟨x, hx⟩
+
+/-- The implied literal of the `eqReifSlot` delegation is decided at every
+    solution (both operand reads are integers). -/
+theorem propEqReifSlot_implied_decided {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {lg : Literal} {rsn : Reason} {a : Assignment}
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hprob : DomConstraint.eqReifSlot i j r ∈ problem.constraints)
+    (hrun : propEqReifSlot st i j r = .implied lg rsn) :
+    ∃ b, lg.eval a = some b := by
+  obtain ⟨p, q, -, hp, hq, -⟩ := eqReif_reads (ha.2 _ hprob)
+  have hx : slotInt a i = some p := slotInt_of_int_read hp
+  have hy : slotInt a j = some q := slotInt_of_int_read hq
+  rcases propEqReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+    exact propEq_implied_decided_views hx hy hres
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+    exact propNe_implied_decided_views hx hy hres
+  · rw [he] at hrun; cases hrun
+
+/-- The implied literal of the `neReifSlot` delegation is decided at every
+    solution (both operand reads are integers). -/
+theorem propNeReifSlot_implied_decided {problem : Problem DomConstraint Unit}
+    {st : State} {i j r : Nat} {lg : Literal} {rsn : Reason} {a : Assignment}
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
+    (hprob : DomConstraint.neReifSlot i j r ∈ problem.constraints)
+    (hrun : propNeReifSlot st i j r = .implied lg rsn) :
+    ∃ b, lg.eval a = some b := by
+  obtain ⟨p, q, -, hp, hq, -⟩ := neReif_reads (ha.2 _ hprob)
+  have hx : slotInt a i = some p := slotInt_of_int_read hp
+  have hy : slotInt a j = some q := slotInt_of_int_read hq
+  rcases propNeReifSlot_cases st i j r with ⟨h1, he⟩ | ⟨h1, h2, he⟩ | he
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+    exact propNe_implied_decided_views hx hy hres
+  · rw [he] at hrun
+    obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+    exact propEq_implied_decided_views hx hy hres
+  · rw [he] at hrun; cases hrun
+
+/-! ## PLAN L5: the pinned `int_lin_eq_reif`/`int_lin_ne_reif` reasons
+
+The `linEqReif`/`linNeReif` delegations reify a DOT predicate, so (unlike
+the L4 slot comparisons) the reif fact holds only when the reif slot
+reads `true`; at `false` the constraint says nothing about the dot's
+EXISTENCE. The pinned-true arms delegate to `propLinEq2`/`propLinNe`
+under the escape `r = false`, whose reason obligations are the
+`reifAug_reason_valid` split: at a solution reading `r = false` the
+escape is true, and at `r = true` the reified dot predicate holds
+(the reified `SatisfiedBy` pins both directions at the Boolean read).
+The pinned-false arms are conflicts-only, so their reason obligation is
+vacuous. -/
+
+/-- The reif-true split for `linEqReif`: either the escape `r = false`
+    is true, or the reified equality holds. -/
+theorem linEqReif_split_true {a : Assignment} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (h : (DomConstraint.linEqReif coeffs is b r).SatisfiedBy a) :
+    (∃ q ∈ [posBool r false], q.eval a = some true) ∨
+      (DomConstraint.linEq coeffs is b).SatisfiedBy a := by
+  obtain ⟨rb, hread, hiff⟩ := linEqReif_satisfied_inv h
+  cases rb with
+  | false =>
+      exact Or.inl ⟨posBool r false, List.mem_singleton_self _,
+        posBool_eval_true hread⟩
+  | true => exact Or.inr (linEqReif_true_dot h hread)
+
+/-- The reif-true split for `linNeReif`. -/
+theorem linNeReif_split_true {a : Assignment} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat}
+    (h : (DomConstraint.linNeReif coeffs is b r).SatisfiedBy a) :
+    (∃ q ∈ [posBool r false], q.eval a = some true) ∨
+      (DomConstraint.linNe coeffs is b).SatisfiedBy a := by
+  obtain ⟨rb, hread, hiff⟩ := linNeReif_satisfied_inv h
+  cases rb with
+  | false =>
+      exact Or.inl ⟨posBool r false, List.mem_singleton_self _,
+        posBool_eval_true hread⟩
+  | true => exact Or.inr (linNeReif_true_dot h hread)
+
+/-- State-free reason validity of the `linEqReif` delegation. -/
+theorem propLinEqReif_reason_valid {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int} {r : Nat}
+    {l : Literal} {rs : Reason}
+    (hprob : DomConstraint.linEqReif coeffs is b r ∈ problem.constraints)
+    (hrun : propLinEqReif st coeffs is b r = .implied l rs) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
+      (∀ q ∈ rs.clause, q = q.norm) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
+    by_cases h1 : domBoolPin st.domains r true = true
+    · rw [propLinEqReif_run_true hlenB h1] at hrun
+      obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+      have hv := propLinEq2_reason_valid
+        (problem := { problem with constraints :=
+          [DomConstraint.linEq coeffs is b] })
+        (List.mem_singleton_self _) hlen hres
+      have := reifAug_reason_valid hv.1 hv.2
+        (extras := [posBool r false]) (fun q hq => by
+          rw [List.mem_singleton.mp hq]; exact (posBool_norm _ _).symm)
+        (fun a ha => linEqReif_split_true (ha.2 _ hprob))
+      have hrs : rs = { clause := insertAfterHead [posBool r false] rs0.clause } := by
+        cases rs; simp_all [linLeReifEscTrue]
+      rw [hrs]; exact this
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinEqReif_run_false hlenB h1 h2] at hrun
+        exact (conflictsOnly_implied_elim hrun).elim
+      · rw [propLinEqReif_run_stable hlenB h1 h2] at hrun
+        cases hrun
+  · rw [propLinEqReif_run_arity (Bool.eq_false_iff.mpr hlenB)] at hrun
+    cases hrun
+
+/-- State-free reason validity of the `linNeReif` delegation. -/
+theorem propLinNeReif_reason_valid {problem : Problem DomConstraint Unit}
+    {st : State} {coeffs : List Int} {is : List Nat} {b : Int} {r : Nat}
+    {l : Literal} {rs : Reason}
+    (hprob : DomConstraint.linNeReif coeffs is b r ∈ problem.constraints)
+    (hrun : propLinNeReif st coeffs is b r = .implied l rs) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
+      (∀ q ∈ rs.clause, q = q.norm) := by
+  by_cases hlenB : (coeffs.length == is.length) = true
+  · by_cases h1 : domBoolPin st.domains r true = true
+    · rw [propLinNeReif_run_true hlenB h1] at hrun
+      obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+      have hv := propLinNe_reason_valid
+        (problem := { problem with constraints :=
+          [DomConstraint.linNe coeffs is b] })
+        (List.mem_singleton_self _) hres
+      have := reifAug_reason_valid hv.1 hv.2
+        (extras := [posBool r false]) (fun q hq => by
+          rw [List.mem_singleton.mp hq]; exact (posBool_norm _ _).symm)
+        (fun a ha => linNeReif_split_true (ha.2 _ hprob))
+      have hrs : rs = { clause := insertAfterHead [posBool r false] rs0.clause } := by
+        cases rs; simp_all [linLeReifEscTrue]
+      rw [hrs]; exact this
+    · by_cases h2 : (domBoolPin st.domains r false
+          && domsIntOnlyB st.domains is) = true
+      · rw [propLinNeReif_run_false hlenB h1 h2] at hrun
+        exact (conflictsOnly_implied_elim hrun).elim
+      · rw [propLinNeReif_run_stable hlenB h1 h2] at hrun
+        cases hrun
+  · rw [propLinNeReif_run_arity (Bool.eq_false_iff.mpr hlenB)] at hrun
+    cases hrun
+
 /-- **ReasonSafeUniv for the proved-propagator list (non-linLe
     coverage)**: every propagator's implied literal carries a VALID,
     normalized explanation, with NO state premises consumed
-    (`DomainCoherent` is discharged unused). The eqSlot arm consumes
-    the problem-level `IntViewedDoms` premise; every other family is
-    fully state-free. -/
+    (`DomainCoherent` is discharged unused). The eqSlot, neSlot and
+    allDiff arms consume the problem-level `IntViewedDoms` premise; the
+    allDiff value eliminations additionally consume the problem-level
+    operand-range gate `hlad` (PLAN L8); every other family is fully
+    state-free. -/
 theorem propagatorsOfProved_reasonSafeUniv
     {problem : Problem DomConstraint Unit}
     (hview : IntViewedDoms problem.domains)
@@ -1308,7 +2004,12 @@ theorem propagatorsOfProved_reasonSafeUniv
     (hlin : ∀ dc ∈ problem.constraints, ∀ coeffs is b,
       dc = .linLe coeffs is b → coeffs.length = is.length)
     (hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b,
-      dc = .linEq coeffs is b → coeffs.length = is.length) :
+      dc = .linEq coeffs is b → coeffs.length = is.length)
+    (hlreif : ∀ dc ∈ problem.constraints, ∀ coeffs is b r,
+      dc = .linLeReif coeffs is b r →
+        ∀ i ∈ is, i < problem.domains.length)
+    (hlad : ∀ dc ∈ problem.constraints, ∀ is, dc = .allDiff is →
+        ∀ i ∈ is, i < problem.domains.length) :
     ReasonSafeUniv problem DomConstraint.SatisfiedBy props := by
   intro st _hcoh p hp l r hrun
   obtain ⟨dc, hdc, hprop⟩ := hprops p hp
@@ -1319,10 +2020,18 @@ theorem propagatorsOfProved_reasonSafeUniv
     ⟨i, c, hdc2, hrun2⟩ | ⟨i, c, hdc2, hrun2⟩ |
     ⟨i, c, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
     ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-    ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-    ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-    ⟨lc, li, lb2, hdcl, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-    ⟨ais, hdcai, hrunad⟩
+    ⟨ic, jc, kc, hdcc, hrunc⟩ |
+    ⟨lc, li, lb2, hdcl, hrunl⟩ |
+    ⟨ais, hdcai, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+    ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+    ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+    ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+    ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+    ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+    ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+    ⟨iab, kab, hdcAb, hrunAb⟩ |
+    ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+    ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
   · rw [hdc2] at hdc
     exact propLe_reason_valid hdc hrun2
   · rw [hdc2] at hdc
@@ -1354,20 +2063,49 @@ theorem propagatorsOfProved_reasonSafeUniv
     exact propBoolAnd_reason_safe_sat hdc hrunb
   · rw [hdcc] at hdc
     exact propBoolOr_reason_safe_sat hdc hrunc
-  · rw [hdcd] at hdc
-    exact propMin_reason_valid hdc hrund
-  · rw [hdce] at hdc
-    exact propMax_reason_valid hdc hrune
-  · rw [hdcg] at hdc
-    exact propAbs_reason_valid hdc hrung
   · rw [hdcl] at hdc
     have hlenL : lc.length = li.length :=
       hlinE _ hdc lc li lb2 rfl
     exact propLinEq2_reason_valid hdc hlenL hrunl
-  · rw [hdct] at hdc
-    exact propTimes_reason_valid hdc hrunt
-  · rw [hdcai] at hdc
-    exact propAllDiffLCG_reason_valid hrunad
+  · -- allDiff: the value eliminations' state-free reason validity (the
+    -- operand-range gate pins the fixed and the target slot in range)
+    have hlad' : ∀ i ∈ ais, i < problem.domains.length :=
+      fun i hi => hlad dc hdc ais hdcai i hi
+    rw [hdcai] at hdc
+    exact propAllDiffLCG_reason_valid hview hdc hlad' hrunad
+  · -- linLeReif: the delegation's state-free reason validity (the bounds
+    -- arm consumes the problem-level operand-range gate)
+    rw [hdcR] at hdc
+    exact propLinLeReif_reason_valid hview hdc hlreif hrunR
+  · rw [hdcN] at hdc
+    exact propLinNe_reason_valid hdc hrunN
+  · -- minSlot/maxSlot: the bound propagators' reasons are state-free valid
+    exact propMin_reason_valid (fun a ha => hdcMn _ (ha.2 _ hdc)) hrunMn
+  · exact propMax_reason_valid (fun a ha => hdcMx _ (ha.2 _ hdc)) hrunMx
+  · rw [hdcLR] at hdc
+    exact propLeReifSlot_reason_valid hdc hrunLR
+  · rw [hdcE] at hdc
+    exact propEqReifSlot_reason_valid hview hdc hrunE
+  · rw [hdcNE] at hdc
+    exact propNeReifSlot_reason_valid hview hdc hrunNE
+  · rw [hdcEqR] at hdc
+    exact propLinEqReif_reason_valid hdc hrunEqR
+  · rw [hdcNeR] at hdc
+    exact propLinNeReif_reason_valid hdc hrunNeR
+  · rw [hdcTt] at hdc
+    exact propTimes_reason_valid hdc hrunTt
+  · rw [hdcAb] at hdc
+    exact propAbs_reason_valid hdc hrunAb
+  · rw [hdcD] at hdc
+    exact propDiv_reason_valid hdc hrunD
+  · rw [hdcM] at hdc
+    exact propMod_reason_valid hdc hrunM
+  · -- `propCheck` never implies.
+    exact (propCheck_implied_elim hrunLn).elim
+  · rw [hdcG] at hdc
+    exact propMaxGen_reason_valid (fun a ha => ha.2 _ hdc) hrunG
+  · rw [hdcH] at hdc
+    exact propMinGen_reason_valid (fun a ha => ha.2 _ hdc) hrunH
 
 /-! ### C.2: the conflict entitlement (the cc ≠ [] version)
 
@@ -1396,6 +2134,7 @@ state-dependent — see `linLe_conflict_entitled_state_free_false`). -/
 theorem runPropagators_conflict_entitled_statefree
     {problem : Problem DomConstraint Unit}
     (hview : IntViewedDoms problem.domains)
+    (hshape : DomsShapeTyped problem.domains)
     {props : List Propagator}
     (hprops : ∀ p ∈ props, ∃ dc ∈ problem.constraints,
       propagatorOfProved dc = some p)
@@ -1404,15 +2143,19 @@ theorem runPropagators_conflict_entitled_statefree
     (hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b,
       dc = .linEq coeffs is b → coeffs.length = is.length)
     (st0 : State) (hnone : st0.conflict = none)
+    (hsub0 : DomSub st0.domains problem.domains)
     (c : Clause) (hrep : (runPropagators props st0).conflict = some c)
     (hcne : c ≠ [])
     (a : Assignment)
     (ha : ProblemSolution problem DomConstraint.SatisfiedBy a) :
     ∃ l ∈ c, l.eval a = some true := by
   have hent : ∀ (p : Propagator) (st : State),
-      p ∈ props → ∀ (cc : Clause), p.run st = .conflict cc →
+      p ∈ props → DomSub st.domains problem.domains →
+      ∀ (cc : Clause), p.run st = .conflict cc →
         cc ≠ [] → ∃ l ∈ cc, l.eval a = some true := by
-    intro p st hp cc hrun hne0
+    intro p st hp hsubst cc hrun hne0
+    have hfaith : FrameFaithful st.domains a :=
+      frameFaithful_of_domSub hview hshape ha.1 hsubst
     obtain ⟨dc, hdc, hprop⟩ := hprops p hp
     rcases propagatorOfProved_run hprop hrun with
       ⟨i, j, hdc2, hrun2⟩ | ⟨i, j, hdc2, hrun2⟩ | ⟨i, j, hdc2, hrun2⟩ |
@@ -1421,18 +2164,27 @@ theorem runPropagators_conflict_entitled_statefree
         ⟨i, c2, hdc2, hrun2⟩ | ⟨i, c2, hdc2, hrun2⟩ |
         ⟨i, c2, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
       ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-      ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-      ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-      ⟨lc, li, lb2, hdcl, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-      ⟨ais, hdcai, hrunad⟩
+      ⟨ic, jc, kc, hdcc, hrunc⟩ |
+      ⟨lc, li, lb2, hdcl, hrunl⟩ |
+      ⟨ais, hdcai, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+      ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+      ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+      ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+      ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+      ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+      ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+      ⟨iab, kab, hdcAb, hrunAb⟩ |
+      ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+      ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
     · rw [hdc2] at hdc
       exact propLe_conflict_entitled hdc hrun2 a ha
     · rw [hdc2] at hdc
       exact propLt_conflict_entitled hdc hrun2 a ha
     · rw [hdc2] at hdc
       exact propEq_conflict_entitled hview hdc hrun2 a ha
-    · -- neSlot: its conflict clause is EMPTY, contradicting cc ≠ []
-      exact absurd rfl (propNe_conflict_clause_empty hrun2 ▸ hne0)
+    · -- neSlot: the explained clause `[x ≠ c, y ≠ c]` / `[x = ¬b, y = ¬b]`
+      rw [hdc2] at hdc
+      exact propNe_conflict_entailed hrun2 hne0 (ha.2 _ hdc) hfaith
     · rw [hdc2] at hdc
       exact propPlus_conflict_entitled hdc hrun2 a ha
     · rw [hdc2] at hdc
@@ -1455,28 +2207,53 @@ theorem runPropagators_conflict_entitled_statefree
       exact propBoolAnd_entitled hdc hrunb a ha
     · rw [hdcc] at hdc
       exact propBoolOr_entitled hdc hrunc a ha
-    · rw [hdcd] at hdc
-      exact propMin_entitled hdc hrund a ha
-    · rw [hdce] at hdc
-      exact propMax_entitled hdc hrune a ha
-    · rw [hdcg] at hdc
-      exact propAbs_entitled hdc hrung a ha
     · rw [hdcl] at hdc
       have hlenL : lc.length = li.length :=
         hlinE _ hdc lc li lb2 rfl
       exact propLinEq2_entitled hdc hlenL hrunl a ha
-    · rw [hdct] at hdc
-      exact propTimes_entitled hdc hrunt a ha
-    · -- allDiff: its conflict clause is EMPTY, contradicting cc ≠ []
-      exact absurd rfl (propAllDiffLCG_conflict_clause_empty hrunad ▸ hne0)
+    · -- allDiff: the explained Hall clause
+      rw [hdcai] at hdc
+      exact propAllDiffLCG_conflict_entailed hrunad hne0 (ha.2 _ hdc) hfaith
+    · -- linLeReif: the pinned delegation's conflict entitlement
+      rw [hdcR] at hdc
+      exact propLinLeReif_entitled hrunR hfaith (ha.2 _ hdc)
+    · rw [hdcN] at hdc
+      exact propLinNe_entitled hrunN (ha.2 _ hdc)
+    · exact propMin_entitled (fun a ha => hdcMn _ (ha.2 _ hdc)) hrunMn a ha
+    · exact propMax_entitled (fun a ha => hdcMx _ (ha.2 _ hdc)) hrunMx a ha
+    · rw [hdcLR] at hdc
+      exact propLeReifSlot_entitled hdc hrunLR a ha
+    · rw [hdcE] at hdc
+      exact propEqReifSlot_entitled hview hdc hrunE a hfaith ha
+    · rw [hdcNE] at hdc
+      exact propNeReifSlot_entitled hview hdc hrunNE a hfaith ha
+    · rw [hdcEqR] at hdc
+      exact propLinEqReif_entitled hrunEqR hfaith (ha.2 _ hdc)
+    · rw [hdcNeR] at hdc
+      exact propLinNeReif_entitled hrunNeR hfaith (ha.2 _ hdc)
+    · rw [hdcTt] at hdc
+      exact propTimes_entitled hdc hrunTt a ha
+    · rw [hdcAb] at hdc
+      exact propAbs_entitled hdc hrunAb a ha
+    · rw [hdcD] at hdc
+      exact propDiv_entitled hdc hrunD a ha
+    · rw [hdcM] at hdc
+      exact propMod_entitled hdc hrunM a ha
+    · -- `propCheck`: the faithful solution differs from the forced assignment
+      exact propCheck_conflict_faithful hrunLn hfaith (ha.2 _ hdc)
+    · rw [hdcG] at hdc
+      exact propMaxGen_entitled (fun a ha => ha.2 _ hdc) hrunG a ha
+    · rw [hdcH] at hdc
+      exact propMinGen_entitled (fun a ha => ha.2 _ hdc) hrunH a ha
   -- the per-family implied-literal DECIDEDNESS (for the opposing-pair
   -- arm): each family's implied literal is an order/Boolean literal
   -- on a slot whose view the family's constraint forces
   have hdec : ∀ (p : Propagator) (st : State),
-      p ∈ props → ∀ (lg : Literal) (rsn : Reason),
+      p ∈ props → DomSub st.domains problem.domains →
+      ∀ (lg : Literal) (rsn : Reason),
       p.run st = .implied lg rsn →
       ∃ b, lg.eval a = some b := by
-    intro p st hp lg rsn hrun
+    intro p st hp hsubst lg rsn hrun
     obtain ⟨dc, hdc, hprop⟩ := hprops p hp
     rcases propagatorOfProved_run hprop hrun with
       ⟨i, j, hdc2, hrun2⟩ | ⟨i, j, hdc2, hrun2⟩ | ⟨i, j, hdc2, hrun2⟩ |
@@ -1485,10 +2262,18 @@ theorem runPropagators_conflict_entitled_statefree
         ⟨i, c2, hdc2, hrun2⟩ | ⟨i, c2, hdc2, hrun2⟩ |
         ⟨i, c2, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
       ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-      ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-      ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-      ⟨lc, li, lb2, hdcl, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-      ⟨ais, hdcai, hrunad⟩
+      ⟨ic, jc, kc, hdcc, hrunc⟩ |
+      ⟨lc, li, lb2, hdcl, hrunl⟩ |
+      ⟨ais, hdcai, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+      ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+      ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+      ⟨ieq2, jeq2, req2, hdcE2, hrunE2⟩ | ⟨ine2, jne2, rne2, hdcNE2, hrunNE2⟩ |
+      ⟨lq3, leqs3, leqb3, leqr3, hdcEqR3, hrunEqR3⟩ |
+      ⟨lq4, lnis4, lnib4, lnir4, hdcNeR4, hrunNeR4⟩ |
+      ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+      ⟨iab4, kab4, hdcAb4, hrunAb4⟩ |
+      ⟨od4, od5, od6, hdcD4, hrunD4⟩ | ⟨om4, om5, om6, hdcM4, hrunM4⟩ |
+      ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
     · rw [hdc2] at hdc
       have hcons : (DomConstraint.leSlot i j).SatisfiedBy a :=
         ha.2 _ hdc
@@ -1788,99 +2573,6 @@ theorem runPropagators_conflict_entitled_statefree
         subst hl
         exact posBool_decided ⟨r2, hr.1⟩
       · exact absurd hstable (by intro hc; cases hc)
-    · -- minSlot: implied literals are order literals on i/j/k; the
-      -- views give all three slotInt reads
-      rw [hdcd] at hdc
-      have hcons : (DomConstraint.minSlot id jd kd).SatisfiedBy a :=
-        ha.2 _ hdc
-      obtain ⟨x, y, z, hx, hy, hz, _⟩ := minSlot_views a id jd kd hcons
-      unfold propMin at hrund
-      split at hrund
-      · rcases firstEvent_mem
-          [narrowLo st kd _ [_, _, _], narrowHi st kd _ [_, _, _],
-           narrowLo st id _ [_, _], narrowLo st jd _ [_, _]]
-          (.implied lg rsn) hrund with hstable | hmem
-        · exact absurd hstable (by intro hc; cases hc)
-        · rcases List.mem_cons.mp hmem with h1' | hrest1
-          · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1')
-            subst hl
-            exact negLe_decided ⟨z, hz⟩
-          · rcases List.mem_cons.mp hrest1 with h2' | hrest2
-            · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm h2')
-              subst hl
-              exact posLe_decided ⟨z, hz⟩
-            · rcases List.mem_cons.mp hrest2 with h3' | hrest3
-              · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h3')
-                subst hl
-                exact negLe_decided ⟨x, hx⟩
-              · obtain ⟨hl, _⟩ := narrowLo_implied_inv
-                  (Eq.symm (List.mem_singleton.mp hrest3))
-                subst hl
-                exact negLe_decided ⟨y, hy⟩
-      · exact absurd hrund (by intro hc; simp at hc)
-    · -- maxSlot: dually
-      rw [hdce] at hdc
-      have hcons : (DomConstraint.maxSlot ie je ke).SatisfiedBy a :=
-        ha.2 _ hdc
-      obtain ⟨x, y, z, hx, hy, hz, _⟩ := maxSlot_views a ie je ke hcons
-      unfold propMax at hrune
-      split at hrune
-      · rcases firstEvent_mem
-          [narrowLo st ke _ [_, _, _], narrowHi st ke _ [_, _, _],
-           narrowHi st ie _ [_, _], narrowHi st je _ [_, _]]
-          (.implied lg rsn) hrune with hstable | hmem
-        · exact absurd hstable (by intro hc; cases hc)
-        · rcases List.mem_cons.mp hmem with h1' | hrest1
-          · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1')
-            subst hl
-            exact negLe_decided ⟨z, hz⟩
-          · rcases List.mem_cons.mp hrest1 with h2' | hrest2
-            · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm h2')
-              subst hl
-              exact posLe_decided ⟨z, hz⟩
-            · rcases List.mem_cons.mp hrest2 with h3' | hrest3
-              · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm h3')
-                subst hl
-                exact posLe_decided ⟨x, hx⟩
-              · obtain ⟨hl, _⟩ := narrowHi_implied_inv
-                  (Eq.symm (List.mem_singleton.mp hrest3))
-                subst hl
-                exact posLe_decided ⟨y, hy⟩
-      · exact absurd hrune (by intro hc; simp at hc)
-    · -- absSlot: implied literals are order literals on i or k
-      rw [hdcg] at hdc
-      have hcons : (DomConstraint.absSlot ig kg).SatisfiedBy a :=
-        ha.2 _ hdc
-      obtain ⟨x, r2, hx, hr, _⟩ := absSlot_views a ig kg hcons
-      unfold propAbs at hrung
-      split at hrung
-      · rcases firstEvent_mem
-          [narrowLo st kg 0 [negLe kg (-1)], narrowLo st kg _ [_, _, _],
-           narrowHi st kg _ [_, _, _], narrowHi st ig _ [_, _],
-           narrowLo st ig _ [_, _]]
-          (.implied lg rsn) hrung with hstable | hmem
-        · exact absurd hstable (by intro hc; cases hc)
-        · rcases List.mem_cons.mp hmem with h1' | hrest1
-          · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1')
-            subst hl
-            exact negLe_decided ⟨r2, hr⟩
-          · rcases List.mem_cons.mp hrest1 with h2' | hrest2
-            · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h2')
-              subst hl
-              exact negLe_decided ⟨r2, hr⟩
-            · rcases List.mem_cons.mp hrest2 with h3' | hrest3
-              · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm h3')
-                subst hl
-                exact posLe_decided ⟨r2, hr⟩
-              · rcases List.mem_cons.mp hrest3 with h4' | hrest4
-                · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm h4')
-                  subst hl
-                  exact posLe_decided ⟨x, hx⟩
-                · obtain ⟨hl, _⟩ := narrowLo_implied_inv
-                    (Eq.symm (List.mem_singleton.mp hrest4))
-                  subst hl
-                  exact negLe_decided ⟨x, hx⟩
-      · exact absurd hrung (by intro hc; simp at hc)
     · -- linEq: the implied literal is an order literal on the ±1
       -- slot; the constraint's reads-int bridge at the zipped pair
       -- (derived from the emission inversion's zipIdx membership)
@@ -1943,38 +2635,204 @@ theorem runPropagators_conflict_entitled_statefree
         obtain ⟨xt, hxt⟩ :=
           hreads (c, m) (lin2_mem_zip_of_zipIdx _ 0 ((c, m), i) hmem)
         exact posLe_decided ⟨xt, hxt⟩
-    · -- timesSlot: the implied literal is an order literal on one of
-      -- the three slots; the constraint's views give the slotInt
-      -- read, and the emission-slot inversion routes it
-      rw [hdct] at hdc
-      obtain ⟨x, y, z, hx, hy, hz, _⟩ :=
-        timesSlot_views a ti tj tk2 (ha.2 _ hdc)
-      rcases propTimes_implied_slot hrunt with
-        ⟨_, hl⟩ | ⟨_, hl⟩ | ⟨_, hl⟩ | ⟨_, hl⟩ | ⟨_, hl⟩ | ⟨_, hl⟩
+    · -- allDiff: the eliminated slot j is in range of the problem (the
+      -- gate plus the sub-box relation) with a view (the box is
+      -- int-viewed), so the removal literal is decided
+      obtain ⟨i2, j2, c2, hf2, hl2, -⟩ := propAllDiffLCG_implied_inv hrunad
+      obtain ⟨-, -, hj2, hb2⟩ := allDiffElimFirst_spec hf2
+      obtain ⟨-, hjlt2, -, -, -⟩ := allDiffElimB_eq hb2
+      subst hl2
+      have hjlen2 : j2 < problem.domains.length := by
+        rw [← hsubst.1]; exact hjlt2
+      have hja2 : j2 < a.length := by rw [ha.1.1]; exact hjlen2
+      have hread2 : a[j2]? = some a[j2] := List.getElem?_eq_getElem hja2
+      have hmem2 : a[j2] ∈ problem.domains.getD j2 [] := ha.1.2 j2 _ hread2
+      have hmemd2 : problem.domains.getD j2 [] ∈ problem.domains :=
+        getD_mem_of_lt hjlen2
+      have hv2 : Value.intView a[j2] ≠ none := hview _ hmemd2 _ hmem2
+      obtain ⟨w2, hw2⟩ : ∃ w, Value.intView a[j2] = some w := by
+        cases hh2 : Value.intView a[j2] with
+        | none => exact absurd hh2 hv2
+        | some w => exact ⟨w, rfl⟩
+      exact posNe_decided ⟨w2, by
+        show (a[j2]?.bind Value.intView) = some w2
+        rw [hread2]
+        exact hw2⟩
+    · -- linLeReif: the delegated implied head is an order literal on an
+      -- in-range operand slot (or the bounds arm's pin on the reif slot),
+      -- hence decided at every solution
+      rw [hdcR] at hdc
+      exact propLinLeReif_implied_decided hview hsubst ha (ha.2 _ hdc) hrunR
+    · rw [hdcN] at hdc
+      exact propLinNe_implied_decided ha hdc hrunN
+    · -- minSlot: the implied literal is an order literal on i, j or k,
+      -- and the constraint forces all three views at `a`
+      obtain ⟨x, y, z, hx, hy, hz, -⟩ :=
+        minSlot_views a imn jmn kmn (hdcMn _ (ha.2 _ hdc))
+      unfold propMin at hrunMn
+      split at hrunMn
+      · rename_i xi' xi yj' yj zk' h1 h2 h3 h4 h5
+        rcases firstEvent_mem
+            [narrowLo st kmn (min xi' yj')
+                [negLe kmn (min xi' yj' - 1), posLe imn (xi' - 1),
+                  posLe jmn (yj' - 1)],
+             narrowHi st kmn (min xi yj)
+                [posLe kmn (min xi yj), negLe imn xi, negLe jmn yj],
+             narrowLo st imn zk' [negLe imn (zk' - 1), posLe kmn (zk' - 1)],
+             narrowLo st jmn zk' [negLe jmn (zk' - 1), posLe kmn (zk' - 1)]]
+            (.implied lg rsn) hrunMn with hstable | hmem
+        · exact absurd hstable (by intro hc; cases hc)
+        · rcases List.mem_cons.mp hmem with h1' | hrest1
+          · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1')
+            subst hl
+            exact negLe_decided ⟨z, hz⟩
+          · rcases List.mem_cons.mp hrest1 with h2' | hrest2
+            · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm h2')
+              subst hl
+              exact posLe_decided ⟨z, hz⟩
+            · rcases List.mem_cons.mp hrest2 with h3' | hrest3
+              · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h3')
+                subst hl
+                exact negLe_decided ⟨x, hx⟩
+              · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm
+                  (List.mem_singleton.mp hrest3))
+                subst hl
+                exact negLe_decided ⟨y, hy⟩
+      · exact absurd hrunMn (by intro hc; simp at hc)
+    · -- maxSlot: dually, over the four `propMax` arms
+      obtain ⟨x, y, z, hx, hy, hz, -⟩ :=
+        maxSlot_views a imx jmx kmx (hdcMx _ (ha.2 _ hdc))
+      unfold propMax at hrunMx
+      split at hrunMx
+      · rename_i xi' xi yj' yj zk h1 h2 h3 h4 h5
+        rcases firstEvent_mem
+            [narrowLo st kmx (max xi' yj')
+                [negLe kmx (max xi' yj' - 1), posLe imx (xi' - 1),
+                  posLe jmx (yj' - 1)],
+             narrowHi st kmx (max xi yj)
+                [posLe kmx (max xi yj), negLe imx xi, negLe jmx yj],
+             narrowHi st imx zk [posLe imx zk, negLe kmx zk],
+             narrowHi st jmx zk [posLe jmx zk, negLe kmx zk]]
+            (.implied lg rsn) hrunMx with hstable | hmem
+        · exact absurd hstable (by intro hc; cases hc)
+        · rcases List.mem_cons.mp hmem with h1' | hrest1
+          · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1')
+            subst hl
+            exact negLe_decided ⟨z, hz⟩
+          · rcases List.mem_cons.mp hrest1 with h2' | hrest2
+            · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm h2')
+              subst hl
+              exact posLe_decided ⟨z, hz⟩
+            · rcases List.mem_cons.mp hrest2 with h3' | hrest3
+              · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm h3')
+                subst hl
+                exact posLe_decided ⟨x, hx⟩
+              · obtain ⟨hl, _⟩ := narrowHi_implied_inv (Eq.symm
+                  (List.mem_singleton.mp hrest3))
+                subst hl
+                exact posLe_decided ⟨y, hy⟩
+      · exact absurd hrunMx (by intro hc; simp at hc)
+    · rw [hdcLR] at hdc
+      exact propLeReifSlot_implied_decided ha hdc hrunLR
+    · rw [hdcE2] at hdc
+      exact propEqReifSlot_implied_decided ha hdc hrunE2
+    · rw [hdcNE2] at hdc
+      exact propNeReifSlot_implied_decided ha hdc hrunNE2
+    · rw [hdcEqR3] at hdc
+      exact propLinEqReif_implied_decided hview hsubst ha hrunEqR3
+    · rw [hdcNeR4] at hdc
+      exact propLinNeReif_implied_decided hview hsubst ha hrunNeR4
+    · -- timesSlot: an order literal on one of the three slots, and the
+      -- constraint forces all three views at `a`
+      rw [hdcTt] at hdc
+      have hcons : (DomConstraint.timesSlot itt jtt ktt).SatisfiedBy a :=
+        ha.2 _ hdc
+      obtain ⟨x, y, z, hx, hy, hz, -⟩ :=
+        timesSlot_views a itt jtt ktt hcons
+      rcases propTimes_implied_slot hrunTt with
+        ⟨kc, hl⟩ | ⟨kc, hl⟩ | ⟨kc, hl⟩ | ⟨kc, hl⟩ | ⟨kc, hl⟩ | ⟨kc, hl⟩
       · subst hl; exact negLe_decided ⟨x, hx⟩
       · subst hl; exact posLe_decided ⟨x, hx⟩
       · subst hl; exact negLe_decided ⟨y, hy⟩
       · subst hl; exact posLe_decided ⟨y, hy⟩
       · subst hl; exact negLe_decided ⟨z, hz⟩
       · subst hl; exact posLe_decided ⟨z, hz⟩
-    · -- allDiff: never implies
-      exact (propAllDiffLCG_never_implied hrunad).elim
+    · rw [hdcAb4] at hdc
+      obtain ⟨x, r2, hx, hr2, -⟩ := absSlot_views a iab4 kab4 (ha.2 _ hdc)
+      exact propAbs_implied_decided_views hx hr2 hrunAb4
+    · rw [hdcD4] at hdc
+      exact propDiv_implied_decided (ha.2 _ hdc) hrunD4
+    · rw [hdcM4] at hdc
+      exact propMod_implied_decided (ha.2 _ hdc) hrunM4
+    · -- `propCheck` never implies.
+      exact (propCheck_implied_elim hrunLn).elim
+    · rw [hdcG] at hdc
+      obtain ⟨mv, hrest2⟩ := ha.2 _ hdc
+      obtain ⟨hrread, -⟩ := hrest2
+      unfold propMaxGen at hrunG
+      split at hrunG
+      case h_1 => exact absurd hrunG (by intro hc; cases hc)
+      case h_2 =>
+        rename_i r' k
+        split at hrunG
+        case h_1 =>
+          rename_i m_lo m_hi hlo hhi
+          rcases firstEvent_mem
+              [ narrowLo st k m_lo (negLe k (m_lo - 1) :: osG.flatMap (argLoCause st))
+              , narrowHi st k m_hi (posLe k m_hi :: osG.flatMap (argHiCause st)) ]
+              (.implied lg rsn) hrunG with hstable | hmem
+          · exact absurd hstable (by intro hc; cases hc)
+          · rcases List.mem_cons.mp hmem with h1 | hrest
+            · obtain ⟨hl, -⟩ := narrowLo_implied_inv (Eq.symm h1)
+              subst hl
+              exact negLe_decided ⟨mv, read_slot_int hrread⟩
+            · rw [List.mem_singleton] at hrest
+              obtain ⟨hl, -⟩ := narrowHi_implied_inv (Eq.symm hrest)
+              subst hl
+              exact posLe_decided ⟨mv, read_slot_int hrread⟩
+        case h_2 => exact absurd hrunG (by intro hc; cases hc)
+    · rw [hdcH] at hdc
+      obtain ⟨mv, hrest2⟩ := ha.2 _ hdc
+      obtain ⟨hrread, -⟩ := hrest2
+      unfold propMinGen at hrunH
+      split at hrunH
+      case h_1 => exact absurd hrunH (by intro hc; cases hc)
+      case h_2 =>
+        rename_i r' k
+        split at hrunH
+        case h_1 =>
+          rename_i m_lo m_hi hlo hhi
+          rcases firstEvent_mem
+              [ narrowLo st k m_lo (negLe k (m_lo - 1) :: osH.flatMap (argLoCause st))
+              , narrowHi st k m_hi (posLe k m_hi :: osH.flatMap (argHiCause st)) ]
+              (.implied lg rsn) hrunH with hstable | hmem
+          · exact absurd hstable (by intro hc; cases hc)
+          · rcases List.mem_cons.mp hmem with h1 | hrest
+            · obtain ⟨hl, -⟩ := narrowLo_implied_inv (Eq.symm h1)
+              subst hl
+              exact negLe_decided ⟨mv, read_slot_int hrread⟩
+            · rw [List.mem_singleton] at hrest
+              obtain ⟨hl, -⟩ := narrowHi_implied_inv (Eq.symm hrest)
+              subst hl
+              exact posLe_decided ⟨mv, read_slot_int hrread⟩
+        case h_2 => exact absurd hrunH (by intro hc; cases hc)
   -- the sweep induction (mirroring runPropagators_conflict_entitled's
   -- goInv, with the state-free per-family entitlement)
   have goInv : ∀ (ps : List Propagator) (acc : State),
       (∀ q ∈ ps, q ∈ props) →
       acc.conflict = none →
+      DomSub acc.domains problem.domains →
       ∀ d, (runPropagators.go ps acc).conflict = some d →
         d ≠ [] →
         ∃ l ∈ d, l.eval a = some true := by
     intro ps
     induction ps with
     | nil =>
-        intro acc _ hacnone d hgo _
+        intro acc _ hacnone _ d hgo _
         rw [show (runPropagators.go [] acc) = acc from rfl, hacnone] at hgo
         exact absurd hgo (by intro hc; cases hc)
     | cons p rest ih =>
-        intro acc hmem hacnone d hgo hdne
+        intro acc hmem hacnone hacsub d hgo hdne
         have hp : p ∈ props := hmem p (List.mem_cons_self)
         have hrest : ∀ q ∈ rest, q ∈ props := fun q hq =>
           hmem q (List.mem_cons_of_mem _ hq)
@@ -1984,16 +2842,16 @@ theorem runPropagators_conflict_entitled_statefree
           rw [hacnone] at his
           exact absurd his (by simp)
         · split at hgo
-          · exact ih acc hrest hacnone d hgo hdne
+          · exact ih acc hrest hacnone hacsub d hgo hdne
           · rename_i c2 heq
             have hc2d : c2 = d := by injection hgo
             subst hc2d
-            exact hent p acc hp c2 heq hdne
+            exact hent p acc hp hacsub c2 heq hdne
           · rename_i lg rsn hres
             -- the opposing-pair arm: enqueueNorm either preserves
             -- the conflict slot (recurse) or sets [lg.norm, ¬lg.norm]
             -- (close via the literal's decidedness)
-            obtain ⟨b, hb⟩ := hdec p acc hp lg rsn hres
+            obtain ⟨b, hb⟩ := hdec p acc hp hacsub lg rsn hres
             have hbn : st0.negOnTrail (lg.norm) = false → True := by
               intro _
               trivial
@@ -2002,7 +2860,7 @@ theorem runPropagators_conflict_entitled_statefree
                 have hstate : enqueueNorm acc lg (some rsn) = acc := by
                   simp only [enqueueNorm, hb1, if_true]
                 rw [hstate] at hgo
-                exact ih acc hrest hacnone d hgo hdne
+                exact ih acc hrest hacnone hacsub d hgo hdne
             | false =>
                 cases hb2 : acc.negOnTrail lg.norm with
                 | true =>
@@ -2039,8 +2897,9 @@ theorem runPropagators_conflict_entitled_statefree
                         Bool.false_eq_true, if_false]
                       exact hacnone
                     exact ih (enqueueNorm acc lg (some rsn)) hrest
-                      hstate2 d hgo hdne
-  exact goInv props st0 (fun _ hq => hq) hnone c hrep hcne
+                      hstate2 ((enqueueNorm_domSub acc lg (some rsn)).trans hacsub)
+                      d hgo hdne
+  exact goInv props st0 (fun _ hq => hq) hnone hsub0 c hrep hcne
 
 /-! ### The scan-unit enqueue is unconditionally conflict-clear
 
@@ -2136,6 +2995,7 @@ conflict clause — the `cc ≠ []` gate). -/
 theorem propagatorsOfProved_conflictEntitled
     {problem : Problem DomConstraint Unit}
     (hview : IntViewedDoms problem.domains)
+    (hshape : DomsShapeTyped problem.domains)
     {props : List Propagator}
     (_hsolvable : ∃ b, ProblemSolution problem DomConstraint.SatisfiedBy b)
     (hprops : ∀ p ∈ props, ∃ dc ∈ problem.constraints,
@@ -2157,6 +3017,7 @@ theorem propagatorsOfProved_conflictEntitled
   -- conflict-clearness and the two database facts
   have main : ∀ (fuel : Nat) (s : State),
       s.conflict = none →
+      DomSub s.domains problem.domains →
       s.clauses = problem.clauses →
       (∀ c ∈ s.learned, c.EntailedBy problem
         DomConstraint.SatisfiedBy) →
@@ -2167,12 +3028,12 @@ theorem propagatorsOfProved_conflictEntitled
     intro fuel
     induction fuel with
     | zero =>
-        intro s hcl _ _ c hrep2 _
+        intro s hcl _ _ _ c hrep2 _
         simp only [propagateLoop] at hrep2
         rw [hcl] at hrep2
         exact absurd hrep2 (by simp)
     | succ fuel ih =>
-        intro s hcl sclfix slearned c hrep2 hcne a ha
+        intro s hcl hssub sclfix slearned c hrep2 hcne a ha
         cases hscan : scanAll s with
         | none =>
             have hUnf : propagateLoop (fuel + 1) props s =
@@ -2189,8 +3050,8 @@ theorem propagatorsOfProved_conflictEntitled
               -- per-family entitlement (C.2), gated by cc ≠ []
               -- (neSlot's empty clause never reaches here)
               rw [if_pos hlen] at hrep2
-              exact runPropagators_conflict_entitled_statefree hview
-                hprops hlin hlinE s hcl c hrep2 hcne a ha
+              exact runPropagators_conflict_entitled_statefree hview hshape
+                hprops hlin hlinE s hcl hssub c hrep2 hcne a ha
             · rw [if_neg hlen] at hrep2
               -- the swept state's two database facts (both
               -- unconditionally preserved by the sweep)
@@ -2205,6 +3066,7 @@ theorem propagatorsOfProved_conflictEntitled
               cases hconf2 : (runPropagators props s).conflict with
               | none =>
                   exact ih (runPropagators props s) hconf2
+                    ((runPropagators_domSub props s).trans hssub)
                     (by rw [hcl2]; exact sclfix)
                     (by rw [hln2]; exact slearned) c hrep2 hcne a ha
               | some c2 =>
@@ -2221,7 +3083,7 @@ theorem propagatorsOfProved_conflictEntitled
                     injection hrep2
                   subst hc2c
                   exact runPropagators_conflict_entitled_statefree
-                    hview hprops hlin hlinE s hcl c2 hconf2 hcne a ha
+                    hview hshape hprops hlin hlinE s hcl hssub c2 hconf2 hcne a ha
         | some verdict =>
             cases verdict with
             | inl c2 =>
@@ -2270,9 +3132,16 @@ theorem propagatorsOfProved_conflictEntitled
                 have hln2 : (enqueueNorm s l (some r)).learned
                     = s.learned := enqueueNorm_learned
                 exact ih (enqueueNorm s l (some r)) hconf2
+                  ((enqueueNorm_domSub s l (some r)).trans hssub)
                   (by rw [hcl2]; exact sclfix)
                   (by rw [hln2]; exact slearned) c hrep2 hcne a ha
-  exact main (engineFuel st) st hc hinv.clausesFixed
+  have hst0 : DomSub st.domains problem.domains := by
+    have hcoh : st.domains = st.trail.foldl
+        (fun acc e => domOfLit acc e.literal) problem.domains :=
+      hinv.coherent
+    rw [hcoh]
+    exact foldl_domOfLit_domSub _ _
+  exact main (engineFuel st) st hc hst0 hinv.clausesFixed
     hinv.learnedEntailed cc hrep hne a ha
 
 
@@ -2366,10 +3235,18 @@ theorem propagatorsOfProved_just
     ⟨i, c, hdc2, hrun2⟩ | ⟨i, c, hdc2, hrun2⟩ |
     ⟨i, c, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
     ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-    ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-    ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-    ⟨lc, li, lb2, hdcl, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-    ⟨ais, hdcai, hrunad⟩
+    ⟨ic, jc, kc, hdcc, hrunc⟩ |
+    ⟨lc, li, lb2, hdcl, hrunl⟩ |
+    ⟨ais, hdcai, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+    ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+    ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+    ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+    ⟨lq5, leqs5, leqb5, leqr5, hdcEqR, hrunEqR⟩ |
+    ⟨lq6, lnis6, lnib6, lnir6, hdcNeR, hrunNeR⟩ |
+    ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+    ⟨iab, kab, hdcAb, hrunAb⟩ |
+    ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+    ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
   · -- leSlot
     rw [hdc2] at hdc
     rw [Literal.norm_eval l a]
@@ -2443,37 +3320,83 @@ theorem propagatorsOfProved_just
     rw [Literal.norm_eval l a]
     exact (propBoolOr_safe acc ic jc kc).1 l r hrunc a hfit
       (hsol.2 _ hdc)
-  · -- minSlot
-    rw [hdcd] at hdc
-    rw [Literal.norm_eval l a]
-    exact (propMin_safe acc id jd kd).1 l r hrund a hfit
-      (hsol.2 _ hdc)
-  · -- maxSlot
-    rw [hdce] at hdc
-    rw [Literal.norm_eval l a]
-    exact (propMax_safe acc ie je ke).1 l r hrune a hfit
-      (hsol.2 _ hdc)
-  · -- absSlot
-    rw [hdcg] at hdc
-    rw [Literal.norm_eval l a]
-    exact (propAbs_safe acc ig kg).1 l r hrung a hfit
-      (hsol.2 _ hdc)
   · -- linEq
     rw [hdcl] at hdc
     rw [Literal.norm_eval l a]
     exact (propLinEq2_safe acc lc li lb2
       (hlinE _ hdc lc li lb2 rfl)).1 l r hrunl a hfit
       (hsol.2 _ hdc)
-  · -- timesSlot
-    rw [hdct] at hdc
-    rw [Literal.norm_eval l a]
-    exact (propTimes_safe acc ti tj tk2).1 l r hrunt a hfit
-      (hsol.2 _ hdc)
-  · -- allDiff (never implies; the shape still discharges)
+  · -- allDiff: the value elimination's implied literal (the safe
+    -- triple's first conjunct; the reason side is `hlad`-gated)
     rw [hdcai] at hdc
     rw [Literal.norm_eval l a]
     exact (propAllDiffLCG_safe acc ais).1 l r hrunad a hfit
       (hsol.2 _ hdc)
+  · -- linLeReif
+    rw [hdcR] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propLinLeReif_safe acc lre lri lrb lrr).1 l r hrunR a hfit
+      (hsol.2 _ hdc)
+  · rw [hdcN] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propLinNe_safe acc lnc lni lnb).1 l r hrunN a hfit
+      (hsol.2 _ hdc)
+  · -- minSlot
+    rw [Literal.norm_eval l a]
+    exact (propMin_safe acc imn jmn kmn).1 l r hrunMn a hfit
+      (hdcMn _ (hsol.2 _ hdc))
+  · -- maxSlot
+    rw [Literal.norm_eval l a]
+    exact (propMax_safe acc imx jmx kmx).1 l r hrunMx a hfit
+      (hdcMx _ (hsol.2 _ hdc))
+  · rw [hdcLR] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propLeReifSlot_safe acc ilr jlr rlr).1 l r hrunLR a hfit
+      (hsol.2 _ hdc)
+  · rw [hdcE] at hdc
+    rw [Literal.norm_eval l a]
+    have hviewst : IntViewedDoms acc.domains :=
+      intViewedDoms_of_coherent hview hcoh
+    exact (propEqReifSlot_safe acc ieq jeq req hviewst).1 l r hrunE a hfit
+      (hsol.2 _ hdc)
+  · rw [hdcNE] at hdc
+    rw [Literal.norm_eval l a]
+    have hviewst : IntViewedDoms acc.domains :=
+      intViewedDoms_of_coherent hview hcoh
+    exact (propNeReifSlot_safe acc ine jne rne hviewst).1 l r hrunNE a hfit
+      (hsol.2 _ hdc)
+  · rw [hdcEqR] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propLinEqReif_safe acc lq5 leqs5 leqb5 leqr5).1 l r hrunEqR a hfit
+      (hsol.2 _ hdc)
+  · rw [hdcNeR] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propLinNeReif_safe acc lq6 lnis6 lnib6 lnir6).1 l r hrunNeR a hfit
+      (hsol.2 _ hdc)
+  · -- timesSlot
+    rw [hdcTt] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propTimes_safe acc itt jtt ktt).1 l r hrunTt a hfit
+      (hsol.2 _ hdc)
+  · rw [hdcAb] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propAbs_safe acc iab kab).1 l r hrunAb a hfit (hsol.2 _ hdc)
+  · rw [hdcD] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propDiv_safe acc od1 od2 od3).1 l r hrunD a hfit (hsol.2 _ hdc)
+  · rw [hdcM] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propMod_safe acc om1 om2 om3).1 l r hrunM a hfit (hsol.2 _ hdc)
+  · -- `propCheck` never implies.
+    exact (propCheck_implied_elim hrunLn).elim
+  · -- maxGen (PLAN C9c)
+    rw [hdcG] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propMaxGen_safe acc osG rG).1 l r hrunG a hfit (hsol.2 _ hdc)
+  · -- minGen (PLAN C9c)
+    rw [hdcH] at hdc
+    rw [Literal.norm_eval l a]
+    exact (propMinGen_safe acc osH rH).1 l r hrunH a hfit (hsol.2 _ hdc)
 
 /-- The concrete front-door instantiation: the hjust obligation over
     the registered list
@@ -3103,14 +4026,11 @@ theorem step_fits_or_false {R D : List (List Value)} {e : TrailEntry}
                     refine fits_domOfLit_of_survive hfit hget ?_
                     show w ∈ (domOfLit R
                       (Literal.mk (Atom.boolEq s b) true)).getD s []
-                    have hgoal : (domOfLit R
-                        (Literal.mk (Atom.boolEq s b) true)).getD s []
-                        = [Value.bool b] := by
-                      unfold domOfLit
-                      rw [updateSlot_getD_eq R s _ hs]
-                      cases b <;> rfl
-                    rw [hgoal]
-                    exact List.mem_singleton.mpr hxb
+                    unfold domOfLit
+                    rw [updateSlot_getD_eq R s _ hs]
+                    refine List.mem_filter.mpr ⟨hfit.2 s w hget, ?_⟩
+                    rw [hxb]
+                    cases b <;> rfl
                   · -- w is a DIFFERENT Boolean: the pin is false at a
                     have hxbne : x ≠ b := fun h => hxb (by rw [hx, h])
                     left
@@ -3137,14 +4057,11 @@ theorem step_fits_or_false {R D : List (List Value)} {e : TrailEntry}
                     refine fits_domOfLit_of_survive hfit hget ?_
                     show w ∈ (domOfLit R
                       (Literal.mk (Atom.boolEq s b) false)).getD s []
-                    have hgoal : (domOfLit R
-                        (Literal.mk (Atom.boolEq s b) false)).getD s []
-                        = [Value.bool (!b)] := by
-                      unfold domOfLit
-                      rw [updateSlot_getD_eq R s _ hs]
-                      cases b <;> rfl
-                    rw [hgoal]
-                    exact List.mem_singleton.mpr hxb
+                    unfold domOfLit
+                    rw [updateSlot_getD_eq R s _ hs]
+                    refine List.mem_filter.mpr ⟨hfit.2 s w hget, ?_⟩
+                    rw [hxb]
+                    cases b <;> rfl
                   · have hxbne : x ≠ (!b) := fun h => hxb (by rw [hx, h])
                     left
                     have hget' : a[s]? = some (Value.bool x) := by

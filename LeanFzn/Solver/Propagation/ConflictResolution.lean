@@ -32,6 +32,7 @@ DAG:
 
 import LeanFzn.Solver.Propagation.BranchState
 import LeanFzn.Solver.Propagation.ExplainedPropagation
+import LeanFzn.Solver.Propagation.LcgAnalyzer
 open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation
 
 
@@ -173,25 +174,14 @@ floor the computed allowance is taken against. -/
 def historicalAllowance (trail : List TrailEntry) : Nat :=
   4 * trail.length * trail.length + 256
 
-/-- The allowance the executable analysis is actually run with: the
-computed literal budget, never below the historical constant. Taking the
-maximum makes the switch to an input-dependent allowance a *provable*
-refinement rather than a gamble: no input the constant handled can
-regress (see `analyzeStep_mono_le`).
-
-B1 RESIDUAL OBLIGATION: proving that `analysisAllowance` alone suffices —
-without the `max` safety net — requires the reachable-state ordering
-invariant that bounds the number of pivot rounds. Until that is proved,
-the plan's instruction not to *claim* the formula sufficient is honoured
-by routing through `max`. -/
-def analysisFuel (trail : List TrailEntry) (c : Clause) : Nat :=
-  max (analysisAllowance trail c) (historicalAllowance trail)
-
-/-- Analyze a conflict clause at an explicit allowance. This is the
-executable entry point that consumes `analysisFuel`. -/
-def analyzeAtAllowance (trail : List TrailEntry) (lvl : Nat) (c : Clause) :
-    Option (List (Literal × Nat) × Literal) :=
-  analyzeStep trail lvl (analysisFuel trail c) [c] none [] []
+/-- Analyze a conflict clause with the LCG analyzer (`LcgAnalyzer.lean`:
+root drop, semantic falsifiers, bounded reason falsifiers) over the original
+domains `orig`. The loop runs at `analysisFuel`, which is proved sufficient
+for EVERY input (`analyzeAtAllowance_complete`, `AnalysisCompletion.lean`),
+so a `none` result is always a semantic stop. -/
+def analyzeAtAllowance (orig : List Domain) (trail : List TrailEntry) (lvl : Nat)
+    (c : Clause) : Option (List (Literal × Nat) × Literal) :=
+  analyzeLoop orig trail lvl (analysisFuel trail c) (initAnalysisState c)
 
 /-! ## The analysis record of one run
 
@@ -279,16 +269,16 @@ def ConflictAnalysis.ofRunNormalized (below : List (Literal × Nat))
 /-- Analyze with the input-dependent allowance: the analysis is run at
 `analysisFuel`, not at the historical constant, so long clauses and long
 reason clauses are not truncated. -/
-def BranchState.analyzeWithAllowance (bs : BranchState leaf) (c : Clause) :
-    Option ConflictAnalysis :=
-  (analyzeAtAllowance bs.trail bs.level c).map
+def BranchState.analyzeWithAllowance (orig : List Domain) (bs : BranchState leaf)
+    (c : Clause) : Option ConflictAnalysis :=
+  (analyzeAtAllowance orig bs.trail bs.level c).map
     (fun p => ConflictAnalysis.ofRun p.1 p.2)
 
 /-- The allowance run's record is what `analyzeWithAllowance` returns. -/
-theorem BranchState.analyzeWithAllowance_eq_map_ofRun (bs : BranchState leaf)
-    (c : Clause) :
-    bs.analyzeWithAllowance c =
-      (analyzeAtAllowance bs.trail bs.level c).map
+theorem BranchState.analyzeWithAllowance_eq_map_ofRun (orig : List Domain)
+    (bs : BranchState leaf) (c : Clause) :
+    bs.analyzeWithAllowance orig c =
+      (analyzeAtAllowance orig bs.trail bs.level c).map
         (fun p => ConflictAnalysis.ofRun p.1 p.2) := rfl
 
 end LeanFzn.Solver.Propagation

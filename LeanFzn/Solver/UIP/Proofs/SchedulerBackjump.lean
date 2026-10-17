@@ -335,7 +335,7 @@ theorem perform_eq_none_of_restoreNarrow_eq_none {leaf : Assignment → Bool}
     {p : BackjumpPlan leaf} {bs : BranchState leaf}
     {original : List Clause} {props : List Propagator}
     (h : p.restoreNarrow bs = none) :
-    p.perform bs original props = none := by
+    p.perform bs orig original props = none := by
   unfold BackjumpPlan.perform
   rw [h]
   rfl
@@ -351,7 +351,7 @@ theorem assertion_reject_routes_local {leaf : Assignment → Bool}
     {original : List Clause} {props : List Propagator}
     (h : p.restoreNarrow bs = none)
     (hdead : ∀ a, leaf a = true → FrameCovers p.checkpoint.frame a → False) :
-    p.perform bs original props = none ∧
+    p.perform bs orig original props = none ∧
       DeadRegion.Sound leaf (DeadRegion.ofFrame p.checkpoint.frame) :=
   ⟨perform_eq_none_of_restoreNarrow_eq_none h,
     local_exclusion_ofFrame_sound (f := p.checkpoint.frame) hdead⟩
@@ -491,15 +491,16 @@ theorem restoreNarrow_eq_some_iff {p : BackjumpPlan leaf}
         rfl
 
 /-- THE `perform` RESULT, EXACT: the complete transition's result is the
-resumed closure of the restored-and-narrowed state. This is the equation
+resumed (synchronised) closure of the frame/trail synchronisation (R1d
+`syncAll`) of the restored-and-narrowed state. This is the equation
 every successor-field derivation starts from (no field of the successor is
 an assumption; each is computed from this shape). -/
 theorem perform_eq_some_iff {p : BackjumpPlan leaf} {bs s : BranchState leaf}
-    {original : List Clause} {props : List Propagator} :
-    p.perform bs original props = some s ↔
+    {orig : List Domain} {original : List Clause} {props : List Propagator} :
+    p.perform bs orig original props = some s ↔
       ∃ g : BranchFrame, filterFrame p.asserting p.checkpoint.frame = some g ∧
-        s = explainedClosure original props
-              ((p.execute (bs.learnGlobal p.learned)).narrowFrame g) := by
+        s = explainedClosure orig original props (syncAll orig
+              ((p.execute (bs.learnGlobal p.learned)).narrowFrame g)) := by
   unfold BackjumpPlan.perform
   constructor
   · intro h
@@ -520,21 +521,26 @@ theorem perform_eq_some_iff {p : BackjumpPlan leaf} {bs s : BranchState leaf}
 executed trail by entries at the plan's target level only. No entry below
 the target is added, so every restored checkpoint prefix survives. -/
 theorem perform_trail_extends {p : BackjumpPlan leaf} {bs s : BranchState leaf}
-    {original : List Clause} {props : List Propagator}
-    (h : p.perform bs original props = some s) :
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    (h : p.perform bs orig original props = some s) :
     ∃ extra : List TrailEntry,
       s.trail = (p.execute (bs.learnGlobal p.learned)).trail ++ extra ∧
         ∀ e ∈ extra, e.level = p.target := by
   obtain ⟨g, hg, rfl⟩ := perform_eq_some_iff.mp h
+  obtain ⟨ex1, hex1, hlev1⟩ := syncAll_trail_shape orig
+    ((p.execute (bs.learnGlobal p.learned)).narrowFrame g)
   obtain ⟨extra, hextra, hlev⟩ :=
-    explainedClosure_trail_extends original props
-      ((p.execute (bs.learnGlobal p.learned)).narrowFrame g)
-  refine ⟨extra, ?_, ?_⟩
-  · rw [hextra]
+    explainedClosure_trail_extends orig original props
+      (syncAll orig ((p.execute (bs.learnGlobal p.learned)).narrowFrame g))
+  refine ⟨ex1 ++ extra, ?_, ?_⟩
+  · rw [hextra, hex1, List.append_assoc]
     rfl
   · intro e he
-    rw [hlev e he]
-    rfl
+    rcases List.mem_append.mp he with he | he
+    · rw [hlev1 e he]
+      rfl
+    · rw [hlev e he, syncAll_level]
+      rfl
 
 /-- TRAIL PREFIX OF THE SELECTED CHECKPOINT: the performed plan's trail
 extends the SELECTED checkpoint's saved trail by entries at target level or
@@ -542,18 +548,16 @@ above (the asserting entry plus the closure's narrowing entries) — the
 prefix conjunct of `Identifies` at `target := p.target`. -/
 theorem perform_trail_prefix_checkpoint {p : BackjumpPlan leaf}
     {bs s : BranchState leaf}
-    {original : List Clause} {props : List Propagator}
-    (h : p.perform bs original props = some s) :
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    (h : p.perform bs orig original props = some s) :
     ∃ extra : List TrailEntry,
       s.trail = p.checkpoint.trail ++ extra ∧ ∀ e ∈ extra, p.target ≤ e.level := by
   obtain ⟨extra, hextra, hlev⟩ := perform_trail_extends h
-  refine ⟨{ literal := p.asserting.norm, level := p.target,
-            reason := some { clause := p.learned } } :: extra, ?_, ?_⟩
-  · rw [hextra, BackjumpPlan.execute_trail, List.append_assoc,
-      List.singleton_append]
+  refine ⟨p.assertExtra ++ extra, ?_, ?_⟩
+  · rw [hextra, BackjumpPlan.execute_trail, List.append_assoc]
   · intro e he
-    rcases List.mem_cons.mp he with he | he
-    · subst he
+    rcases List.mem_append.mp he with he | he
+    · rw [BackjumpPlan.assertExtra_mem p he]
       exact Nat.le_refl _
     · exact Nat.le_of_eq (hlev e he).symm
 
@@ -561,8 +565,8 @@ theorem perform_trail_prefix_checkpoint {p : BackjumpPlan leaf}
 from the selected checkpoint's frame — `execute` restores it, the
 assertion filters it, and the closure only narrows further. -/
 theorem perform_frame_descends {p : BackjumpPlan leaf} {bs s : BranchState leaf}
-    {original : List Clause} {props : List Propagator}
-    (h : p.perform bs original props = some s) :
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    (h : p.perform bs orig original props = some s) :
     FrameDescendsFrom s.frame p.checkpoint.frame := by
   obtain ⟨g, hg, rfl⟩ := perform_eq_some_iff.mp h
   have hmid : FrameDescendsFrom
@@ -570,10 +574,12 @@ theorem perform_frame_descends {p : BackjumpPlan leaf} {bs s : BranchState leaf}
       p.checkpoint.frame :=
     fun a hc =>
       filterFrame_refines hg (by simpa only [BranchState.narrowFrame] using hc)
-  exact FrameDescendsFrom.trans
-    (explainedClosure_frame_descends original props
-      ((p.execute (bs.learnGlobal p.learned)).narrowFrame g))
-    hmid
+  refine FrameDescendsFrom.trans
+    (explainedClosure_frame_descends orig original props
+      (syncAll orig ((p.execute (bs.learnGlobal p.learned)).narrowFrame g)))
+    ?_
+  rw [syncAll_frame]
+  exact hmid
 
 /-- **THE `hident` ENGINE**: every surviving checkpoint of the jump
 successor identifies the successor branch at its own level — from the
@@ -590,7 +596,7 @@ theorem stepLearnBackjumpAssert_hident_of_chain {leaf : Assignment → Bool}
     (hchain : CpChain cfg.checkpoints)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hperform : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-        an.learned).perform cfg.branch cfg.original cfg.props = some restored)
+        an.learned).perform cfg.branch cfg.orig cfg.original cfg.props = some restored)
     (hmem : cp' ∈ (stepLearnBackjumpAssert cfg
         (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
         ev restored).checkpoints) :
@@ -634,7 +640,7 @@ theorem perform_reachable_of_narrowFrame {orig : List Domain}
     (hg : filterFrame p.asserting p.checkpoint.frame = some g)
     (hpre : ReachableState leaf orig
       ((p.execute (bs.learnGlobal p.learned)).narrowFrame g))
-    (h : p.perform bs original props = some s) :
+    (h : p.perform bs orig original props = some s) :
     ReachableState leaf orig s := by
   obtain ⟨g', hg', rfl⟩ := perform_eq_some_iff.mp h
   rw [hg] at hg'
@@ -643,7 +649,8 @@ theorem perform_reachable_of_narrowFrame {orig : List Domain}
       ((p.execute (bs.learnGlobal p.learned)).narrowFrame g).learned := by
     show UnitDB (p.learned :: bs.learned)
     exact unitDB_append hplanU hu
-  exact explainedClosure_reachable hc _ hpay hpre hu'
+  exact explainedClosure_reachable hc _ hpay (syncAll_reachable hpre hc.leafFits)
+    (by rw [syncAll_learned]; exact hu')
 
 /-- RESIDUAL (owner S5), stated rather than assumed: the executed-and-narrowed
 pre-closure state is a reachable branch state. Its two ingredients are
@@ -672,7 +679,7 @@ theorem perform_reachable_of_pre {orig : List Domain}
     {p : BackjumpPlan leaf} {bs s : BranchState leaf}
     (hu : UnitDB bs.learned) (hplanU : UnitDB [p.learned])
     (hpre : RestorationPreReachable leaf orig p bs)
-    (h : p.perform bs original props = some s) :
+    (h : p.perform bs orig original props = some s) :
     ReachableState leaf orig s := by
   obtain ⟨g, hg, hgpre⟩ := hpre
   exact perform_reachable_of_narrowFrame hc hpay hu hplanU hg hgpre h

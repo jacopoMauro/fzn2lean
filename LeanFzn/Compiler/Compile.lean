@@ -387,6 +387,52 @@ inductive AuxShape where
   /-- `bool_or(x, y, false)`: `x ∨ y = false` forces both operands
       false — no aux slot. -/
   | orFalse (x y : Ident)
+  /-- `int_eq_reif(x, k, r)` (PLAN C5b): an aux slot carries the
+      literal `k` (domain `[.int k]`), rewritten to
+      `int_eq_reif(x, AUX, r)`. -/
+  | eqReifRK (x r : Ident) (k : Int)
+  /-- `int_eq_reif(k, x, r)` (PLAN C5b): an aux slot carries the
+      literal `k` (domain `[.int k]`). -/
+  | eqReifKR (x r : Ident) (k : Int)
+  /-- `int_le_reif(x, k, r)` (PLAN C5b): an aux slot carries the
+      literal `k` (domain `[.int k]`). -/
+  | leReifRK (x r : Ident) (k : Int)
+  /-- `int_le_reif(k, x, r)` (PLAN C5b): an aux slot carries the
+      literal `k` (domain `[.int k]`). -/
+  | leReifKR (x r : Ident) (k : Int)
+  /-- `int_ne_reif(x, k, r)` (PLAN C5b): an aux slot carries the
+      literal `k` (domain `[.int k]`). -/
+  | neReifRK (x r : Ident) (k : Int)
+  /-- `int_ne_reif(k, x, r)` (PLAN C5b): an aux slot carries the
+      literal `k` (domain `[.int k]`). -/
+  | neReifKR (x r : Ident) (k : Int)
+  /-- `int_min(x, k, z)` (PLAN C9): an aux slot carries the literal
+      `k` (domain `[.int k]`), rewritten to `int_min(x, AUX, z)`
+      (`minSlot`, the explained `propMin`). -/
+  | minRK (x z : Ident) (k : Int)
+  /-- `int_min(k, x, z)` (PLAN C9). -/
+  | minKR (x z : Ident) (k : Int)
+  /-- `int_max(x, k, z)` (PLAN C9). -/
+  | maxRK (x z : Ident) (k : Int)
+  /-- `int_max(k, x, z)` (PLAN C9). -/
+  | maxKR (x z : Ident) (k : Int)
+  /-- `int_min(x, y, k)` (PLAN C9 remainder): the LITERAL is the
+      RESULT operand (third position). An aux slot carries the literal
+      `k` (domain `[.int k]`), rewritten to `int_min(x, y, AUX)`
+      (`minSlot`, the explained `propMin`). -/
+  | minRRK (x y : Ident) (k : Int)
+  /-- `int_max(x, y, k)` (PLAN C9 remainder): the literal RESULT
+      operand, rewritten to `int_max(x, y, AUX)` (`maxSlot`). -/
+  | maxRRK (x y : Ident) (k : Int)
+  /-- `array_int_minimum(r, [e₁, e₂])` (PLAN C9 remainder): the
+      two-element array minimum, rewritten into the CHAIN of binary
+      `int_min(e₁, e₂, r)` over the element slots themselves
+      (`minSlot`, the explained `propMin`) — no aux slot at all. -/
+  | minGen2 (e1 e2 r : Ident)
+  /-- `array_int_maximum(r, [e₁, e₂])` (PLAN C9 remainder): the
+      two-element array maximum, rewritten into the chain
+      `int_max(e₁, e₂, r)` (`maxSlot`). -/
+  | maxGen2 (e1 e2 r : Ident)
 
 /-- The syntactic classification of the nine pinning shapes. -/
 def auxShapeOf (c : ConstraintItem) : Option AuxShape :=
@@ -425,6 +471,62 @@ def auxShapeOf (c : ConstraintItem) : Option AuxShape :=
       | [.basic (.ident x), .basic (.ident y), .basic (.lit (.bool false))] =>
           some (.orFalse x y)
       | _ => none
+  -- PLAN C5b: the reified families with ONE literal operand. `r` stays
+  -- a slot identifier; the literal is pinned into a fresh aux slot.
+  | "int_eq_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident r)] =>
+          some (.eqReifRK x r k)
+      | [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident r)] =>
+          some (.eqReifKR x r k)
+      | _ => none
+  | "int_le_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident r)] =>
+          some (.leReifRK x r k)
+      | [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident r)] =>
+          some (.leReifKR x r k)
+      | _ => none
+  | "int_ne_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident r)] =>
+          some (.neReifRK x r k)
+      | [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident r)] =>
+          some (.neReifKR x r k)
+      | _ => none
+  -- PLAN C9: min/max with ONE literal operand (slot form over a pinned aux).
+  | "int_min" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident z)] =>
+          some (.minRK x z k)
+      | [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident z)] =>
+          some (.minKR x z k)
+      -- PLAN C9 remainder: the LITERAL is the RESULT operand
+      | [.basic (.ident x), .basic (.ident y), .basic (.lit (.int k))] =>
+          some (.minRRK x y k)
+      | _ => none
+  | "int_max" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.int k)), .basic (.ident z)] =>
+          some (.maxRK x z k)
+      | [.basic (.lit (.int k)), .basic (.ident x), .basic (.ident z)] =>
+          some (.maxKR x z k)
+      -- PLAN C9 remainder: the LITERAL is the RESULT operand
+      | [.basic (.ident x), .basic (.ident y), .basic (.lit (.int k))] =>
+          some (.maxRRK x y k)
+      | _ => none
+  -- PLAN C9 remainder: the two-element ARRAY shapes chain over the
+  -- element slots themselves (no aux slot, no pin).
+  | "array_int_maximum" =>
+      match c.args with
+      | [.basic (.ident r), .array [.ident e1, .ident e2]] =>
+          some (.maxGen2 e1 e2 r)
+      | _ => none
+  | "array_int_minimum" =>
+      match c.args with
+      | [.basic (.ident r), .array [.ident e1, .ident e2]] =>
+          some (.minGen2 e1 e2 r)
+      | _ => none
   | _ => none
 
 /-- The aux slot's pinned value: `some v` means the shape consumes an
@@ -442,10 +544,24 @@ def AuxShape.pin : AuxShape → Option Value
   | .timesKKR _ k _ => some (.int k)
   | .neRK _ k => some (.int k)
   | .neKR _ k => some (.int k)
+  | .eqReifRK _ _ k => some (.int k)
+  | .eqReifKR _ _ k => some (.int k)
+  | .leReifRK _ _ k => some (.int k)
+  | .leReifKR _ _ k => some (.int k)
+  | .neReifRK _ _ k => some (.int k)
+  | .neReifKR _ _ k => some (.int k)
+  | .minRK _ _ k => some (.int k)
+  | .minKR _ _ k => some (.int k)
+  | .maxRK _ _ k => some (.int k)
+  | .maxKR _ _ k => some (.int k)
+  | .minRRK _ _ k => some (.int k)
+  | .maxRRK _ _ k => some (.int k)
   | .andFalse _ _ => some (.bool false)
   | .orTrue _ _ => some (.bool true)
   | .andTrue _ _ => none
   | .orFalse _ _ => none
+  | .minGen2 _ _ _ => none
+  | .maxGen2 _ _ _ => none
 
 /-- The SECOND aux slot's pinned value (`some v` only for the
     two-literal times shapes, whose second literal `k'` needs its own
@@ -532,6 +648,62 @@ def AuxShape.expand : AuxShape → Ident → List ConstraintItem
        , anns := [] }
       ,{ name := Ident.mk "bool_not"
        , args := [.basic (.ident y), .basic (.lit (.bool true))]
+       , anns := [] }]
+  | .eqReifRK x r _, aux =>
+      [{ name := Ident.mk "int_eq_reif"
+       , args := [.basic (.ident x), .basic (.ident aux), .basic (.ident r)]
+       , anns := [] }]
+  | .eqReifKR x r _, aux =>
+      [{ name := Ident.mk "int_eq_reif"
+       , args := [.basic (.ident aux), .basic (.ident x), .basic (.ident r)]
+       , anns := [] }]
+  | .leReifRK x r _, aux =>
+      [{ name := Ident.mk "int_le_reif"
+       , args := [.basic (.ident x), .basic (.ident aux), .basic (.ident r)]
+       , anns := [] }]
+  | .leReifKR x r _, aux =>
+      [{ name := Ident.mk "int_le_reif"
+       , args := [.basic (.ident aux), .basic (.ident x), .basic (.ident r)]
+       , anns := [] }]
+  | .neReifRK x r _, aux =>
+      [{ name := Ident.mk "int_ne_reif"
+       , args := [.basic (.ident x), .basic (.ident aux), .basic (.ident r)]
+       , anns := [] }]
+  | .neReifKR x r _, aux =>
+      [{ name := Ident.mk "int_ne_reif"
+       , args := [.basic (.ident aux), .basic (.ident x), .basic (.ident r)]
+       , anns := [] }]
+  | .minRK x z _, aux =>
+      [{ name := Ident.mk "int_min"
+       , args := [.basic (.ident x), .basic (.ident aux), .basic (.ident z)]
+       , anns := [] }]
+  | .minKR x z _, aux =>
+      [{ name := Ident.mk "int_min"
+       , args := [.basic (.ident aux), .basic (.ident x), .basic (.ident z)]
+       , anns := [] }]
+  | .maxRK x z _, aux =>
+      [{ name := Ident.mk "int_max"
+       , args := [.basic (.ident x), .basic (.ident aux), .basic (.ident z)]
+       , anns := [] }]
+  | .maxKR x z _, aux =>
+      [{ name := Ident.mk "int_max"
+       , args := [.basic (.ident aux), .basic (.ident x), .basic (.ident z)]
+       , anns := [] }]
+  | .minRRK x y _, aux =>
+      [{ name := Ident.mk "int_min"
+       , args := [.basic (.ident x), .basic (.ident y), .basic (.ident aux)]
+       , anns := [] }]
+  | .maxRRK x y _, aux =>
+      [{ name := Ident.mk "int_max"
+       , args := [.basic (.ident x), .basic (.ident y), .basic (.ident aux)]
+       , anns := [] }]
+  | .minGen2 e1 e2 r, _ =>
+      [{ name := Ident.mk "int_min"
+       , args := [.basic (.ident e1), .basic (.ident e2), .basic (.ident r)]
+       , anns := [] }]
+  | .maxGen2 e1 e2 r, _ =>
+      [{ name := Ident.mk "int_max"
+       , args := [.basic (.ident e1), .basic (.ident e2), .basic (.ident r)]
        , anns := [] }]
 
 /-- The longest string length of a list (the aux-name freshness

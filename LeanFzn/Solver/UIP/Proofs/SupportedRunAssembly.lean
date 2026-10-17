@@ -113,7 +113,8 @@ theorem supportedPhaseNext_unsat_excludes {orig : List Domain}
       ⟨hconf, hact, hlv, bs, cs, learned, hne, ht⟩
     · exact exhausted hreach hp hstat
     · exact rootConflictExcludes_of_terminalEvent (hbr hreach)
-        (hbridge hreach) (hlent hreach) (hc hreach) ht
+        (hbridge hreach) (hlent hreach) (hc hreach)
+        (SupportedReach.orig_eq hreach) ht
   · exact exhausted (SupportedReach.step hreach hn_succ) hn_pend hn_dead
   · exact exhausted (SupportedReach.step (SupportedReach.step hreach hn_succ)
       hd_succ) hd_pend hd_dead

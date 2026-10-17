@@ -38,6 +38,7 @@ import LeanFzn.Solver.Propagation.Pruning
 import LeanFzn.Solver.Propagation.Propagate
 import LeanFzn.Solver.Propagation.Proofs.BranchState
 import LeanFzn.Solver.Propagation.Proofs.Engine
+import LeanFzn.Solver.Propagation.LcgAnalyzer
 open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation
 
 
@@ -1302,19 +1303,524 @@ def explainedDeduction (original : List Clause) (props : List Propagator)
                        filtered := hf, decreases := hm }
               else none
 
+/-! ## R1d frame/trail synchronisation
+
+After a frame tightening the branch frame may be strictly tighter than the
+trail records (bounds from holes, fixings). `syncOne` pushes one implied
+bound/fix literal with its DOMAIN EXPLANATION clause as an ordinary
+`narrowState` enqueue at the unchanged frame; `syncSlot` pushes the three
+candidates of a slot, `syncAll` those of every remaining slot. -/
+
+section FrameSyncCore
+
+variable {leaf : Assignment → Bool}
+
+/-- The negation of the LATEST trail literal on slot `s` that rejects `w`. -/
+def syncRemover (trail : List TrailEntry) (s : Nat) (w : Value) : Option Literal :=
+  (trail.reverse.map fun e => e.literal.negate).find? fun q =>
+    q.atom.slot == s && q.valueHolds w
+
+/-- The removers of every value of `W` (duplicate free); `none` when some
+value has no remover. -/
+def syncExplain (trail : List TrailEntry) (s : Nat) (W : List Value) :
+    Option Clause :=
+  let rs := W.map (syncRemover trail s)
+  if rs.any Option.isNone then none else some (rs.filterMap id).eraseDups
+
+/-- The domain-explanation clause of pushing `lit` at `bs`, when the push is
+justified: the literal holds on the whole (nonempty) remaining domain of its
+slot, is not implied by the trail, rejects some original value, and every
+rejected original value has a trail remover. -/
+def syncClause (orig : List Domain) (bs : BranchState leaf) (lit : Literal) :
+    Option Clause :=
+  let s := lit.atom.slot
+  let plen := bs.frame.2.length
+  if plen ≤ s then
+    match bs.frame.1[s - plen]? with
+    | none => none
+    | some d =>
+      let l := lit.norm
+      let W := (orig.getD s []).filter fun w => !l.valueHolds w
+      if !d.isEmpty && d.all l.valueHolds && !W.isEmpty
+          && !(bs.trail.any fun e => impliesP orig e.literal l) then
+        (syncExplain bs.trail s W).map (l :: ·)
+      else none
+  else none
+
+/-- Push one synchronised literal (an enqueue at the unchanged frame). -/
+def syncOne (orig : List Domain) (bs : BranchState leaf) (lit : Literal) :
+    BranchState leaf :=
+  match syncClause orig bs lit with
+  | some c => narrowState bs bs.frame lit c []
+  | none => bs
+
+/-- The candidate literals of slot `s`: lower bound, upper bound, fixing.
+Each is only offered when its threshold/value is an ORIGINAL value of the
+slot (so every candidate lies in the literal pool of the box, whatever the
+frame is). -/
+def syncCands (orig : List Domain) (f : BranchFrame) (s : Nat) : List Literal :=
+  if f.2.length ≤ s ∧ s < orig.length then
+    match f.1[s - f.2.length]? with
+    | none => []
+    | some d =>
+      let od := orig.getD s []
+      let oints := od.filterMap Value.intView
+      let ints := d.filterMap Value.intView
+      (match ints.min? with
+        | some lo => if lo ∈ oints then [negLe s (lo - 1)] else []
+        | none => [])
+      ++ (match ints.max? with
+        | some hi => if hi ∈ oints then [posLe s hi] else []
+        | none => [])
+      ++ (match d with
+          | [.int i] => if i ∈ oints then (valueLiteral s (.int i)).toList else []
+          | [.bool b] => (valueLiteral s (.bool b)).toList
+          | _ => [])
+      ++ (match ints.min?, ints.max? with
+          | some lo, some hi =>
+              (oints.filter fun h => decide (lo < h) && decide (h < hi) &&
+                !(ints.contains h)).eraseDups.map (posNe s)
+          | _, _ => [])
+  else []
+
+/-- Synchronise slot `s`: push its candidates in order. -/
+def syncSlot (orig : List Domain) (bs : BranchState leaf) (s : Nat) :
+    BranchState leaf :=
+  (syncCands orig bs.frame s).foldl (syncOne orig) bs
+
+/-- Synchronise every remaining slot. -/
+def syncAll (orig : List Domain) (bs : BranchState leaf) : BranchState leaf :=
+  (List.range bs.frame.1.length).foldl
+    (fun b i => syncSlot orig b (bs.frame.2.length + i)) bs
+
+
+/-! ## Specification of the explanation -/
+
+theorem syncRemover_spec {trail : List TrailEntry} {s : Nat} {w : Value}
+    {q : Literal} (h : syncRemover trail s w = some q) :
+    (∃ e ∈ trail, q = e.literal.negate) ∧ q.atom.slot = s ∧
+      q.valueHolds w = true := by
+  unfold syncRemover at h
+  have hmem := List.mem_of_find?_eq_some h
+  have hp := List.find?_some h
+  obtain ⟨e, he, hq⟩ := List.mem_map.mp hmem
+  simp only [Bool.and_eq_true, beq_iff_eq] at hp
+  exact ⟨⟨e, List.mem_reverse.mp he, hq.symm⟩, hp.1, hp.2⟩
+
+theorem syncExplain_spec {trail : List TrailEntry} {s : Nat} {W : List Value}
+    {ex : Clause} (h : syncExplain trail s W = some ex) :
+    (∀ q ∈ ex, ∃ e ∈ trail, q = e.literal.negate) ∧
+    (∀ w ∈ W, ∃ q ∈ ex, q.atom.slot = s ∧ q.valueHolds w = true) := by
+  unfold syncExplain at h
+  simp only at h
+  by_cases hany : (W.map (syncRemover trail s)).any Option.isNone = true
+  · rw [if_pos hany] at h
+    cases h
+  · rw [if_neg hany] at h
+    cases h
+    constructor
+    · intro q hq
+      obtain ⟨r, hr, hrq⟩ := List.mem_filterMap.mp (List.mem_eraseDups.mp hq)
+      obtain ⟨w, _, hw⟩ := List.mem_map.mp hr
+      simp only [id] at hrq
+      subst hrq
+      exact (syncRemover_spec hw).1
+    · intro w hw
+      have hnn : syncRemover trail s w ≠ none := by
+        intro hn
+        apply hany
+        exact List.any_eq_true.mpr ⟨none, List.mem_map.mpr ⟨w, hw, hn⟩, rfl⟩
+      obtain ⟨q, hq⟩ := Option.ne_none_iff_exists'.mp hnn
+      obtain ⟨-, hs, hv⟩ := syncRemover_spec hq
+      refine ⟨q, List.mem_eraseDups.mpr (List.mem_filterMap.mpr
+        ⟨some q, List.mem_map.mpr ⟨w, hw, hq⟩, rfl⟩), hs, hv⟩
+
+/-- Unpacking a justified push. -/
+theorem syncClause_spec {orig : List Domain} {bs : BranchState leaf}
+    {lit : Literal} {c : Clause} (h : syncClause orig bs lit = some c) :
+    ∃ d ex, bs.frame.2.length ≤ lit.atom.slot ∧
+      bs.frame.1[lit.atom.slot - bs.frame.2.length]? = some d ∧
+      d.isEmpty = false ∧ d.all lit.norm.valueHolds = true ∧
+      (∀ e ∈ bs.trail, impliesP orig e.literal lit.norm = false) ∧
+      syncExplain bs.trail lit.atom.slot
+        ((orig.getD lit.atom.slot []).filter fun w => !lit.norm.valueHolds w)
+          = some ex ∧
+      c = lit.norm :: ex := by
+  unfold syncClause at h
+  simp only at h
+  by_cases hle : bs.frame.2.length ≤ lit.atom.slot
+  · rw [if_pos hle] at h
+    cases hd : bs.frame.1[lit.atom.slot - bs.frame.2.length]? with
+    | none => rw [hd] at h; cases h
+    | some d =>
+      rw [hd] at h
+      simp only at h
+      by_cases hg : (!d.isEmpty && d.all lit.norm.valueHolds
+          && !((orig.getD lit.atom.slot []).filter fun w => !lit.norm.valueHolds w).isEmpty
+          && !(bs.trail.any fun e => impliesP orig e.literal lit.norm)) = true
+      · rw [if_pos hg] at h
+        simp only [Bool.and_eq_true, Bool.not_eq_true'] at hg
+        obtain ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩ := hg
+        cases hx : syncExplain bs.trail lit.atom.slot
+            ((orig.getD lit.atom.slot []).filter fun w => !lit.norm.valueHolds w) with
+        | none => rw [hx] at h; cases h
+        | some ex =>
+          rw [hx] at h
+          simp only [Option.map_some, Option.some.injEq] at h
+          refine ⟨d, ex, hle, rfl, h1, h2, ?_, rfl, h.symm⟩
+          intro e he
+          cases hne : impliesP orig e.literal lit.norm with
+          | false => rfl
+          | true =>
+            exfalso
+            have : bs.trail.any (fun e => impliesP orig e.literal lit.norm) = true :=
+              List.any_eq_true.mpr ⟨e, he, hne⟩
+            rw [this] at h4
+            cases h4
+      · rw [if_neg hg] at h
+        cases h
+  · rw [if_neg hle] at h
+    cases h
+
+
+/-! ## Validity of the push -/
+
+theorem filterSlots_id (l : Literal) :
+    ∀ (slots : List Domain) (offset : Nat),
+      (∀ i d, slots[i]? = some d → offset + i = l.atom.slot →
+        d.all l.valueHolds = true) →
+      filterSlots l offset slots = slots := by
+  intro slots
+  induction slots with
+  | nil => intro offset _; rfl
+  | cons d rest ih =>
+    intro offset h
+    simp only [filterSlots]
+    congr 1
+    · split
+      · rename_i hoff
+        have := h 0 d rfl (by omega)
+        exact List.filter_eq_self.mpr (fun x hx => by simpa using List.all_eq_true.mp this x hx)
+      · rfl
+    · exact ih (offset + 1) (fun i d' hd hi => h (i + 1) d' (by simpa using hd) (by omega))
+
+theorem syncClause_filter {orig : List Domain} {bs : BranchState leaf}
+    {lit : Literal} {c : Clause} (h : syncClause orig bs lit = some c) :
+    filterFrame lit bs.frame = some bs.frame := by
+  obtain ⟨d, ex, hle, hd, -, hall, -⟩ := syncClause_spec h
+  unfold filterFrame
+  rw [if_neg (by omega)]
+  have hid : filterSlots lit bs.frame.2.length bs.frame.1 = bs.frame.1 := by
+    apply filterSlots_id
+    intro i d' hi hoff
+    have : i = lit.atom.slot - bs.frame.2.length := by omega
+    subst this
+    rw [hd] at hi
+    cases hi
+    simpa [norm_valueHolds] using hall
+  rw [hid]
+
+theorem syncClause_hfresh {orig : List Domain} {bs : BranchState leaf}
+    {lit : Literal} {c : Clause} (h : syncClause orig bs lit = some c) :
+    ∀ e ∈ bs.trail, e.literal ≠ lit.norm := by
+  obtain ⟨d, ex, -, -, -, -, himp, -⟩ := syncClause_spec h
+  intro e he heq
+  have := himp e he
+  have h2 : impliesP orig e.literal lit.norm = true := by
+    rw [heq]; simp [impliesP, impliesBase, litEqB]
+  rw [h2] at this
+  exact absurd this (by decide)
+
+theorem syncClause_pivot {orig : List Domain} {bs : BranchState leaf}
+    {lit : Literal} {c : Clause} (h : syncClause orig bs lit = some c) :
+    (lit.norm ∈ c) = True := by
+  obtain ⟨d, ex, -, -, -, -, -, -, rfl⟩ := syncClause_spec h
+  simp
+
+theorem syncClause_chron {orig : List Domain} {bs : BranchState leaf}
+    {lit : Literal} {c : Clause} (h : syncClause orig bs lit = some c) :
+    StepChronology bs lit c := by
+  obtain ⟨d, ex, -, -, -, -, -, hx, rfl⟩ := syncClause_spec h
+  intro q hq hne
+  rcases List.mem_cons.mp hq with rfl | hq
+  · exact absurd rfl hne
+  · obtain ⟨e, he, rfl⟩ := (syncExplain_spec hx).1 q hq
+    exact ⟨e, he, (Literal.negate_negate _).symm⟩
+
+theorem syncClause_entailed {orig : List Domain} {bs : BranchState leaf}
+    {lit : Literal} {c : Clause} (h : syncClause orig bs lit = some c)
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
+    (hslot : lit.atom.slot < orig.length) :
+    LearnedEntailed leaf [c] := by
+  obtain ⟨d, ex, -, -, -, -, -, hx, rfl⟩ := syncClause_spec h
+  intro c' hc' a ha
+  rw [List.mem_singleton] at hc'
+  subst hc'
+  have hfit := hfits a ha
+  by_cases hsl : lit.atom.slot < a.length
+  · have hget : a[lit.atom.slot]? = some a[lit.atom.slot] := List.getElem?_eq_getElem hsl
+    have hw : a[lit.atom.slot] ∈ orig.getD lit.atom.slot [] := hfit.2 lit.atom.slot _ hget
+    by_cases hv : lit.norm.valueHolds a[lit.atom.slot] = true
+    · refine ⟨lit.norm, List.mem_cons_self, ?_⟩
+      exact (valueHolds_read (by rw [norm_atom_slot]; exact hget)).mp hv
+    · have hmem : a[lit.atom.slot] ∈ (orig.getD lit.atom.slot []).filter fun w => !lit.norm.valueHolds w :=
+        List.mem_filter.mpr ⟨hw, by simpa using hv⟩
+      obtain ⟨q, hq, hqs, hqv⟩ := (syncExplain_spec hx).2 _ hmem
+      exact ⟨q, List.mem_cons_of_mem _ hq,
+        (valueHolds_read (by rw [hqs]; exact hget)).mp hqv⟩
+  · exfalso
+    have := hfit.1
+    omega
+
+
+/-! ## Preservation -/
+
+@[simp] theorem syncOne_frame (orig : List Domain) (bs : BranchState leaf)
+    (lit : Literal) : (syncOne orig bs lit).frame = bs.frame := by
+  unfold syncOne; split <;> rfl
+
+@[simp] theorem syncOne_level (orig : List Domain) (bs : BranchState leaf)
+    (lit : Literal) : (syncOne orig bs lit).level = bs.level := by
+  unfold syncOne; split <;> rfl
+
+@[simp] theorem syncOne_learned (orig : List Domain) (bs : BranchState leaf)
+    (lit : Literal) : (syncOne orig bs lit).learned = bs.learned := by
+  unfold syncOne; split <;> rfl
+
+theorem syncOne_trail (orig : List Domain) (bs : BranchState leaf)
+    (lit : Literal) : ∃ ex, (syncOne orig bs lit).trail = bs.trail ++ ex ∧
+      ∀ e ∈ ex, e.level = bs.level := by
+  unfold syncOne
+  split
+  · exact ⟨_, rfl, by simp [narrowState]⟩
+  · exact ⟨[], by simp, by simp⟩
+
+theorem syncClause_in {orig : List Domain} {bs : BranchState leaf}
+    {lit : Literal} {c : Clause} (h : syncClause orig bs lit = some c) :
+    lit.atom.slot < (fullDomains bs.frame).length := by
+  obtain ⟨d, ex, hle, hd, -⟩ := syncClause_spec h
+  rw [fullDomains_length]
+  have := (List.getElem?_eq_some_iff.mp hd).1
+  omega
+
+theorem syncOne_reachable {orig : List Domain} {bs : BranchState leaf}
+    (lit : Literal) (hreach : ReachableState leaf orig bs)
+    (hfits : ∀ a, leaf a = true → a.Fits orig) :
+    ReachableState leaf orig (syncOne orig bs lit) := by
+  unfold syncOne
+  cases h : syncClause orig bs lit with
+  | none => exact hreach
+  | some c =>
+    simp only
+    have hin := syncClause_in h
+    refine explainedStep_narrow_reachable hreach (syncClause_filter h)
+      (syncClause_hfresh h) hin (fun _ h => absurd h (by simp))
+      (syncClause_entailed h hfits ?_) (by
+        simpa using syncClause_pivot h) (syncClause_chron h)
+    have := hreach.length_ok
+    omega
+
+theorem syncOne_represents {orig : List Domain} {bs : BranchState leaf}
+    (lit : Literal) {a : Assignment} (hleaf : leaf a = true)
+    (hreach : ReachableState leaf orig bs)
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
+    (hrep : bs.Represents a) : (syncOne orig bs lit).Represents a := by
+  unfold syncOne
+  cases h : syncClause orig bs lit with
+  | none => exact hrep
+  | some c =>
+    simp only
+    refine explainedStep_narrow_coverage (syncClause_filter h)
+      (fun _ h => absurd h (by simp)) a hleaf hrep ?_
+    exact filterFrame_literal_holds (syncClause_filter h) hrep.1 (syncClause_in h)
+
+theorem foldl_syncOne_inv {orig : List Domain} {P : BranchState leaf → Prop}
+    (hP : ∀ b lit, P b → P (syncOne orig b lit)) :
+    ∀ (cs : List Literal) (b : BranchState leaf), P b →
+      P (cs.foldl (syncOne orig) b) := by
+  intro cs
+  induction cs with
+  | nil => intro b hb; exact hb
+  | cons l rest ih => intro b hb; exact ih _ (hP b l hb)
+
+theorem syncSlot_reachable {orig : List Domain} {bs : BranchState leaf}
+    (s : Nat) (hreach : ReachableState leaf orig bs)
+    (hfits : ∀ a, leaf a = true → a.Fits orig) :
+    ReachableState leaf orig (syncSlot orig bs s) := by
+  -- the frame is invariant along the fold, so the candidates are fixed
+  unfold syncSlot
+  exact foldl_syncOne_inv (P := fun b => ReachableState leaf orig b)
+    (fun b lit hb => syncOne_reachable lit hb hfits) _ _ hreach
+
+
+theorem syncSlot_represents {orig : List Domain} {bs : BranchState leaf}
+    (s : Nat) {a : Assignment} (hleaf : leaf a = true)
+    (hreach : ReachableState leaf orig bs)
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
+    (hrep : bs.Represents a) : (syncSlot orig bs s).Represents a := by
+  unfold syncSlot
+  exact foldl_syncOne_inv (P := fun b => ReachableState leaf orig b ∧ b.Represents a)
+    (fun b lit hb => ⟨syncOne_reachable lit hb.1 hfits,
+      syncOne_represents lit hleaf hb.1 hfits hb.2⟩) _ _ ⟨hreach, hrep⟩ |>.2
+
+theorem syncSlot_shape (orig : List Domain) (bs : BranchState leaf) (s : Nat) :
+    (syncSlot orig bs s).frame = bs.frame ∧
+    (syncSlot orig bs s).level = bs.level ∧
+    (syncSlot orig bs s).learned = bs.learned ∧
+    ∃ ex, (syncSlot orig bs s).trail = bs.trail ++ ex ∧
+      ∀ e ∈ ex, e.level = bs.level := by
+  unfold syncSlot
+  have := foldl_syncOne_inv (orig := orig)
+    (P := fun b => b.frame = bs.frame ∧ b.level = bs.level ∧
+      b.learned = bs.learned ∧ ∃ ex, b.trail = bs.trail ++ ex ∧
+        ∀ e ∈ ex, e.level = bs.level)
+    (fun b lit hb => by
+      obtain ⟨h1, h2, h3, ex, h4, h4'⟩ := hb
+      obtain ⟨ex', h5, h5'⟩ := syncOne_trail orig b lit
+      refine ⟨by simp [h1], by simp [h2], by simp [h3],
+        ex ++ ex', by rw [h5, h4, List.append_assoc], ?_⟩
+      intro e he
+      rcases List.mem_append.mp he with he | he
+      · exact h4' e he
+      · rw [h5' e he, h2])
+    (syncCands orig bs.frame s) bs ⟨rfl, rfl, rfl, [], by simp, by simp⟩
+  exact this
+
+theorem foldl_range_inv {orig : List Domain} {P : BranchState leaf → Prop}
+    (f : BranchState leaf → Nat → BranchState leaf)
+    (hf : ∀ b i, P b → P (f b i)) :
+    ∀ (l : List Nat) (b : BranchState leaf), P b → P (l.foldl f b) := by
+  intro l
+  induction l with
+  | nil => intro b hb; exact hb
+  | cons i rest ih => intro b hb; exact ih _ (hf b i hb)
+
+theorem syncAll_reachable {orig : List Domain} {bs : BranchState leaf}
+    (hreach : ReachableState leaf orig bs)
+    (hfits : ∀ a, leaf a = true → a.Fits orig) :
+    ReachableState leaf orig (syncAll orig bs) := by
+  unfold syncAll
+  exact foldl_range_inv (orig := orig) (P := fun b => ReachableState leaf orig b) _
+    (fun b i hb => syncSlot_reachable _ hb hfits) _ _ hreach
+
+theorem syncAll_represents {orig : List Domain} {bs : BranchState leaf}
+    {a : Assignment} (hleaf : leaf a = true)
+    (hreach : ReachableState leaf orig bs)
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
+    (hrep : bs.Represents a) : (syncAll orig bs).Represents a := by
+  unfold syncAll
+  exact (foldl_range_inv (orig := orig)
+    (P := fun b => ReachableState leaf orig b ∧ b.Represents a) _
+    (fun b i hb => ⟨syncSlot_reachable _ hb.1 hfits,
+      syncSlot_represents _ hleaf hb.1 hfits hb.2⟩) _ _ ⟨hreach, hrep⟩).2
+
+theorem syncAll_shape (orig : List Domain) (bs : BranchState leaf) :
+    (syncAll orig bs).frame = bs.frame ∧
+    (syncAll orig bs).level = bs.level ∧
+    (syncAll orig bs).learned = bs.learned ∧
+    ∃ ex, (syncAll orig bs).trail = bs.trail ++ ex ∧
+      ∀ e ∈ ex, e.level = bs.level := by
+  unfold syncAll
+  exact foldl_range_inv (orig := orig)
+    (P := fun b => b.frame = bs.frame ∧ b.level = bs.level ∧
+      b.learned = bs.learned ∧ ∃ ex, b.trail = bs.trail ++ ex ∧
+        ∀ e ∈ ex, e.level = bs.level)
+    _ (fun b i hb => by
+      obtain ⟨h1, h2, h3, ex, h4, h4'⟩ := hb
+      obtain ⟨g1, g2, g3, ex', g4, g4'⟩ := syncSlot_shape orig b (bs.frame.2.length + i)
+      refine ⟨by rw [g1, h1], by rw [g2, h2], by rw [g3, h3],
+        ex ++ ex', by rw [g4, h4, List.append_assoc], ?_⟩
+      intro e he
+      rcases List.mem_append.mp he with he | he
+      · exact h4' e he
+      · rw [g4' e he, h2])
+    _ _ ⟨rfl, rfl, rfl, [], by simp, by simp⟩
+
+
+@[simp] theorem syncSlot_frame (orig : List Domain) (bs : BranchState leaf)
+    (s : Nat) : (syncSlot orig bs s).frame = bs.frame := (syncSlot_shape orig bs s).1
+@[simp] theorem syncSlot_level (orig : List Domain) (bs : BranchState leaf)
+    (s : Nat) : (syncSlot orig bs s).level = bs.level := (syncSlot_shape orig bs s).2.1
+@[simp] theorem syncSlot_learned (orig : List Domain) (bs : BranchState leaf)
+    (s : Nat) : (syncSlot orig bs s).learned = bs.learned := (syncSlot_shape orig bs s).2.2.1
+@[simp] theorem syncAll_frame (orig : List Domain) (bs : BranchState leaf) :
+    (syncAll orig bs).frame = bs.frame := (syncAll_shape orig bs).1
+@[simp] theorem syncAll_level (orig : List Domain) (bs : BranchState leaf) :
+    (syncAll orig bs).level = bs.level := (syncAll_shape orig bs).2.1
+@[simp] theorem syncAll_learned (orig : List Domain) (bs : BranchState leaf) :
+    (syncAll orig bs).learned = bs.learned := (syncAll_shape orig bs).2.2.1
+
+
+
+theorem syncAll_trail_shape (orig : List Domain) (bs : BranchState leaf) :
+    ∃ ex, (syncAll orig bs).trail = bs.trail ++ ex ∧
+      ∀ e ∈ ex, e.level = bs.level := by
+  obtain ⟨-, -, -, ex, hex, hlev⟩ := syncAll_shape orig bs
+  exact ⟨ex, hex, hlev⟩
+
+end FrameSyncCore
+
+/-- One synchronised productive step: the narrowing enqueue followed by the
+frame/trail synchronisation of the deduced literal's slot. -/
+def stepNarrowSync (orig : List Domain) (bs : BranchState leaf)
+    (d : ProductiveDeduction leaf bs) : BranchState leaf :=
+  syncSlot orig (narrowState bs d.frame d.literal d.reason d.learned)
+    d.literal.atom.slot
+
+@[simp] theorem stepNarrowSync_frame (orig : List Domain) (bs : BranchState leaf)
+    (d : ProductiveDeduction leaf bs) : (stepNarrowSync orig bs d).frame = d.frame := by
+  simp [stepNarrowSync, narrowState]
+
+@[simp] theorem stepNarrowSync_level (orig : List Domain) (bs : BranchState leaf)
+    (d : ProductiveDeduction leaf bs) : (stepNarrowSync orig bs d).level = bs.level := by
+  simp [stepNarrowSync, narrowState]
+
+@[simp] theorem stepNarrowSync_learned (orig : List Domain) (bs : BranchState leaf)
+    (d : ProductiveDeduction leaf bs) :
+    (stepNarrowSync orig bs d).learned = d.learned ++ bs.learned := by
+  simp [stepNarrowSync, narrowState]
+
+theorem stepNarrowSync_trail (orig : List Domain) (bs : BranchState leaf)
+    (d : ProductiveDeduction leaf bs) :
+    ∃ ex, (stepNarrowSync orig bs d).trail =
+        bs.trail ++ [{ literal := d.literal.norm, level := bs.level,
+                       reason := some { clause := d.reason } }] ++ ex ∧
+      ∀ e ∈ ex, e.level = bs.level := by
+  obtain ⟨-, hl, -, ex, hex, hlev⟩ := syncSlot_shape orig
+    (narrowState bs d.frame d.literal d.reason d.learned) d.literal.atom.slot
+  exact ⟨ex, hex, hlev⟩
+
+theorem stepNarrowSync_reachable {orig : List Domain} {bs : BranchState leaf}
+    (d : ProductiveDeduction leaf bs)
+    (h : ReachableState leaf orig
+      (narrowState bs d.frame d.literal d.reason d.learned))
+    (hfits : ∀ a, leaf a = true → a.Fits orig) :
+    ReachableState leaf orig (stepNarrowSync orig bs d) :=
+  syncSlot_reachable _ h hfits
+
+theorem stepNarrowSync_represents {orig : List Domain} {bs : BranchState leaf}
+    (d : ProductiveDeduction leaf bs) {a : Assignment} (hleaf : leaf a = true)
+    (h : ReachableState leaf orig
+      (narrowState bs d.frame d.literal d.reason d.learned))
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
+    (hrep : (narrowState bs d.frame d.literal d.reason d.learned).Represents a) :
+    (stepNarrowSync orig bs d).Represents a :=
+  syncSlot_represents _ hleaf h hfits hrep
+
 /-- The explained closure: iterate productive deductions until the step is
-stable or the branch is dead. Recursion is on `Frame.mass`, the same
+stable or the branch is dead; every step is followed by the frame/trail
+synchronisation of its slot (R1d). Recursion is on `Frame.mass`, the same
 measure the certified closure uses — the decrease comes from the step's
 own payload, so no fuel and no restart counter is involved. -/
-def explainedClosure (original : List Clause) (props : List Propagator)
-    (bs : BranchState leaf) : BranchState leaf :=
+def explainedClosure (orig : List Domain) (original : List Clause)
+    (props : List Propagator) (bs : BranchState leaf) : BranchState leaf :=
   match hd : explainedDeduction original props bs with
   | none => bs
-  | some d => explainedClosure original props
-      (narrowState bs d.frame d.literal d.reason d.learned)
+  | some d => explainedClosure orig original props (stepNarrowSync orig bs d)
 termination_by Frame.mass bs.frame
 decreasing_by
-  exact d.decreases
+  have := d.decreases
+  simpa using this
 
 /-! ### Bridging the step and its deduction -/
 
@@ -1601,6 +2107,9 @@ structure ClosureContract (leaf : Assignment → Bool) (orig : List Domain)
     (original : List Clause) (props : List Propagator) : Prop where
   /-- the problem's original clause database is globally entailed -/
   originalEntailed : ∀ c ∈ original, ∀ a, leaf a = true → c.SatisfiedBy a
+  /-- every leaf solution fits the original box (the wipe-out clause's
+      entailment, R1c) -/
+  leafFits : ∀ a, leaf a = true → a.Fits orig
   /-- supported-fragment gate: the original box is int-viewed -/
   origViewed : ∀ d ∈ orig, IntViewedDomain d
   /-- BRANCH-RELATIVE literal soundness of the SELECTED deduction event:
@@ -1693,11 +2202,11 @@ theorem explainedClosure_reachable {orig : List Domain}
     (hc : ClosureContract leaf orig original props) (bs : BranchState leaf)
     (hpay : UnitPayload original props) (hreach : ReachableState leaf orig bs)
     (hu : UnitDB bs.learned) :
-    ReachableState leaf orig (explainedClosure original props bs) := by
+    ReachableState leaf orig (explainedClosure orig original props bs) := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel →
       ReachableState leaf orig bs → UnitDB bs.learned →
-      ReachableState leaf orig (explainedClosure original props bs) from
+      ReachableState leaf orig (explainedClosure orig original props bs) from
     h (Frame.mass bs.frame) bs (Nat.le_refl _) hreach hu
   intro fuel
   induction fuel with
@@ -1716,13 +2225,14 @@ theorem explainedClosure_reachable {orig : List Domain}
     split
     · exact hreach
     · rename_i d hd
-      refine ih (narrowState bs d.frame d.literal d.reason d.learned) ?_ ?_ ?_
+      refine ih (stepNarrowSync orig bs d) ?_ ?_ ?_
       · have hdec := d.decreases
-        simp only [narrowState] at hdec ⊢
+        simp only [stepNarrowSync_frame]
         omega
-      · exact explainedDeduction_narrow_reachable hc hreach hu hd
+      · exact stepNarrowSync_reachable d
+          (explainedDeduction_narrow_reachable hc hreach hu hd) hc.leafFits
       · have hpay' := hpay hd hu
-        show UnitDB (d.learned ++ bs.learned)
+        rw [stepNarrowSync_learned]
         exact unitDB_append hpay' hu
 
 /-- COVERAGE: the run cannot lose a leaf solution. Narrowing is only
@@ -1736,11 +2246,11 @@ theorem explainedClosure_coverage {orig : List Domain}
     (bs : BranchState leaf) (hpay : UnitPayload original props)
     (hreach : ReachableState leaf orig bs) (hu : UnitDB bs.learned)
     (a : Assignment) (hleaf : leaf a = true) (hrep : bs.Represents a) :
-    (explainedClosure original props bs).Represents a := by
+    (explainedClosure orig original props bs).Represents a := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel → ReachableState leaf orig bs →
       UnitDB bs.learned →
-      bs.Represents a → (explainedClosure original props bs).Represents a from
+      bs.Represents a → (explainedClosure orig original props bs).Represents a from
     h (Frame.mass bs.frame) bs (Nat.le_refl _) hreach hu hrep
   intro fuel
   induction fuel with
@@ -1760,20 +2270,21 @@ theorem explainedClosure_coverage {orig : List Domain}
     · exact hrep
     · rename_i d hd
       obtain ⟨lr, fl, hev⟩ := explainedDeduction_event hd
-      have hu' : UnitDB
-          (narrowState bs d.frame d.literal d.reason d.learned).learned := by
-        show UnitDB (d.learned ++ bs.learned)
+      have hnr := explainedDeduction_narrow_reachable hc hreach hu hd
+      have hu' : UnitDB (stepNarrowSync orig bs d).learned := by
+        rw [stepNarrowSync_learned]
         exact unitDB_append (hpay hd hu) hu
-      refine ih (narrowState bs d.frame d.literal d.reason d.learned) ?_
-        (explainedDeduction_narrow_reachable hc hreach hu hd) hu' ?_
+      refine ih (stepNarrowSync orig bs d) ?_
+        (stepNarrowSync_reachable d hnr hc.leafFits) hu' ?_
       · have hdec := d.decreases
-        simp only [narrowState] at hdec ⊢
+        simp only [stepNarrowSync_frame]
         omega
-      · exact explainedStep_narrow_coverage d.filtered
-          (explainedDeduction_learned_entailed hd
-            (hc.reasonEntailed bs hreach d.literal d.reason lr fl hev))
-          a hleaf hrep
-          (hc.literalSound bs hreach d.literal d.reason lr fl hev a hleaf hrep)
+      · exact stepNarrowSync_represents d hleaf hnr hc.leafFits
+          (explainedStep_narrow_coverage d.filtered
+            (explainedDeduction_learned_entailed hd
+              (hc.reasonEntailed bs hreach d.literal d.reason lr fl hev))
+            a hleaf hrep
+            (hc.literalSound bs hreach d.literal d.reason lr fl hev a hleaf hrep))
 
 /-! ### The result-returning closure (INTERFACES §2.2)
 
@@ -1848,17 +2359,67 @@ theorem learned_entailed_filter (bs : BranchState leaf) {c : Clause}
     exact h
   · simp at hc'
 
+/-! ### The wipe-out conflict clause (R1c)
+
+A frame with an EMPTY remaining domain holds no leaf solution. The conflict
+is reported on the clause "no trail literal that removed an original value of
+that slot holds": for every ORIGINAL value `w` of slot `s`, the first trail
+entry whose negation holds at `w` is a remover; the clause is the (duplicate
+free) list of these negated-normalized removers. It is entailed whenever every
+leaf solution fits the original box (a solution with `x_s = w` makes the
+remover's negation true) and falsified by the trail (each literal is the
+negation of a trail literal). If some original value has no remover (the frame
+and the trail disagree) no clause is built and the branch falls back to the
+plain stable classification. -/
+
+/-- The negated-normalized trail literal removing value `w` of slot `s`. -/
+def wipeRemover (trail : List TrailEntry) (s : Nat) (w : Value) : Option Literal :=
+  (trail.map fun e => e.literal.negate.norm).find? fun q =>
+    q.atom.slot == s && q.valueHolds w
+
+/-- The wipe-out clause of slot `s` over its original domain (nonempty). -/
+def wipeoutClauseAt (orig : List Domain) (trail : List TrailEntry) (s : Nat) :
+    Option Clause :=
+  let rs := (orig.getD s []).map (wipeRemover trail s)
+  if rs.any Option.isNone then none
+  else
+    match (rs.filterMap id).eraseDups with
+    | [] => none
+    | c => some c
+
+/-- Scan the remaining domains (slot indices start at `s`) for the first
+empty one with a buildable wipe-out clause. -/
+def wipeoutScan (orig : List Domain) (trail : List TrailEntry) :
+    List Domain → Nat → Option Clause
+  | [], _ => none
+  | d :: rest, s =>
+      match (if d.isEmpty then wipeoutClauseAt orig trail s else none) with
+      | some c => some c
+      | none => wipeoutScan orig trail rest (s + 1)
+
+/-- The wipe-out conflict clause of a branch frame, if one is buildable. -/
+def wipeoutClause (orig : List Domain) (trail : List TrailEntry)
+    (f : BranchFrame) : Option Clause :=
+  wipeoutScan orig trail f.1 f.2.length
+
 /-- The terminal classification when no productive deduction is selected:
-stable, conflict, or a dead filter. -/
-def terminalResult (original : List Clause) (props : List Propagator)
-    (bs : BranchState leaf) : ClosureResult leaf :=
+stable or conflict. Three conflict sources besides the scan's own
+(R1c conflict routing): an implied literal the frame filter rejects is a
+conflict ON ITS REASON CLAUSE; a stable event at a frame with an emptied
+domain is a conflict on the WIPE-OUT clause. (`ClosureResult.localExcluded`
+is no longer produced here.) -/
+def terminalResult (orig : List Domain) (original : List Clause)
+    (props : List Propagator) (bs : BranchState leaf) : ClosureResult leaf :=
   match nextPruningEvent original props bs.frame bs.learned with
-  | .stable => .stable bs
+  | .stable =>
+      match wipeoutClause orig bs.trail bs.frame with
+      | some w => .conflict bs [w] []
+      | none => .stable bs
   | .conflict cs =>
       .conflict bs cs (cs.filter fun c => !(bs.learned.contains c))
   | .implied l c lr fl =>
       match filterFrame l bs.frame with
-      | none => .localExcluded bs (some l) (some c)
+      | none => .conflict bs [c]
           (if lr && !(bs.learned.contains c) then [c] else [])
       | some _ => .stable bs
 
@@ -1866,33 +2427,169 @@ def terminalResult (original : List Clause) (props : List Propagator)
 terminal event is classified by `terminalResult`. Recursion is on
 `Frame.mass` — the decrease comes from the deduction's own payload, so no
 fuel is involved. -/
-def explainedClosureResult (original : List Clause) (props : List Propagator)
-    (bs : BranchState leaf) : ClosureResult leaf :=
+def explainedClosureResult (orig : List Domain) (original : List Clause)
+    (props : List Propagator) (bs : BranchState leaf) : ClosureResult leaf :=
   match hd : explainedDeduction original props bs with
   | some d =>
-      explainedClosureResult original props
+      explainedClosureResult orig original props
         (narrowState bs d.frame d.literal d.reason d.learned)
-  | none => terminalResult original props bs
+  | none => terminalResult orig original props bs
 termination_by Frame.mass bs.frame
 decreasing_by
   exact d.decreases
 
+theorem wipeRemover_spec {trail : List TrailEntry} {s : Nat} {w : Value}
+    {q : Literal} (h : wipeRemover trail s w = some q) :
+    (∃ e ∈ trail, q = e.literal.negate.norm) ∧ q.atom.slot = s ∧
+      q.valueHolds w = true := by
+  unfold wipeRemover at h
+  have hmem := List.mem_of_find?_eq_some h
+  have hp := List.find?_some h
+  obtain ⟨e, he, hq⟩ := List.mem_map.mp hmem
+  simp only [Bool.and_eq_true, beq_iff_eq] at hp
+  exact ⟨⟨e, he, hq.symm⟩, hp.1, hp.2⟩
+
+theorem wipeoutClauseAt_eq {orig : List Domain} {trail : List TrailEntry}
+    {s : Nat} {c : Clause} (h : wipeoutClauseAt orig trail s = some c) :
+    c ≠ [] ∧
+      c = (((orig.getD s []).map (wipeRemover trail s)).filterMap id).eraseDups ∧
+      ((orig.getD s []).map (wipeRemover trail s)).any Option.isNone = false := by
+  unfold wipeoutClauseAt at h
+  simp only at h
+  generalize hrs : ((orig.getD s []).map (wipeRemover trail s)) = rs at h ⊢
+  by_cases hany : rs.any Option.isNone = true
+  · rw [if_pos hany] at h
+    cases h
+  · rw [if_neg hany] at h
+    generalize hed : (rs.filterMap id).eraseDups = ed at h
+    cases ed with
+    | nil => cases h
+    | cons x xs =>
+        cases h
+        exact ⟨by simp, rfl, Bool.eq_false_iff.mpr hany⟩
+
+/-- The wipe-out clause of a slot is falsified literal-for-literal by the
+trail: every literal is the negation-normalization of a trail literal. -/
+theorem wipeoutClauseAt_falsified {orig : List Domain} {trail : List TrailEntry}
+    {s : Nat} {c : Clause} (h : wipeoutClauseAt orig trail s = some c) :
+    ∀ q ∈ c, ∃ e ∈ trail, q = e.literal.negate.norm := by
+  obtain ⟨-, hc, -⟩ := wipeoutClauseAt_eq h
+  intro q hq
+  rw [hc] at hq
+  have hq' := (List.mem_eraseDups).mp hq
+  obtain ⟨r, hr, hrq⟩ := List.mem_filterMap.mp hq'
+  obtain ⟨w, _, hw⟩ := List.mem_map.mp hr
+  simp only [id] at hrq
+  subst hrq
+  exact (wipeRemover_spec hw).1
+
+/-- The wipe-out clause of a slot is entailed by the original box: every
+assignment fitting the box satisfies it. -/
+theorem wipeoutClauseAt_entailed {orig : List Domain} {trail : List TrailEntry}
+    {s : Nat} {c : Clause} (h : wipeoutClauseAt orig trail s = some c)
+    {a : Assignment} (hfit : a.Fits orig) :
+    ∃ q ∈ c, q.eval a = some true := by
+  obtain ⟨hne, hc, hany⟩ := wipeoutClauseAt_eq h
+  by_cases hs : s < a.length
+  · have hget : a[s]? = some a[s] := List.getElem?_eq_getElem hs
+    have hw : a[s] ∈ orig.getD s [] := hfit.2 s _ hget
+    have hsome : ∃ q, wipeRemover trail s a[s] = some q := by
+      cases hr : wipeRemover trail s a[s] with
+      | some q => exact ⟨q, rfl⟩
+      | none =>
+          exfalso
+          have : ((orig.getD s []).map (wipeRemover trail s)).any
+              Option.isNone = true :=
+            List.any_eq_true.mpr ⟨none, List.mem_map.mpr ⟨a[s], hw, hr⟩, rfl⟩
+          rw [hany] at this
+          cases this
+    obtain ⟨q, hq⟩ := hsome
+    obtain ⟨-, hslot, hvh⟩ := wipeRemover_spec hq
+    refine ⟨q, ?_, ?_⟩
+    · rw [hc]
+      apply (List.mem_eraseDups).mpr
+      exact List.mem_filterMap.mpr ⟨some q,
+        List.mem_map.mpr ⟨a[s], hw, hq⟩, rfl⟩
+    · exact (valueHolds_read (by rw [hslot]; exact hget)).mp hvh
+  · exfalso
+    have hlen := hfit.1
+    have hnil : orig.getD s [] = [] := by
+      rw [List.getD_eq_getElem?_getD]
+      have : orig[s]? = none := List.getElem?_eq_none (by omega)
+      rw [this]; rfl
+    rw [hnil] at hc
+    simp at hc
+    exact hne hc
+
+theorem wipeoutScan_spec {orig : List Domain} {trail : List TrailEntry} :
+    ∀ (ds : List Domain) (s : Nat) {c : Clause},
+      wipeoutScan orig trail ds s = some c →
+      ∃ s', wipeoutClauseAt orig trail s' = some c := by
+  intro ds
+  induction ds with
+  | nil => intro s c h; simp [wipeoutScan] at h
+  | cons d rest ih =>
+      intro s c h
+      unfold wipeoutScan at h
+      generalize hx : (if d.isEmpty = true then wipeoutClauseAt orig trail s
+        else none) = x at h
+      cases x with
+      | some c' =>
+          cases h
+          by_cases hd : d.isEmpty = true
+          · rw [if_pos hd] at hx
+            exact ⟨s, hx⟩
+          · rw [if_neg hd] at hx
+            cases hx
+      | none => exact ih (s + 1) h
+
+theorem wipeoutClause_falsified {orig : List Domain} {trail : List TrailEntry}
+    {f : BranchFrame} {c : Clause} (h : wipeoutClause orig trail f = some c) :
+    ∀ q ∈ c, ∃ e ∈ trail, q = e.literal.negate.norm := by
+  obtain ⟨s', hs'⟩ := wipeoutScan_spec _ _ h
+  exact wipeoutClauseAt_falsified hs'
+
+theorem wipeoutClause_entailed {orig : List Domain} {trail : List TrailEntry}
+    {f : BranchFrame} {c : Clause} (h : wipeoutClause orig trail f = some c)
+    {a : Assignment} (hfit : a.Fits orig) :
+    ∃ q ∈ c, q.eval a = some true := by
+  obtain ⟨s', hs'⟩ := wipeoutScan_spec _ _ h
+  exact wipeoutClauseAt_entailed hs' hfit
+
+/-- A wipe-out clause is refuted by every assignment satisfying the trail
+that fits the original box. -/
+theorem wipeoutClause_excludes {orig : List Domain} {trail : List TrailEntry}
+    {f : BranchFrame} {c : Clause} (h : wipeoutClause orig trail f = some c)
+    {a : Assignment} (hfit : a.Fits orig)
+    (htrail : ∀ e ∈ trail, e.literal.eval a = some true) : False := by
+  obtain ⟨q, hq, hqe⟩ := wipeoutClause_entailed h hfit
+  obtain ⟨e, he, rfl⟩ := wipeoutClause_falsified h q hq
+  rw [Literal.norm_eval, Literal.eval_negate, htrail e he] at hqe
+  simp at hqe
+
 /-- SPEC of the terminal dispatch: coherent state, entailed new clauses,
-and per-case coverage. The `.localExcluded` case's exclusion is DERIVED
+and per-case coverage. The filter-rejection conflict case's exclusion is DERIVED
 from the branch-relative literal soundness plus the failed filter — the
 `x ≠ y` counterexample's shape. -/
 theorem terminalResult_spec {orig : List Domain}
     (hc : ClosureContract leaf orig original props) {bs : BranchState leaf}
     (hreach : ReachableState leaf orig bs) :
-    ClosureResult.Spec leaf orig bs (terminalResult original props bs) := by
+    ClosureResult.Spec leaf orig bs (terminalResult orig original props bs) := by
   rw [terminalResult]
   split
-  · -- stable
-    refine ⟨hreach, ?_, ?_⟩
-    · intro c hc'
-      cases hc'
-    · intro a _ hrep
-      exact hrep
+  · -- stable event: stable, or the wipe-out conflict
+    split
+    · rename_i w hw
+      refine ⟨hreach, ?_, ?_⟩
+      · intro c hc'
+        cases hc'
+      · intro a hleaf hrep
+        exact wipeoutClause_excludes hw (hc.leafFits a hleaf) hrep.2.1
+    · refine ⟨hreach, ?_, ?_⟩
+      · intro c hc'
+        cases hc'
+      · intro a _ hrep
+        exact hrep
   · -- conflict
     rename_i cs hev
     refine ⟨hreach, ?_, ?_⟩
@@ -1928,6 +2625,58 @@ theorem terminalResult_spec {orig : List Domain}
       · intro a _ hrep
         exact hrep
 
+/-- The terminal `.conflict` result exposes its source (R1c routing): the
+scan's own `.conflict cs`; the filter-rejected `.implied` event reported as a
+conflict on its reason clause; or the WIPE-OUT conflict of a stable event
+at a frame with an emptied domain (payload `[]`). -/
+theorem terminalResult_conflict_cases {leaf : Assignment → Bool}
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    {bs : BranchState leaf}
+    {s : BranchState leaf} {cs learned : List Clause}
+    (h : terminalResult orig original props bs = .conflict s cs learned) :
+    s = bs ∧
+      ((nextPruningEvent original props bs.frame bs.learned = .conflict cs ∧
+          learned = cs.filter fun c => !(bs.learned.contains c)) ∨
+        (∃ (l : Literal) (c : Clause) (lr fl : Bool),
+          nextPruningEvent original props bs.frame bs.learned = .implied l c lr fl ∧
+            filterFrame l bs.frame = none ∧ cs = [c] ∧
+            learned = (if lr && !(bs.learned.contains c) then [c] else [])) ∨
+        (∃ w : Clause,
+          nextPruningEvent original props bs.frame bs.learned = .stable ∧
+            wipeoutClause orig bs.trail bs.frame = some w ∧ cs = [w] ∧
+            learned = [])) := by
+  unfold terminalResult at h
+  split at h
+  · rename_i hev
+    split at h
+    · rename_i w hw
+      cases h
+      exact ⟨rfl, Or.inr (Or.inr ⟨w, hev, hw, rfl, rfl⟩)⟩
+    · cases h
+  · rename_i cs' hprune
+    cases h
+    exact ⟨rfl, Or.inl ⟨hprune, rfl⟩⟩
+  · rename_i l c lr fl hev
+    split at h
+    · rename_i hf
+      cases h
+      exact ⟨rfl, Or.inr (Or.inl ⟨l, c, lr, fl, hev, hf, rfl, rfl⟩)⟩
+    · cases h
+
+/-- The terminal `.localExcluded` result is never produced (R1c routing). -/
+theorem terminalResult_ne_localExcluded {leaf : Assignment → Bool}
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    {bs : BranchState leaf}
+    {s : BranchState leaf} {lit : Option Literal} {reason : Option Clause}
+    {learned : List Clause} :
+    terminalResult orig original props bs ≠ .localExcluded s lit reason learned := by
+  intro h
+  unfold terminalResult at h
+  split at h
+  · split at h <;> cases h
+  · cases h
+  · split at h <;> cases h
+
 /-- SPEC of the result-returning closure (INTERFACES §2.2, the frozen
 `explainedClosureResult_spec`): the carried state is coherent, the
 reported new clauses are globally entailed, and each case covers every
@@ -1936,12 +2685,12 @@ theorem explainedClosureResult_spec {orig : List Domain}
     (hc : ClosureContract leaf orig original props) (bs : BranchState leaf)
     (hpay : UnitPayload original props) (hreach : ReachableState leaf orig bs)
     (hu : UnitDB bs.learned) :
-    ClosureResult.Spec leaf orig bs (explainedClosureResult original props bs) := by
+    ClosureResult.Spec leaf orig bs (explainedClosureResult orig original props bs) := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel → ReachableState leaf orig bs →
       UnitDB bs.learned →
       ClosureResult.Spec leaf orig bs
-        (explainedClosureResult original props bs) from
+        (explainedClosureResult orig original props bs) from
     h (Frame.mass bs.frame) bs (Nat.le_refl _) hreach hu
   intro fuel
   induction fuel with
@@ -1979,7 +2728,7 @@ theorem explainedClosureResult_spec {orig : List Domain}
           (explainedDeduction_learned_entailed hd
             (hc.reasonEntailed bs hreach d.literal d.reason lr fl hev))
       have hlit := hc.literalSound bs hreach d.literal d.reason lr fl hev
-      generalize hr : explainedClosureResult original props
+      generalize hr : explainedClosureResult orig original props
         (narrowState bs d.frame d.literal d.reason d.learned) = r at hspec ⊢
       cases r with
       | stable s =>
@@ -1994,7 +2743,7 @@ theorem explainedClosureResult_reachable {orig : List Domain}
     (hc : ClosureContract leaf orig original props) (bs : BranchState leaf)
     (hpay : UnitPayload original props) (hreach : ReachableState leaf orig bs)
     (hu : UnitDB bs.learned) :
-    ReachableState leaf orig (explainedClosureResult original props bs).state :=
+    ReachableState leaf orig (explainedClosureResult orig original props bs).state :=
   (explainedClosureResult_spec hc bs hpay hreach hu).reachable
 
 /-- Entailment of the clauses the result-returning closure reports
@@ -2003,7 +2752,7 @@ theorem explainedClosureResult_entailed {orig : List Domain}
     (hc : ClosureContract leaf orig original props) (bs : BranchState leaf)
     (hpay : UnitPayload original props) (hreach : ReachableState leaf orig bs)
     (hu : UnitDB bs.learned) :
-    ∀ c ∈ (explainedClosureResult original props bs).newClauses,
+    ∀ c ∈ (explainedClosureResult orig original props bs).newClauses,
       LearnedEntailed leaf [c] :=
   (explainedClosureResult_spec hc bs hpay hreach hu).entailed
 
@@ -2012,7 +2761,7 @@ theorem explainedClosureResult_coverage {orig : List Domain}
     (hc : ClosureContract leaf orig original props) (bs : BranchState leaf)
     (hpay : UnitPayload original props) (hreach : ReachableState leaf orig bs)
     (hu : UnitDB bs.learned) :
-    (explainedClosureResult original props bs).Covers bs :=
+    (explainedClosureResult orig original props bs).Covers bs :=
   (explainedClosureResult_spec hc bs hpay hreach hu).coverage
 
 /-! ### Selected-event characterization
@@ -2046,12 +2795,12 @@ theorem scanDatabase_implied_facts {original : List Clause} {f : BranchFrame}
         exact ⟨List.mem_cons_of_mem _ hmem, hlr, hunit⟩
 
 /-- A `.conflict` event from the database scan names a database clause that
-is empty in the frame; the event itself carries no clause (`cs = []`), so
-the refuting clause must be recovered from the database. -/
+is empty in the frame, and the event carries exactly that clause
+(`cs = [c]`, R1c conflict routing). -/
 theorem scanDatabase_conflict_facts {original : List Clause} {f : BranchFrame}
     {db : List Clause} {cs : List Clause}
     (h : scanDatabase original f db = .conflict cs) :
-    ∃ c ∈ db, clauseRemaining f c = [] ∧ cs = [] := by
+    ∃ c ∈ db, clauseRemaining f c = [] ∧ cs = [c] := by
   induction db with
   | nil => simp [scanDatabase] at h
   | cons d rest ih =>
@@ -2333,11 +3082,14 @@ concrete propagators and clauses. -/
 theorem domExplainedContract
     (hOriginal : ∀ c ∈ original, ∀ a, leaf a = true → c.SatisfiedBy a)
     (hViewed : ∀ d ∈ orig, IntViewedDomain d)
+    (hSorts : DomsShapeTyped orig)
+    (hLeafFits : ∀ a, leaf a = true → a.Fits orig)
     (hp : PropagationContract leaf props)
     (hProp : PropagatorEvidence leaf props)
     (hUnit : UnitClauseEvidence leaf orig) :
     ClosureContract leaf orig original props where
   originalEntailed := hOriginal
+  leafFits := hLeafFits
   origViewed := hViewed
   literalSound := by
     intro bs hreach l c lr fl hev a hleaf hrep
@@ -2405,14 +3157,18 @@ theorem domExplainedContract
     rcases nextPruningEvent_conflict_cases hev with hdb | ⟨hsd, hview, hprop⟩
     · obtain ⟨c, hmem, hunit, hcs⟩ := scanDatabase_conflict_facts hdb
       rw [hcs]
-      intro c' hc'
-      simp at hc'
+      intro c' hc' a hleaf
+      rw [List.mem_singleton] at hc'
+      rw [hc']
+      exact hreach.wf.2.2.2.2 c hmem a hleaf
     · obtain ⟨p, hpm, c, hrun, hcs⟩ := scanPropagators_conflict_facts hprop
       rw [hcs]
       intro c' hc' a hleaf
       obtain ⟨hc'', hne⟩ := mem_conflict_payload hc'
       rw [hc'']
       exact hp.conflictReason bs.frame hview p hpm c hrun hne a hleaf
+        (frameFaithful_of_domSub hViewed hSorts (hLeafFits a hleaf)
+          ⟨hreach.length_ok, hreach.full_fits⟩)
 
 /-! ### The `x ≠ y` acceptance example (PLAN P1.1)
 

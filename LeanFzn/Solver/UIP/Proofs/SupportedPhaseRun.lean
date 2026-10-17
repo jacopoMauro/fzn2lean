@@ -73,7 +73,7 @@ def SupportedPhaseProgressSorted (orig : List Domain) (original : List Clause)
 
 /-- **THE S2 SORTED-PROGRESS INSTANCE**: the sorted obligation on the
 supported run from the SELF-INDEXED premises — `halignDB` (literal-pool
-alignment at the run's own box), `hdb` (unfalsified database), `hbr`
+alignment at the run's own box), `hbr`
 (branch reachability over the run's own box). All per-arm decreases
 instantiate at the run's `orig`; the recorded-analysis falsification is
 produced from the forgetting map (`SupportedReach.reachable`). -/
@@ -81,9 +81,6 @@ theorem supportedPhaseProgressSorted_of_premises {leaf : Assignment → Bool}
     (orig : List Domain) (original : List Clause) (props : List Propagator)
     (halignDB : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPool orig)
-    (hdb : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence},
-      SupportedReach orig original props cfg → cfg.conflict = some ev →
-      DatabaseUnfalsified cfg.branch)
     (hbr : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ReachableState leaf orig cfg.branch) :
     SupportedPhaseProgressSorted orig original props leaf :=
@@ -104,10 +101,27 @@ theorem supportedPhaseProgressSorted_of_premises {leaf : Assignment → Bool}
       P4.phaseRankSorted_analyzeConflictCounted_stutter orig cfg c learned n)
     (fun c0 cp ev an restored hreach hconf hana hperf =>
       P4.phaseLtSorted_stepLearnBackjumpAssert
-        (P4.sortedNovelty_of_unfalsified (halignDB hreach) (hdb hreach hconf)
-          (recordedAnalysis_normFalsified (bs := c0.branch) rfl (hbr hreach)
-            hreach.reachable hconf hana))
+        (hreach.orig_eq ▸ P4.sortedNovelty_of_not_repeats
+          (reachable_analysis_novel hreach.reachable hconf hana))
         hperf (planMatchesAnalysis_ofCheckpoint cp c0.branch an))
+
+/-- The OLD discharge of the novelty premise (kept by R1c): at supported
+sites whose learned database is unfalsified, the recorded analysis has sorted
+novelty. It does NOT hold at routed (database-sourced) sites, which is why
+`supportedPhaseProgressSorted_of_premises` now takes the novelty itself. -/
+theorem supportedSortedNovelty_of_dbUnfalsified_site {leaf : Assignment → Bool}
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    (halignDB : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
+      ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPool orig)
+    {cfg : SchedulerConfig leaf} {ev : ConflictEvidence} {an : ConflictAnalysis}
+    (hreach : SupportedReach orig original props cfg)
+    (hdb : DatabaseUnfalsified cfg.branch)
+    (hbr : ReachableState leaf orig cfg.branch)
+    (hconf : cfg.conflict = some ev) (hana : ev.analysis = some an) :
+    P4.SortedNovelty orig cfg.branch.learned an :=
+  P4.sortedNovelty_of_unfalsified (halignDB hreach) hdb
+    (recordedAnalysis_normFalsified (bs := cfg.branch) rfl hbr
+      hreach.reachable hconf hana)
 
 /-! ## §3 The supported kernel and computable driver -/
 

@@ -81,7 +81,7 @@ theorem supportedStepReachAndEvidence_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch)
@@ -129,7 +129,7 @@ theorem supportedStepReachAndEvidence_of_premises {orig : List Domain}
             cases hconf'
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 -- perform rejected → localExclude with the recorded payload
                 rw [ha] at hsucc
@@ -205,7 +205,7 @@ theorem supportedStepReachAndEvidence_of_premises {orig : List Domain}
           cases hcs
       | cons f rest =>
           have hres := stepConsume_reachable_of_inv hpend hcs ih.1 ih.2.2
-            (SupportedReach.orig_eq hreach)
+            (SupportedReach.orig_eq hreach) (hclos hreach).leafFits
           refine ⟨hres, ?_, pendingSideInv_supportedStep hshape ih.1 hs' ih.2.2⟩
           intro ev' hconf'
           rw [stepConsume_conflict hcs] at hconf'
@@ -224,8 +224,9 @@ theorem supportedStepReachAndEvidence_of_premises {orig : List Domain}
       have hd' : explainedDeduction original props cfg.branch = some d := by
         rw [← SupportedReach.original_eq hreach, ← SupportedReach.props_eq hreach]
         exact hd
-      refine ⟨explainedDeduction_narrow_reachable (hclos hreach) ih.1
-        (hunit hreach) hd', ?_, pendingSideInv_supportedStep hshape ih.1 hs' ih.2.2⟩
+      refine ⟨stepPropagate_branch_reachable d (SupportedReach.orig_eq hreach)
+        (hclos hreach).leafFits (explainedDeduction_narrow_reachable (hclos hreach) ih.1
+        (hunit hreach) hd'), ?_, pendingSideInv_supportedStep hshape ih.1 hs' ih.2.2⟩
       intro ev' hconf'
       rw [stepPropagate_conflict] at hconf'
       exact ih.2.1 hconf'
@@ -306,7 +307,7 @@ theorem supportedStepReachAndEvidence_of_premises {orig : List Domain}
           simp only [successor_localExclude, Option.some.injEq] at hsucc
           subst hsucc
           have hspec := terminalResult_spec (hclos hreach) ih.1
-          rw [SupportedReach.original_eq hreach,
+          rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
             SupportedReach.props_eq hreach] at ht
           rw [ht] at hspec
           refine ⟨reachable_prepend_learned ih.1
@@ -333,7 +334,7 @@ theorem supportedStepReachAndEvidence_of_premises {orig : List Domain}
             injection hconf' with hev
             subst hev
             have hspec := terminalResult_spec (hclos hreach) ih.1
-            rw [SupportedReach.original_eq hreach,
+            rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
               SupportedReach.props_eq hreach] at ht
             rw [ht] at hspec
             exact fun c' hc' a ha =>
@@ -343,7 +344,7 @@ theorem supportedStepReachAndEvidence_of_premises {orig : List Domain}
       simp only [successor_localExclude, Option.some.injEq] at hsucc
       subst hsucc
       have hspec := terminalResult_spec (hclos hreach) ih.1
-      rw [SupportedReach.original_eq hreach,
+      rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
         SupportedReach.props_eq hreach] at ht
       rw [ht] at hspec
       refine ⟨reachable_prepend_learned ih.1
@@ -393,7 +394,7 @@ theorem supportedReachAndEvidence_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch)
@@ -405,8 +406,8 @@ theorem supportedReachAndEvidence_of_premises {orig : List Domain}
         PendingSideInv orig cfg := by
   intro cfg hreach
   induction hreach with
-  | init =>
-      exact ⟨reachable_init leaf orig,
+  | init hent =>
+      exact ⟨reachable_seed leaf orig original hent,
         (fun {ev} hconf => absurd hconf (by simp [SchedulerConfig.init])),
         PendingSideInv.init orig original props⟩
   | step hrec hs ih =>
@@ -453,7 +454,7 @@ theorem supportedArmsPreserveReach_of_gates {orig : List Domain}
             exact hbs
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 -- perform rejected → localExclude with the recorded payload
                 rw [ha] at hsucc
@@ -516,8 +517,9 @@ theorem supportedArmsPreserveReach_of_gates {orig : List Domain}
       have hd' : explainedDeduction original props cfg.branch = some d := by
         rw [← SupportedReach.original_eq hreach, ← SupportedReach.props_eq hreach]
         exact hd
-      exact explainedDeduction_narrow_reachable (hg.hclos hreach) hbs
-        (hg.hunit hreach) hd'
+      exact stepPropagate_branch_reachable d (SupportedReach.orig_eq hreach)
+        (hg.hclos hreach).leafFits (explainedDeduction_narrow_reachable (hg.hclos hreach) hbs
+        (hg.hunit hreach) hd')
     · -- ARM 2 / ARM 3 / ARM 6: the guarded stable dispatch
       rw [hnext] at hsucc
       unfold stableStepGuarded at hsucc
@@ -583,7 +585,7 @@ theorem supportedArmsPreserveReach_of_gates {orig : List Domain}
           simp only [successor_localExclude, Option.some.injEq] at hsucc
           subst hsucc
           have hspec := terminalResult_spec (hg.hclos hreach) hbs
-          rw [SupportedReach.original_eq hreach,
+          rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
             SupportedReach.props_eq hreach] at ht
           rw [ht] at hspec
           exact reachable_prepend_learned hbs
@@ -606,7 +608,7 @@ theorem supportedArmsPreserveReach_of_gates {orig : List Domain}
       simp only [successor_localExclude, Option.some.injEq] at hsucc
       subst hsucc
       have hspec := terminalResult_spec (hg.hclos hreach) hbs
-      rw [SupportedReach.original_eq hreach,
+      rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
         SupportedReach.props_eq hreach] at ht
       rw [ht] at hspec
       exact reachable_prepend_learned hbs
@@ -650,10 +652,10 @@ theorem SupportedArmInvGatesCore.toSupportedArmInvGates {orig : List Domain}
   hpay := hc.hpay
   hplanU := hc.hplanU
   hdeadConflictNil := fun hreach hbs ht hcs => by
-    rw [SupportedReach.original_eq hreach, SupportedReach.props_eq hreach] at ht
+    rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach, SupportedReach.props_eq hreach] at ht
     exact deadConflictNil_of_terminalEvent (hc.hclos hreach) hbs ht hcs
   hdeadLocalExcluded := fun hreach hbs ht => by
-    rw [SupportedReach.original_eq hreach, SupportedReach.props_eq hreach] at ht
+    rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach, SupportedReach.props_eq hreach] at ht
     exact deadLocalExcluded_of_terminalEvent (hc.hclos hreach) hbs ht
 
 /-! ## §4 The shared-gate projection (ONE record, both assemblies) -/
@@ -701,7 +703,7 @@ theorem supportedInvariantDiscipline_of_gates {orig : List Domain}
       SupportedReach orig original props cfg → SchedulerInvariant cfg := by
   intro cfg hreach
   induction hreach with
-  | init => exact schedulerInvariant_init leaf orig original props
+  | init hent => exact schedulerInvariant_init leaf orig original props hent
   | step hrec hsucc ih =>
       clear cfg
       rename_i cfg cfg'
@@ -734,7 +736,7 @@ theorem supportedInvariantDiscipline_of_gates {orig : List Domain}
                   (hg.core.hdeadFallbackNoCp hrec hc ha hcp)
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hsuccP
                     simp only [] at hsuccP
@@ -797,7 +799,7 @@ theorem supportedInvariantDiscipline_of_gates {orig : List Domain}
                           (by rw [← SupportedReach.orig_eq hrec];
                               exact ih.reachable)
                           hc ha hcp hp)
-                        (by rw [← SupportedReach.original_eq hrec,
+                        (by rw [← SupportedReach.orig_eq hrec, ← SupportedReach.original_eq hrec,
                                 ← SupportedReach.props_eq hrec]
                             exact hp)
                     exact schedulerInvariant_after_backjump hreach'
@@ -921,7 +923,7 @@ theorem supportedInvariantDiscipline_of_gates {orig : List Domain}
                 (by rw [← SupportedReach.orig_eq hrec]; exact ih.reachable) ht rfl
               have hspec := terminalResult_spec (hg.core.hclos hrec)
                 (by rw [← SupportedReach.orig_eq hrec]; exact ih.reachable)
-              rw [SupportedReach.original_eq hrec,
+              rw [SupportedReach.orig_eq hrec, SupportedReach.original_eq hrec,
                 SupportedReach.props_eq hrec] at ht
               rw [ht] at hspec
               exact stepLocalExclude_invariant ih
@@ -949,7 +951,7 @@ theorem supportedInvariantDiscipline_of_gates {orig : List Domain}
             (by rw [← SupportedReach.orig_eq hrec]; exact ih.reachable) ht
           have hspec := terminalResult_spec (hg.core.hclos hrec)
             (by rw [← SupportedReach.orig_eq hrec]; exact ih.reachable)
-          rw [SupportedReach.original_eq hrec,
+          rw [SupportedReach.orig_eq hrec, SupportedReach.original_eq hrec,
             SupportedReach.props_eq hrec] at ht
           rw [ht] at hspec
           exact stepLocalExclude_invariant ih

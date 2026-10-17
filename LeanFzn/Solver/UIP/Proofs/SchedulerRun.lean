@@ -591,10 +591,10 @@ root configuration of any original box is reachable (`R1.init`), hence has
 a result. -/
 theorem runPhase_total_init {orig : List Domain} {leaf : Assignment → Bool}
     (k : ReachablePhaseKernel leaf) (original : List Clause)
-    (props : List Propagator) :
+    (props : List Propagator) (hent : LearnedEntailed leaf original) :
     ∃ r : DriverResult leaf,
       runPhase k (SchedulerConfig.init orig original props)
-        (SchedulerReachable.init orig original props) = r :=
+        (SchedulerReachable.init orig original props hent) = r :=
   ⟨_, rfl⟩
 
 end LeanFzn.Solver.UIP.W1

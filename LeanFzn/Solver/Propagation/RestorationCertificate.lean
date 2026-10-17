@@ -531,60 +531,185 @@ theorem analyzeTrail_certificate {leaf : Assignment → Bool} {orig : List Domai
   analyzeStep_certificate (fuel := 4 * bs.trail.length * bs.trail.length + 256)
     hreach hpos h hanL hanA hanB hent
 
-/-- THE COMPUTED-ALLOWANCE CERTIFICATE (INTERFACES §1/§4 item 14, repair
-(d)): the certificate is produced from the ACTUAL success equation of
-`analyzeAtAllowance` — the entry point that consumes `analysisFuel` —
-never from the historical `analyzeTrail` result. -/
+/-! ## The LCG analyzer's certificate (R1a)
+
+The scheduler runs the LCG analyzer (`LcgAnalyzer.lean`), whose learned
+literals are the normalized negations of the EARLIEST implying trail
+entries (semantic weakening). Its structural invariant `LcgLearntOk` names,
+for every learned literal, the trail entry it negates; trail-literal
+distinctness (`ReachableState.distinct`) makes that entry the ONLY exact
+falsifier, which is what the uniqueness and maximality conjuncts need. -/
+
+/-- The exact falsifier of a weakened learned literal is its own entry. -/
+theorem lcg_learnt_negate_norm {e : TrailEntry} (hn : e.literal = e.literal.norm) :
+    (e.literal.negate.norm).negate.norm = e.literal := by
+  rw [norm_negate_norm_local, Literal.negate_negate, ← hn]
+
+/-- The below-level conjuncts for one pair of a successful LCG run. -/
+theorem lcg_below_pair_facts {leaf : Assignment → Bool} {bs : BranchState leaf}
+    {below : List (Literal × Nat)} {lvl target : Nat} {p : Literal × Nat}
+    (hok : LcgLearntOk bs.trail lvl below)
+    (hdist : TrailLiteralsDistinct bs.trail)
+    (hnorm : ∀ e ∈ bs.trail, e.literal = e.literal.norm)
+    (hmaxLe : ∀ p ∈ below, p.2 ≤ target) (hp : p ∈ below) :
+    (∃ e ∈ bs.trail, e.level ≤ target ∧ e.literal = (p.1.negate).norm) ∧
+    (∀ e₂ ∈ bs.trail, e₂.level = lvl → e₂.literal ≠ (p.1.negate).norm) ∧
+    (∀ e₂ ∈ bs.trail, e₂.literal = (p.1.negate).norm → e₂.level ≤ target) := by
+  obtain ⟨e, he, hp1, hlev, hpos, hlt⟩ := hok p hp
+  have hlit : e.literal = (p.1.negate).norm := by
+    rw [hp1, lcg_learnt_negate_norm (hnorm e he)]
+  have huniq : ∀ e₂ ∈ bs.trail, e₂.literal = (p.1.negate).norm → e₂ = e := by
+    intro e₂ he₂ h₂
+    exact hdist.1 e he e₂ he₂ (h₂.trans (hlit.symm.trans (hnorm e he)))
+  refine ⟨⟨e, he, by rw [hlev]; exact hmaxLe p hp, hlit⟩, ?_, ?_⟩
+  · intro e₂ he₂ hl₂ h₂
+    rw [huniq e₂ he₂ h₂] at hl₂
+    omega
+  · intro e₂ he₂ h₂
+    rw [huniq e₂ he₂ h₂, hlev]
+    exact hmaxLe p hp
+
+/-- THE COMPUTED-ALLOWANCE CERTIFICATE (R1a): every conjunct of the
+restoration certificate of a successful LCG run, derived from the run's
+structural invariant and the reachable-state discipline. The only semantic
+premise is the leaf-level entailment `hent`
+(`analyzeAtAllowance_learnedEntailed` derives it). -/
 theorem analyzeAtAllowance_certificate {leaf : Assignment → Bool}
     {orig : List Domain} {bs : BranchState leaf} {c : Clause}
     {an : ConflictAnalysis} {below : List (Literal × Nat)} {uip : Literal}
+    {orig' : List Domain}
     (hreach : ReachableState leaf orig bs)
     (hpos : 0 < bs.level)
-    (h : analyzeAtAllowance bs.trail bs.level c = some (below, uip))
+    (h : analyzeAtAllowance orig' bs.trail bs.level c = some (below, uip))
     (hanL : an.learned = uip.negate :: below.map (fun p => p.1))
     (hanA : an.asserting = uip.negate)
     (hanB : an.backjumpLevel = below.foldl (fun a p => max a p.2) 0)
     (hent : LearnedEntailed leaf [an.learned]) :
-    RestorationCertificate leaf bs an :=
-  analyzeStep_certificate (fuel := analysisFuel bs.trail c)
-    hreach hpos h hanL hanA hanB hent
+    RestorationCertificate leaf bs an := by
+  obtain ⟨hm0, hl0⟩ := lcgInv_init bs.trail bs.level c
+  obtain ⟨hok, i, m, hmi, hmLit, hmLev⟩ :=
+    analyzeLoop_inv _ _ below uip hm0 hl0 h
+  have hmMem : m ∈ bs.trail := List.mem_of_getElem? hmi
+  have hbelowStrict : ∀ p ∈ below, p.2 < bs.level := by
+    intro p hp
+    obtain ⟨-, -, -, -, -, hlt⟩ := hok p hp
+    exact hlt
+  have hdistinct : TrailLiteralsDistinct bs.trail := hreach.distinct
+  have hnorm : ∀ e ∈ bs.trail, e.literal = e.literal.norm := hreach.wf.2.1
+  have huipnorm : uip = uip.norm := by
+    rw [← hmLit]
+    exact hnorm m hmMem
+  have hass : m.literal = (an.asserting.negate).norm := by
+    rw [hanA, Literal.negate_negate, ← huipnorm]
+    exact hmLit
+  have hmaxLe : ∀ p ∈ below, p.2 ≤ an.backjumpLevel := by
+    intro p hp
+    rw [hanB]
+    exact foldl_max_mem_le below 0 p hp
+  have hlg : an.asserting ∈ an.learned := by
+    rw [hanL, hanA]
+    exact List.mem_cons_self ..
+  have hlt : an.backjumpLevel < bs.level := by
+    rw [hanB]
+    exact foldl_max_lt below 0 bs.level hbelowStrict hpos
+  refine
+    { assertingMem := hlg
+      learnedEntailed := hent
+      learnedFalsified := ?_
+      assertingAtConflict := ⟨m, hmMem, hass, hmLev⟩
+      othersBelow := ?_
+      targetLegal := Nat.le_of_lt hlt
+      targetDescends := Or.inr hlt
+      targetMaximal := ?_
+      assertingSurvives := ?_
+      unitAfterRestore := ?_
+      conservation := ?_
+      targetAttained := ?_ }
+  · intro q hq
+    rw [hanL] at hq
+    rcases List.mem_cons.mp hq with hEq | hq
+    · refine ⟨m, hmMem, ?_⟩
+      rw [hEq, Literal.negate_negate, ← huipnorm]
+      exact hmLit
+    · obtain ⟨p, hp, hpq⟩ := List.mem_map.mp hq
+      obtain ⟨⟨e, he, -, hlit⟩, -, -⟩ :=
+        lcg_below_pair_facts (target := an.backjumpLevel) hok hdistinct hnorm hmaxLe hp
+      exact ⟨e, he, by rw [← hpq]; exact hlit⟩
+  · intro q hq hne
+    rw [hanL] at hq
+    rcases List.mem_cons.mp hq with hEq | hq
+    · exact absurd (by rw [hEq, hanA]) hne
+    · obtain ⟨p, hp, hpq⟩ := List.mem_map.mp hq
+      obtain ⟨hf1, hf2, _⟩ := lcg_below_pair_facts hok hdistinct hnorm hmaxLe hp
+      refine ⟨?_, ?_⟩
+      · obtain ⟨e, he, hlev, hlit⟩ := hf1
+        exact ⟨e, he, hlev, by rw [← hpq]; exact hlit⟩
+      · intro e₂ he₂ hlev₂ hlit₂
+        rw [← hpq] at hlit₂
+        exact hf2 e₂ he₂ hlev₂ hlit₂
+  · intro q hq hne e₂ he₂ hlit₂
+    rw [hanL] at hq
+    rcases List.mem_cons.mp hq with hEq | hq
+    · exact absurd (by rw [hEq, hanA]) hne
+    · obtain ⟨p, hp, hpq⟩ := List.mem_map.mp hq
+      rw [← hpq] at hlit₂
+      exact (lcg_below_pair_facts hok hdistinct hnorm hmaxLe hp).2.2 e₂ he₂ hlit₂
+  · intro e he hlevel hlit
+    have hsame : e.literal = m.literal := hlit.trans hass.symm
+    have heq : e = m := hdistinct.1 m hmMem e he (hsame.trans (hnorm m hmMem))
+    rw [heq, hmLev] at hlevel
+    omega
+  · intro a hleaf htrail
+    refine asserting_of_entailed (an := an) hent hlg ?_ hleaf
+    intro q hq hne
+    rw [hanL] at hq
+    rcases List.mem_cons.mp hq with hEq | hq
+    · exact absurd (by rw [hEq, hanA]) hne
+    · obtain ⟨p, hp, hpq⟩ := List.mem_map.mp hq
+      obtain ⟨⟨e, he, hlev, hlit⟩, _, _⟩ :=
+        lcg_below_pair_facts hok hdistinct hnorm hmaxLe hp
+      exact eval_false_of_surviving ⟨e, he, hlev, by rw [← hpq]; exact hlit⟩ htrail
+  · intro a hleaf _ q _
+    obtain ⟨q', hq', hq'true⟩ := hent an.learned (List.mem_singleton_self _) a hleaf
+    exact Or.inr ⟨q', hq', hq'true⟩
+  · rcases Nat.eq_zero_or_pos an.backjumpLevel with h0 | hposT
+    · exact Or.inl h0
+    · have hne : below.foldl (fun a p => max a p.2) 0 ≠ 0 := by
+        rw [← hanB]
+        omega
+      obtain ⟨p, hp, hpv⟩ := foldl_max_attained_mem hne
+      obtain ⟨e, he, hp1, hlev, -, -⟩ := hok p hp
+      refine Or.inr ⟨e, he, ?_, p.1, ?_, ?_⟩
+      · rw [hlev, hpv, hanB]
+      · rw [hanL]
+        exact List.mem_cons_of_mem _
+          (List.mem_map_of_mem (f := fun p : Literal × Nat => p.1) hp)
+      · rw [hp1, lcg_learnt_negate_norm (hnorm e he)]
 
-/-- The same certificate at the run's own record `ConflictAnalysis.ofRun`,
-whose `hanL`/`hanA`/`hanB` equations hold by `rfl`: this is the form the
-classified success case and the `analyzeWithAllowance` entry point
-consume. -/
+/-- The same certificate at the run's own record `ConflictAnalysis.ofRun`. -/
 theorem analyzeAtAllowance_certificate_ofRun {leaf : Assignment → Bool}
-    {orig : List Domain} {bs : BranchState leaf} {c : Clause}
+    {orig orig' : List Domain} {bs : BranchState leaf} {c : Clause}
     {below : List (Literal × Nat)} {uip : Literal}
     (hreach : ReachableState leaf orig bs)
     (hpos : 0 < bs.level)
-    (h : analyzeAtAllowance bs.trail bs.level c = some (below, uip))
+    (h : analyzeAtAllowance orig' bs.trail bs.level c = some (below, uip))
     (hent : LearnedEntailed
       leaf [(ConflictAnalysis.ofRun below uip).learned]) :
     RestorationCertificate leaf bs (ConflictAnalysis.ofRun below uip) :=
   analyzeAtAllowance_certificate hreach hpos h rfl rfl rfl hent
 
 /-- THE SINGLE CONCRETE THEOREM the scheduler's learn/backjump/assert
-transition consumes: from a REACHABLE, non-root branch and the ACTUAL
-success equation of the computed-allowance entry point
-(`BranchState.analyzeWithAllowance`), the certificate of the returned
-`ConflictAnalysis` is produced. No separate `hanL`/`hanA`/`hanB`, no
-distinctness, no strictness, no falsifier hypothesis: the equations are
-`rfl` and every other conjunct is derived.
-
-`hent` is the ONLY semantic premise and is problem-level (D1's bridge,
-ledger item 16): the leaf-level entailment of the analysis's learned
-clause. It is never per-deduction. -/
+transition consumes, at the `analyzeWithAllowance` entry point. -/
 theorem analyzeWithAllowance_certificate {leaf : Assignment → Bool}
-    {orig : List Domain} {bs : BranchState leaf} {c : Clause}
+    {orig orig' : List Domain} {bs : BranchState leaf} {c : Clause}
     {an : ConflictAnalysis}
     (hreach : ReachableState leaf orig bs)
     (hpos : 0 < bs.level)
-    (h : bs.analyzeWithAllowance c = some an)
+    (h : bs.analyzeWithAllowance orig' c = some an)
     (hent : LearnedEntailed leaf [an.learned]) :
     RestorationCertificate leaf bs an := by
   unfold BranchState.analyzeWithAllowance at h
-  cases hA : analyzeAtAllowance bs.trail bs.level c with
+  cases hA : analyzeAtAllowance orig' bs.trail bs.level c with
   | none => rw [hA] at h; simp at h
   | some p =>
       obtain ⟨below, uip⟩ := p
@@ -592,6 +717,37 @@ theorem analyzeWithAllowance_certificate {leaf : Assignment → Bool}
       simp only [Option.map_some, Option.some.injEq] at h
       subst h
       exact analyzeAtAllowance_certificate_ofRun hreach hpos hA hent
+
+/-! ## The learned clause is entailed (R1a)
+
+`analyzeLoop_holds` (`LcgAnalyzer.lean`) is the per-assignment resolution
+argument. Lifted to leaf solutions it needs exactly: the conflict clause and
+every trail reason clause are entailed, level-0 trail literals hold, and
+every leaf solution fits the ORIGINAL domains (so root-dropped literals —
+false under `orig` — are false at it). Semantic weakening needs no premise:
+it is sound by `impliesP_sound`. -/
+
+/-- THE ENTAILMENT OF THE LEARNED CLAUSE (leaf level). -/
+theorem analyzeAtAllowance_learnedEntailed {leaf : Assignment → Bool}
+    {orig : List Domain} {trail : List TrailEntry} {lvl : Nat} {c : Clause}
+    {below : List (Literal × Nat)} {uip : Literal}
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
+    (hconf : LearnedEntailed leaf [c])
+    (hreasons : ∀ e ∈ trail, ∀ r ∈ e.reason, LearnedEntailed leaf [r.clause])
+    (hroot : ∀ e ∈ trail, e.level = 0 → ∀ a, leaf a = true →
+      e.literal.eval a = some true)
+    (h : analyzeAtAllowance orig trail lvl c = some (below, uip)) :
+    LearnedEntailed leaf [(ConflictAnalysis.ofRun below uip).learned] := by
+  intro c₀ hc₀ a hleaf
+  rw [List.mem_singleton] at hc₀
+  subst hc₀
+  have hh := analyzeLoop_holds (hfits a hleaf)
+    (fun e he r hr => hreasons e he r hr r.clause (List.mem_singleton_self _) a hleaf)
+    (fun e he h0 => hroot e he h0 a hleaf) _ _ below uip
+    (lcgHolds_init (hconf c (List.mem_singleton_self _) a hleaf)) h
+  rcases hh with hu | ⟨p, hp, hpt⟩
+  · exact ⟨uip.negate, List.mem_cons_self .., hu⟩
+  · exact ⟨p.1, List.mem_cons_of_mem _ (List.mem_map_of_mem (f := fun p => p.1) hp), hpt⟩
 
 /-! ## THE problem-level certificate (ledger item 16: the D1 bridge)
 
@@ -671,32 +827,39 @@ theorem analyzeStep_certificate_of_problem {problem : Problem Constraint Objecti
   exact analyzeStep_certificate (an := ConflictAnalysis.ofRun below uip)
     hreach hpos h rfl rfl rfl hent
 
-/-- THE COMPUTED-ALLOWANCE PROBLEM-LEVEL CERTIFICATE: the plan's target
-theorem. The success equation is `analyzeAtAllowance`'s — the entry
-point the scheduler runs — and the learned-clause entailment is derived
-from the problem-level lift, so the only remaining premises are D1's
-problem/kit bridges (ledger item 16). -/
+/-- THE COMPUTED-ALLOWANCE PROBLEM-LEVEL CERTIFICATE (R1a): the success
+equation is `analyzeAtAllowance`'s and the learned-clause entailment is
+derived from the problem-level bridges. R1a adds `hfits` (leaf solutions fit
+the original domains, `SupportedRun.leaf_fits`) and drops `hrnorm` (the LCG
+entailment argument is semantic, so reason literals need not be normalized). -/
 theorem analyzeAtAllowance_certificate_of_problem {problem : Problem Constraint Objective}
     {constraintHolds : Constraint → Assignment → Prop}
     {leaf : Assignment → Bool} {orig : List Domain} {bs : BranchState leaf}
     {c : Clause} {below : List (Literal × Nat)} {uip : Literal}
     (hreach : ReachableState leaf orig bs)
     (hpos : 0 < bs.level)
-    (h : analyzeAtAllowance bs.trail bs.level c = some (below, uip))
+    (h : analyzeAtAllowance orig bs.trail bs.level c = some (below, uip))
     (hconf : Clause.EntailedBy problem constraintHolds c)
     (hleafSol : ∀ a, leaf a = true → ProblemSolution problem constraintHolds a)
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
     (hreasons : ∀ e ∈ bs.trail, ∀ r ∈ e.reason,
       Reason.Valid problem constraintHolds r e.literal)
-    (hrootFacts : RootFacts problem constraintHolds bs.trail)
-    (hrnorm : ∀ e ∈ bs.trail, ∀ r ∈ e.reason, ∀ l ∈ r.clause, l = l.norm) :
-    RestorationCertificate leaf bs (ConflictAnalysis.ofRun below uip) :=
-  analyzeStep_certificate_of_problem (fuel := analysisFuel bs.trail c)
-    hreach hpos h hconf hleafSol hreasons hrootFacts hrnorm
+    (hrootFacts : RootFacts problem constraintHolds bs.trail) :
+    RestorationCertificate leaf bs (ConflictAnalysis.ofRun below uip) := by
+  refine analyzeAtAllowance_certificate_ofRun hreach hpos h ?_
+  refine analyzeAtAllowance_learnedEntailed hfits ?_ ?_ ?_ h
+  · intro c₀ hc₀ a hleaf
+    rw [List.mem_singleton] at hc₀
+    subst hc₀
+    exact hconf a (hleafSol a hleaf)
+  · intro e he r hr c₀ hc₀ a hleaf
+    rw [List.mem_singleton] at hc₀
+    subst hc₀
+    exact (hreasons e he r hr).1 a (hleafSol a hleaf)
+  · intro e he h0 a hleaf
+    exact hrootFacts e he h0 a (hleafSol a hleaf)
 
-/-- The single concrete theorem of the plan's B2 surface, with the
-entailment derived: from `BranchState.analyzeWithAllowance`'s success
-(the scheduler's entry point) and the problem-level bridges, the
-certificate of the returned record. -/
+/-- The `analyzeWithAllowance` form of the problem-level certificate. -/
 theorem analyzeWithAllowance_certificate_of_problem
     {problem : Problem Constraint Objective}
     {constraintHolds : Constraint → Assignment → Prop}
@@ -704,16 +867,16 @@ theorem analyzeWithAllowance_certificate_of_problem
     {c : Clause} {an : ConflictAnalysis}
     (hreach : ReachableState leaf orig bs)
     (hpos : 0 < bs.level)
-    (h : bs.analyzeWithAllowance c = some an)
+    (h : bs.analyzeWithAllowance orig c = some an)
     (hconf : Clause.EntailedBy problem constraintHolds c)
     (hleafSol : ∀ a, leaf a = true → ProblemSolution problem constraintHolds a)
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
     (hreasons : ∀ e ∈ bs.trail, ∀ r ∈ e.reason,
       Reason.Valid problem constraintHolds r e.literal)
-    (hrootFacts : RootFacts problem constraintHolds bs.trail)
-    (hrnorm : ∀ e ∈ bs.trail, ∀ r ∈ e.reason, ∀ l ∈ r.clause, l = l.norm) :
+    (hrootFacts : RootFacts problem constraintHolds bs.trail) :
     RestorationCertificate leaf bs an := by
   unfold BranchState.analyzeWithAllowance at h
-  cases hA : analyzeAtAllowance bs.trail bs.level c with
+  cases hA : analyzeAtAllowance orig bs.trail bs.level c with
   | none => rw [hA] at h; simp at h
   | some p =>
       obtain ⟨below, uip⟩ := p
@@ -721,7 +884,7 @@ theorem analyzeWithAllowance_certificate_of_problem
       simp only [Option.map_some, Option.some.injEq] at h
       subst h
       exact analyzeAtAllowance_certificate_of_problem hreach hpos hA hconf
-        hleafSol hreasons hrootFacts hrnorm
+        hleafSol hfits hreasons hrootFacts
 
 /-! ## B2 — the classified results (success / root / unsupported)
 
@@ -750,12 +913,12 @@ shape, `.rootContradiction` is `.root`, `.unsupported` is `.analyzable`. -/
 /-- Inversion of the success verdict: it is exactly the computed-allowance
 success equation. (B1's `AnalysisCompletion` owns its own iff; this file
 is upstream of it and re-derives the direction it needs.) -/
-theorem analyzeClassified_success_imp {trail : List TrailEntry} {lvl : Nat}
+theorem analyzeClassified_success_imp {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
     {c : Clause} {below : List (Literal × Nat)} {uip : Literal}
-    (h : analyzeClassified trail lvl c = .success below uip) :
-    analyzeAtAllowance trail lvl c = some (below, uip) := by
+    (h : analyzeClassified orig trail lvl c = .success below uip) :
+    analyzeAtAllowance orig trail lvl c = some (below, uip) := by
   unfold analyzeClassified at h
-  generalize hA : analyzeAtAllowance trail lvl c = y at h
+  generalize hA : analyzeAtAllowance orig trail lvl c = y at h
   cases y with
   | none =>
       by_cases h0 : lvl = 0 <;> simp [h0] at h
@@ -766,11 +929,11 @@ theorem analyzeClassified_success_imp {trail : List TrailEntry} {lvl : Nat}
       rfl
 
 /-- Inversion of the root verdict: `none` at level 0. -/
-theorem analyzeClassified_root_imp {trail : List TrailEntry} {lvl : Nat}
-    {c : Clause} (h : analyzeClassified trail lvl c = .rootContradiction) :
-    analyzeAtAllowance trail lvl c = none ∧ lvl = 0 := by
+theorem analyzeClassified_root_imp {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
+    {c : Clause} (h : analyzeClassified orig trail lvl c = .rootContradiction) :
+    analyzeAtAllowance orig trail lvl c = none ∧ lvl = 0 := by
   unfold analyzeClassified at h
-  generalize hA : analyzeAtAllowance trail lvl c = y at h
+  generalize hA : analyzeAtAllowance orig trail lvl c = y at h
   cases y with
   | none =>
       by_cases h0 : lvl = 0
@@ -780,11 +943,11 @@ theorem analyzeClassified_root_imp {trail : List TrailEntry} {lvl : Nat}
       simp at h
 
 /-- Inversion of the unsupported verdict: `none` above the root. -/
-theorem analyzeClassified_unsupported_imp {trail : List TrailEntry} {lvl : Nat}
-    {c : Clause} (h : analyzeClassified trail lvl c = .unsupported) :
-    analyzeAtAllowance trail lvl c = none ∧ lvl ≠ 0 := by
+theorem analyzeClassified_unsupported_imp {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
+    {c : Clause} (h : analyzeClassified orig trail lvl c = .unsupported) :
+    analyzeAtAllowance orig trail lvl c = none ∧ lvl ≠ 0 := by
   unfold analyzeClassified at h
-  generalize hA : analyzeAtAllowance trail lvl c = y at h
+  generalize hA : analyzeAtAllowance orig trail lvl c = y at h
   cases y with
   | none =>
       by_cases h0 : lvl = 0
@@ -794,10 +957,10 @@ theorem analyzeClassified_unsupported_imp {trail : List TrailEntry} {lvl : Nat}
       simp at h
 
 /-- The success verdict IS the allowance success (forward direction). -/
-theorem analyzeClassified_success_of_allowance {trail : List TrailEntry}
+theorem analyzeClassified_success_of_allowance {orig : List Domain} {trail : List TrailEntry}
     {lvl : Nat} {c : Clause} {below : List (Literal × Nat)} {uip : Literal}
-    (h : analyzeAtAllowance trail lvl c = some (below, uip)) :
-    analyzeClassified trail lvl c = .success below uip := by
+    (h : analyzeAtAllowance orig trail lvl c = some (below, uip)) :
+    analyzeClassified orig trail lvl c = .success below uip := by
   simp only [analyzeClassified, h]
 
 /-- SUCCESS: the classified success case produces the certificate of the
@@ -810,7 +973,7 @@ theorem analyzeClassified_success_certificate {leaf : Assignment → Bool}
     {below : List (Literal × Nat)} {uip : Literal}
     (hreach : ReachableState leaf orig bs)
     (hpos : 0 < bs.level)
-    (hcl : analyzeClassified bs.trail bs.level c = .success below uip)
+    (hcl : analyzeClassified orig bs.trail bs.level c = .success below uip)
     (hent : LearnedEntailed
       leaf [(ConflictAnalysis.ofRun below uip).learned]) :
     RestorationCertificate leaf bs (ConflictAnalysis.ofRun below uip) :=
@@ -828,16 +991,16 @@ theorem analyzeClassified_success_certificate_of_problem
     {c : Clause} {below : List (Literal × Nat)} {uip : Literal}
     (hreach : ReachableState leaf orig bs)
     (hpos : 0 < bs.level)
-    (hcl : analyzeClassified bs.trail bs.level c = .success below uip)
+    (hcl : analyzeClassified orig bs.trail bs.level c = .success below uip)
     (hconf : Clause.EntailedBy problem constraintHolds c)
     (hleafSol : ∀ a, leaf a = true → ProblemSolution problem constraintHolds a)
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
     (hreasons : ∀ e ∈ bs.trail, ∀ r ∈ e.reason,
       Reason.Valid problem constraintHolds r e.literal)
-    (hrootFacts : RootFacts problem constraintHolds bs.trail)
-    (hrnorm : ∀ e ∈ bs.trail, ∀ r ∈ e.reason, ∀ l ∈ r.clause, l = l.norm) :
+    (hrootFacts : RootFacts problem constraintHolds bs.trail) :
     RestorationCertificate leaf bs (ConflictAnalysis.ofRun below uip) :=
   analyzeAtAllowance_certificate_of_problem hreach hpos
-    (analyzeClassified_success_imp hcl) hconf hleafSol hreasons hrootFacts hrnorm
+    (analyzeClassified_success_imp hcl) hconf hleafSol hfits hreasons hrootFacts
 
 /-- A nonempty clause has `isEmpty = false` — the gate that keeps a
 classified conflict out of the local shape. -/
@@ -857,7 +1020,7 @@ may consume. -/
 theorem conflictShape_of_analyzeClassified_success {leaf : Assignment → Bool}
     {bs : BranchState leaf} (hin : AnalyzerInput leaf bs)
     {below : List (Literal × Nat)} {uip : Literal}
-    (_hcl : analyzeClassified bs.trail bs.level hin.conflict = .success below uip) :
+    (_hcl : analyzeClassified orig bs.trail bs.level hin.conflict = .success below uip) :
     ConflictShape.ofConflict bs.level hin.conflict ≠ .local := by
   have hne : hin.conflict.isEmpty = false := isEmpty_eq_false hin.nonempty
   rw [ConflictShape.ofConflict, hne]
@@ -872,10 +1035,10 @@ witness that the stop is semantic (not a fuel cut-off) is
 theorem analyzeClassified_root_contradiction {leaf : Assignment → Bool}
     {orig : List Domain} {bs : BranchState leaf}
     (hin : AnalyzerInput leaf bs) (_hreach : ReachableState leaf orig bs)
-    (hroot : analyzeClassified bs.trail bs.level hin.conflict
+    (hroot : analyzeClassified orig bs.trail bs.level hin.conflict
       = .rootContradiction) :
     bs.level = 0 ∧
-    analyzeAtAllowance bs.trail bs.level hin.conflict = none ∧
+    analyzeAtAllowance orig bs.trail bs.level hin.conflict = none ∧
     ConflictShape.ofConflict bs.level hin.conflict = .root ∧
     (∀ a, leaf a = true →
       (∀ e ∈ bs.trail, e.literal.eval a = some true) → False) ∧
@@ -907,14 +1070,14 @@ The completed-trace witness is the downstream
 theorem analyzeClassified_unsupported_local {leaf : Assignment → Bool}
     {orig : List Domain} {bs : BranchState leaf}
     (hin : AnalyzerInput leaf bs) (_hreach : ReachableState leaf orig bs)
-    (huns : analyzeClassified bs.trail bs.level hin.conflict
+    (huns : analyzeClassified orig bs.trail bs.level hin.conflict
       = .unsupported) :
     bs.level ≠ 0 ∧
-    analyzeAtAllowance bs.trail bs.level hin.conflict = none ∧
-    bs.analyzeWithAllowance hin.conflict = none ∧
+    analyzeAtAllowance orig bs.trail bs.level hin.conflict = none ∧
+    bs.analyzeWithAllowance orig hin.conflict = none ∧
     ConflictShape.ofConflict bs.level hin.conflict = .analyzable := by
   obtain ⟨hnone, hlvl⟩ := analyzeClassified_unsupported_imp huns
-  have hana : bs.analyzeWithAllowance hin.conflict = none := by
+  have hana : bs.analyzeWithAllowance orig hin.conflict = none := by
     unfold BranchState.analyzeWithAllowance
     rw [hnone]
     rfl
@@ -1632,73 +1795,13 @@ theorem reason_falsifier_not_after_pivot {trail : List TrailEntry}
   rw [heq]
   exact fun hh => earlierThan_asymm hdist.2 ⟨hh, hbefore⟩
 
-/-! ## B1 — the fuel accounting
+/-! ## B1 — fuel accounting (R1a)
 
-The two things the analyzer's transitions consume are exactly the two things
-`analysisAllowance` charges for: one unit per worklist literal EVER held (the
-conflict clause plus every reason clause reached — and the frontier above
-shows each trail entry reseeds at most one reason), and one unit per pivot
-round (bounded by the trail length). The bound is therefore
-
-  `reasonBudget trail c + trail.length`,
-
-and this section proves that the executable fuel covers it. -/
-
-/-- The analyzer's transition budget: every worklist literal ever held plus
-one unit per pivot round. -/
-def transitionBudget (trail : List TrailEntry) (c : Clause) : Nat :=
-  reasonBudget trail c + trail.length
-
-/-- The computed allowance covers the transition budget. This is the
-arithmetic that makes the formula `(budget + 1) * (len + 1) + 1` the right
-shape: it is exactly the lexicographic bound `rounds x (worklist + 1)`. -/
-theorem transitionBudget_le_analysisAllowance (trail : List TrailEntry)
-    (c : Clause) : transitionBudget trail c ≤ analysisAllowance trail c := by
-  rw [transitionBudget, analysisAllowance, Nat.mul_succ]
-  have hmul : trail.length ≤ (reasonBudget trail c + 1) * trail.length := by
-    have h : 1 * trail.length ≤ (reasonBudget trail c + 1) * trail.length :=
-      Nat.mul_le_mul_right _ (Nat.succ_le_succ (Nat.zero_le _))
-    simpa using h
-  omega
-
-/-- The EXECUTABLE fuel (`analysisFuel`, the allowance actually passed to
-`analyzeStep`) covers the transition budget. -/
-theorem transitionBudget_le_analysisFuel (trail : List TrailEntry) (c : Clause) :
-    transitionBudget trail c ≤ analysisFuel trail c :=
-  Nat.le_trans (transitionBudget_le_analysisAllowance trail c)
-    (analysisAllowance_le_analysisFuel trail c)
-
-/-! ## B1 status
-
-The analytic content is proved:
-
-* every reason-scan mark lies AT OR BEFORE the pivot
-  (`reason_falsifier_not_after_pivot`), so the pivot position cannot advance
-  within a round;
-* a consumed pivot can never be re-marked
-  (`reason_not_negate_pivot`), so the marks cannot grow back into resolved
-  entries;
-* the transition budget is covered by the executable fuel
-  (`transitionBudget_le_analysisFuel`).
-
-What remains is the loop-level induction that threads the frontier through
-`analyzeStep` and concludes `analyzeStep ... (analysisFuel trail c) [c] none
-[] []` does not run out of fuel. The invariant it needs is stated below, so
-the remaining work is a single preservation induction rather than a design
-question. -/
-
-/-- B1 LOOP INVARIANT: the marks all lie strictly before the current pivot
-frontier, and every clause still in the worklist is a suffix of the reason
-clause of the pivot that seeded it (so the exact lookup is the only path
-taken on it). `analyzeStep` preserves this, and the frontier strictly
-decreases at every pivot round — which is why the rounds are bounded by the
-trail length and why `transitionBudget` pays for every transition. -/
-def FrontierInvariant (trail : List TrailEntry) (lvl : Nat)
-    (cs : List Clause) (marks : List TrailEntry) : Prop :=
-  (∀ m ∈ marks, m ∈ trail) ∧
-  (∀ m ∈ marks, m.level = lvl) ∧
-  (∀ m ∈ marks, ∀ fron ∈ trail, ¬ TrailEntry.earlierThan trail fron m) ∧
-  (∀ c ∈ cs, ∃ e ∈ trail, ∃ r ∈ e.reason, c <:+ r.clause) ∧
-  List.Nodup trail
+The historical-analyzer fuel accounting (`transitionBudget`, the B1 status
+note and `FrontierInvariant`) is retired: the scheduler's LCG analyzer
+terminates unconditionally by its potential (`analyzerPotential_lt_of_next`,
+`LcgAnalyzer.lean`), and `analysisFuel` is that potential plus one
+(`AnalysisCompletion.analysis_complete`). The frontier lemmas above remain
+true statements about the historical `findEntryOf` lookup. -/
 
 end LeanFzn.Solver.Propagation

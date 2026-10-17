@@ -134,7 +134,7 @@ def resolutionIncrement {leaf : Assignment → Bool}
     (cfg : SchedulerConfig leaf) : Nat :=
   match schedulerNext cfg with
   | .analyzeConflict _ c =>
-      analyzeEventsExpansions cfg.branch.trail cfg.branch.level c
+      analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c
   | _ => 0
 
 /-- The consume dispatcher's successor is counter-neutral (it is the
@@ -174,7 +174,7 @@ theorem backjumpStep_successor_reasonResolutions {leaf : Assignment → Bool}
           exact stepChronologicalFallback_reasonResolutions cfg (branchRegion cfg)
       | some cp =>
           cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-              an.learned).perform cfg.branch cfg.original cfg.props with
+              an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
           | none =>
               simp only [backjumpStep, ha, hcp, hp, SchedulerTransition.successor,
                 Option.some.injEq] at h
@@ -234,7 +234,7 @@ theorem schedulerNext_successor_reasonResolutions {leaf : Assignment → Bool}
               rw [hinc0, Nat.add_zero, ← h]
               exact stepPropagate_reasonResolutions cfg d
           | none =>
-              cases ht : terminalResult cfg.original cfg.props cfg.branch with
+              cases ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch with
               | stable bs =>
                   cases hw : leafWitness leaf cfg with
                   | some w =>
@@ -305,7 +305,7 @@ theorem schedulerNext_successor_reasonResolutions {leaf : Assignment → Bool}
                         simp only [SchedulerTransition.successor,
                           Option.some.injEq] at h
                         have hinc : resolutionIncrement cfg
-                            = analyzeEventsExpansions cfg.branch.trail
+                            = analyzeEventsExpansions cfg.orig cfg.branch.trail
                                 cfg.branch.level c := by
                           simp only [resolutionIncrement,
                             C2d.schedulerNext_eq_conflict_analyze hconf hst hd ht

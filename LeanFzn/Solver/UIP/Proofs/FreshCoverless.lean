@@ -82,6 +82,7 @@ NO `sorry`, NO custom axiom. Registration owes the umbrella import line
 import LeanFzn.Solver.UIP.Proofs.HdeadCkpt
 import LeanFzn.Solver.UIP.Proofs.SiteInhabited
 import LeanFzn.Solver.UIP.Proofs.SiteLiveness
+import LeanFzn.Solver.UIP.Proofs.UnitRunSupported
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler
 
 
@@ -148,12 +149,8 @@ theorem supportedHfresh_of_site_separated {orig : List Domain}
   have hass : an.asserting.norm = (uip.negate).norm := by
     rw [hcanon, ConflictAnalysis.normalized_asserting,
       ConflictAnalysis.ofUIP_asserting, norm_norm]
-  have hrun' := hrun
-  unfold analyzeAtAllowance at hrun'
   obtain ⟨m, hm, hmlit, hmlev⟩ :=
-    analyzeStep_uip_on_trail cfg.branch.trail cfg.branch.level
-      (analysisFuel cfg.branch.trail ev.clause) [ev.clause] none [] []
-      (analyzerInvariant_init cfg.branch.trail cfg.branch.level) below uip hrun'
+    analyzeAtAllowance_uip_on_trail hrun
   -- the checkpoint's trail is a prefix of the branch trail
   obtain ⟨hident, -⟩ := identifiesChain_of_reach hreach
   obtain ⟨mid, hmid, -⟩ := hident cp (checkpointAt_mem hcp) |>.2.1
@@ -334,15 +331,15 @@ theorem unitKit_backjumpLevel_eq_zero {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props) :
     ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis},
       SupportedReach orig original props cfg → cfg.conflict = some ev →
         ev.analysis = some an → an.backjumpLevel = 0 := by
   intro cfg ev an hreach hc ha
   obtain ⟨q, hq, -⟩ :=
-    (unitRunInvariant_of_reachable (leaf := leaf) hSupp hreach.reachable
-      (by rw [SupportedReach.props_eq hreach, hprops])).recorded ev hc |>.1
+    (unitRunInvariant_of_supported hprops hSupp hgate hreach).recorded ev hc |>.1
   obtain ⟨below, uip, hrun, heq⟩ :=
     reachable_analysis_success leaf cfg ev an hreach.reachable hc ha
   rw [hq] at hrun

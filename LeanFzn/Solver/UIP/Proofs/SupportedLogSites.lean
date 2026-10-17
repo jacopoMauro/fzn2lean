@@ -101,15 +101,16 @@ theorem supportedClosureContract_runTriple {orig : List Domain}
   exact hclos hreach
 
 /-- The dispatcher's terminal-event input at a supported configuration is
-the run triple's: `terminalResult cfg.original cfg.props cfg.branch =
-terminalResult original props cfg.branch`. -/
+the run triple's: `terminalResult cfg.orig cfg.original cfg.props cfg.branch =
+terminalResult orig original props cfg.branch`. -/
 theorem supportedTerminalResult_runTriple {orig : List Domain}
     {original : List Clause} {props : List Propagator} {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf}
     (hreach : SupportedReach orig original props cfg) :
-    terminalResult cfg.original cfg.props cfg.branch
-      = terminalResult original props cfg.branch := by
-  rw [SupportedReach.original_eq hreach, SupportedReach.props_eq hreach]
+    terminalResult cfg.orig cfg.original cfg.props cfg.branch
+      = terminalResult orig original props cfg.branch := by
+  rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
+    SupportedReach.props_eq hreach]
 
 /-! ## §2 The per-site branch-region producers
 
@@ -132,7 +133,7 @@ theorem supportedBranchRegionSound_of_stableNone {orig : List Domain}
         ReachableState leaf orig cfg.branch)
     {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     (hreach : SupportedReach orig original props cfg)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .stable bs)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs)
     (hwit : leafWitness leaf cfg = none)
     (hsp : splitData cfg.branch.frame = none) :
     DeadRegion.Sound leaf (branchRegion cfg) :=
@@ -176,10 +177,10 @@ theorem supportedBranchRegionSound_of_conflictNil {orig : List Domain}
     {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     {cs learned : List Clause}
     (hreach : SupportedReach orig original props cfg)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .conflict bs cs learned)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .conflict bs cs learned)
     (hcs : cs = []) :
     DeadRegion.Sound leaf (branchRegion cfg) := by
-  have htr : terminalResult original props cfg.branch = .conflict bs cs learned := by
+  have htr : terminalResult orig original props cfg.branch = .conflict bs cs learned := by
     rw [← supportedTerminalResult_runTriple hreach]
     exact ht
   exact branchRegion_sound
@@ -201,10 +202,10 @@ theorem supportedBranchRegionSound_of_localExcluded {orig : List Domain}
     {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     {lit : Option Literal} {reason : Option Clause} {learned : List Clause}
     (hreach : SupportedReach orig original props cfg)
-    (ht : terminalResult cfg.original cfg.props cfg.branch
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch
       = .localExcluded bs lit reason learned) :
     DeadRegion.Sound leaf (branchRegion cfg) := by
-  have htr : terminalResult original props cfg.branch
+  have htr : terminalResult orig original props cfg.branch
       = .localExcluded bs lit reason learned := by
     rw [← supportedTerminalResult_runTriple hreach]
     exact ht
@@ -236,7 +237,7 @@ theorem supportedNewRegionsSound_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp)) :
     SupportedNewRegionsSound orig original props leaf := by
   intro cfg cfg' hreach hsucc
@@ -270,7 +271,7 @@ theorem supportedNewRegionsSound_of_premises {orig : List Domain}
               (supportedBranchRegionSound_of_recordedEvidence hclos hbr hreach hc)
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 -- ARM 9: the checkpoint-rejection site registers the
                 -- CHECKPOINT's region; the E1 premise supplies soundness
@@ -460,7 +461,7 @@ theorem supportedLogSound_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp)) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ExhaustionLog.Sound leaf cfg.log :=

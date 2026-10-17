@@ -185,11 +185,13 @@ theorem hconfent_vacuous
 entitlement is necessary) -/
 
 /-- The witness problem: one slot whose domain mixes an integer and a
-    Boolean; no constraints, no SAT clauses. -/
+    Boolean, constrained to the integer; no SAT clauses. (The mixed domain
+    still admits the Boolean pin: `domOfLit` filters, so the pin must be an
+    admitted value.) -/
 def probB : LeanFzn.Solver.Propagation.Problem DomConstraint Unit where
   names := ["x"]
-  domains := [[Value.int 5, Value.bool false]]
-  constraints := []
+  domains := [[Value.int 5, Value.bool true]]
+  constraints := [DomConstraint.constEq 0 (Value.int 5)]
   objective := ()
   clauses := []
 
@@ -221,7 +223,10 @@ private theorem solB : ProblemSolution probB DomConstraint.SatisfiedBy
     rw [← hv3]
     exact List.mem_cons_self
   · intro dc hdc
-    exact absurd hdc (by simp [probB])
+    have hdc' : dc = DomConstraint.constEq 0 (Value.int 5) := by
+      simpa [probB] using hdc
+    subst hdc'
+    rfl
 
 /-- The witness state is coherent (the domains are the pin's
     `domOfLit` fold). -/
@@ -241,24 +246,18 @@ private theorem stB_allSingleton : allSingleton stB = true := by
 /-- The complete assignment is `[.bool true]`. -/
 private theorem stB_singleton : singletonAssignment stB = some [Value.bool true] := rfl
 
-/-- The leaf test FAILS at `a0 = [.bool true]` (it does not fit the
-    mixed problem domain). -/
+/-- The leaf test FAILS at `a0 = [.bool true]` (it violates the constraint
+    `slot 0 = 5`). -/
 private theorem stB_leafFails :
     ¬ (fitsB probB [Value.bool true] &&
         probB.constraints.all (fun c => DomConstraint.satisfiedB c
           [Value.bool true])) := by
   rw [Bool.and_eq_true]
-  intro ⟨hfit, _⟩
-  rw [fitsB_iff] at hfit
-  obtain ⟨_, hmem⟩ := hfit
-  have h5 : Value.bool true ∈ probB.domains.getD 0 [] := hmem 0
-    (Value.bool true) (by rfl)
-  simp only [probB, List.getD_cons_zero, List.mem_cons, List.not_mem_nil,
-    or_false] at h5
-  rcases h5 with h5 | h5
-  · exact Value.noConfusion h5
-  · -- .bool true = .bool false is impossible
-    cases h5
+  intro ⟨_, hcons⟩
+  have hall := List.all_eq_true.mp hcons (DomConstraint.constEq 0 (Value.int 5))
+    (by simp [probB])
+  revert hall
+  decide
 
 /-- OBSTRUCTION 3, machine-checked: WITHOUT the `TrailBoolPins`
     premise, the leaf-nogood entitlement (Reason.lean's

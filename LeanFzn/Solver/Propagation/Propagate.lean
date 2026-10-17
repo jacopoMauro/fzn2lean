@@ -233,12 +233,96 @@ def domNeGate (x : Value) (c : Int) (d : List Value) : Bool :=
     | some p => if p = c then Value.eqB v x else true
     | none => true
 
+/-- The explained conflict clause of a raw `x ≠ y` whose two sides are both
+    pinned to the same value `x`: the integer shape reports `[x ≠ c, y ≠ c]`,
+    the Boolean shape `[x = ¬b, y = ¬b]` (both literals are in normal form and
+    both are falsified by the pins). Any other shape reports no clause. -/
+def neConflictClause (i j : Nat) (x : Value) : Clause :=
+  match x with
+  | .int c => [posNe i c, posNe j c]
+  | .bool b => [posBool i (!b), posBool j (!b)]
+  | _ => []
+
+/-- Two values of the same sort (both integer or both Boolean): on such a
+    pair the integer view is injective, so view equality is raw equality. -/
+def SortAgree (x y : Value) : Prop :=
+  ((∃ k : Int, x = .int k) ∧ (∃ k : Int, y = .int k)) ∨
+  ((∃ b : Bool, x = .bool b) ∧ (∃ b : Bool, y = .bool b))
+
+/-- The assignment `a` is FAITHFUL to the domain list `doms`: at every slot of
+    `doms` it reads a value that has an integer view and that agrees in sort
+    with every value of the slot's domain. This is the shape premise under
+    which the explained `propNe`/`propAllDiffLCG` conflict clauses are
+    entailed (a mixed-sort raw/view collision is the only way a raw
+    disequality can hold while both view-literals of the clause are false). -/
+def FrameFaithful (doms : List Domain) (a : Assignment) : Prop :=
+  ∀ i, i < doms.length → ∃ y, a[i]? = some y ∧ y.intView ≠ none ∧
+    ∀ x ∈ doms.getD i [], SortAgree x y
+
+/-- Pointwise sub-domains: same slot count, every value of a slot of `d'` is a
+value of the same slot of `d`. -/
+def DomSub (d' d : List (List Value)) : Prop :=
+  d'.length = d.length ∧ ∀ i v, v ∈ d'.getD i [] → v ∈ d.getD i []
+
+theorem DomSub.trans {d₁ d₂ d₃ : List (List Value)}
+    (h12 : DomSub d₁ d₂) (h23 : DomSub d₂ d₃) : DomSub d₁ d₃ :=
+  ⟨h12.1.trans h23.1, fun i v hv => h23.2 i v (h12.2 i v hv)⟩
+
+theorem DomSub.refl (d : List (List Value)) : DomSub d d := ⟨rfl, fun _ _ h => h⟩
+
+/-- Every domain of the box is int-shaped or bool-shaped throughout. -/
+def DomsShapeTyped (pd : List (List Value)) : Prop :=
+  ∀ d ∈ pd, (∀ v ∈ d, ∃ k : Int, v = .int k) ∨ (∀ v ∈ d, ∃ b : Bool, v = .bool b)
+
+theorem getD_mem_of_lt {l : List (List Value)} {i : Nat} (h : i < l.length) :
+    l.getD i [] ∈ l := by
+  rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem h]
+  exact List.getElem_mem h
+
+/-- **Faithfulness from the problem's shape**: a solution of an int-viewed,
+shape-typed box is faithful to every pointwise sub-domain list. -/
+theorem frameFaithful_of_domSub {pd doms : List (List Value)} {a : Assignment}
+    (hview : ∀ d ∈ pd, ∀ v ∈ d, Value.intView v ≠ none)
+    (hshape : DomsShapeTyped pd) (hfit : a.Fits pd) (hsub : DomSub doms pd) :
+    FrameFaithful doms a := by
+  intro i hi
+  have hipd : i < pd.length := by rw [← hsub.1]; exact hi
+  have hia : i < a.length := by rw [hfit.1]; exact hipd
+  have hread : a[i]? = some a[i] := List.getElem?_eq_getElem hia
+  have hymem : a[i] ∈ pd.getD i [] := hfit.2 i _ hread
+  refine ⟨a[i], hread, hview _ (getD_mem_of_lt hipd) _ hymem, ?_⟩
+  intro x hx
+  have hxpd := hsub.2 i x hx
+  rcases hshape _ (getD_mem_of_lt hipd) with hint | hbool
+  · obtain ⟨k1, hk1⟩ := hint x hxpd
+    obtain ⟨k2, hk2⟩ := hint _ hymem
+    exact Or.inl ⟨⟨k1, hk1⟩, ⟨k2, hk2⟩⟩
+  · obtain ⟨k1, hk1⟩ := hbool x hxpd
+    obtain ⟨k2, hk2⟩ := hbool _ hymem
+    exact Or.inr ⟨⟨k1, hk1⟩, ⟨k2, hk2⟩⟩
+
+/-- The Boolean-pin disjunct of a `propNe` reason on slot `s` for the integer
+    `c`: `s = B` when a Boolean `B` views to `c` (`c ∈ {0,1}`), else a harmless
+    duplicate of the pivot slot `p`'s bound cause `p > c` (no Boolean views to `c`). -/
+def neBoolLit (p s : Nat) (c : Int) : Literal :=
+  if c = 0 ∨ c = 1 then posBool s (decide (c = 1)) else negLe p c
+
+/-- Integer-shaped raw values. The value-removal arm of `propNe` fires only on
+    an integer pin: a Boolean pin `x = B` would put the frame-TRUE literal
+    `x = B` into the reason clause, so Boolean pins propagate only through
+    the (frame-false) conflict clause once both sides are pinned. -/
+def isIntValue : Value → Bool
+  | .int _ => true
+  | _ => false
+
 /-- `int_ne`-style: `x ≠ y` over slots `i j` (the RAW disequality).
     Sound behaviours:
 
     * when BOTH sides are singletons, a direct conflict is reported
       if the values are raw-equal (the constraint is violated), else
-      nothing to do;
+      nothing to do; the reported clause is the EXPLAINED
+      `neConflictClause` (`[x ≠ c, y ≠ c]`, Boolean shape
+      `[x = ¬b, y = ¬b]`);
     * when exactly one side is a singleton `x` with integer view
       `c` and the other side's domain still CONTAINS `x` (multi-value)
       while every value of it that views to `c` IS `x` raw (the
@@ -260,25 +344,23 @@ def domNeGate (x : Value) (c : Int) (d : List Value) : Bool :=
     it never fires across a raw/view shape mismatch. -/
 def propNe (st : State) (i j : Nat) : PropagationResult :=
   match st.domains.getD i [], st.domains.getD j [] with
-  | [x], [y] => if x.eqB y then .conflict [] else .stable
+  | [x], [y] => if x.eqB y then .conflict (neConflictClause i j x) else .stable
   | [x], dy =>
       match domSingletonI [x] with
       | some c =>
-          if valueMemB x dy && domNeGate x c dy then
+          if valueMemB x dy && domNeGate x c dy && isIntValue x then
             .implied (posNe j c) { clause :=
               [posNe j c, posLe i (c - 1), negLe i c,
-                posBool i (decide (c = 1)),
-                posBool j (decide (c = 1))] }
+                neBoolLit i i c, neBoolLit i j c] }
           else .stable
       | none => .stable
   | dx, [y] =>
       match domSingletonI [y] with
       | some c =>
-          if valueMemB y dx && domNeGate y c dx then
+          if valueMemB y dx && domNeGate y c dx && isIntValue y then
             .implied (posNe i c) { clause :=
               [posNe i c, posLe j (c - 1), negLe j c,
-                posBool j (decide (c = 1)),
-                posBool i (decide (c = 1))] }
+                neBoolLit j j c, neBoolLit j i c] }
           else .stable
       | none => .stable
   | _, _ => .stable

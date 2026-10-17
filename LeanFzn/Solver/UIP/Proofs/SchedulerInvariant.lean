@@ -113,8 +113,9 @@ def RootInvariant (leaf : Assignment → Bool) (orig : List Domain)
 frontier `[(orig, [])]` covers every original leaf solution. Discharged
 here, not in the C2 group: it is the non-vacuity obligation of the root
 invariant. -/
-theorem covers_root_init (leaf : Assignment → Bool) (orig : List Domain) :
-    CoversRemainingLeaves leaf orig [(orig, [])] [] := by
+theorem covers_root_init (leaf : Assignment → Bool) (orig : List Domain)
+    (db : List Clause := []) :
+    CoversRemainingLeaves leaf orig [(orig, [])] db := by
   intro a ⟨_, hfits⟩
   left
   obtain ⟨hlen, hmem⟩ := hfits
@@ -127,11 +128,12 @@ not a `Prop` field, and every field is inhabited at the root — in
 particular the frontier is the real `[(orig, [])]` and the learned database
 is the empty `BranchState.init` database. -/
 theorem schedulerInvariant_init (leaf : Assignment → Bool)
-    (orig : List Domain) (original : List Clause) (props : List Propagator) :
+    (orig : List Domain) (original : List Clause) (props : List Propagator)
+    (hent : LearnedEntailed leaf original) :
     RootInvariant leaf orig original props := by
   have hparts := SchedulerConfig.init_wellFormed_parts leaf orig original props
-  have hreach := reachable_init leaf orig
-  refine ⟨hreach, hparts.1, ?_, ?_, hparts.2, covers_root_init leaf orig, ?_⟩
+  have hreach := reachable_seed leaf orig original hent
+  refine ⟨hreach, hparts.1, ?_, ?_, hparts.2, covers_root_init leaf orig original, ?_⟩
   · -- no pending alternatives at the root
     intro f hf
     simp only [SchedulerConfig.init, List.not_mem_nil] at hf
@@ -139,9 +141,11 @@ theorem schedulerInvariant_init (leaf : Assignment → Bool)
     intro i v hv
     exact hreach.full_fits i v (by simpa only [SchedulerConfig.init,
       BranchState.init, fullDomains] using hv)
-  · -- the root learned database is empty
-    intro c hc
-    simp only [SchedulerConfig.init, BranchState.init, List.not_mem_nil] at hc
+  · -- the root learned database is the (entailed) original clauses
+    intro c hc c' hc' a ha
+    rw [List.mem_singleton] at hc'
+    rw [hc']
+    exact hent c hc a ha
 
 /-- The `unsat` arm's coverage instance (INTERFACES §9.1/§9.3): with no
 pending alternatives left and the current branch dead (the evidence C2d

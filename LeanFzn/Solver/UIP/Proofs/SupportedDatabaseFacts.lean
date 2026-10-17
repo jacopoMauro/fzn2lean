@@ -47,25 +47,28 @@ theorem normFalsified_learned_poolAligned {orig : List Domain}
   have h2 := litPool_negate_norm_mem (l := q.negate) h1
   rwa [Literal.negate_negate] at h2
 
-/-- **THE TERMINAL-CONFLICT EVENT BRIDGE**: a terminal `.conflict` result
-exposes the raw pruning event, so the scan-stability lemmas apply at
-recorded sites. -/
+/-- **THE TERMINAL-CONFLICT EVENT BRIDGE** (restated by R1c): a terminal
+`.conflict` result exposes the raw pruning event in one of three shapes —
+the scan's own `.conflict cs`, a filter-rejected `.implied` event reported on
+its reason clause, or a stable event at a wiped-out frame. (Before conflict
+routing only the first shape existed and the bridge concluded
+`nextPruningEvent … = .conflict cs` outright.) -/
 theorem nextPruningEvent_eq_of_terminalResult_conflict {leaf : Assignment → Bool}
-    {original : List Clause} {props : List Propagator} {bs : BranchState leaf}
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    {bs : BranchState leaf}
     {s : BranchState leaf} {cs learned : List Clause}
-    (h : terminalResult original props bs = .conflict s cs learned) :
-    nextPruningEvent original props bs.frame bs.learned = .conflict cs := by
-  rw [terminalResult] at h
-  split at h
-  · cases h
-  · rename_i cs' hprune
-    cases h
-    exact hprune
-  · -- the implied case classifies through the inner filterFrame match:
-    -- neither branch is a conflict
-    split at h
-    · cases h
-    · cases h
+    (h : terminalResult orig original props bs = .conflict s cs learned) :
+    nextPruningEvent original props bs.frame bs.learned = .conflict cs ∨
+      (∃ (l : Literal) (c : Clause) (lr fl : Bool),
+        nextPruningEvent original props bs.frame bs.learned = .implied l c lr fl ∧
+          cs = [c]) ∨
+      (nextPruningEvent original props bs.frame bs.learned = .stable ∧
+        ∃ w : Clause, cs = [w]) := by
+  obtain ⟨-, hcase⟩ := terminalResult_conflict_cases h
+  rcases hcase with ⟨hev, -⟩ | ⟨l, c, lr, fl, hev, -, hcs, -⟩ | ⟨w, hev, -, hcs, -⟩
+  · exact Or.inl hev
+  · exact Or.inr (Or.inl ⟨l, c, lr, fl, hev, hcs⟩)
+  · exact Or.inr (Or.inr ⟨hev, w, hcs⟩)
 
 /-- **THE C1 ANALYSIS-CLAUSE ALIGNMENT**: at a recorded-evidence site of a
 reachable run whose branch carries the trail vocabulary, the analysis's
@@ -274,8 +277,11 @@ theorem databaseAligned_conflict_learned {leaf : Assignment → Bool}
     (hev : nextPruningEvent original props bs.frame bs.learned = .conflict cs) :
     DatabaseAligned orig (cs.filter fun c => !(bs.learned.contains c)) := by
   rcases nextPruningEvent_conflict_cases hev with hsrc | ⟨-, -, hprop⟩
-  · obtain ⟨-, -, -, hcs⟩ := scanDatabase_conflict_facts hsrc
-    rw [hcs, List.filter_nil]
+  · obtain ⟨c, hmem, -, hcs⟩ := scanDatabase_conflict_facts hsrc
+    -- the reported stored clause is already in the database: nothing fresh
+    have hfilt : [c].filter (fun c => !(bs.learned.contains c)) = [] := by
+      simp [List.elem_eq_mem, hmem]
+    rw [hcs, hfilt]
     exact databaseAligned_nil orig
   · obtain ⟨p, hpm, c, hrun, hcs⟩ := scanPropagators_conflict_facts hprop
     rw [hcs]
@@ -298,59 +304,41 @@ theorem databaseAligned_conflict_learned {leaf : Assignment → Bool}
 /-- The terminal-conflict payload of `terminalResult` is aligned (the
 recorded-evidence `learned` field at the recording arm). -/
 theorem databaseAligned_terminalResult_conflict {leaf : Assignment → Bool}
-    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    {orig orig' : List Domain} {original : List Clause} {props : List Propagator}
     {bs bs' : BranchState leaf} {cs learned : List Clause}
     (hvocab : UnitEmissionVocabulary orig props)
-    (ht : terminalResult original props bs = .conflict bs' cs learned) :
+    (ht : terminalResult orig' original props bs = .conflict bs' cs learned) :
     DatabaseAligned orig learned := by
-  rw [terminalResult] at ht
-  split at ht
-  · cases ht
-  · rename_i cs' hev
-    cases ht
+  obtain ⟨-, hcase⟩ := terminalResult_conflict_cases ht
+  rcases hcase with ⟨hev, hlearned⟩ | ⟨l, c, lr, fl, hev, -, -, hlearned⟩ |
+      ⟨w, -, -, -, hlearned⟩
+  · rw [hlearned]
     exact databaseAligned_conflict_learned hvocab hev
-  · split at ht <;> cases ht
-
-/-- The terminal `localExcluded` payload (the failed-filter arm's learned
-list) is aligned: it is the freshness-filtered unit reason of the implied
-event that the failing `filterFrame` classified. -/
-theorem databaseAligned_terminalResult_localExcluded {leaf : Assignment → Bool}
-    {orig : List Domain} {original : List Clause} {props : List Propagator}
-    {bs bs' : BranchState leaf} {lit : Option Literal} {reason : Option Clause}
-    {learned : List Clause}
-    (hvocab : UnitEmissionVocabulary orig props)
-    (ht : terminalResult original props bs =
-      .localExcluded bs' lit reason learned) :
-    DatabaseAligned orig learned := by
-  rw [terminalResult] at ht
-  split at ht
-  · cases ht
-  · cases ht
-  · rename_i l c lr fl hev
-    split at ht
-    · cases ht
-      rcases nextPruningEvent_implied_cases hev with hsrc | ⟨-, -, hprop⟩
-      · obtain ⟨-, hlr, -⟩ := scanDatabase_implied_facts hsrc
-        rw [hlr]
-        rw [if_neg (by simp)]
-        exact databaseAligned_nil orig
-      · obtain ⟨p, hpm, r, hrun, hcl, -, -⟩ := scanPropagators_implied_facts hprop
-        obtain ⟨q, hq, -, -, hqpool⟩ := hvocab.1 p hpm (frameState bs.frame) l r hrun
-        exact databaseAligned_if_singleton ⟨q, by rw [hcl, hq], hqpool⟩
-    · cases ht
+  · rw [hlearned]
+    rcases nextPruningEvent_implied_cases hev with hsrc | ⟨-, -, hprop⟩
+    · obtain ⟨-, hlr, -⟩ := scanDatabase_implied_facts hsrc
+      rw [hlr]
+      rw [if_neg (by simp)]
+      exact databaseAligned_nil orig
+    · obtain ⟨p, hpm, r, hrun, hcl, -, -⟩ := scanPropagators_implied_facts hprop
+      obtain ⟨q, hq, -, -, hqpool⟩ := hvocab.1 p hpm (frameState bs.frame) l r hrun
+      exact databaseAligned_if_singleton ⟨q, by rw [hcl, hq], hqpool⟩
+  · rw [hlearned]
+    exact databaseAligned_nil orig
 
 /-- **CLOSURE MAINTENANCE**: the explained closure keeps the database
 aligned (the same `Frame.mass` fuel induction as
 `unitLearned_explainedClosure`); the closure learns only selected
 deductions' payloads, never on a conflict. -/
 theorem databaseAligned_explainedClosure {leaf : Assignment → Bool}
-    (original : List Clause) (props : List Propagator) (bs : BranchState leaf)
+    (dom : List Domain) (original : List Clause) (props : List Propagator)
+    (bs : BranchState leaf)
     {orig : List Domain} (hvocab : UnitEmissionVocabulary orig props)
     (h : DatabaseAligned orig bs.learned) :
-    DatabaseAligned orig (explainedClosure original props bs).learned := by
+    DatabaseAligned orig (explainedClosure dom original props bs).learned := by
   suffices hmain : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel → DatabaseAligned orig bs.learned →
-      DatabaseAligned orig (explainedClosure original props bs).learned from
+      DatabaseAligned orig (explainedClosure dom original props bs).learned from
     hmain (Frame.mass bs.frame) bs (Nat.le_refl _) h
   intro fuel
   induction fuel with
@@ -370,13 +358,12 @@ theorem databaseAligned_explainedClosure {leaf : Assignment → Bool}
       · exact h
       · rename_i d hd
         have hpay := databaseAligned_deduction_learned hvocab hd
-        have hnew : DatabaseAligned orig
-            (narrowState bs d.frame d.literal d.reason d.learned).learned := by
-          show DatabaseAligned orig (d.learned ++ bs.learned)
+        have hnew : DatabaseAligned orig (stepNarrowSync dom bs d).learned := by
+          rw [stepNarrowSync_learned]
           exact databaseAligned_append hpay h
-        refine ih (narrowState bs d.frame d.literal d.reason d.learned) ?_ hnew
+        refine ih (stepNarrowSync dom bs d) ?_ hnew
         have hdec := d.decreases
-        simp only [narrowState] at hdec ⊢
+        simp only [stepNarrowSync_frame]
         omega
 
 /-- **JUMP RESTORED-DATABASE PRODUCER**: the `perform` result's database is
@@ -384,12 +371,13 @@ aligned from the pre-jump alignment, the plan clause's alignment
 (`recordedAnalysis_learned_poolAligned` at the site) and the emission
 vocabulary (the closure's own learning during restoration). -/
 theorem databaseAligned_perform {leaf : Assignment → Bool}
-    {orig : List Domain} {original : List Clause} {props : List Propagator}
+    {orig : List Domain} {dom : List Domain} {original : List Clause}
+    {props : List Propagator}
     {p : BackjumpPlan leaf} {bs restored : BranchState leaf}
     (hvocab : UnitEmissionVocabulary orig props)
     (hdb : DatabaseAligned orig bs.learned)
     (hplan : DatabaseAligned orig [p.learned])
-    (hperf : p.perform bs original props = some restored) :
+    (hperf : p.perform bs dom original props = some restored) :
     DatabaseAligned orig restored.learned := by
   unfold BackjumpPlan.perform at hperf
   cases hr : p.restoreNarrow bs with
@@ -399,7 +387,8 @@ theorem databaseAligned_perform {leaf : Assignment → Bool}
   | some s =>
       simp only [hr, Option.map_some, Option.some.injEq] at hperf
       rw [← hperf]
-      refine databaseAligned_explainedClosure original props s hvocab ?_
+      refine databaseAligned_explainedClosure dom original props _ hvocab ?_
+      rw [syncAll_learned]
       unfold BackjumpPlan.restoreNarrow at hr
       split at hr
       · cases hr
@@ -465,7 +454,7 @@ theorem databaseAlignedStep {leaf : Assignment → Bool}
               fun h => by rw [stepChronologicalFallback_conflict] at h; cases h⟩
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 rw [C2d.schedulerNext_eq_backjump_perform_none hc ha hcp hp] at hsucc
                 rw [successor_localExclude] at hsucc
@@ -563,12 +552,7 @@ theorem databaseAlignedStep {leaf : Assignment → Bool}
                     (learned := learned) h
                 rw [hlearned]
                 exact databaseAligned_terminalResult_conflict hvocab ht⟩
-    · rw [hsj] at hsucc
-      rw [successor_localExclude] at hsucc
-      cases hsucc
-      exact ⟨stepLocalExclude_halignDB learned (branchRegion cfg) hdb
-          (databaseAligned_terminalResult_localExcluded hvocab ht),
-        fun h => by rw [stepLocalExclude_conflict] at h; cases h⟩
+    · exact absurd ht terminalResult_ne_localExcluded
 
 /-- **SUPPORTED-RUN JOINT INDUCTION** (self-indexed, the C2/P5 chain):
 along exact `SupportedReach` execution, the branch database and every
@@ -577,6 +561,7 @@ the two per-state site inputs. -/
 theorem databaseAlignedAndEvidence_of_supportedRun {orig : List Domain}
     {original : List Clause} {props : List Propagator} {leaf : Assignment → Bool}
     (hvocab : UnitEmissionVocabulary orig props)
+    (horig : DatabaseAligned orig original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (htrail : ∀ {cfg : SchedulerConfig leaf},
@@ -589,8 +574,8 @@ theorem databaseAlignedAndEvidence_of_supportedRun {orig : List Domain}
           DatabaseAligned orig ev.learned) := by
   intro cfg hreach
   induction hreach with
-  | init =>
-      refine ⟨databaseAligned_nil orig, ?_⟩
+  | init _ =>
+      refine ⟨horig, ?_⟩
       intro ev h
       simp [SchedulerConfig.init] at h
   | step hpre hsucc ih =>
@@ -603,6 +588,7 @@ theorem databaseAlignedAndEvidence_of_supportedRun {orig : List Domain}
 theorem halignDB_of_supportedRun {orig : List Domain} {original : List Clause}
     {props : List Propagator} {leaf : Assignment → Bool}
     (hvocab : UnitEmissionVocabulary orig props)
+    (horig : DatabaseAligned orig original)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (htrail : ∀ {cfg : SchedulerConfig leaf},
@@ -612,7 +598,7 @@ theorem halignDB_of_supportedRun {orig : List Domain} {original : List Clause}
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPool orig :=
   fun hreach =>
-    (databaseAlignedAndEvidence_of_supportedRun hvocab hbr htrail hreach).1
+    (databaseAlignedAndEvidence_of_supportedRun hvocab horig hbr htrail hreach).1
 
 /-- **RAW-REACHABILITY JOINT INDUCTION** (self-`orig`, the D1/F1
 `CompiledPhasePremises` shape): same invariant along arbitrary reachable
@@ -620,6 +606,8 @@ execution, with the pool read at each configuration's own box. -/
 theorem databaseAlignedAndEvidence_of_reachable {leaf : Assignment → Bool}
     (hvocab : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       UnitEmissionVocabulary cfg.orig cfg.props)
+    (horig : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
+      DatabaseAligned cfg.orig cfg.original)
     (hbr : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       ReachableState leaf cfg.orig cfg.branch)
     (htrail : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
@@ -631,10 +619,10 @@ theorem databaseAlignedAndEvidence_of_reachable {leaf : Assignment → Bool}
           DatabaseAligned cfg.orig ev.learned) := by
   intro cfg hreach
   induction hreach with
-  | init orig original props =>
+  | init orig original props hent =>
       refine ⟨?_, ?_⟩
-      · show DatabaseAligned orig []
-        exact databaseAligned_nil orig
+      · show DatabaseAligned orig original
+        exact horig (SchedulerReachable.init orig original props hent)
       · intro ev h
         simp [SchedulerConfig.init] at h
   | step hnext hsucc hpre ih =>
@@ -646,6 +634,8 @@ theorem databaseAlignedAndEvidence_of_reachable {leaf : Assignment → Bool}
 theorem halignDB_of_reachable {leaf : Assignment → Bool}
     (hvocab : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       UnitEmissionVocabulary cfg.orig cfg.props)
+    (horig : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
+      DatabaseAligned cfg.orig cfg.original)
     (hbr : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       ReachableState leaf cfg.orig cfg.branch)
     (htrail : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
@@ -654,7 +644,7 @@ theorem halignDB_of_reachable {leaf : Assignment → Bool}
     ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPool cfg.orig :=
   fun hreach =>
-    (databaseAlignedAndEvidence_of_reachable hvocab hbr htrail hreach).1
+    (databaseAlignedAndEvidence_of_reachable hvocab horig hbr htrail hreach).1
 
 /-! ## §7 The C2 input ledger (exact residual producers)
 
@@ -736,6 +726,41 @@ def EmissionVocabularyAt (pool : List Literal) (props : List Propagator) : Prop 
     ∃ q : Literal, r.clause = [q] ∧ l = q ∧ q = q.norm ∧ q.norm ∈ pool) ∧
   (∀ p ∈ props, ∀ st c, p.run st = .conflict c →
     c = [] ∨ ∃ q : Literal, c = [q] ∧ q = q.norm ∧ q.norm ∈ pool)
+
+/-- **U1e: the pool-only emission vocabulary** (no unit-shape): every literal a
+propagator emits (implied pivot, every literal of the reason, every literal of a
+conflict clause) is `pool`-pooled after normalization. This is all the
+database/trail alignment producers consume; `EmissionVocabularyAt` (unit
+shapes) implies it, and the clamped LCG kit (`clampProps`) satisfies it
+(`Proofs/ClampPool.lean`). -/
+def EmissionPoolAt (pool : List Literal) (props : List Propagator) : Prop :=
+  (∀ p ∈ props, ∀ st l r, p.run st = .implied l r →
+    l.norm ∈ pool ∧ ∀ q ∈ r.clause, q.norm ∈ pool) ∧
+  (∀ p ∈ props, ∀ st c, p.run st = .conflict c → ∀ q ∈ c, q.norm ∈ pool)
+
+/-- The unit-shaped vocabulary forgets to the pool-only one. -/
+theorem EmissionVocabularyAt.toPool {pool : List Literal} {props : List Propagator}
+    (h : EmissionVocabularyAt pool props) : EmissionPoolAt pool props := by
+  constructor
+  · intro p hp st l r hr
+    obtain ⟨q, hq, hl, -, hqpool⟩ := h.1 p hp st l r hr
+    refine ⟨by rw [hl]; exact hqpool, fun q' hq' => ?_⟩
+    rw [hq] at hq'
+    have : q' = q := List.mem_singleton.mp hq'
+    rw [this]; exact hqpool
+  · intro p hp st c hc q' hq'
+    rcases h.2 p hp st c hc with hnil | ⟨q, hcq, -, hqpool⟩
+    · rw [hnil] at hq'; cases hq'
+    · rw [hcq] at hq'
+      have : q' = q := List.mem_singleton.mp hq'
+      rw [this]; exact hqpool
+
+theorem emissionPoolAt_mono {pool pool' : List Literal} {props : List Propagator}
+    (hsub : ∀ l ∈ pool, l ∈ pool') (h : EmissionPoolAt pool props) :
+    EmissionPoolAt pool' props :=
+  ⟨fun p hp st l r hr =>
+      ⟨hsub _ (h.1 p hp st l r hr).1, fun q hq => hsub _ ((h.1 p hp st l r hr).2 q hq)⟩,
+   fun p hp st c hc q hq => hsub _ (h.2 p hp st c hc q hq)⟩
 
 /-- The bridge: the landed `UnitEmissionVocabulary` is exactly the
 pool-parametric form at the box's own `litPool`. -/

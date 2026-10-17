@@ -378,6 +378,26 @@ theorem unitEmissionVocabulary_proved_of_thresholds {orig : List Domain}
     | boolNotSlot i j => simp [unitFamilyB] at hs
     | boolAndSlot i j k => simp [unitFamilyB] at hs
     | boolOrSlot i j k => simp [unitFamilyB] at hs
+    | linNe coeffs is b => simp [unitFamilyB] at hs
+    | boolClauseSlot ps ns => simp [unitFamilyB] at hs
+    | arrayBoolAndSlot is k => simp [unitFamilyB] at hs
+    | bool2intSlot i k => simp [unitFamilyB] at hs
+    | boolEqSlot i j => simp [unitFamilyB] at hs
+    | arrayIntElementSlot xs i k => simp [unitFamilyB] at hs
+    | arrayVarIntElementSlot is i k => simp [unitFamilyB] at hs
+    | arrayVarBoolElementSlot is i k => simp [unitFamilyB] at hs
+    | eqReifSlot i j r => simp [unitFamilyB] at hs
+    | leReifSlot i j r => simp [unitFamilyB] at hs
+    | neReifSlot i j r => simp [unitFamilyB] at hs
+    | linEqReif coeffs is b r => simp [unitFamilyB] at hs
+    | linLeReif coeffs is b r => simp [unitFamilyB] at hs
+    | linNeReif coeffs is b r => simp [unitFamilyB] at hs
+    | minPair o₀ o₁ r => simp [unitFamilyB] at hs
+    | maxPair o₀ o₁ r => simp [unitFamilyB] at hs
+    | divGen o₁ o₂ r => simp [unitFamilyB] at hs
+    | modGen o₁ o₂ r => simp [unitFamilyB] at hs
+    | maxGen os r => simp [unitFamilyB] at hs
+    | minGen os r => simp [unitFamilyB] at hs
   · intro p hpm st c' hrun
     obtain ⟨dc, hdc, hprop⟩ := propagatorsOfProved_mem hpm
     have hrows := hthr dc hdc
@@ -436,6 +456,26 @@ theorem unitEmissionVocabulary_proved_of_thresholds {orig : List Domain}
     | boolNotSlot i j => simp [unitFamilyB] at hs
     | boolAndSlot i j k => simp [unitFamilyB] at hs
     | boolOrSlot i j k => simp [unitFamilyB] at hs
+    | linNe coeffs is b => simp [unitFamilyB] at hs
+    | boolClauseSlot ps ns => simp [unitFamilyB] at hs
+    | arrayBoolAndSlot is k => simp [unitFamilyB] at hs
+    | bool2intSlot i k => simp [unitFamilyB] at hs
+    | boolEqSlot i j => simp [unitFamilyB] at hs
+    | arrayIntElementSlot xs i k => simp [unitFamilyB] at hs
+    | arrayVarIntElementSlot is i k => simp [unitFamilyB] at hs
+    | arrayVarBoolElementSlot is i k => simp [unitFamilyB] at hs
+    | eqReifSlot i j r => simp [unitFamilyB] at hs
+    | leReifSlot i j r => simp [unitFamilyB] at hs
+    | neReifSlot i j r => simp [unitFamilyB] at hs
+    | linEqReif coeffs is b r => simp [unitFamilyB] at hs
+    | linLeReif coeffs is b r => simp [unitFamilyB] at hs
+    | linNeReif coeffs is b r => simp [unitFamilyB] at hs
+    | minPair o₀ o₁ r => simp [unitFamilyB] at hs
+    | maxPair o₀ o₁ r => simp [unitFamilyB] at hs
+    | divGen o₁ o₂ r => simp [unitFamilyB] at hs
+    | modGen o₁ o₂ r => simp [unitFamilyB] at hs
+    | maxGen os r => simp [unitFamilyB] at hs
+    | minGen os r => simp [unitFamilyB] at hs
 
 /-! ## §4 The residual is real (kernel witness)
 
@@ -680,7 +720,26 @@ theorem emissionLits_mem_litPoolExt {orig : List Domain}
   | boolNotSlot i j => simp [emissionLits] at hl
   | boolAndSlot i j k => simp [emissionLits] at hl
   | boolOrSlot i j k => simp [emissionLits] at hl
-
+  | linNe coeffs is b => simp [emissionLits] at hl
+  | boolClauseSlot ps ns => simp [emissionLits] at hl
+    | arrayBoolAndSlot is k => simp [emissionLits] at hl
+    | bool2intSlot i k => simp [emissionLits] at hl
+    | boolEqSlot i j => simp [emissionLits] at hl
+    | arrayIntElementSlot xs i k => simp [emissionLits] at hl
+    | arrayVarIntElementSlot is i k => simp [emissionLits] at hl
+    | arrayVarBoolElementSlot is i k => simp [emissionLits] at hl
+    | eqReifSlot i j r => simp [emissionLits] at hl
+    | leReifSlot i j r => simp [emissionLits] at hl
+    | neReifSlot i j r => simp [emissionLits] at hl
+    | linEqReif coeffs is b r => simp [emissionLits] at hl
+    | linLeReif coeffs is b r => simp [emissionLits] at hl
+    | linNeReif coeffs is b r => simp [emissionLits] at hl
+    | minPair o₀ o₁ r => simp [emissionLits] at hl
+    | maxPair o₀ o₁ r => simp [emissionLits] at hl
+    | divGen o₁ o₂ r => simp [emissionLits] at hl
+    | modGen o₁ o₂ r => simp [emissionLits] at hl
+    | maxGen os r => simp [emissionLits] at hl
+    | minGen os r => simp [emissionLits] at hl
 /-! ## §6 The pool-parametric per-family producers
 
 The §3 family lemmas with the pool membership taken DIRECTLY (instead of
@@ -927,6 +986,26 @@ theorem emissionVocabularyAt_of_rows {pool : List Literal}
     | boolNotSlot i j => simp [unitFamilyB] at hs
     | boolAndSlot i j k => simp [unitFamilyB] at hs
     | boolOrSlot i j k => simp [unitFamilyB] at hs
+    | linNe coeffs is b => simp [unitFamilyB] at hs
+    | boolClauseSlot ps ns => simp [unitFamilyB] at hs
+    | arrayBoolAndSlot is k => simp [unitFamilyB] at hs
+    | bool2intSlot i k => simp [unitFamilyB] at hs
+    | boolEqSlot i j => simp [unitFamilyB] at hs
+    | arrayIntElementSlot xs i k => simp [unitFamilyB] at hs
+    | arrayVarIntElementSlot is i k => simp [unitFamilyB] at hs
+    | arrayVarBoolElementSlot is i k => simp [unitFamilyB] at hs
+    | eqReifSlot i j r => simp [unitFamilyB] at hs
+    | leReifSlot i j r => simp [unitFamilyB] at hs
+    | neReifSlot i j r => simp [unitFamilyB] at hs
+    | linEqReif coeffs is b r => simp [unitFamilyB] at hs
+    | linLeReif coeffs is b r => simp [unitFamilyB] at hs
+    | linNeReif coeffs is b r => simp [unitFamilyB] at hs
+    | minPair o₀ o₁ r => simp [unitFamilyB] at hs
+    | maxPair o₀ o₁ r => simp [unitFamilyB] at hs
+    | divGen o₁ o₂ r => simp [unitFamilyB] at hs
+    | modGen o₁ o₂ r => simp [unitFamilyB] at hs
+    | maxGen os r => simp [unitFamilyB] at hs
+    | minGen os r => simp [unitFamilyB] at hs
   · intro p hpm st c' hrun
     obtain ⟨dc, hdc, hprop⟩ := propagatorsOfProved_mem hpm
     have hrow := hrows dc hdc
@@ -992,6 +1071,26 @@ theorem emissionVocabularyAt_of_rows {pool : List Literal}
     | boolNotSlot i j => simp [unitFamilyB] at hs
     | boolAndSlot i j k => simp [unitFamilyB] at hs
     | boolOrSlot i j k => simp [unitFamilyB] at hs
+    | linNe coeffs is b => simp [unitFamilyB] at hs
+    | boolClauseSlot ps ns => simp [unitFamilyB] at hs
+    | arrayBoolAndSlot is k => simp [unitFamilyB] at hs
+    | bool2intSlot i k => simp [unitFamilyB] at hs
+    | boolEqSlot i j => simp [unitFamilyB] at hs
+    | arrayIntElementSlot xs i k => simp [unitFamilyB] at hs
+    | arrayVarIntElementSlot is i k => simp [unitFamilyB] at hs
+    | arrayVarBoolElementSlot is i k => simp [unitFamilyB] at hs
+    | eqReifSlot i j r => simp [unitFamilyB] at hs
+    | leReifSlot i j r => simp [unitFamilyB] at hs
+    | neReifSlot i j r => simp [unitFamilyB] at hs
+    | linEqReif coeffs is b r => simp [unitFamilyB] at hs
+    | linLeReif coeffs is b r => simp [unitFamilyB] at hs
+    | linNeReif coeffs is b r => simp [unitFamilyB] at hs
+    | minPair o₀ o₁ r => simp [unitFamilyB] at hs
+    | maxPair o₀ o₁ r => simp [unitFamilyB] at hs
+    | divGen o₁ o₂ r => simp [unitFamilyB] at hs
+    | modGen o₁ o₂ r => simp [unitFamilyB] at hs
+    | maxGen os r => simp [unitFamilyB] at hs
+    | minGen os r => simp [unitFamilyB] at hs
 
 /-- **THE C1 EXTENDED-POOL EMISSION PRODUCER (route (b))**: the registered
 kit over a `unitFamilyB`-supported base has the pooled emission vocabulary

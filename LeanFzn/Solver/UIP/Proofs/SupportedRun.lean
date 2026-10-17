@@ -76,7 +76,7 @@ inductive SupportedReach {leaf : Assignment → Bool} (orig : List Domain)
     (original : List Clause) (props : List Propagator) :
     SchedulerConfig leaf → Prop where
   /-- the actual initializer of the supported triple -/
-  | init : SupportedReach orig original props
+  | init (hent : LearnedEntailed leaf original) : SupportedReach orig original props
       (SchedulerConfig.init (leaf := leaf) orig original props)
   /-- one real dispatcher successor -/
   | step {cfg cfg' : SchedulerConfig leaf} :
@@ -94,13 +94,13 @@ structural lemma stated over `SchedulerReachable` remains reusable (with
 the root triple carried explicitly by the S1 consumers). -/
 theorem reachable : ∀ {cfg : SchedulerConfig leaf},
     SupportedReach orig original props cfg → SchedulerReachable cfg
-  | _, .init => SchedulerReachable.init orig original props
+  | _, .init hent => SchedulerReachable.init orig original props hent
   | _, .step h hs => SchedulerReachable.step rfl hs (reachable h)
 
 /-- Every supported configuration carries the initializer's own box. -/
 theorem orig_eq : ∀ {cfg : SchedulerConfig leaf},
     SupportedReach orig original props cfg → cfg.orig = orig
-  | _, .init => rfl
+  | _, .init _ => rfl
   | _, .step h hs => (W1.schedulerNext_succ_orig hs).trans (orig_eq h)
 
 /-- Every supported configuration carries the initializer's static
@@ -109,7 +109,7 @@ closure/contract transfer consumes. -/
 theorem triple_eq : ∀ {cfg : SchedulerConfig leaf},
     SupportedReach orig original props cfg →
       cfg.orig = orig ∧ cfg.original = original ∧ cfg.props = props
-  | _, .init => ⟨rfl, rfl, rfl⟩
+  | _, .init _ => ⟨rfl, rfl, rfl⟩
   | _, .step h hs =>
       ⟨(W1.schedulerNext_succ_inputs hs).1.trans (triple_eq h).1,
        (W1.schedulerNext_succ_inputs hs).2.1.trans (triple_eq h).2.1,
@@ -224,7 +224,7 @@ the root-indexed execution). -/
 theorem witnessReach_init (leaf : Assignment → Bool) :
     SupportedReach (leaf := leaf) witnessOrig [] []
       (SchedulerConfig.init (leaf := leaf) witnessOrig [] []) :=
-  SupportedReach.init
+  SupportedReach.init (fun _ hc => absurd hc (List.not_mem_nil))
 
 /-! ## §5 The universal-shape counterexample (mixed int/bool box)
 
@@ -288,7 +288,7 @@ theorem universal_pin_gate_false :
     exact mixed_fits
   have hp := h (leaf := fun _ => false)
     (cfg := SchedulerConfig.init (leaf := fun _ => false) mixedOrig [] [])
-    (SchedulerReachable.init mixedOrig [] []) mixed_splitData hred
+    (SchedulerReachable.init mixedOrig [] [] (fun _ hc => absurd hc (List.not_mem_nil))) mixed_splitData hred
     mixedAssign hfit
   change (negNe 0 0).norm.eval mixedAssign = some true ↔
     mixedAssign[0]? = some (Value.int 0) at hp

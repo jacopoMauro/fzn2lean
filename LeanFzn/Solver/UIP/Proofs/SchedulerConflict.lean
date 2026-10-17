@@ -94,29 +94,29 @@ inductive ConflictRoute where
 
 /-- The route of the executable analysis, computed from
 `analyzeAtAllowance` exactly as `AnalysisOutcome` classifies it. -/
-def conflictRoute (trail : List TrailEntry) (lvl : Nat) (c : Clause) :
+def conflictRoute (orig : List Domain) (trail : List TrailEntry) (lvl : Nat) (c : Clause) :
     ConflictRoute :=
-  match analyzeAtAllowance trail lvl c with
+  match analyzeAtAllowance orig trail lvl c with
   | some (below, uip) => .analyzable below uip
   | none => if lvl = 0 then .rootVerdict else .fallback
 
-theorem conflictRoute_of_some {trail : List TrailEntry} {lvl : Nat}
+theorem conflictRoute_of_some {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
     {c : Clause} {below : List (Literal × Nat)} {uip : Literal}
-    (h : analyzeAtAllowance trail lvl c = some (below, uip)) :
-    conflictRoute trail lvl c = .analyzable below uip := by
+    (h : analyzeAtAllowance orig trail lvl c = some (below, uip)) :
+    conflictRoute orig trail lvl c = .analyzable below uip := by
   unfold conflictRoute
   rw [h]
 
-theorem conflictRoute_of_none_pos {trail : List TrailEntry} {lvl : Nat}
-    {c : Clause} (h : analyzeAtAllowance trail lvl c = none) (hpos : lvl ≠ 0) :
-    conflictRoute trail lvl c = .fallback := by
+theorem conflictRoute_of_none_pos {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
+    {c : Clause} (h : analyzeAtAllowance orig trail lvl c = none) (hpos : lvl ≠ 0) :
+    conflictRoute orig trail lvl c = .fallback := by
   unfold conflictRoute
   rw [h]
   simp [hpos]
 
-theorem conflictRoute_of_none_zero {trail : List TrailEntry} {lvl : Nat}
-    {c : Clause} (h : analyzeAtAllowance trail lvl c = none) (h0 : lvl = 0) :
-    conflictRoute trail lvl c = .rootVerdict := by
+theorem conflictRoute_of_none_zero {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
+    {c : Clause} (h : analyzeAtAllowance orig trail lvl c = none) (h0 : lvl = 0) :
+    conflictRoute orig trail lvl c = .rootVerdict := by
   unfold conflictRoute
   rw [h]
   simp [h0]
@@ -157,7 +157,7 @@ example {leaf : Assignment → Bool} {cfg : SchedulerConfig leaf}
     (hfals : FalsifiedByTrail cfg.branch c) :
     (analyzerInputOfConflict (bs := cfg.branch)
         { clause := c, learned := learned,
-          analysis := (analyzeAtAllowance cfg.branch.trail cfg.branch.level c).map
+          analysis := (analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level c).map
             (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized) } hne hent hfals).conflict
       = c := rfl
 
@@ -203,7 +203,7 @@ theorem reachable_event_analysis_success {leaf : Assignment → Bool}
     (hreach : SchedulerReachable cfg) (hconf : cfg.conflict = some ev)
     (an : ConflictAnalysis) (hana : ev.analysis = some an) :
     ∃ (below : List (Literal × Nat)) (uip : Literal),
-      analyzeAtAllowance cfg.branch.trail cfg.branch.level ev.clause
+      analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level ev.clause
         = some (below, uip) ∧ an = (ConflictAnalysis.ofUIP below uip).normalized :=
   reachable_analysis_success leaf cfg ev an hreach hconf hana
 
@@ -278,47 +278,33 @@ theorem rootContradiction_of_reachable_event {leaf : Assignment → Bool}
 /-! ## The computed-allowance certificate -/
 
 /-- E3's computed-allowance certificate for one recorded conflict event:
-the executable entry point's result `r` together with the two domination
-facts that make the runtime allowance the "large enough" one — at least
-the computed literal budget `analysisAllowance` and at least the
-historical constant. Consumers (C2c) get the exact run equation and the
-budget facts without unfolding the `max`. -/
-structure AllowanceCertificate (trail : List TrailEntry) (lvl : Nat)
+the executable entry point's result `r` together with the fact that the
+runtime allowance strictly exceeds the analyzer's termination potential
+(R1a: replaces the former `ge_computed`/`ge_historical` domination fields —
+the allowance is now the potential plus one, proved sufficient by
+`AnalysisCompletion.analysis_complete`). -/
+structure AllowanceCertificate (orig : List Domain) (trail : List TrailEntry) (lvl : Nat)
     (c : Clause) (r : List (Literal × Nat) × Literal) : Prop where
   /-- the recorded run is the executable entry point's result -/
-  run : analyzeAtAllowance trail lvl c = some r
-  /-- the runtime allowance dominates the computed literal budget -/
-  ge_computed : analysisAllowance trail c ≤ analysisFuel trail c
-  /-- the runtime allowance dominates the historical constant -/
-  ge_historical : historicalAllowance trail ≤ analysisFuel trail c
+  run : analyzeAtAllowance orig trail lvl c = some r
+  /-- the runtime allowance exceeds the termination potential -/
+  sufficient : analyzerPotential trail (initAnalysisState c) < analysisFuel trail c
 
 /-- The certificate of a completed run. -/
-theorem allowanceCertificate_of_run {trail : List TrailEntry} {lvl : Nat}
+theorem allowanceCertificate_of_run {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
     {c : Clause} {r : List (Literal × Nat) × Literal}
-    (h : analyzeAtAllowance trail lvl c = some r) :
-    AllowanceCertificate trail lvl c r :=
-  ⟨h, Nat.le_max_left _ _, Nat.le_max_right _ _⟩
-
-/-- Allowance sufficiency: every result the historical constant obtained,
-the runtime allowance obtains with the same result — the refinement that
-makes the switch to the input-dependent allowance honest. -/
-theorem allowanceCertificate_of_historical {trail : List TrailEntry} {lvl : Nat}
-    {c : Clause} {r : List (Literal × Nat) × Literal}
-    (h : analyzeTrail trail lvl c = some r) :
-    AllowanceCertificate trail lvl c r :=
-  ⟨analyzeAtAllowance_dominates h, Nat.le_max_left _ _, Nat.le_max_right _ _⟩
+    (h : analyzeAtAllowance orig trail lvl c = some r) :
+    AllowanceCertificate orig trail lvl c r :=
+  ⟨h, Nat.lt_succ_self _⟩
 
 /-- The certificate's equation is the executable loop at the runtime
-allowance (B1's simulation), so the certified allowance is exactly the
-one the run consumed. -/
-theorem allowanceCertificate_run_eq_loop {trail : List TrailEntry} {lvl : Nat}
-    {c : Clause} {r : List (Literal × Nat) × Literal}
-    (h : AllowanceCertificate trail lvl c r) :
-    analyzeLoop trail lvl (analysisFuel trail c) (initAnalysisState c)
-      = some r := by
-  dsimp only [initAnalysisState]
-  rw [← analyzeAtAllowance_fuel_eq]
-  exact h.run
+allowance. -/
+theorem allowanceCertificate_run_eq_loop {orig : List Domain} {trail : List TrailEntry}
+    {lvl : Nat} {c : Clause} {r : List (Literal × Nat) × Literal}
+    (h : AllowanceCertificate orig trail lvl c r) :
+    analyzeLoop orig trail lvl (analysisFuel trail c) (initAnalysisState c)
+      = some r :=
+  h.run
 
 /-- The scheduler's `ofUIP` record IS `ofRun` (definitional identity): a
 certificate stated for `ConflictAnalysis.ofRun` — the record B2's
@@ -354,7 +340,7 @@ theorem conflictStep_of_level_pos {cfg : SchedulerConfig leaf} {c : Clause}
     {rest : List Clause} {learned : List Clause} (h : cfg.branch.level ≠ 0) :
     conflictStep cfg (c :: rest) learned
       = .analyzeConflict (stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) c := by
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) c := by
   simp only [conflictStep, h, if_false]
 
 /- The recorded evidence's `analysis` field is the mapped allowance run,
@@ -367,20 +353,23 @@ NORMALIZED form (the N1 recording-site normalization). -/
 theorem stepAnalyzeConflict_analysis_some {cfg : SchedulerConfig leaf}
     {c : Clause} {learned : List Clause} {below : List (Literal × Nat)}
     {uip : Literal}
-    (h : analyzeAtAllowance cfg.branch.trail cfg.branch.level c
-      = some (below, uip)) :
+    (h : analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level c
+      = some (below, uip))
+    (hg : learnedRepeats cfg (ConflictAnalysis.ofUIP below uip).normalized.learned = false) :
     (stepAnalyzeConflict cfg c learned).conflict
       = some { clause := c, learned := learned,
                analysis := some ((ConflictAnalysis.ofUIP below uip).normalized) } := by
-  simp only [stepAnalyzeConflict_conflict_eq, h, Option.map_some]
+  simp only [stepAnalyzeConflict_conflict_eq, recordedAnalysis, h, Option.map_some,
+    Option.filter_some, hg, Bool.not_false, if_true]
 
 /-- Case (c) recording: no result stores `none` (the fallback trigger). -/
 theorem stepAnalyzeConflict_analysis_none {cfg : SchedulerConfig leaf}
     {c : Clause} {learned : List Clause}
-    (h : analyzeAtAllowance cfg.branch.trail cfg.branch.level c = none) :
+    (h : analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level c = none) :
     (stepAnalyzeConflict cfg c learned).conflict
       = some { clause := c, learned := learned, analysis := none } := by
-  simp only [stepAnalyzeConflict_conflict_eq, h, Option.map_none]
+  simp only [stepAnalyzeConflict_conflict_eq, recordedAnalysis, h, Option.map_none,
+    Option.filter_none]
 
 /-! ## The recorded-evidence dispatcher's arms -/
 
@@ -411,7 +400,7 @@ theorem backjumpStep_of_perform_none {cfg : SchedulerConfig leaf}
     (han : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = none) :
+        cfg.branch cfg.orig cfg.original cfg.props = none) :
     backjumpStep cfg ev
       = .localExclude (stepLocalExclude cfg ev.learned (checkpointRegion cp)) := by
   simp only [backjumpStep, han, hcp, hp]
@@ -423,7 +412,7 @@ theorem backjumpStep_of_perform_some {cfg : SchedulerConfig leaf}
     (han : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored) :
+        cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     backjumpStep cfg ev
       = .learnBackjumpAssert (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
@@ -447,7 +436,7 @@ theorem backjumpStep_ne_unsat (cfg : SchedulerConfig leaf) (ev : ConflictEvidenc
           intro hh; cases hh
       | some cp =>
           cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-              cfg.branch cfg.original cfg.props with
+              cfg.branch cfg.orig cfg.original cfg.props with
           | none =>
               rw [backjumpStep_of_perform_none ha hc hp]
               intro hh; cases hh
@@ -498,7 +487,7 @@ theorem schedulerNext_local_exclude_route {cfg : SchedulerConfig leaf}
     (hev : cfg.conflict = some ev) (ha : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = none) :
+        cfg.branch cfg.orig cfg.original cfg.props = none) :
     schedulerNext cfg
       = .localExclude (stepLocalExclude cfg ev.learned (checkpointRegion cp)) := by
   rw [schedulerNext_of_conflict hev, backjumpStep_of_perform_none ha hcp hp]
@@ -511,7 +500,7 @@ theorem schedulerNext_analyzable_route {cfg : SchedulerConfig leaf}
     (hev : cfg.conflict = some ev) (ha : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored) :
+        cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     schedulerNext cfg
       = .learnBackjumpAssert (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
@@ -521,16 +510,16 @@ theorem schedulerNext_analyzable_route {cfg : SchedulerConfig leaf}
 
 /-! ## The classification of the executable analysis -/
 
-theorem analyzeClassified_eq_of_allowance {trail : List TrailEntry} {lvl : Nat}
+theorem analyzeClassified_eq_of_allowance {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
     {c : Clause} {below : List (Literal × Nat)} {uip : Literal}
-    (h : analyzeAtAllowance trail lvl c = some (below, uip)) :
-    analyzeClassified trail lvl c = AnalysisOutcome.success below uip := by
+    (h : analyzeAtAllowance orig trail lvl c = some (below, uip)) :
+    analyzeClassified orig trail lvl c = AnalysisOutcome.success below uip := by
   unfold analyzeClassified
   rw [h]
 
-theorem analyzeClassified_eq_of_none {trail : List TrailEntry} {lvl : Nat}
-    {c : Clause} (h : analyzeAtAllowance trail lvl c = none) :
-    analyzeClassified trail lvl c
+theorem analyzeClassified_eq_of_none {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
+    {c : Clause} (h : analyzeAtAllowance orig trail lvl c = none) :
+    analyzeClassified orig trail lvl c
       = (if lvl = 0 then AnalysisOutcome.rootContradiction
          else AnalysisOutcome.unsupported) := by
   unfold analyzeClassified
@@ -538,12 +527,12 @@ theorem analyzeClassified_eq_of_none {trail : List TrailEntry} {lvl : Nat}
 
 /-- §9.3 item 1: `.unsupported` is exactly "no result above the root" —
 the fallback trigger, never a verdict. -/
-theorem analyzeClassified_unsupported {trail : List TrailEntry} {lvl : Nat}
+theorem analyzeClassified_unsupported {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
     {c : Clause}
-    (h : analyzeClassified trail lvl c = AnalysisOutcome.unsupported) :
-    analyzeAtAllowance trail lvl c = none ∧ lvl ≠ 0 := by
+    (h : analyzeClassified orig trail lvl c = AnalysisOutcome.unsupported) :
+    analyzeAtAllowance orig trail lvl c = none ∧ lvl ≠ 0 := by
   unfold analyzeClassified at h
-  cases h' : analyzeAtAllowance trail lvl c with
+  cases h' : analyzeAtAllowance orig trail lvl c with
   | none =>
       by_cases h0 : lvl = 0
       · simp only [h'] at h
@@ -557,12 +546,12 @@ theorem analyzeClassified_unsupported {trail : List TrailEntry} {lvl : Nat}
 
 /-- §9.3 item 2: `.rootContradiction` is exactly "no result at level 0" —
 the route that requires `AnalyzerInput` + `RootFactsBridge`. -/
-theorem analyzeClassified_rootContradiction {trail : List TrailEntry} {lvl : Nat}
+theorem analyzeClassified_rootContradiction {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
     {c : Clause}
-    (h : analyzeClassified trail lvl c = AnalysisOutcome.rootContradiction) :
-    analyzeAtAllowance trail lvl c = none ∧ lvl = 0 := by
+    (h : analyzeClassified orig trail lvl c = AnalysisOutcome.rootContradiction) :
+    analyzeAtAllowance orig trail lvl c = none ∧ lvl = 0 := by
   unfold analyzeClassified at h
-  cases h' : analyzeAtAllowance trail lvl c with
+  cases h' : analyzeAtAllowance orig trail lvl c with
   | none =>
       by_cases h0 : lvl = 0
       · exact ⟨by first | rfl | exact h', h0⟩
@@ -576,12 +565,12 @@ theorem analyzeClassified_rootContradiction {trail : List TrailEntry} {lvl : Nat
 
 /-- §2.3 item 18: the `.success` classification is exactly the completed
 run's result — the certificate inputs for real conflict events. -/
-theorem analyzeClassified_eq_success_iff {trail : List TrailEntry} {lvl : Nat}
+theorem analyzeClassified_eq_success_iff {orig : List Domain} {trail : List TrailEntry} {lvl : Nat}
     {c : Clause} {below : List (Literal × Nat)} {uip : Literal} :
-    analyzeClassified trail lvl c = AnalysisOutcome.success below uip ↔
-      analyzeAtAllowance trail lvl c = some (below, uip) := by
+    analyzeClassified orig trail lvl c = AnalysisOutcome.success below uip ↔
+      analyzeAtAllowance orig trail lvl c = some (below, uip) := by
   unfold analyzeClassified
-  cases h : analyzeAtAllowance trail lvl c with
+  cases h : analyzeAtAllowance orig trail lvl c with
   | none =>
       dsimp only
       constructor
@@ -610,7 +599,8 @@ theorem analyzeClassified_eq_success_iff {trail : List TrailEntry} {lvl : Nat}
 single-`intNe`-literal clause: the falsifier lookup fails, so `markLit`
 stops the loop with `none`. -/
 theorem analyzeAtAllowance_intNe_nil :
-    analyzeAtAllowance ([] : List TrailEntry) 0 [⟨.intNe 0 0, true⟩] = none := rfl
+    analyzeAtAllowance [[.int 0, .int 1]] ([] : List TrailEntry) 0
+      [⟨.intNe 0 0, true⟩] = none := by decide
 
 /-- FINDING (root-arm evidence gap, not a soundness bug): the level-0
 `.unsat` arm is NOT a function of the executable analysis. At the real
@@ -643,7 +633,7 @@ clause — `analyzeAtAllowance_singleton_below` empties the below list and
 the canonical form maps the remaining head to its own normal form. -/
 theorem unitLearned_ofUIP_normalized_of_singleton {trail : List TrailEntry}
     {lvl : Nat} {q : Literal} {below : List (Literal × Nat)} {uip : Literal}
-    (h : analyzeAtAllowance trail lvl [q] = some (below, uip)) :
+    (h : analyzeAtAllowance orig trail lvl [q] = some (below, uip)) :
     ∃ q' : Literal,
       (ConflictAnalysis.ofUIP below uip).normalized.learned = [q'] ∧
         q' = q'.norm := by
@@ -653,75 +643,37 @@ theorem unitLearned_ofUIP_normalized_of_singleton {trail : List TrailEntry}
   rw [ConflictAnalysis.normalized_learned, ConflictAnalysis.ofUIP_learned]
   simp
 
-/-- The terminal `.conflict` result exposes its raw event: the reported
-clause list is the event's payload and the learned payload is its
-freshness filter. -/
-theorem nextPruningEvent_of_terminalResult_conflict {leaf : Assignment → Bool}
-    {original : List Clause} {props : List Propagator} {bs : BranchState leaf}
-    {s : BranchState leaf} {cs learned : List Clause}
-    (h : terminalResult original props bs = .conflict s cs learned) :
-    nextPruningEvent original props bs.frame bs.learned = .conflict cs ∧
-      s = bs ∧ learned = cs.filter fun c => !(bs.learned.contains c) := by
-  unfold terminalResult at h
-  split at h
-  · cases h
-  · rename_i cs' hprune
-    cases h
-    exact ⟨hprune, rfl, rfl⟩
-  · split at h <;> cases h
-
-/-- The terminal `.localExcluded` result exposes its raw event. -/
-theorem nextPruningEvent_of_terminalResult_localExcluded
-    {leaf : Assignment → Bool} {original : List Clause}
-    {props : List Propagator} {bs : BranchState leaf} {s : BranchState leaf}
-    {lit : Option Literal} {reason : Option Clause} {learned : List Clause}
-    (h : terminalResult original props bs = .localExcluded s lit reason learned) :
-    ∃ (l : Literal) (c : Clause) (lr fl : Bool),
-      nextPruningEvent original props bs.frame bs.learned = .implied l c lr fl ∧
-        filterFrame l bs.frame = none ∧ s = bs ∧ lit = some l ∧
-        reason = some c ∧
-        learned = (if lr && !(bs.learned.contains c) then [c] else []) := by
-  unfold terminalResult at h
-  split at h
-  · cases h
-  · cases h
-  · rename_i l c lr fl hev
-    split at h
-    · rename_i hf
-      cases h
-      exact ⟨l, c, lr, fl, hev, hf, rfl, rfl, rfl, rfl⟩
-    · cases h
-
 /-- N1 TERMINAL PAYLOAD UNIT: the terminal result's new clauses are
 unit-learned under the supported kit — the conflict row's freshness filter
 of a normalized-unit payload, the implied row's single-clause payload, and
 the stable row's empty list. -/
 theorem unitLearned_terminalResult_newClauses {leaf : Assignment → Bool}
-    {original : List Clause} {props : List Propagator} {bs : BranchState leaf}
+    {orig : List Domain} {original : List Clause} {props : List Propagator} {bs : BranchState leaf}
     {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
     (hdb : UnitLearned bs.learned) :
-    UnitLearned (terminalResult original props bs).newClauses := by
+    UnitLearned (terminalResult orig original props bs).newClauses := by
   have hprof : UnitRunProfile props := by
     rw [hprops]
     exact unitRunProfile_proved dcs hSupp
-  cases ht : terminalResult original props bs with
+  cases ht : terminalResult orig original props bs with
   | stable s =>
       show UnitLearned ([] : List Clause)
       exact unitLearned_nil
   | conflict s cs learned =>
       show UnitLearned learned
-      obtain ⟨hevent, -, hlearned⟩ :=
-        nextPruningEvent_of_terminalResult_conflict ht
-      rw [hlearned]
-      exact unitLearned_excluded_learned hprof hevent
+      obtain ⟨-, hcase⟩ := terminalResult_conflict_cases ht
+      rcases hcase with ⟨hevent, hlearned⟩ | ⟨l, c, lr, fl, hevent, -, -, hlearned⟩ |
+          ⟨w, -, -, -, hlearned⟩
+      · rw [hlearned]
+        exact unitLearned_excluded_learned hprof hevent
+      · rw [hlearned]
+        exact unitLearned_implied_payload hprof hdb hevent
+      · rw [hlearned]
+        exact unitLearned_nil
   | localExcluded s lit reason learned =>
-      show UnitLearned learned
-      obtain ⟨l, c, lr, fl, hevent, -, -, -, -, hlearned⟩ :=
-        nextPruningEvent_of_terminalResult_localExcluded ht
-      rw [hlearned]
-      exact unitLearned_implied_payload hprof hdb hevent
+      exact absurd ht terminalResult_ne_localExcluded
 
 /-- The restored-and-narrowed state's learned database is the plan's
 learned clause consed onto the predecessor's (`BackjumpPlan.execute`'s
@@ -750,7 +702,7 @@ theorem unitLearned_perform {leaf : Assignment → Bool}
     {bs restored : BranchState leaf} {p : BackjumpPlan leaf}
     (hProps : UnitRunProfile props) (hdb : UnitLearned bs.learned)
     (hlearned : ∃ q : Literal, p.learned = [q] ∧ q = q.norm)
-    (h : p.perform bs original props = some restored) :
+    (h : p.perform bs orig original props = some restored) :
     UnitLearned restored.learned := by
   unfold BackjumpPlan.perform at h
   cases hr : p.restoreNarrow bs with
@@ -761,7 +713,8 @@ theorem unitLearned_perform {leaf : Assignment → Bool}
       have hRN : UnitLearned s.learned := unitLearned_restoreNarrow hdb hlearned hr
       simp only [hr, Option.map_some, Option.some.injEq] at h
       subst h
-      exact unitLearned_explainedClosure original props s hProps hRN
+      exact unitLearned_explainedClosure orig original props _ hProps
+        (by rw [syncAll_learned]; exact hRN)
 
 /-- THE NORMALIZED-UNIT RUN INVARIANT of a scheduler configuration under
 the supported kit: the branch's learned database is unit-learned, and every
@@ -784,6 +737,7 @@ theorem unitRunInvariant_step {leaf : Assignment → Bool}
     (hprops : cfg.props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
     (hinv : UnitRunInvariant cfg) (hreach : SchedulerReachable cfg)
+    (hnw : wipeoutClause cfg.orig cfg.branch.trail cfg.branch.frame = none)
     (hsucc : (schedulerNext cfg).successor = some cfg') :
     UnitRunInvariant cfg' := by
   have hprof : UnitRunProfile cfg.props := by
@@ -818,7 +772,7 @@ theorem unitRunInvariant_step {leaf : Assignment → Bool}
               cases hev'
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 simp only [ha, hcp, hp, successor_localExclude,
                   Option.some.injEq] at hsucc
@@ -871,7 +825,7 @@ theorem unitRunInvariant_step {leaf : Assignment → Bool}
       simp only [successor_propagate, Option.some.injEq] at hsucc
       subst hsucc
       refine ⟨?_, ?_⟩
-      · show UnitLearned (d.learned ++ cfg.branch.learned)
+      · rw [stepPropagate_branch_learned]
         exact unitLearned_append
           (unitLearned_deduction_learned hd (deduction_reason_unit hprof hinv.db hd))
           hinv.db
@@ -925,11 +879,14 @@ theorem unitRunInvariant_step {leaf : Assignment → Bool}
           simp only [successor_localExclude, Option.some.injEq] at hsucc
           subst hsucc
           refine ⟨?_, ?_⟩
-          · obtain ⟨-, -, hlearned⟩ :=
-              nextPruningEvent_of_terminalResult_conflict ht
+          · obtain ⟨-, hcase⟩ := terminalResult_conflict_cases ht
             show UnitLearned (learned ++ cfg.branch.learned)
-            rw [hlearned]
-            simpa using hinv.db
+            rcases hcase with ⟨-, hlearned⟩ | ⟨l', c', lr', fl', -, -, hcs', -⟩ |
+                ⟨w', -, -, hcs', -⟩
+            · rw [hlearned]
+              simpa using hinv.db
+            · cases hcs'
+            · cases hcs'
           · intro ev' hev'
             rw [stepLocalExclude_conflict] at hev'
             cases hev'
@@ -942,15 +899,29 @@ theorem unitRunInvariant_step {leaf : Assignment → Bool}
             simp only [conflictStep, if_neg hlv, successor_analyzeConflict,
               Option.some.injEq] at hsucc
             subst hsucc
-            obtain ⟨hevent, -, hlearned⟩ :=
-              nextPruningEvent_of_terminalResult_conflict ht
-            rw [hprops] at hevent
-            obtain ⟨-, q, hcq, hqn⟩ :=
-              supported_conflict_clause_unit hSupp hevent
-            have hpay : UnitLearned learned := by
-              rw [hlearned]
-              exact unitLearned_excluded_learned
-                (unitRunProfile_proved dcs hSupp) hevent
+            have hprof : UnitRunProfile cfg.props := by
+              rw [hprops]
+              exact unitRunProfile_proved dcs hSupp
+            obtain ⟨-, hcase⟩ := terminalResult_conflict_cases ht
+            have hcq' : (∃ q : Literal, c = [q] ∧ q = q.norm) ∧
+                UnitLearned learned := by
+              rcases hcase with ⟨hevent, hlearned⟩ |
+                  ⟨l', c', lr', fl', hevent, -, hcs', hlearned⟩ |
+                  ⟨w', -, hw', -, -⟩
+              · have hevent' := hevent
+                rw [hprops] at hevent'
+                obtain ⟨-, q, hcq, hqn⟩ :=
+                  supported_conflict_clause_unit hSupp hinv.db hevent'
+                refine ⟨⟨q, hcq, hqn⟩, ?_⟩
+                rw [hlearned]
+                exact unitLearned_excluded_learned hprof hevent
+              · injection hcs' with hc' hrest'
+                obtain ⟨q, hq, hqn⟩ := implied_reason_unit hprof hinv.db hevent
+                refine ⟨⟨q, by rw [hc', hq], hqn⟩, ?_⟩
+                rw [hlearned]
+                exact unitLearned_implied_payload hprof hinv.db hevent
+              · exact absurd (hnw.symm.trans hw') (by simp)
+            obtain ⟨⟨q, hcq, hqn⟩, hpay⟩ := hcq'
             refine ⟨?_, ?_⟩
             · rw [stepAnalyzeConflictCounted_branch]
               exact hinv.db
@@ -967,7 +938,7 @@ theorem unitRunInvariant_step {leaf : Assignment → Bool}
       subst hsucc
       refine ⟨?_, ?_⟩
       · have h : UnitLearned
-            (terminalResult cfg.original cfg.props cfg.branch).newClauses :=
+            (terminalResult cfg.orig cfg.original cfg.props cfg.branch).newClauses :=
           unitLearned_terminalResult_newClauses hprops hSupp hinv.db
         rw [ht] at h
         show UnitLearned (learned ++ cfg.branch.learned)
@@ -985,26 +956,31 @@ real dispatcher successor (`W1.schedulerNext_succ_inputs` transports the
 kit equation). -/
 theorem unitRunInvariant_of_reachable {leaf : Assignment → Bool}
     {dcs : List DomConstraint}
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hnw : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
+      wipeoutClause cfg.orig cfg.branch.trail cfg.branch.frame = none) :
     ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
-      cfg.props = dcs.filterMap propagatorOfProved → UnitRunInvariant cfg := by
+      cfg.props = dcs.filterMap propagatorOfProved →
+      UnitLearned cfg.original → UnitRunInvariant cfg := by
   intro cfg h
   refine SchedulerReachable.rec
     (motive := fun cfg _ =>
-      cfg.props = dcs.filterMap propagatorOfProved → UnitRunInvariant cfg)
+      cfg.props = dcs.filterMap propagatorOfProved →
+      UnitLearned cfg.original → UnitRunInvariant cfg)
     ?_ ?_ h
-  · intro orig' original' props hprops'
+  · intro orig' original' props hent hprops' hunit
     refine ⟨?_, ?_⟩
-    · show UnitLearned ([] : List Clause)
-      exact unitLearned_nil
+    · exact hunit
     · intro ev hev
       cases hev
-  · intro cfg cfg' t hnext hsucc hrec ih hprops'
+  · intro cfg cfg' t hnext hsucc hrec ih hprops' hunit
     rw [← hnext] at hsucc
     have hpropsOld : cfg.props = dcs.filterMap propagatorOfProved :=
       (W1.schedulerNext_succ_inputs hsucc).2.2.symm.trans hprops'
+    have hunitOld : UnitLearned cfg.original :=
+      (W1.schedulerNext_succ_inputs hsucc).2.1.symm ▸ hunit
     exact unitRunInvariant_step (cfg := cfg) (cfg' := cfg')
-      hpropsOld hSupp (ih hpropsOld) hrec hsucc
+      hpropsOld hSupp (ih hpropsOld hunitOld) hrec (hnw hrec) hsucc
 
 /-! ### N1 regressions (Boolean shape, inhabitedness, verdict neutrality) -/
 
@@ -1017,15 +993,11 @@ example : (ConflictAnalysis.ofUIP [] (posBool 0 true)).normalized.learned
 site applies to the executable singleton run of the Boolean conflict stores
 exactly that normalized unit. -/
 example :
-    ((analyzeAtAllowance
+    ((analyzeAtAllowance [[.bool false, .bool true]]
         [{ literal := posBool 0 true, level := 1, reason := none }] 1
         [posBool 0 false]).map
           (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized)).map
-      ConflictAnalysis.learned = some [posBool 0 false] := by
-  rw [show analyzeAtAllowance
-      [{ literal := posBool 0 true, level := 1, reason := none }] 1
-      [posBool 0 false] = some ([], posBool 0 true) from rfl]
-  rfl
+      ConflictAnalysis.learned = some [posBool 0 false] := by decide
 
 /-- N1 VERDICT NEUTRALITY: normalization preserves the learned literal's
 evaluation at every assignment (`Literal.norm_eval`; the full certificate
@@ -1039,11 +1011,10 @@ example (a : Assignment) :
 unit-run invariant (empty database, no recorded evidence) — the invariant
 is not vacuous. -/
 example {leaf : Assignment → Bool} (orig : List Domain) (original : List Clause)
-    (props : List Propagator) :
+    (props : List Propagator) (hunit : UnitLearned original) :
     UnitRunInvariant (SchedulerConfig.init (leaf := leaf) orig original props) := by
   refine ⟨?_, ?_⟩
-  · show UnitLearned ([] : List Clause)
-    exact unitLearned_nil
+  · exact hunit
   · intro ev hev
     cases hev
 

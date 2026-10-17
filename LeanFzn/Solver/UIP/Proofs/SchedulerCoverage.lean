@@ -109,7 +109,7 @@ theorem stepLearnBackjumpAssert_branch_fits {leaf : Assignment → Bool}
 restored branch database contains the pre-jump learned database —
 `perform`'s `learnGlobal p.learned` insertion survives `execute`,
 `narrowFrame` and the resumed closure. This is the exact statement every
-`restored` produced by `p.perform bs original props = some restored`
+`restored` produced by `p.perform bs orig original props = some restored`
 satisfies; it is a premise of the monotonicity theorem below, never of
 `hmono` itself. -/
 def RestorationKeepsLearned {leaf : Assignment → Bool}
@@ -149,13 +149,13 @@ theorem narrowState_learned_mono {leaf : Assignment → Bool}
 the closure ever removes a clause). Induction on the frame-mass fuel,
 the same motor the closure's other preservation lemmas use. -/
 theorem explainedClosure_learned_mono {leaf : Assignment → Bool}
-    (original : List Clause) (props : List Propagator)
+    (orig : List Domain) (original : List Clause) (props : List Propagator)
     (bs : BranchState leaf) :
-    ∀ c ∈ bs.learned, c ∈ (explainedClosure original props bs).learned := by
+    ∀ c ∈ bs.learned, c ∈ (explainedClosure orig original props bs).learned := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel →
       ∀ c ∈ bs.learned,
-        c ∈ (explainedClosure original props bs).learned from
+        c ∈ (explainedClosure orig original props bs).learned from
     h (Frame.mass bs.frame) bs (Nat.le_refl _)
   intro fuel
   induction fuel with
@@ -174,10 +174,10 @@ theorem explainedClosure_learned_mono {leaf : Assignment → Bool}
       split
       · exact hc
       · rename_i d _
-        refine ih (narrowState bs d.frame d.literal d.reason d.learned) ?_
-          c (narrowState_learned_mono c hc)
+        refine ih (stepNarrowSync orig bs d) ?_
+          c (by rw [stepNarrowSync_learned]; exact List.mem_append.mpr (Or.inr hc))
         have hdec := d.decreases
-        simp only [narrowState] at hdec ⊢
+        simp only [stepNarrowSync_frame]
         omega
 
 /-- `restoreNarrow` keeps the learned database: `learnGlobal` head-inserts
@@ -204,7 +204,7 @@ theorem perform_learned_mono {leaf : Assignment → Bool}
     {p : BackjumpPlan leaf} {bs : BranchState leaf}
     {original : List Clause} {props : List Propagator}
     {restored : BranchState leaf}
-    (h : p.perform bs original props = some restored) :
+    (h : p.perform bs orig original props = some restored) :
     ∀ c ∈ bs.learned, c ∈ restored.learned := by
   unfold BackjumpPlan.perform at h
   cases hr : p.restoreNarrow bs with
@@ -215,8 +215,8 @@ theorem perform_learned_mono {leaf : Assignment → Bool}
       simp only [hr, Option.map_some, Option.some.injEq] at h
       rw [← h]
       intro c hc
-      exact explainedClosure_learned_mono original props s c
-        (restoreNarrow_learned_mono hr c hc)
+      exact explainedClosure_learned_mono orig original props _ c
+        (by rw [syncAll_learned]; exact restoreNarrow_learned_mono hr c hc)
 
 /-- **RESIDUAL DISCHARGED** (`RestorationKeepsLearned`, formerly the named
 S3/L1 residual): the actual `perform` result keeps `cfg.branch`'s learned
@@ -226,7 +226,7 @@ theorem restorationKeepsLearned_of_perform {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     {p : BackjumpPlan leaf} {original : List Clause}
     {props : List Propagator} {restored : BranchState leaf}
-    (hb : cfg.branch = bs) (h : p.perform bs original props = some restored) :
+    (hb : cfg.branch = bs) (h : p.perform bs orig original props = some restored) :
     RestorationKeepsLearned cfg restored := by
   unfold RestorationKeepsLearned
   rw [hb]
@@ -238,7 +238,7 @@ propagators). -/
 theorem restorationKeepsLearned_of_perform_cfg {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {p : BackjumpPlan leaf}
     {props : List Propagator} {restored : BranchState leaf}
-    (h : p.perform cfg.branch cfg.original props = some restored) :
+    (h : p.perform cfg.branch cfg.orig cfg.original props = some restored) :
     RestorationKeepsLearned cfg restored :=
   perform_learned_mono h
 
@@ -262,7 +262,7 @@ theorem perform_learned_mem_own {leaf : Assignment → Bool}
     {p : BackjumpPlan leaf} {bs : BranchState leaf}
     {original : List Clause} {props : List Propagator}
     {restored : BranchState leaf}
-    (h : p.perform bs original props = some restored) :
+    (h : p.perform bs orig original props = some restored) :
     p.learned ∈ restored.learned := by
   unfold BackjumpPlan.perform at h
   cases hr : p.restoreNarrow bs with
@@ -272,8 +272,8 @@ theorem perform_learned_mem_own {leaf : Assignment → Bool}
   | some s =>
       simp only [hr, Option.map_some, Option.some.injEq] at h
       rw [← h]
-      exact explainedClosure_learned_mono original props s p.learned
-        (restoreNarrow_learned_own hr)
+      exact explainedClosure_learned_mono orig original props _ p.learned
+        (by rw [syncAll_learned]; exact restoreNarrow_learned_own hr)
 
 /-! ### Covered-leaf falsification of the recorded analysis clause -/
 
@@ -346,10 +346,10 @@ theorem jumpFrameAlternative_of_recorded_analysis {leaf : Assignment → Bool}
     {orig : List Domain} {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
     {restored : BranchState leaf} {bs : BranchState leaf}
     {an : ConflictAnalysis}
-    {p : BackjumpPlan leaf} {original : List Clause} {props : List Propagator}
+    {p : BackjumpPlan leaf} {dom : List Domain} {original : List Clause} {props : List Propagator}
     (hb : cfg.branch = bs) (hreach : ReachableState leaf orig bs)
     (hana : ev.analysis = some an) (hplan : p.learned = an.learned)
-    (hperform : p.perform bs original props = some restored)
+    (hperform : p.perform bs dom original props = some restored)
     (hfals : FalsifiedByTrail bs an.learned) :
     JumpFrameAlternative leaf orig cfg ev restored := by
   have _ := hana
@@ -418,7 +418,7 @@ theorem stepLearnBackjumpAssert_coverage_of_recorded_analysis
     (hcov : cfg.coverage) (hb : cfg.branch = bs)
     (hreach : ReachableState leaf cfg.orig bs)
     (hana : ev.analysis = some an) (hplan : p.learned = an.learned)
-    (hperform : p.perform bs original props = some restored)
+    (hperform : p.perform bs cfg.orig original props = some restored)
     (hfals : FalsifiedByTrail bs an.learned) :
     (stepLearnBackjumpAssert cfg p ev restored).coverage :=
   stepLearnBackjumpAssert_coverage_from_facts hcov

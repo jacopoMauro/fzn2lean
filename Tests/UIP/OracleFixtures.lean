@@ -454,6 +454,11 @@ def mTrail : List TrailEntry :=
   , mkImp (posLe 2 9) 3 [posLe 2 9, negLe 0 5]
   , mkImp (posLe 4 2) 3 [posLe 4 2, negLe 2 9] ]
 
+/-- The original box of the analyzer fixtures (R1a: the LCG analyzer reads
+it for the root drop): five integer slots with domain `0..12`. -/
+def oOrig : List Domain :=
+  List.replicate 5 ((List.range 13).map fun k => Value.int (Int.ofNat k))
+
 /-- The multi-resolution conflict clause. -/
 def mConflict : Clause := [negLe 1 7, negLe 2 9, negLe 4 2]
 
@@ -480,8 +485,9 @@ example : mUip = posLe 1 7 := rfl
 
 -- A COMPLETED trace (13 transitions), not a numeric allowance comparison:
 -- the analyzer stops semantically well inside the executable fuel.
-example : analyzeTrace mTrail 3 (analysisFuel mTrail mConflict)
-    (initAnalysisState mConflict) = some (13, some ([(negLe 0 5, 1)], posLe 1 7)) := rfl
+example : analyzeTrace oOrig mTrail 3 (analysisFuel mTrail mConflict)
+    (initAnalysisState mConflict) = some (13, some ([(negLe 0 5, 1)], posLe 1 7)) := by
+  decide
 
 -- The jump skips the irrelevant level 2: target 1 from source level 3.
 example : mTargetLevel = 1 := rfl
@@ -515,12 +521,19 @@ example : (posLe 2 3 :: (List.range 12).map (fun k => negLe 3 (Int.ofNat k))).le
 example : longBelow.length = 12 := rfl
 example : analyzeTrail longTrail 2 longConflict = some (longBelow, posLe 1 10) := rfl
 
+/-- R1a: the LCG analyzer (semantic weakening) learns the twelve side
+literals `x3 > k` as the single weakened literal `x3 > 0` — the EARLIEST
+entry implying every `x3 ≤ k` is the decision `x3 ≤ 0`. The historical
+`analyzeTrail` above still records all twelve. -/
+def longBelowLcg : List (Literal × Nat) := [(negLe 3 0, 1)]
+
 -- COMPLETED long-reason trace (19 transitions): the semantic stop, observed,
 -- not an allowance-comparison.
-example : analyzeTrace longTrail 2 (analysisFuel longTrail longConflict)
-    (initAnalysisState longConflict) = some (19, some (longBelow, posLe 1 10)) := rfl
-example : (analyzeTrace longTrail 2 (analysisFuel longTrail longConflict)
-    (initAnalysisState longConflict)).isSome = true := rfl
+example : analyzeTrace oOrig longTrail 2 (analysisFuel longTrail longConflict)
+    (initAnalysisState longConflict) = some (19, some (longBelowLcg, posLe 1 10)) := by
+  decide
+example : (analyzeTrace oOrig longTrail 2 (analysisFuel longTrail longConflict)
+    (initAnalysisState longConflict)).isSome = true := by decide
 
 -- EXACT reason lookup: the falsifier `x0 ≤ 5` is found by exact normalized
 -- match for the literal `¬(x0 ≤ 5)`.
@@ -898,7 +911,7 @@ def checkFamilyOracleCounts : Bool :=
 /-- The multi-resolution analysis and its completed trace. -/
 def checkMultiResolution : Bool :=
   decide (analyzeTrail mTrail 3 mConflict = some ([(negLe 0 5, 1)], posLe 1 7)) &&
-  decide (analyzeTrace mTrail 3 (analysisFuel mTrail mConflict)
+  decide (analyzeTrace oOrig mTrail 3 (analysisFuel mTrail mConflict)
     (initAnalysisState mConflict) = some (13, some ([(negLe 0 5, 1)], posLe 1 7)))
 
 /-- The jump skips the irrelevant level: target 1, strictly below source 3,
@@ -910,8 +923,8 @@ def checkIrrelevantLevelJump : Bool :=
 below-level clause. -/
 def checkLongReasonTrace : Bool :=
   decide (analyzeTrail longTrail 2 longConflict = some (longBelow, posLe 1 10)) &&
-  decide (analyzeTrace longTrail 2 (analysisFuel longTrail longConflict)
-    (initAnalysisState longConflict) = some (19, some (longBelow, posLe 1 10)))
+  decide (analyzeTrace oOrig longTrail 2 (analysisFuel longTrail longConflict)
+    (initAnalysisState longConflict) = some (19, some (longBelowLcg, posLe 1 10)))
 
 /-- A tag for the root-conflict dispatch (the transition type has no
 `DecidableEq`, so the running check matches on the constructor). -/

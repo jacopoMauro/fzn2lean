@@ -48,6 +48,8 @@ in `LeanFzn.Solver/LeanFzn.Solver.UIP.lean` (owned by the coordinator; not edite
 
 import LeanFzn.Solver.UIP.Proofs.SupportedProviders
 import LeanFzn.Solver.UIP.Proofs.CheckpointPrefix
+import LeanFzn.Solver.UIP.Proofs.TrailSlotRange
+import LeanFzn.Solver.UIP.Proofs.UnitRunSupported
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler
 
 
@@ -100,7 +102,7 @@ theorem supportedHdeadCheckpointRegion_of_snapshots {orig : List Domain}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp) := by
   intro cfg cp ev an hreach hconf hana hcp hp
   -- the rejection IS a filter failure on the checkpoint frame
@@ -180,7 +182,7 @@ theorem supportedHpre_of_snapshots {orig : List Domain} {original : List Clause}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch := by
@@ -190,7 +192,7 @@ theorem supportedHpre_of_snapshots {orig : List Domain} {original : List Clause}
   exact restorationPreReachable_of_success_avoiding hsnap hbs
     (hcert hreach hconf hana)
     (hstable hreach hconf hana) (hneg hreach hconf hana)
-    (hsurv hreach hconf hana hcp) (hfresh hreach hconf hana hcp)
+    (hsurv hreach hconf hana hcp)
     (hrange hreach hconf hana) hp
 
 /-! ## §3 J1: the `hstable` producer from reachability -/
@@ -340,15 +342,15 @@ theorem supportedLearned_eq_asserting_of_unitRun {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props) :
     ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis},
       SupportedReach orig original props cfg → cfg.conflict = some ev →
         ev.analysis = some an → an.learned = [an.asserting] := by
   intro cfg ev an hreach hc ha
   obtain ⟨q, hq, -⟩ :=
-    (unitRunInvariant_of_reachable (leaf := leaf) hSupp hreach.reachable
-      (by rw [SupportedReach.props_eq hreach, hprops])).recorded ev hc |>.1
+    (unitRunInvariant_of_supported hprops hSupp hgate hreach).recorded ev hc |>.1
   obtain ⟨below, uip, hrun, heq⟩ :=
     reachable_analysis_success leaf cfg ev an hreach.reachable hc ha
   rw [hq] at hrun
@@ -375,7 +377,8 @@ theorem supportedHneg_of_unitRun {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props) :
     ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis},
       SupportedReach orig original props cfg → cfg.conflict = some ev →
@@ -383,7 +386,7 @@ theorem supportedHneg_of_unitRun {orig : List Domain}
         NegStableAvoiding an.asserting an.learned := by
   intro cfg ev an hreach hc ha
   exact negStableAvoiding_of_learned_eq_singleton
-    (supportedLearned_eq_asserting_of_unitRun hprops hSupp hreach hc ha)
+    (supportedLearned_eq_asserting_of_unitRun hprops hSupp hgate hreach hc ha)
 
 /-- **THE MAXIMAL UNIT-FRAGMENT INSTANTIATION OF `supportedHpre_of_snapshots`
 (J1 acceptance).** At the supported index of the unit kit the `hstable`
@@ -414,6 +417,7 @@ theorem supportedHpre_of_unitRun {orig : List Domain} {original : List Clause}
     {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hsnaps : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         ReachableCpSnapshots leaf orig cfg)
@@ -448,7 +452,7 @@ theorem supportedHpre_of_unitRun {orig : List Domain} {original : List Clause}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
@@ -457,7 +461,7 @@ theorem supportedHpre_of_unitRun {orig : List Domain} {original : List Clause}
     (fun hreach hconf hana =>
       supportedHstable_of_reach hreach hconf hana)
     (fun hreach hconf hana =>
-      supportedHneg_of_unitRun hprops hSupp hreach hconf hana)
+      supportedHneg_of_unitRun hprops hSupp hgate hreach hconf hana)
     hsurv hfresh hrange
 
 /-! ## §7 J1: the `hsurv` target-level boundary (finding + kernel witnesses)
@@ -710,7 +714,7 @@ theorem supportedHdeadCheckpointRegion_of_premises {orig : List Domain}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp) :=
   supportedHdeadCheckpointRegion_of_snapshots
     (supportedReachableCpSnapshots_of_premises hbr)
@@ -745,8 +749,9 @@ This section exports at the CONSUMER index:
     instantiation: the snapshot bundle and the `hcert`/`hstable`/`hneg`/
     `hsurv`/`hfresh`/`hrange` families all DERIVED, leaving only the unit
     kit (`hprops`/`hSupp`), the branch-reachability family, the D1
-    entailment `hent`, the inhabitedness `hinhab` and the C1 vocabulary
-    `hv`. `supportedHpre_of_unitRun` (§6) is retained unchanged as the
+    entailment `hent` and the inhabitedness `hinhab` (the former C1
+    vocabulary premise `hv` is gone: `hrange` is the premise-free
+    `TrailSlotRange.supportedHrange_of_run`, C2b). `supportedHpre_of_unitRun` (§6) is retained unchanged as the
     named-premise reference instantiation. -/
 
 /-- **THE `hsurv` FAMILY FROM `hbr` + `hent`** (J1 round 3 acceptance):
@@ -793,20 +798,18 @@ theorem supportedHdeadCheckpointRegion_of_reach {orig : List Domain}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp) :=
   supportedHdeadCheckpointRegion_of_premises hbr hent
     (supportedHsurv_of_reach hbr hent)
 
 /-- **THE MAXIMAL DERIVED `hpre` INSTANTIATION (J1 round 3)**: the unit
 fragment's restoration pre-reachability with every family of
-`supportedHpre_of_snapshots` DERIVED except the two named honest
-prerequisites of this round:
+`supportedHpre_of_snapshots` DERIVED except the named honest
+prerequisite of this round:
 
   * `hinhab` — recorded-site inhabitedness of the branch frame (C2's
     obligation; consumed by `supportedHfresh_of_reach`);
-  * `hv` — C1's run-wide trail vocabulary (consumed by
-    `supportedHrange_of_premises`);
 
 plus the joint induction's `hbr`, the D1 entailment `hent` and the unit
 kit (`hprops`/`hSupp`, which discharges `hneg` via
@@ -814,12 +817,14 @@ kit (`hprops`/`hSupp`, which discharges `hneg` via
 (`supportedReachableCpSnapshots_of_premises`), `hcert`
 (`supportedHcert_of_premises`), `hstable` (`supportedHstable_of_reach`),
 `hsurv` (`supportedHsurv_of_reach`) and `hrange`
-(`supportedHrange_of_premises`) are produced here. -/
+(`TrailSlotRange.supportedHrange_of_run`, premise-free — C2b replaced the
+refuted original-pool `hv` route) are produced here. -/
 theorem supportedHpre_of_unitRun_reach {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hent : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
@@ -828,9 +833,7 @@ theorem supportedHpre_of_unitRun_reach {orig : List Domain}
         LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     ∀ {cfg : SchedulerConfig leaf} {cp : DecisionCheckpoint leaf}
       {ev : ConflictEvidence} {an : ConflictAnalysis}
       {restored : BranchState leaf},
@@ -839,7 +842,7 @@ theorem supportedHpre_of_unitRun_reach {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
@@ -848,10 +851,10 @@ theorem supportedHpre_of_unitRun_reach {orig : List Domain}
     (supportedHcert_of_premises hbr hent)
     (fun hreach hconf hana => supportedHstable_of_reach hreach hconf hana)
     (fun hreach hconf hana =>
-      supportedHneg_of_unitRun hprops hSupp hreach hconf hana)
+      supportedHneg_of_unitRun hprops hSupp hgate hreach hconf hana)
     (supportedHsurv_of_reach hbr hent)
     (supportedHfresh_of_reach hbr hinhab)
-    (supportedHrange_of_premises hbr hv)
+    (fun hreach hconf hana => supportedHrange_of_run hreach hconf hana)
 
 /-! ## §10 I1: the SITE-LEVEL twins (circularity breakers)
 
@@ -967,12 +970,8 @@ theorem supportedHfresh_of_site {orig : List Domain} {original : List Clause}
   have he' : e ∈ bs.trail := by
     rw [← hb, hmid]
     exact List.mem_append.mpr (Or.inl he)
-  have hrun' := hrun
-  unfold analyzeAtAllowance at hrun'
   obtain ⟨m, hm, hmlit, -⟩ :=
-    analyzeStep_uip_on_trail cfg.branch.trail cfg.branch.level
-      (analysisFuel cfg.branch.trail ev.clause) [ev.clause] none [] []
-      (analyzerInvariant_init cfg.branch.trail cfg.branch.level) below uip hrun'
+    analyzeAtAllowance_uip_on_trail hrun
   have hm' : m ∈ bs.trail := by rw [← hb]; exact hm
   obtain ⟨a, hcov⟩ := hinhabSite
   have h1 : (uip.negate).eval a = some true := by
@@ -989,7 +988,11 @@ theorem supportedHfresh_of_site {orig : List Domain} {original : List Clause}
 
 /-- **THE `hrange` PRODUCER, SITE FORM**: the recorded asserting literal's
 slot range at ONE supported recorded-evidence site from the site's branch
-reachability and the site trail vocabulary (C1's `hv` at the site). -/
+reachability and the site trail vocabulary (C1's `hv` at the site).
+
+LEGACY: the original-pool vocabulary premise is REFUTED along actual runs
+(`ExtendedPoolProducers.branchTrailVocabulary_refuted_on_run`); no entry
+consumes this lemma — use `TrailSlotRange.supportedHrange_of_run`. -/
 theorem supportedHrange_of_site {orig : List Domain} {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     (hb : cfg.branch = bs) (hbs : ReachableState leaf orig bs)
@@ -1033,7 +1036,7 @@ theorem supportedHdeadCheckpointRegion_of_site {orig : List Domain}
     ∀ {ev : ConflictEvidence} {an : ConflictAnalysis},
       cfg.conflict = some ev → ev.analysis = some an →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp) := by
   intro ev an hconf hana hp
   have hnone : filterFrame an.asserting cp.frame = none :=
@@ -1058,10 +1061,11 @@ site, with EVERY family input of `supportedHpre_of_unitRun_reach` replaced
 by its site fact: the site's `SupportedReach` (strict-prefix/provenance),
 the site's `ReachableState`, the selected checkpoint's snapshot (the chain
 component of the joint induction), the site entailment, the site frame
-inhabitedness and the site trail vocabulary. Its argument list is exactly
-the current `hpre` site context plus the three run-level site facts the
-joint induction must supply (`hsnap`, `hentSite` via the D1/I1-B bridge,
-`hinhabSite`/`hvSite` via the C2/C1 families at the site). -/
+inhabitedness. Its argument list is exactly the current `hpre` site
+context plus the run-level site facts the joint induction must supply
+(`hsnap`, `hentSite` via the D1/I1-B bridge, `hinhabSite` via the C2
+family at the site). The asserting slot range is produced from the site's
+`SupportedReach` alone (`TrailSlotRange.supportedHrange_of_run`, C2b). -/
 theorem supportedHpre_of_unitRun_site {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
@@ -1070,6 +1074,7 @@ theorem supportedHpre_of_unitRun_site {orig : List Domain}
     {restored : BranchState leaf}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hreach : SupportedReach orig original props cfg)
     (hbs : ReachableState leaf orig cfg.branch)
     (hsnap : CheckpointSnapshot leaf orig cp)
@@ -1077,23 +1082,21 @@ theorem supportedHpre_of_unitRun_site {orig : List Domain}
       cfg.conflict = some ev' → ev'.analysis = some an' →
         LearnedEntailed leaf [an'.learned])
     (hinhabSite : ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hvSite : BranchTrailVocabulary orig cfg.branch)
     (hconf : cfg.conflict = some ev) (hana : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored) :
+        cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     RestorationPreReachable leaf orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch :=
   restorationPreReachable_of_success_avoiding hsnap hbs
     (supportedHcert_of_site rfl hbs hreach.reachable hentSite hconf hana)
     (supportedHstable_of_reach hreach hconf hana)
-    (supportedHneg_of_unitRun hprops hSupp hreach hconf hana)
+    (supportedHneg_of_unitRun hprops hSupp hgate hreach hconf hana)
     (supportedHsurv_of_site hreach
       (supportedHcert_of_site rfl hbs hreach.reachable hentSite)
       hconf hana hcp)
-    (supportedHfresh_of_site rfl hbs hreach hinhabSite hconf hana hcp)
-    (supportedHrange_of_site rfl hbs hreach.reachable hvSite hconf hana)
+    (supportedHrange_of_run hreach hconf hana)
     hp
 
 /-! ## §11 C2c: the `hfresh` producer WITHOUT inhabitedness (C2 completion)
@@ -1185,12 +1188,8 @@ theorem supportedHfresh_of_site_levelSeparated {orig : List Domain}
   have hass : an.asserting.norm = (uip.negate).norm := by
     rw [hcanon, ConflictAnalysis.normalized_asserting,
       ConflictAnalysis.ofUIP_asserting, norm_norm]
-  have hrun' := hrun
-  unfold analyzeAtAllowance at hrun'
   obtain ⟨m, hm, hmlit, hmlev⟩ :=
-    analyzeStep_uip_on_trail cfg.branch.trail cfg.branch.level
-      (analysisFuel cfg.branch.trail ev.clause) [ev.clause] none [] []
-      (analyzerInvariant_init cfg.branch.trail cfg.branch.level) below uip hrun'
+    analyzeAtAllowance_uip_on_trail hrun
   obtain ⟨hident, -⟩ := identifiesChain_of_reach hreach
   obtain ⟨mid, hmid, -⟩ := hident cp (checkpointAt_mem hcp) |>.2.1
   have he' : e ∈ cfg.branch.trail := by
@@ -1265,6 +1264,7 @@ theorem supportedHpre_of_unitRun_reach_or_coverless {orig : List Domain}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hbr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → ReachableState leaf orig cfg.branch)
     (hent : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
@@ -1281,9 +1281,7 @@ theorem supportedHpre_of_unitRun_reach_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     ∀ {cfg : SchedulerConfig leaf} {cp : DecisionCheckpoint leaf}
       {ev : ConflictEvidence} {an : ConflictAnalysis}
       {restored : BranchState leaf},
@@ -1292,7 +1290,7 @@ theorem supportedHpre_of_unitRun_reach_or_coverless {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
@@ -1301,12 +1299,12 @@ theorem supportedHpre_of_unitRun_reach_or_coverless {orig : List Domain}
     (supportedHcert_of_premises hbr hent)
     (fun hreach hconf hana => supportedHstable_of_reach hreach hconf hana)
     (fun hreach hconf hana =>
-      supportedHneg_of_unitRun hprops hSupp hreach hconf hana)
+      supportedHneg_of_unitRun hprops hSupp hgate hreach hconf hana)
     (supportedHsurv_of_reach hbr hent)
     (supportedHfresh_of_reach_or_coverless hbr
       (supportedHcert_of_premises hbr hent)
       (supportedReachableCpSnapshots_of_premises hbr) hinhabOr hsepF)
-    (supportedHrange_of_premises hbr hv)
+    (fun hreach hconf hana => supportedHrange_of_run hreach hconf hana)
 
 /-- **THE `hfresh` SITE PRODUCER FROM THE SITE DISJUNCTION + THE SITE LEVEL
 SEPARATION (C2c)**: the combined §10 `hfresh` twin — the drop-in for
@@ -1359,6 +1357,7 @@ theorem supportedHpre_of_unitRun_site_or_coverless {orig : List Domain}
     {restored : BranchState leaf}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hreach : SupportedReach orig original props cfg)
     (hbs : ReachableState leaf orig cfg.branch)
     (hsnapSite : ∀ {ev' : ConflictEvidence} {an' : ConflictAnalysis}
@@ -1380,11 +1379,10 @@ theorem supportedHpre_of_unitRun_site_or_coverless {orig : List Domain}
         ∀ e₀ ∈ cfg'.branch.trail, e₀.level ≤ an'.backjumpLevel →
           ∀ e ∈ cfg'.branch.trail, an'.backjumpLevel < e.level →
             e₀.literal ≠ e.literal.negate.norm)
-    (hvSite : BranchTrailVocabulary orig cfg.branch)
     (hconf : cfg.conflict = some ev) (hana : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored) :
+        cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     RestorationPreReachable leaf orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch := by
@@ -1393,27 +1391,21 @@ theorem supportedHpre_of_unitRun_site_or_coverless {orig : List Domain}
       (hsnapSite hconf hana hcp) hbs
       (supportedHcert_of_site rfl hbs hreach.reachable hentSite hconf hana)
       (supportedHstable_of_reach hreach hconf hana)
-      (supportedHneg_of_unitRun hprops hSupp hreach hconf hana)
+      (supportedHneg_of_unitRun hprops hSupp hgate hreach hconf hana)
       (supportedHsurv_of_site hreach
         (supportedHcert_of_site rfl hbs hreach.reachable hentSite)
         hconf hana hcp)
-      (supportedHfresh_of_site rfl hbs hreach hinhab hconf hana hcp)
-      (supportedHrange_of_site rfl hbs hreach.reachable hvSite hconf hana)
+      (supportedHrange_of_run hreach hconf hana)
       hp
   · exact restorationPreReachable_of_success_avoiding
       (hsnapSite hconf hana hcp) hbs
       (supportedHcert_of_site rfl hbs hreach.reachable hentSite hconf hana)
       (supportedHstable_of_reach hreach hconf hana)
-      (supportedHneg_of_unitRun hprops hSupp hreach hconf hana)
+      (supportedHneg_of_unitRun hprops hSupp hgate hreach hconf hana)
       (supportedHsurv_of_site hreach
         (supportedHcert_of_site rfl hbs hreach.reachable hentSite)
         hconf hana hcp)
-      (supportedHfresh_of_site_levelSeparated hreach
-        (fun hc ha => supportedHcert_of_site rfl hbs hreach.reachable hentSite hc ha)
-        hsnapSite
-        (fun hc ha => hsepF hreach hc ha hcov)
-        hconf hana hcp)
-      (supportedHrange_of_site rfl hbs hreach.reachable hvSite hconf hana)
+      (supportedHrange_of_run hreach hconf hana)
       hp
 
 end LeanFzn.Solver.UIP

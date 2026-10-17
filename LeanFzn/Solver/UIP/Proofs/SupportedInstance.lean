@@ -19,7 +19,7 @@ residual, with OWNER)
 | `hplanU`                | `supportedHplanU_of_unitRun` (SupportedDead §6, N1)           | none (unit kit) |
 | `hlevel`                | `supportedHlevel_of_reach` (SupportedProviders §5)            | none |
 | `hpin`/`hskip`/`hpinSkip`| `supportedPinGates_of_shape` (SupportedProviders §1; inside the assembly) | `hshape` — F1 compiled shape (`shapeTypedDomains_of_compileModel_toLCG`) |
-| `hpre`                  | `supportedHpre_of_unitRun_site_or_coverless` (HdeadCkpt §11)  | `hAnalysisEntail` (I1-B), `hinhabOr` (C2a, PREMISE-FREE), `hsepF` (C2c), `hv` (C1) |
+| `hpre`                  | `supportedHpre_of_unitRun_site_or_coverless` (HdeadCkpt §11)  | `hAnalysisEntail` (I1-B), `hinhabOr` (C2a, PREMISE-FREE), `hsepF` (C2c); `hrange` premise-free (C2b, `TrailSlotRange`) |
 | (joint `hbr`)           | §0 `supportedReachEvidenceChain_of_premises` (this file)      | NONE — the four-component induction |
 | (site snapshots)        | §0 chain component `(J hreach).2.2.2`                         | NONE |
 | (joint `hentEv`)        | §0 entailment component `(J hreach).2.1`                      | NONE |
@@ -102,9 +102,6 @@ marker):
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
             e₀.literal ≠ e.literal.negate.norm
-  hv :
-    ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch
 
 (plus the unit-kit equations `hprops : props = dcs.filterMap
 propagatorOfProved` and `hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true`).
@@ -144,11 +141,14 @@ C2a (PREMISE-FREE: `Proofs/SiteInhabited.lean`,
 `supportedInhabited_or_coverless`; it is an explicit argument here only
 because this file does not import `SiteInhabited`); `hsepF` — C2c
 (`Proofs/FreshCoverless.lean` §4/§5 + `HdeadCkpt` §11; the one genuine
-residual, exact sub-case documented above); `hv` — C1 (the landed-pool
-trail vocabulary; the unit kit's premise-free emission vocabulary is only
-the EXTENDED-pool one, `unitEmissionVocabulary_proved_litPoolExt`, so the
-landed-pool `hv` route needs the pool extension re-keyed into `hrange`,
-or a slot-range lemma at `litPoolExt`).
+residual, exact sub-case documented above). The former C1 premise `hv`
+(original-pool trail vocabulary) is ELIMINATED (C2b): it was only consumed
+by `hrange`, which is now the premise-free run fact
+`TrailSlotRange.supportedHrange_of_run`; `hv` itself is REFUTED along an
+actual run of a registered unit instance
+(`ExtendedPoolProducers.branchTrailVocabulary_refuted_on_run`). The proved
+extended-pool vocabulary along supported runs is
+`ExtendedPoolProducers.branchTrailVocabularyAt_litPoolExtIn_of_supportedRun`.
 
 NO `sorry`, NO custom axiom. Registration owes the umbrella import line
 `LeanFzn.Solver.UIP.Proofs.SupportedInstance` in `LeanFzn.Solver/LeanFzn.Solver.UIP.lean` (coordinator).
@@ -221,7 +221,7 @@ theorem supportedStepReachEvidenceChain_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch)
@@ -279,7 +279,7 @@ theorem supportedStepReachEvidenceChain_of_premises {orig : List Domain}
             cases hconf'
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 -- perform rejected → localExclude with the recorded payload
                 rw [ha] at hsucc
@@ -361,7 +361,7 @@ theorem supportedStepReachEvidenceChain_of_premises {orig : List Domain}
           cases hcs
       | cons f rest =>
           have hres := stepConsume_reachable_of_inv hpend hcs ih.1 ih.2.2.1
-            (SupportedReach.orig_eq hreach)
+            (SupportedReach.orig_eq hreach) (hclos hreach).leafFits
           refine ⟨hres, ?_, pendingSideInv_supportedStep hshape ih.1 hs' ih.2.2.1,
             ReachableCpSnapshots.of_sublist ih.2.2.2
               (stepConsume_checkpoints_sublist hpend hcs)⟩
@@ -382,8 +382,9 @@ theorem supportedStepReachEvidenceChain_of_premises {orig : List Domain}
       have hd' : explainedDeduction original props cfg.branch = some d := by
         rw [← SupportedReach.original_eq hreach, ← SupportedReach.props_eq hreach]
         exact hd
-      refine ⟨explainedDeduction_narrow_reachable (hclos hreach) ih.1
-        (hunit hreach) hd', ?_, pendingSideInv_supportedStep hshape ih.1 hs' ih.2.2.1,
+      refine ⟨stepPropagate_branch_reachable d (SupportedReach.orig_eq hreach)
+        (hclos hreach).leafFits (explainedDeduction_narrow_reachable (hclos hreach) ih.1
+        (hunit hreach) hd'), ?_, pendingSideInv_supportedStep hshape ih.1 hs' ih.2.2.1,
         ReachableCpSnapshots.of_sublist ih.2.2.2
           (by simpa only [stepPropagate]
             using List.Sublist.refl cfg.checkpoints)⟩
@@ -481,7 +482,7 @@ theorem supportedStepReachEvidenceChain_of_premises {orig : List Domain}
           simp only [successor_localExclude, Option.some.injEq] at hsucc
           subst hsucc
           have hspec := terminalResult_spec (hclos hreach) ih.1
-          rw [SupportedReach.original_eq hreach,
+          rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
             SupportedReach.props_eq hreach] at ht
           rw [ht] at hspec
           refine ⟨reachable_prepend_learned ih.1
@@ -515,7 +516,7 @@ theorem supportedStepReachEvidenceChain_of_premises {orig : List Domain}
             injection hconf' with hev
             subst hev
             have hspec := terminalResult_spec (hclos hreach) ih.1
-            rw [SupportedReach.original_eq hreach,
+            rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
               SupportedReach.props_eq hreach] at ht
             rw [ht] at hspec
             exact fun c' hc' a ha =>
@@ -525,7 +526,7 @@ theorem supportedStepReachEvidenceChain_of_premises {orig : List Domain}
       simp only [successor_localExclude, Option.some.injEq] at hsucc
       subst hsucc
       have hspec := terminalResult_spec (hclos hreach) ih.1
-      rw [SupportedReach.original_eq hreach,
+      rw [SupportedReach.orig_eq hreach, SupportedReach.original_eq hreach,
         SupportedReach.props_eq hreach] at ht
       rw [ht] at hspec
       refine ⟨reachable_prepend_learned ih.1
@@ -577,7 +578,7 @@ theorem supportedReachEvidenceChain_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch)
@@ -590,8 +591,8 @@ theorem supportedReachEvidenceChain_of_premises {orig : List Domain}
         ReachableCpSnapshots leaf orig cfg := by
   intro cfg hreach
   induction hreach with
-  | init =>
-      exact ⟨reachable_init leaf orig,
+  | init hent =>
+      exact ⟨reachable_seed leaf orig original hent,
         (fun {ev} hconf => absurd hconf (by simp [SchedulerConfig.init])),
         PendingSideInv.init orig original props,
         reachableCpSnapshots_init orig original props⟩
@@ -619,6 +620,7 @@ theorem supportedHpre_unitKit_of_site {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hsnapF : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         ReachableCpSnapshots leaf orig cfg)
@@ -629,9 +631,7 @@ theorem supportedHpre_unitKit_of_site {orig : List Domain}
       ev.analysis = some an → LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     ∀ {cfg : SchedulerConfig leaf} {cp : DecisionCheckpoint leaf}
       {ev : ConflictEvidence} {an : ConflictAnalysis}
       {restored : BranchState leaf},
@@ -640,15 +640,15 @@ theorem supportedHpre_unitKit_of_site {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
   fun {_cfg} {cp} {_ev} {_an} {_restored} hreach hbs hconf hana hcp hp =>
-    supportedHpre_of_unitRun_site hprops hSupp hreach hbs
+    supportedHpre_of_unitRun_site hprops hSupp hgate hreach hbs
       (hsnapF hreach cp (checkpointAt_mem hcp))
       (fun hc' ha' => hAnalysisEntail hreach hcontract hbs hc' ha')
-      (hinhab hreach) (hv hreach) hconf hana hcp hp
+      (hinhab hreach) hconf hana hcp hp
 
 /-- **THE UNIT-KIT `hpre` FIELD FROM SITE INGREDIENTS, HONEST FORM (I1)**:
 the `_or_coverless` twin of `supportedHpre_unitKit_of_site` — the refuted
@@ -656,14 +656,16 @@ site inhabitedness is replaced by C2a's PREMISE-FREE classification family
 `hinhabOr` and C2c's coverless-site level separation `hsepF`, wired through
 `HdeadCkpt.supportedHpre_of_unitRun_site_or_coverless` (§11). Every other
 site ingredient is unchanged: `hsnapF` supplies the site's checkpoint
-snapshot via `checkpointAt_mem`, `hAnalysisEntail` the site entailment,
-`hv` the site trail vocabulary. -/
+snapshot via `checkpointAt_mem`, `hAnalysisEntail` the site entailment;
+the asserting slot range is premise-free (`TrailSlotRange.supportedHrange_of_run`,
+C2b — the former `hv` premise is gone). -/
 theorem supportedHpre_unitKit_of_site_or_coverless {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hsnapF : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         ReachableCpSnapshots leaf orig cfg)
@@ -682,9 +684,7 @@ theorem supportedHpre_unitKit_of_site_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     ∀ {cfg : SchedulerConfig leaf} {cp : DecisionCheckpoint leaf}
       {ev : ConflictEvidence} {an : ConflictAnalysis}
       {restored : BranchState leaf},
@@ -693,16 +693,16 @@ theorem supportedHpre_unitKit_of_site_or_coverless {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
   fun {_cfg} {_cp} {_ev} {_an} {_restored} hreach hbs hconf hana hcp hp =>
-    supportedHpre_of_unitRun_site_or_coverless hprops hSupp hreach hbs
+    supportedHpre_of_unitRun_site_or_coverless hprops hSupp hgate hreach hbs
       (fun {_ev'} {_an'} {cp'} _hc' _ha' hcp' =>
         hsnapF hreach cp' (checkpointAt_mem hcp'))
       (fun hc' ha' => hAnalysisEntail hreach hcontract hbs hc' ha')
-      hinhabOr hsepF (hv hreach) hconf hana hcp hp
+      hinhabOr hsepF hconf hana hcp hp
 
 /-! ## §2 The wired unit-kit instance -/
 
@@ -732,7 +732,7 @@ structure SupportedUnitKit (orig : List Domain) (original : List Clause)
     ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = none →
+        cfg.branch cfg.orig cfg.original cfg.props = none →
       DeadRegion.Sound leaf (checkpointRegion cp)
   /-- the jump successor's coverage gate (J2) -/
   hbc : ∀ {cfg : SchedulerConfig leaf} {cp : DecisionCheckpoint leaf}
@@ -742,7 +742,7 @@ structure SupportedUnitKit (orig : List Domain) (original : List Clause)
     ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
       BackjumpCovers leaf orig cfg
         (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
@@ -776,6 +776,7 @@ theorem supportedUnitKit_of_premises {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -783,9 +784,7 @@ theorem supportedUnitKit_of_premises {orig : List Domain}
       ev.analysis = some an → LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedUnitKit orig original props leaf := by
   -- the closure contract at the two spellings the producers take
   have hclosF : ∀ {cfg : SchedulerConfig leaf},
@@ -801,13 +800,13 @@ theorem supportedUnitKit_of_premises {orig : List Domain}
   -- N1's unit-discipline trio (SupportedDead §6)
   have hunit : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → UnitDB cfg.branch.learned :=
-    supportedHunit_of_unitRun hprops hSupp
+    supportedHunit_of_unitRun hprops hSupp hgate
   have hpay : UnitPayload original props :=
     supportedHpay_of_unitRun hprops hSupp
   have hplanU : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       cfg.conflict = some ev → ev.analysis = some an → UnitDB [an.learned] :=
-    supportedHplanU_of_unitRun hprops hSupp
+    supportedHplanU_of_unitRun hprops hSupp hgate
   -- the extended-`hpre` site producer: the four-component induction below
   -- supplies the site's snapshot (`ih.2.2.2`) and the site entailment is
   -- I1-B's bridge at the site's own ReachableState
@@ -820,14 +819,14 @@ theorem supportedUnitKit_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
     fun hreach hbs hsnapS hc ha hcp hp =>
-      supportedHpre_of_unitRun_site hprops hSupp hreach hbs hsnapS
+      supportedHpre_of_unitRun_site hprops hSupp hgate hreach hbs hsnapS
         (fun hc' ha' => hAnalysisEntail hreach hcontract hbs hc' ha')
-        (hinhab hreach) (hv hreach) hc ha hcp hp
+        (hinhab hreach) hc ha hcp hp
   -- THE FOUR-COMPONENT JOINT INDUCTION (I1): reachability, evidence
   -- entailment, PendingSideInv AND the checkpoint-snapshot chain
   have J : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
@@ -863,12 +862,12 @@ theorem supportedUnitKit_of_premises {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
-    supportedHpre_unitKit_of_site hcontract hprops hSupp hsnapF
-      hAnalysisEntail hinhab hv
+    supportedHpre_unitKit_of_site hcontract hprops hSupp hgate hsnapF
+      hAnalysisEntail hinhab
   -- E1 (HdeadCkpt §9) and its L1 dispatcher consumption
   have hdeadCkpt : ∀ {cfg : SchedulerConfig leaf} {cp : DecisionCheckpoint leaf}
       {ev : ConflictEvidence} {an : ConflictAnalysis},
@@ -876,7 +875,7 @@ theorem supportedUnitKit_of_premises {orig : List Domain}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp) :=
     supportedHdeadCheckpointRegion_of_reach hbrF hent
   have hnew : SupportedNewRegionsSound orig original props leaf :=
@@ -894,7 +893,7 @@ theorem supportedUnitKit_of_premises {orig : List Domain}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         BackjumpCovers leaf orig cfg
           (stepLearnBackjumpAssert cfg
             (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
@@ -939,6 +938,7 @@ theorem supportedUnitKit_of_premises_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -954,9 +954,7 @@ theorem supportedUnitKit_of_premises_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedUnitKit orig original props leaf := by
   -- the closure contract at the two spellings the producers take
   have hclosF : ∀ {cfg : SchedulerConfig leaf},
@@ -972,13 +970,13 @@ theorem supportedUnitKit_of_premises_or_coverless {orig : List Domain}
   -- N1's unit-discipline trio (SupportedDead §6)
   have hunit : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg → UnitDB cfg.branch.learned :=
-    supportedHunit_of_unitRun hprops hSupp
+    supportedHunit_of_unitRun hprops hSupp hgate
   have hpay : UnitPayload original props :=
     supportedHpay_of_unitRun hprops hSupp
   have hplanU : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       cfg.conflict = some ev → ev.analysis = some an → UnitDB [an.learned] :=
-    supportedHplanU_of_unitRun hprops hSupp
+    supportedHplanU_of_unitRun hprops hSupp hgate
   -- the extended-`hpre` site producer: the site's checkpoint-at family is
   -- the single site snapshot transported along conflict/analysis/checkpoint
   -- single-valuedness; the site entailment is I1-B's bridge
@@ -991,12 +989,12 @@ theorem supportedUnitKit_of_premises_or_coverless {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
     fun hreach hbs hsnapS hc ha hcp hp =>
-      supportedHpre_of_unitRun_site_or_coverless hprops hSupp hreach hbs
+      supportedHpre_of_unitRun_site_or_coverless hprops hSupp hgate hreach hbs
         (fun {_ev'} {_an'} {_cp'} _hc' _ha' hcp' => by
           have hev := Option.some.inj (_hc'.symm.trans hc)
           rw [hev] at _ha'
@@ -1006,7 +1004,7 @@ theorem supportedUnitKit_of_premises_or_coverless {orig : List Domain}
           rw [hck]
           exact hsnapS)
         (fun hc' ha' => hAnalysisEntail hreach hcontract hbs hc' ha')
-        hinhabOr hsepF (hv hreach) hc ha hcp hp
+        hinhabOr hsepF hc ha hcp hp
   -- THE FOUR-COMPONENT JOINT INDUCTION (I1): reachability, evidence
   -- entailment, PendingSideInv AND the checkpoint-snapshot chain
   have J : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
@@ -1042,12 +1040,12 @@ theorem supportedUnitKit_of_premises_or_coverless {orig : List Domain}
       cfg.conflict = some ev → ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         RestorationPreReachable leaf orig
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
           cfg.branch :=
-    supportedHpre_unitKit_of_site_or_coverless hcontract hprops hSupp hsnapF
-      hAnalysisEntail hinhabOr hsepF hv
+    supportedHpre_unitKit_of_site_or_coverless hcontract hprops hSupp hgate hsnapF
+      hAnalysisEntail hinhabOr hsepF
   -- E1 (HdeadCkpt §9) and its L1 dispatcher consumption
   have hdeadCkpt : ∀ {cfg : SchedulerConfig leaf} {cp : DecisionCheckpoint leaf}
       {ev : ConflictEvidence} {an : ConflictAnalysis},
@@ -1055,7 +1053,7 @@ theorem supportedUnitKit_of_premises_or_coverless {orig : List Domain}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = none →
+          cfg.branch cfg.orig cfg.original cfg.props = none →
         DeadRegion.Sound leaf (checkpointRegion cp) :=
     supportedHdeadCheckpointRegion_of_reach hbrF hent
   have hnew : SupportedNewRegionsSound orig original props leaf :=
@@ -1073,7 +1071,7 @@ theorem supportedUnitKit_of_premises_or_coverless {orig : List Domain}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
         BackjumpCovers leaf orig cfg
           (stepLearnBackjumpAssert cfg
             (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
@@ -1115,6 +1113,7 @@ theorem supportedCoreGates_unitKit {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1122,12 +1121,10 @@ theorem supportedCoreGates_unitKit {orig : List Domain}
       ev.analysis = some an → LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedArmInvGatesCore orig original props leaf :=
-  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hAnalysisEntail
-    hinhab hv).core
+  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hgate hAnalysisEntail
+    hinhab).core
 
 /-- **THE CONCRETE CORE-GATE INSTANTIATION, HONEST FORM (I1 acceptance)**:
 the `_or_coverless` twin of `supportedCoreGates_unitKit` — C2a's
@@ -1141,6 +1138,7 @@ theorem supportedCoreGates_unitKit_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1156,12 +1154,10 @@ theorem supportedCoreGates_unitKit_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedArmInvGatesCore orig original props leaf :=
-  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp
-    hAnalysisEntail hinhabOr hsepF hv).core
+  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp hgate
+    hAnalysisEntail hinhabOr hsepF).core
 
 /-- The shape-typed variant: `SupportedInput` (F1's compiled-input record)
 supplies the shape discipline; the closure contract is still P1's
@@ -1175,6 +1171,7 @@ theorem supportedCoreGates_unitKit_of_supportedInput {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1182,12 +1179,10 @@ theorem supportedCoreGates_unitKit_of_supportedInput {orig : List Domain}
       ev.analysis = some an → LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedArmInvGatesCore orig original props leaf :=
-  supportedCoreGates_unitKit hin.shape hcontract hprops hSupp hAnalysisEntail
-    hinhab hv
+  supportedCoreGates_unitKit hin.shape hcontract hprops hSupp hgate hAnalysisEntail
+    hinhab
 
 /-- The shape-typed variant, honest form: `SupportedInput` supplies the
 shape discipline, C2a's `hinhabOr` + C2c's `hsepF` replace the refuted
@@ -1199,6 +1194,7 @@ theorem supportedCoreGates_unitKit_of_supportedInput_or_coverless {orig : List D
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1214,12 +1210,10 @@ theorem supportedCoreGates_unitKit_of_supportedInput_or_coverless {orig : List D
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedArmInvGatesCore orig original props leaf :=
-  supportedCoreGates_unitKit_or_coverless hin.shape hcontract hprops hSupp
-    hAnalysisEntail hinhabOr hsepF hv
+  supportedCoreGates_unitKit_or_coverless hin.shape hcontract hprops hSupp hgate
+    hAnalysisEntail hinhabOr hsepF
 
 /-! ## §3 The derived run-level exports (for C2/W1)
 
@@ -1237,6 +1231,7 @@ theorem supportedNewRegionsSound_unitKit {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1244,12 +1239,10 @@ theorem supportedNewRegionsSound_unitKit {orig : List Domain}
       ev.analysis = some an → LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedNewRegionsSound orig original props leaf :=
-  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hAnalysisEntail
-    hinhab hv).hnew
+  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hgate hAnalysisEntail
+    hinhab).hnew
 
 /-- The registration-site dispatcher (L1), honest form: C2a's `hinhabOr`
 plus C2c's `hsepF` in place of the refuted `hinhab`. -/
@@ -1260,6 +1253,7 @@ theorem supportedNewRegionsSound_unitKit_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1275,12 +1269,10 @@ theorem supportedNewRegionsSound_unitKit_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedNewRegionsSound orig original props leaf :=
-  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp
-    hAnalysisEntail hinhabOr hsepF hv).hnew
+  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp hgate
+    hAnalysisEntail hinhabOr hsepF).hnew
 
 /-- The unit kit's run-level exhaustion-log soundness (L1 × the run
 induction `supportedLogSound_of_newRegions`).
@@ -1293,6 +1285,7 @@ theorem supportedLogSound_unitKit {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1300,13 +1293,11 @@ theorem supportedLogSound_unitKit {orig : List Domain}
       ev.analysis = some an → LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ExhaustionLog.Sound leaf cfg.log :=
-  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hAnalysisEntail
-    hinhab hv).hlog
+  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hgate hAnalysisEntail
+    hinhab).hlog
 
 /-- The run-level exhaustion-log soundness, honest form. -/
 theorem supportedLogSound_unitKit_or_coverless {orig : List Domain}
@@ -1316,6 +1307,7 @@ theorem supportedLogSound_unitKit_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1331,13 +1323,11 @@ theorem supportedLogSound_unitKit_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ExhaustionLog.Sound leaf cfg.log :=
-  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp
-    hAnalysisEntail hinhabOr hsepF hv).hlog
+  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp hgate
+    hAnalysisEntail hinhabOr hsepF).hlog
 
 /-- The unit kit's run-level dead-site evidence (E1 §4).
 
@@ -1349,6 +1339,7 @@ theorem supportedDeadEvidence_unitKit {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1356,12 +1347,10 @@ theorem supportedDeadEvidence_unitKit {orig : List Domain}
       ev.analysis = some an → LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedDeadEvidence orig original props leaf :=
-  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hAnalysisEntail
-    hinhab hv).hdeadEv
+  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hgate hAnalysisEntail
+    hinhab).hdeadEv
 
 /-- The run-level dead-site evidence (E1 §4), honest form. -/
 theorem supportedDeadEvidence_unitKit_or_coverless {orig : List Domain}
@@ -1371,6 +1360,7 @@ theorem supportedDeadEvidence_unitKit_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1386,12 +1376,10 @@ theorem supportedDeadEvidence_unitKit_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedDeadEvidence orig original props leaf :=
-  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp
-    hAnalysisEntail hinhabOr hsepF hv).hdeadEv
+  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp hgate
+    hAnalysisEntail hinhabOr hsepF).hdeadEv
 
 /-- The unit kit's consume-successor invariant (R2 §2-ter, `hcov`
 discharged internally).
@@ -1404,6 +1392,7 @@ theorem supportedHconsumeInv_unitKit {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1411,15 +1400,13 @@ theorem supportedHconsumeInv_unitKit {orig : List Domain}
       ev.analysis = some an → LearnedEntailed leaf [an.learned])
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
       {rest : List BranchFrame}, SupportedReach orig original props cfg →
       cfg.status = .dead → cfg.pending = f :: rest → stepConsume cfg = some next →
         SchedulerInvariant next :=
-  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hAnalysisEntail
-    hinhab hv).hconsumeInv
+  (supportedUnitKit_of_premises hshape hcontract hprops hSupp hgate hAnalysisEntail
+    hinhab).hconsumeInv
 
 /-- The consume-successor invariant (R2 §2-ter), honest form. -/
 theorem supportedHconsumeInv_unitKit_or_coverless {orig : List Domain}
@@ -1429,6 +1416,7 @@ theorem supportedHconsumeInv_unitKit_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hAnalysisEntail : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
@@ -1444,15 +1432,13 @@ theorem supportedHconsumeInv_unitKit_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
       {rest : List BranchFrame}, SupportedReach orig original props cfg →
       cfg.status = .dead → cfg.pending = f :: rest → stepConsume cfg = some next →
         SchedulerInvariant next :=
-  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp
-    hAnalysisEntail hinhabOr hsepF hv).hconsumeInv
+  (supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp hgate
+    hAnalysisEntail hinhabOr hsepF).hconsumeInv
 
 /-! ## §4 Integration (coordinator): the I1-B entailment bridge plugged in
 
@@ -1467,8 +1453,8 @@ their own entailment derivation.
 The `*_discharged` wrappers still carry the REFUTED `hinhab`; the
 supported interfaces are the `*_discharged_or_coverless` twins, whose
 residuals are exactly `hinhabOr` (PREMISE-FREE — pass
-`fun _ => SiteInhabited.supportedInhabited_or_coverless`), `hsepF` (C2)
-and `hv` (C1). -/
+`fun _ => SiteInhabited.supportedInhabited_or_coverless`) and `hsepF`
+(C2c); the former `hv` (C1) is discharged inside (C2b). -/
 
 /-- The `hAnalysisEntail` premise of §1–§3, discharged from the unit kit
 by I1-B's bridge (`Proofs/AnalysisEntail.lean`). -/
@@ -1476,18 +1462,19 @@ theorem hAnalysisEntail_unitKit_of {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props) :
     ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
       ReachableState leaf orig cfg.branch → cfg.conflict = some ev →
       ev.analysis = some an → LearnedEntailed leaf [an.learned] :=
   fun hreach hcontract hbs hc ha =>
-    hAnalysisEntail_unitKit hprops hSupp hreach hcontract hbs hc ha
+    hAnalysisEntail_unitKit hprops hSupp hgate hreach hcontract hbs hc ha
 
 /-- **THE UNIT-KIT INSTANCE, ENTAILMENT DISCHARGED**: `SupportedUnitKit`
 from the kit equations, the compiled shape/closure inputs and the named
-residuals (`hinhab` — C2; `hv` — C1) only.
+residual `hinhab` (C2) only.
 
 REFUTED premise (`SiteInhabited.cexNotAllSites`); use the `_or_coverless` variant. -/
 theorem supportedUnitKit_unitKit_discharged {orig : List Domain}
@@ -1497,17 +1484,16 @@ theorem supportedUnitKit_unitKit_discharged {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedUnitKit orig original props leaf :=
-  supportedUnitKit_of_premises hshape hcontract hprops hSupp
-    (hAnalysisEntail_unitKit_of hprops hSupp) hinhab hv
+  supportedUnitKit_of_premises hshape hcontract hprops hSupp hgate
+    (hAnalysisEntail_unitKit_of hprops hSupp hgate) hinhab
 
 /-- **THE UNIT-KIT INSTANCE, ENTAILMENT DISCHARGED, HONEST FORM**: the
-residuals are `hinhabOr` (PREMISE-FREE) + `hsepF` (C2) + `hv` (C1). -/
+residuals are `hinhabOr` (PREMISE-FREE) + `hsepF` (C2c). -/
 theorem supportedUnitKit_unitKit_discharged_or_coverless {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
@@ -1515,6 +1501,7 @@ theorem supportedUnitKit_unitKit_discharged_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhabOr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         (∃ a : Assignment, FrameCovers cfg.branch.frame a) ∨
@@ -1525,12 +1512,10 @@ theorem supportedUnitKit_unitKit_discharged_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedUnitKit orig original props leaf :=
-  supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp
-    (hAnalysisEntail_unitKit_of hprops hSupp) hinhabOr hsepF hv
+  supportedUnitKit_of_premises_or_coverless hshape hcontract hprops hSupp hgate
+    (hAnalysisEntail_unitKit_of hprops hSupp hgate) hinhabOr hsepF
 
 /-- **THE CONCRETE CORE-GATE INSTANTIATION, ENTAILMENT DISCHARGED**
 (I1 acceptance): the eight-input assembly's record with I1-B's bridge
@@ -1545,14 +1530,13 @@ theorem supportedCoreGates_unitKit_discharged {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedArmInvGatesCore orig original props leaf :=
-  supportedCoreGates_unitKit hshape hcontract hprops hSupp
-    (hAnalysisEntail_unitKit_of hprops hSupp) hinhab hv
+  supportedCoreGates_unitKit hshape hcontract hprops hSupp hgate
+    (hAnalysisEntail_unitKit_of hprops hSupp hgate) hinhab
 
 /-- The eight-input assembly's record, entailment discharged, honest form. -/
 theorem supportedCoreGates_unitKit_discharged_or_coverless {orig : List Domain}
@@ -1562,6 +1546,7 @@ theorem supportedCoreGates_unitKit_discharged_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhabOr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         (∃ a : Assignment, FrameCovers cfg.branch.frame a) ∨
@@ -1572,12 +1557,10 @@ theorem supportedCoreGates_unitKit_discharged_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedArmInvGatesCore orig original props leaf :=
-  supportedCoreGates_unitKit_or_coverless hshape hcontract hprops hSupp
-    (hAnalysisEntail_unitKit_of hprops hSupp) hinhabOr hsepF hv
+  supportedCoreGates_unitKit_or_coverless hshape hcontract hprops hSupp hgate
+    (hAnalysisEntail_unitKit_of hprops hSupp hgate) hinhabOr hsepF
 
 /-- The registration-site dispatcher, entailment discharged.
 
@@ -1589,14 +1572,13 @@ theorem supportedNewRegionsSound_unitKit_discharged {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedNewRegionsSound orig original props leaf :=
-  (supportedUnitKit_unitKit_discharged hshape hcontract hprops hSupp
-    hinhab hv).hnew
+  (supportedUnitKit_unitKit_discharged hshape hcontract hprops hSupp hgate
+    hinhab).hnew
 
 /-- The registration-site dispatcher, entailment discharged, honest form. -/
 theorem supportedNewRegionsSound_unitKit_discharged_or_coverless {orig : List Domain}
@@ -1606,6 +1588,7 @@ theorem supportedNewRegionsSound_unitKit_discharged_or_coverless {orig : List Do
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhabOr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         (∃ a : Assignment, FrameCovers cfg.branch.frame a) ∨
@@ -1616,12 +1599,10 @@ theorem supportedNewRegionsSound_unitKit_discharged_or_coverless {orig : List Do
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedNewRegionsSound orig original props leaf :=
   (supportedUnitKit_unitKit_discharged_or_coverless hshape hcontract hprops
-    hSupp hinhabOr hsepF hv).hnew
+    hSupp hgate hinhabOr hsepF).hnew
 
 /-- The run-level exhaustion-log soundness, entailment discharged.
 
@@ -1633,15 +1614,14 @@ theorem supportedLogSound_unitKit_discharged {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ExhaustionLog.Sound leaf cfg.log :=
-  (supportedUnitKit_unitKit_discharged hshape hcontract hprops hSupp
-    hinhab hv).hlog
+  (supportedUnitKit_unitKit_discharged hshape hcontract hprops hSupp hgate
+    hinhab).hlog
 
 /-- The run-level exhaustion-log soundness, entailment discharged, honest
 form. -/
@@ -1652,6 +1632,7 @@ theorem supportedLogSound_unitKit_discharged_or_coverless {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhabOr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         (∃ a : Assignment, FrameCovers cfg.branch.frame a) ∨
@@ -1662,13 +1643,11 @@ theorem supportedLogSound_unitKit_discharged_or_coverless {orig : List Domain}
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       ExhaustionLog.Sound leaf cfg.log :=
   (supportedUnitKit_unitKit_discharged_or_coverless hshape hcontract hprops
-    hSupp hinhabOr hsepF hv).hlog
+    hSupp hgate hinhabOr hsepF).hlog
 
 /-- The run-level dead-site evidence, entailment discharged.
 
@@ -1680,14 +1659,13 @@ theorem supportedDeadEvidence_unitKit_discharged {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     SupportedDeadEvidence orig original props leaf :=
-  (supportedUnitKit_unitKit_discharged hshape hcontract hprops hSupp
-    hinhab hv).hdeadEv
+  (supportedUnitKit_unitKit_discharged hshape hcontract hprops hSupp hgate
+    hinhab).hdeadEv
 
 /-- The run-level dead-site evidence, entailment discharged, honest form. -/
 theorem supportedDeadEvidence_unitKit_discharged_or_coverless {orig : List Domain}
@@ -1697,6 +1675,7 @@ theorem supportedDeadEvidence_unitKit_discharged_or_coverless {orig : List Domai
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhabOr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         (∃ a : Assignment, FrameCovers cfg.branch.frame a) ∨
@@ -1707,12 +1686,10 @@ theorem supportedDeadEvidence_unitKit_discharged_or_coverless {orig : List Domai
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     SupportedDeadEvidence orig original props leaf :=
   (supportedUnitKit_unitKit_discharged_or_coverless hshape hcontract hprops
-    hSupp hinhabOr hsepF hv).hdeadEv
+    hSupp hgate hinhabOr hsepF).hdeadEv
 
 /-- The consume-successor invariant, entailment discharged.
 
@@ -1724,17 +1701,16 @@ theorem supportedHconsumeInv_unitKit_discharged {orig : List Domain}
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhab : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
-        ∃ a : Assignment, FrameCovers cfg.branch.frame a)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+        ∃ a : Assignment, FrameCovers cfg.branch.frame a) :
     ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
       {rest : List BranchFrame}, SupportedReach orig original props cfg →
       cfg.status = .dead → cfg.pending = f :: rest → stepConsume cfg = some next →
         SchedulerInvariant next :=
-  (supportedUnitKit_unitKit_discharged hshape hcontract hprops hSupp
-    hinhab hv).hconsumeInv
+  (supportedUnitKit_unitKit_discharged hshape hcontract hprops hSupp hgate
+    hinhab).hconsumeInv
 
 /-- The consume-successor invariant, entailment discharged, honest form. -/
 theorem supportedHconsumeInv_unitKit_discharged_or_coverless {orig : List Domain}
@@ -1744,6 +1720,7 @@ theorem supportedHconsumeInv_unitKit_discharged_or_coverless {orig : List Domain
     (hcontract : ClosureContract leaf orig original props)
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     (hinhabOr : ∀ {cfg : SchedulerConfig leaf},
       SupportedReach orig original props cfg →
         (∃ a : Assignment, FrameCovers cfg.branch.frame a) ∨
@@ -1754,14 +1731,12 @@ theorem supportedHconsumeInv_unitKit_discharged_or_coverless {orig : List Domain
       ev.analysis = some an → (∃ d ∈ cfg.branch.frame.1, d = []) →
         ∀ e₀ ∈ cfg.branch.trail, e₀.level ≤ an.backjumpLevel →
           ∀ e ∈ cfg.branch.trail, an.backjumpLevel < e.level →
-            e₀.literal ≠ e.literal.negate.norm)
-    (hv : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
-      BranchTrailVocabulary orig cfg.branch) :
+            e₀.literal ≠ e.literal.negate.norm) :
     ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
       {rest : List BranchFrame}, SupportedReach orig original props cfg →
       cfg.status = .dead → cfg.pending = f :: rest → stepConsume cfg = some next →
         SchedulerInvariant next :=
   (supportedUnitKit_unitKit_discharged_or_coverless hshape hcontract hprops
-    hSupp hinhabOr hsepF hv).hconsumeInv
+    hSupp hgate hinhabOr hsepF).hconsumeInv
 
 end LeanFzn.Solver.UIP

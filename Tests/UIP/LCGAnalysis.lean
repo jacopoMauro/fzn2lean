@@ -106,6 +106,11 @@ private def multiTrail : List TrailEntry :=
 
 private def multiConflict : Clause := [negLe 1 7, negLe 2 9]
 
+/-- The original box of the fixture (R1a: the LCG analyzer's root drop reads
+it): four integer slots with domain `0..12`. -/
+private def multiOrig : List Domain :=
+  List.replicate 4 ((List.range 13).map fun k => Value.int (Int.ofNat k))
+
 /-- How many literals of `c` are falsified by a level-`lvl` trail entry. -/
 private def currentLevelLits (trail : List TrailEntry) (lvl : Nat)
     (c : Clause) : Nat :=
@@ -256,27 +261,28 @@ def main : IO UInt32 := do
   -- 9b. B1: the worklist is an explicit transition system, its two cost
   -- components are charged to the operations the analyzer performs, and
   -- the executable call uses the computed allowance.
-  st ← st.check "the executable fuel is never below the historical constant"
-    (historicalAllowance trail ≤ analysisFuel trail multiConflict &&
-     analysisAllowance trail multiConflict ≤ analysisFuel trail multiConflict)
-  st ← st.check "the computed-allowance entry point dominates analyzeTrail"
+  st ← st.check "the executable fuel exceeds the analyzer's initial potential"
+    (analyzerPotential trail (initAnalysisState multiConflict)
+      < analysisFuel trail multiConflict)
+  st ← st.check "the LCG analyzer agrees with analyzeTrail on this exact fixture"
     (analyzeTrail trail 3 multiConflict
-      == analyzeAtAllowance trail 3 multiConflict)
+      == analyzeAtAllowance multiOrig trail 3 multiConflict)
   let b1state : AnalyzerState :=
-    { work := [multiConflict], skip := none, marks := [], learnt := [] }
+    { work := [multiConflict], skip := none, bound := none, marks := [], learnt := [] }
   st ← st.check "the first transition scans one literal of the conflict clause"
-    (match analyzeNext trail 3 b1state with
+    (match analyzeNext multiOrig trail 3 b1state with
      | .done _ => false
      | .next st' => st'.work.length == 1 && scanCost st'.work < scanCost b1state.work)
+  st ← st.check "the first transition strictly decreases the potential"
+    (match analyzeNext multiOrig trail 3 b1state with
+     | .done _ => false
+     | .next st' => analyzerPotential trail st' < analyzerPotential trail b1state)
   st ← st.check "the transport loop is fuel-monotone: extra fuel is harmless"
-    (analyzeLoop trail 3 64 b1state == analyzeLoop trail 3 1024 b1state &&
-     analyzeLoop trail 3 64 b1state == analyzeTrail trail 3 multiConflict)
+    (analyzeLoop multiOrig trail 3 64 b1state == analyzeLoop multiOrig trail 3 1024 b1state &&
+     analyzeLoop multiOrig trail 3 64 b1state == analyzeTrail trail 3 multiConflict)
   st ← st.check "one worklist literal costs exactly one scan unit"
     (scanCost [multiConflict] == 1 + multiConflict.length &&
      scanCost ([] : List Clause) == 0)
-  -- `scanCost` charges one unit per clause plus one per literal, so
-  -- expanding a reason re-seeds the worklist at exactly that clause's own
-  -- cost, and the cost of a concatenated worklist is the sum of the parts.
   st ← st.check "an expanded reason is charged to the pivot round, not a scan"
     (scanCost [[negLe 1 7, negLe 2 9], [posLe 2 9]] == 5 &&
      scanCost [[posLe 2 9]] == 1 + 1 &&
@@ -285,69 +291,55 @@ def main : IO UInt32 := do
        == scanCost [[negLe 1 7, negLe 2 9]] + scanCost [[posLe 2 9]])
   st ← st.check "an empty clause transition strictly decreases the scan cost"
     (scanCost [multiConflict] < scanCost ([] :: [multiConflict]))
-  -- 9c. B1: the allowance is fully consumed by the fixture, i.e. the loop
-  -- reaches its verdict well inside the computed budget.
   st ← st.check "the computed budget is not exhausted on the fixture"
-    (analyzeLoop trail 3 (analysisFuel trail multiConflict) b1state
+    (analyzeLoop multiOrig trail 3 (analysisFuel trail multiConflict) b1state
       == analyzeTrail trail 3 multiConflict)
-  -- 9d. B2: the falsification obligations are DERIVED from the analyzer's
-  -- own output, not assumed. `analyzeTrail_belowFalsified` and
-  -- `analyzeTrail_uip_on_trail` say every recorded below-level pair names a
-  -- literal whose normalized negation is a trail entry, and the returned
-  -- first UIP is a trail literal at the analysis level. The checks below
-  -- mirror exactly those two theorems on the fixture.
-  st ← st.check "the recorded below-level pairs are trail-falsified"
-    (match analyzeTrail trail 3 multiConflict with
+  -- 9d. the falsification obligations are DERIVED from the analyzer's output
+  -- (`LcgLearntOk`, `analyzeAtAllowance_uip_on_trail`).
+  st ← st.check "the recorded below-level literals are trail-negations"
+    (match analyzeAtAllowance multiOrig trail 3 multiConflict with
      | none => false
      | some (below, _) =>
         below.all (fun p =>
-          trail.any (fun e => litEq e.literal (p.1.negate).norm)))
+          trail.any (fun e => litEq p.1 e.literal.negate.norm && e.level == p.2)))
   st ← st.check "the returned first UIP is a current-level trail literal"
-    (match analyzeTrail trail 3 multiConflict with
+    (match analyzeAtAllowance multiOrig trail 3 multiConflict with
      | none => false
      | some (_, uip) =>
         trail.any (fun e => litEq e.literal uip && e.level == 3))
   st ← st.check "the UIP is the level-3 mark `x1 ≤ 7`, not the level-2 one"
-    (match analyzeTrail trail 3 multiConflict with
+    (match analyzeAtAllowance multiOrig trail 3 multiConflict with
      | none => false
      | some (_, uip) => litEq uip (posLe 1 7))
-  -- 9e. B2 certificate: the recorded pairs, their levels and the computed
-  -- target are exactly what `analyzeTrail_certificate` consumes — a
-  -- below-level falsifier strictly under the conflict level, and a target
-  -- equal to the maximum recorded level.
   st ← st.check "the recorded below-level pair names the level-1 falsifier"
-    (match analyzeTrail trail 3 multiConflict with
+    (match analyzeAtAllowance multiOrig trail 3 multiConflict with
      | none => false
      | some (below, _) =>
         !below.isEmpty && below.all (fun p => p.2 < 3) &&
         below.any (fun p => p.2 == 1 && litEq p.1 (negLe 0 5)))
   st ← st.check "the certificate target is below the conflict level and above
       the surviving falsifiers"
-    (match analyzeTrail trail 3 multiConflict with
+    (match analyzeAtAllowance multiOrig trail 3 multiConflict with
      | none => false
      | some (below, _) =>
         let target := below.foldl (fun acc p => max acc p.2) 0
         target < 3 && below.all (fun p => p.2 ≤ target))
-  -- 9f. B1: the executable fuel covers the analyzer's transition budget
-  -- (one unit per worklist literal ever held, plus one per pivot round).
-  st ← st.check "the executable fuel covers the transition budget"
-    (transitionBudget trail multiConflict ≤ analysisFuel trail multiConflict &&
-     transitionBudget trail multiConflict ≤ analysisAllowance trail multiConflict)
-  st ← st.check "the transition budget charges the conflict clause and the trail"
-    (transitionBudget trail multiConflict ==
-      reasonBudget trail multiConflict + trail.length)
-  -- 9g. B1 final step: the trace records the transitions, its result is the
-  -- loop's, and the initial measure fits inside the executable fuel — so the
-  -- fuel is never what stops the analysis.
-  st ← st.check "the trace records transitions and agrees with the loop"
-    (match analyzeTrace trail 3 64 (initAnalysisState multiConflict) with
+  -- 9e. R1a fixes: root drop, semantic weakening, bounded reason falsifiers.
+  st ← st.check "root: a literal false under the original domains is dropped"
+    (analyzeAtAllowance multiOrig trail 3 (negLe 3 12 :: multiConflict)
+      == analyzeAtAllowance multiOrig trail 3 multiConflict)
+  st ← st.check "sem: x0 > 7 is falsified by the earlier entry x0 ≤ 5 and learnt as x0 > 5"
+    (match analyzeAtAllowance multiOrig trail 3 [negLe 1 7, negLe 0 7] with
+     | none => false
+     | some (below, uip) =>
+        litEq uip (posLe 1 7) && below.length == 1 &&
+        below.all (fun p => litEq p.1 (negLe 0 5) && p.2 == 1))
+  st ← st.check "trace records transitions and agrees with the loop"
+    (match analyzeTrace multiOrig trail 3 64 (initAnalysisState multiConflict) with
      | none => false
      | some (k, r) =>
         0 < k && k ≤ 64 &&
-        decide (r = analyzeLoop trail 3 64 (initAnalysisState multiConflict)))
-  st ← st.check "the initial measure plus one fits the executable fuel"
-    (roundCost trail (initAnalysisState multiConflict) + 1
-      ≤ analysisFuel trail multiConflict)
+        decide (r = analyzeLoop multiOrig trail 3 64 (initAnalysisState multiConflict)))
   st ← st.check "worklist costs: scan, drop-empty, seed, nil"
     (workCost [multiConflict] == 1 + multiConflict.length &&
      workCost ([] : List Clause) == 0 &&
@@ -450,7 +442,7 @@ def main : IO UInt32 := do
   -- 15. A2 closure: the run keeps one coherent state (frame, trail and
   -- learned database move together), reaches a fixpoint, and never visits
   -- a state whose deduction was not the one it recorded.
-  let closureUnit := explainedClosure [] [] bsUnit
+  let closureUnit := explainedClosure [] [] [] bsUnit
   st ← st.check "the closure narrows the frame, records one entry, keeps the DB"
     (closureUnit.frame == ([[vi 0, vi 1]], []) &&
      closureUnit.trail.length == 1 &&
@@ -464,11 +456,11 @@ def main : IO UInt32 := do
       | none => false
       | some r => litEqs r.clause [posLe 0 1]))
   st ← st.check "the closure reaches a fixpoint: a second run adds nothing"
-    (stateEq (explainedClosure [] [] closureUnit) closureUnit)
+    (stateEq (explainedClosure [] [] [] closureUnit) closureUnit)
   st ← st.check "a stable state is returned unchanged by the closure"
-    (stateEq (explainedClosure [] [] bsA) bsA)
+    (stateEq (explainedClosure [] [] [] bsA) bsA)
   st ← st.check "the closure of a dead local branch records no entry"
-    (stateEq (explainedClosure [] [] bsDead) bsDead)
+    (stateEq (explainedClosure [] [] [] bsDead) bsDead)
   st ← st.check "the closure step agrees with the deduction it selected"
     (match explainedDeduction [] [] bsUnit with
      | none => false
@@ -490,7 +482,7 @@ def main : IO UInt32 := do
     { frame := ([[vi 1, vi 2]], []),
       trail := [imp (posNe 0 0) 0 freshClause],
       level := 0, learned := [freshClause] }
-  let closureFresh := explainedClosure [] [freshProp] bsFresh
+  let closureFresh := explainedClosure [] [] [freshProp] bsFresh
   st ← st.check "a fresh CP reason narrows the frame and learns its clause once"
     (stateEq closureFresh freshExpected)
   st ← st.check "the learned database gained exactly the fresh reason clause"
@@ -503,7 +495,7 @@ def main : IO UInt32 := do
        | none => false
        | some r => litEqs r.clause freshClause))
   st ← st.check "the closure is again at a fixpoint after the fresh reason"
-    (stateEq (explainedClosure [] [freshProp] closureFresh) closureFresh)
+    (stateEq (explainedClosure [] [] [freshProp] closureFresh) closureFresh)
   -- 16b. Contrast: a DATABASE-sourced unit deduction (`scanDatabase`) carries
   -- `learnReason = false` — the clause is already globally known through the
   -- learned database — so it never re-learns the clause, even when `original`
@@ -514,7 +506,7 @@ def main : IO UInt32 := do
     { frame := ([[vi 0]], []),
       trail := [dec (posLe 0 1) 0, imp (negNe 0 0) 0 [negNe 0 0]],
       level := 0, learned := [[negNe 0 0]] }
-  let closureDb := explainedClosure [] [] bsP
+  let closureDb := explainedClosure [] [] [] bsP
   st ← st.check "a database-sourced unit narrows but learns nothing new"
     (stateEq closureDb dbExpected &&
      closureDb.learned.length == 1 &&

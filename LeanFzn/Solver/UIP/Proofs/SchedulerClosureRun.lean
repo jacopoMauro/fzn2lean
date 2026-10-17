@@ -109,12 +109,13 @@ configuration's contract, up to the definitional projections of
 provider (`domExplainedContract`). -/
 theorem closureContract_init {leaf : Assignment → Bool}
     {orig : List Domain} {original : List Clause} {props : List Propagator}
-    (h0 : ClosureContract leaf orig original props) :
+    (h0 : ClosureContract leaf orig original props)
+    (hent : LearnedEntailed leaf original) :
     ClosureContract leaf
       (SchedulerConfig.init (leaf := leaf) orig original props).orig
       (SchedulerConfig.init (leaf := leaf) orig original props).original
       (SchedulerConfig.init (leaf := leaf) orig original props).props :=
   closureContract_along_run h0
-    (SchedulerReachable.init (leaf := leaf) orig original props) rfl rfl rfl
+    (SchedulerReachable.init (leaf := leaf) orig original props hent) rfl rfl rfl
 
 end LeanFzn.Solver.UIP

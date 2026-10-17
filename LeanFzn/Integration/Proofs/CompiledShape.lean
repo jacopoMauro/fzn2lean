@@ -160,7 +160,7 @@ module, which is not in this file's cone). -/
 
 /-- The genuinely non-unit Boolean family's registered propagator shape. -/
 private def boolNotProp : Propagator :=
-  { watches := [], run := fun st => propBoolNot st 0 1 }
+  { watches := [.intLe 0 0, .intLe 1 0], run := fun st => propBoolNot st 0 1 }
 
 /-- **THE `PropagatorEvidence.recorded` REFUTATION WITNESS**: at the
 empty-trail state over the sparse Boolean frame `[[false,true],[true]]`,

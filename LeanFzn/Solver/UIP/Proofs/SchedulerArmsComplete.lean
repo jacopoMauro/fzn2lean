@@ -177,7 +177,7 @@ theorem checkpoints_push_or_sublist_of_successor {leaf : Assignment → Bool}
               using List.Sublist.refl cfg.checkpoints)
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 rw [ha] at hs
                 simp only [] at hs
@@ -389,7 +389,7 @@ def RestorationStepPreserves (leaf : Assignment → Bool) : Prop :=
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
       RestorationPreReachable leaf cfg.orig
         (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
         cfg.branch
@@ -402,7 +402,7 @@ condition), and the E1 dead-region task's site premise `perform = none`
 is exactly a filter-rejection. -/
 theorem perform_eq_none_iff_filterFrame_eq_none {p : BackjumpPlan leaf}
     {bs : BranchState leaf} {original : List Clause} {props : List Propagator} :
-    p.perform bs original props = none ↔
+    p.perform bs orig original props = none ↔
       filterFrame p.asserting p.checkpoint.frame = none := by
   unfold BackjumpPlan.perform BackjumpPlan.restoreNarrow
   cases hg : filterFrame p.asserting p.checkpoint.frame <;> simp
@@ -478,15 +478,33 @@ theorem restorationState_learned (cp : DecisionCheckpoint leaf)
   simp [restorationState, BranchState.narrowFrame, BranchState.learnGlobal,
     BackjumpPlan.ofCheckpoint, BackjumpPlan.execute]
 
-/-- Shape: its trail is the checkpoint trail plus the single asserting
-entry at the checkpoint's level, with the payload as reason. -/
-theorem restorationState_trail (cp : DecisionCheckpoint leaf)
+/-- Shape: its trail is the checkpoint trail, plus the single asserting
+entry at the checkpoint's level (with the payload as reason) unless the
+asserting literal is already on the checkpoint trail (runtime guard). -/
+theorem restorationState_trail_cases (cp : DecisionCheckpoint leaf)
     (bs : BranchState leaf) (an : ConflictAnalysis) (g : BranchFrame) :
-    (restorationState cp bs an g).trail = cp.trail ++
+    ((restorationState cp bs an g).trail = cp.trail ∧
+      ∃ e ∈ cp.trail, e.literal = an.asserting.norm) ∨
+    ((restorationState cp bs an g).trail = cp.trail ++
       [{ literal := an.asserting.norm, level := cp.level,
-         reason := some { clause := an.learned } }] := by
-  simp [restorationState, BranchState.narrowFrame, BackjumpPlan.ofCheckpoint,
-    BackjumpPlan.execute]
+         reason := some { clause := an.learned } }] ∧
+      ∀ e ∈ cp.trail, e.literal ≠ an.asserting.norm) :=
+  BackjumpPlan.execute_trail_cases
+    (BackjumpPlan.ofCheckpoint cp bs an.asserting an.learned)
+    (bs.learnGlobal an.learned)
+
+theorem restorationState_mem {cp : DecisionCheckpoint leaf}
+    {bs : BranchState leaf} {an : ConflictAnalysis} {g : BranchFrame}
+    {e : TrailEntry} (he : e ∈ (restorationState cp bs an g).trail) :
+    e ∈ cp.trail ∨ e =
+      { literal := an.asserting.norm, level := cp.level,
+        reason := some { clause := an.learned } } := by
+  rcases restorationState_trail_cases cp bs an g with ⟨h, -⟩ | ⟨h, -⟩
+  · rw [h] at he; exact Or.inl he
+  · rw [h] at he
+    rcases List.mem_append.mp he with he | he
+    · exact Or.inl he
+    · exact Or.inr (List.mem_singleton.mp he)
 
 /-- THE FIELD OBLIGATIONS of §4, one conjunct per `ReachableState` field
 of `restorationState`. The traversal obligation is split out as
@@ -584,7 +602,6 @@ theorem restorationObligations_of_snapshot {orig : List Domain}
     (hstable : an.asserting.norm = an.asserting)
     (hneg : NegStableAvoiding an.asserting an.learned)
     (hsurv : ∀ e ∈ bs.trail, e.level ≤ an.backjumpLevel → e ∈ cp.trail)
-    (hfresh : ∀ e ∈ cp.trail, e.literal ≠ an.asserting.norm)
     (hrange : an.asserting.atom.slot < orig.length)
     (hg : filterFrame an.asserting cp.frame = some g) :
     RestorationStepObligations leaf orig cp bs an g := by
@@ -632,13 +649,12 @@ theorem restorationObligations_of_snapshot {orig : List Domain}
     exact h
   · -- agrees: retained entries by refinement, the asserting entry by the filter
     intro e he a hcov
-    simp only [restorationState_trail] at he
-    rcases List.mem_append.mp he with he | he
+    replace he := restorationState_mem he
+    rcases he with he | he
     · exact hbs'.agrees e (hsub' e he) a (by
         rw [hf]
         exact filterFrame_refines hg hcov)
-    · rw [List.mem_singleton] at he
-      subst he
+    · subst he
       exact filterFrame_literal_holds hg hcov (by rw [hlen]; exact hrange)
   · -- narrowing_complete
     intro i w horig hnot
@@ -648,13 +664,18 @@ theorem restorationObligations_of_snapshot {orig : List Domain}
     by_cases hwas : w ∈ cp.frame.1.getD i []
     · -- dropped by this filter: the asserting entry falsifies it
       obtain ⟨hslot, hfalse⟩ := filterFrame_removal_witness hg hwas hnot
-      refine ⟨{ literal := an.asserting.norm, level := cp.level,
-                reason := some { clause := an.learned } }, ?_, ?_, ?_⟩
-      · rw [restorationState_trail]
-        exact List.mem_append.mpr (Or.inr (List.mem_singleton_self _))
-      · show (an.asserting.norm).atom.slot = g.2.length + i
-        rw [norm_atom_slot, hslot, hgpre]
-      · rwa [norm_valueHolds]
+      obtain ⟨e0, he0, hel⟩ : ∃ e0 ∈ (restorationState cp bs an g).trail,
+          e0.literal = an.asserting.norm := by
+        rcases restorationState_trail_cases cp bs an g with ⟨h, e0, he0, hel⟩ | ⟨h, -⟩
+        · exact ⟨e0, by rw [h]; exact he0, hel⟩
+        · refine ⟨{ literal := an.asserting.norm, level := cp.level,
+                      reason := some { clause := an.learned } }, ?_, rfl⟩
+          rw [h]
+          exact List.mem_append.mpr (Or.inr (List.mem_singleton_self _))
+      refine ⟨e0, he0, ?_, ?_⟩
+      · show e0.literal.atom.slot = g.2.length + i
+        rw [hel, norm_atom_slot, hslot, hgpre]
+      · rw [hel]; rwa [norm_valueHolds]
     · -- already excluded: the snapshot's own witness, transported
       have horig'' : w ∈ orig.getD (bs'.frame.2.length + i) [] := by
         rw [hf]
@@ -664,35 +685,34 @@ theorem restorationObligations_of_snapshot {orig : List Domain}
         exact hwas
       obtain ⟨e, he, hslot, hfalse⟩ := hbs'.narrowing_complete i w horig'' hnot'
       refine ⟨e, ?_, ?_, hfalse⟩
-      · rw [restorationState_trail]
-        exact List.mem_append.mpr (Or.inl (hsub e he))
+      · rcases restorationState_trail_cases cp bs an g with ⟨h, -⟩ | ⟨h, -⟩
+        · rw [h]; exact hsub e he
+        · rw [h]; exact List.mem_append.mpr (Or.inl (hsub e he))
       · show e.literal.atom.slot = g.2.length + i
         rw [hslot, hgpre, ← hf]
   · -- wf
     refine ⟨?_, ?_, ?_, ?_, ?_⟩
     · -- trail levels
       intro e he
-      simp only [restorationState_trail, restorationState_level] at he ⊢
-      rcases List.mem_append.mp he with he | he
+      replace he := restorationState_mem he
+      show e.level ≤ cp.level
+      rcases he with he | he
       · simpa only [hl] using hlev e (hsub' e he)
-      · rw [List.mem_singleton] at he
-        subst he
+      · subst he
         exact Nat.le_refl _
     · -- normalization
       intro e he
-      simp only [restorationState_trail] at he
-      rcases List.mem_append.mp he with he | he
+      replace he := restorationState_mem he
+      rcases he with he | he
       · exact hnorm e (hsub' e he)
-      · rw [List.mem_singleton] at he
-        subst he
+      · subst he
         exact (norm_norm an.asserting).symm
     · -- reason validity: the asserting entry's reason is the certificate's
       intro e he r hr
-      simp only [restorationState_trail] at he
-      rcases List.mem_append.mp he with he | he
+      replace he := restorationState_mem he
+      rcases he with he | he
       · exact hreason e (hsub' e he) r hr
-      · rw [List.mem_singleton] at he
-        subst he
+      · subst he
         have hr1 : { clause := an.learned } = r := by
           simpa only [Option.mem_some_iff] using hr
         rw [← hr1]
@@ -700,15 +720,20 @@ theorem restorationObligations_of_snapshot {orig : List Domain}
           hcert.asserting_norm_mem_of_stable hstable⟩
     · -- chronology: `othersBelow` + surviving prefix + negation stability
       intro e he r hr l hl hne
-      simp only [restorationState_trail] at he
+      rcases restorationState_trail_cases cp bs an g with ⟨h, -⟩ | ⟨h, -⟩
+      · rw [h] at he ⊢
+        obtain ⟨e'', he'', heq, hlt⟩ :=
+          hchron0 e (hsub' e he) r hr l hl hne
+        refine ⟨e'', hsub e'' he'', heq, ?_⟩
+        rw [ht] at hlt
+        exact hlt
+      rw [h] at he ⊢
       rcases List.mem_append.mp he with he | he
       · obtain ⟨e'', he'', heq, hlt⟩ :=
           hchron0 e (hsub' e he) r hr l hl hne
         refine ⟨e'', ?_, heq, ?_⟩
-        · rw [restorationState_trail]
-          exact List.mem_append.mpr (Or.inl (hsub e'' he''))
-        · rw [restorationState_trail]
-          rw [ht] at hlt
+        · exact List.mem_append.mpr (Or.inl (hsub e'' he''))
+        · rw [ht] at hlt
           exact earlierThan_extend hlt
       · rw [List.mem_singleton] at he
         subst he
@@ -718,10 +743,8 @@ theorem restorationObligations_of_snapshot {orig : List Domain}
         obtain ⟨e'', he'', heq⟩ :=
           restore_chronology_of_certificate hcert hstable hsurv hneg l hl' hne
         refine ⟨e'', ?_, heq, ?_⟩
-        · rw [restorationState_trail]
-          exact List.mem_append.mpr (Or.inl he'')
-        · rw [restorationState_trail]
-          exact earlierThan_append_last he''
+        · exact List.mem_append.mpr (Or.inl he'')
+        · exact earlierThan_append_last he''
     · -- the learned database: certificate + the site branch's entailment
       intro c hc
       rw [restorationState_learned] at hc
@@ -729,15 +752,19 @@ theorem restorationObligations_of_snapshot {orig : List Domain}
       · exact hcert.learnedEntailed _ (List.mem_singleton_self _)
       · exact hbs.wf.2.2.2.2 c hc
   · -- sorted
-    rw [restorationState_trail]
+    rcases restorationState_trail_cases cp bs an g with ⟨h, -⟩ | ⟨h, -⟩
+    · rw [h]; exact hsorted
+    rw [h]
     refine levelSorted_append hsorted ?_
     intro e' he'
     have hle := hlev e' (hsub' e' he')
     rw [hl] at hle
     show e'.level ≤ cp.level
     exact hle
-  · -- distinct: the enqueue's absence check on the snapshot's trail
-    rw [restorationState_trail]
+  · -- distinct: the runtime guard skips an already-present asserting literal
+    rcases restorationState_trail_cases cp bs an g with ⟨h, -⟩ | ⟨h, hfresh⟩
+    · rw [h]; exact hdistinct
+    rw [h]
     exact TrailLiteralsDistinct.enqueue hdistinct hnormT hfresh
 
 /-- **THE `hpre` PRODUCER AT THE ACTUAL SUCCESS EVENT.** The runtime's
@@ -759,17 +786,16 @@ theorem restorationPreReachable_of_success_avoiding {orig : List Domain}
     (hstable : an.asserting.norm = an.asserting)
     (hneg : NegStableAvoiding an.asserting an.learned)
     (hsurv : ∀ e ∈ cfg.branch.trail, e.level ≤ an.backjumpLevel → e ∈ cp.trail)
-    (hfresh : ∀ e ∈ cp.trail, e.literal ≠ an.asserting.norm)
     (hrange : an.asserting.atom.slot < orig.length)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored) :
+        cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     RestorationPreReachable leaf orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch := by
   obtain ⟨g, hg, -⟩ := perform_eq_some_iff.mp hp
   exact restorationPreReachable_of_obligations
     (restorationObligations_of_snapshot hsnap hbs hcert hstable hneg hsurv
-      hfresh hrange hg)
+      hrange hg)
 
 /-- COMPATIBILITY WRAPPER (legacy whole-clause `NegStable` signature):
 retained solely so the out-of-scope caller `supportedHpre_of_premises`
@@ -785,15 +811,14 @@ theorem restorationPreReachable_of_success {orig : List Domain}
     (hstable : an.asserting.norm = an.asserting)
     (hneg : NegStable an.learned)
     (hsurv : ∀ e ∈ cfg.branch.trail, e.level ≤ an.backjumpLevel → e ∈ cp.trail)
-    (hfresh : ∀ e ∈ cp.trail, e.literal ≠ an.asserting.norm)
     (hrange : an.asserting.atom.slot < orig.length)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored) :
+        cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     RestorationPreReachable leaf orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch :=
   restorationPreReachable_of_success_avoiding hsnap hbs hcert hstable
-    hneg.avoiding hsurv hfresh hrange hp
+    hneg.avoiding hsurv hrange hp
 
 /-- THE NAMED RESIDUAL of `RestorationStepPreserves`: exactly the
 per-field bundle at every reachable conflict configuration's SUCCESSFUL
@@ -809,7 +834,7 @@ def RestorationStepResidual (leaf : Assignment → Bool) : Prop :=
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     ∃ g : BranchFrame, RestorationStepObligations leaf cfg.orig cp cfg.branch an g
 
 /-- `RestorationStepResidual` proves `RestorationStepPreserves`: the §4
@@ -860,12 +885,6 @@ theorem restorationStepPreserves_of_site {leaf : Assignment → Bool}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
         ∀ e ∈ cfg.branch.trail, e.level ≤ an.backjumpLevel → e ∈ cp.trail)
-    (hfresh : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
-      {an : ConflictAnalysis} {cp : DecisionCheckpoint leaf},
-      SchedulerReachable cfg → cfg.conflict = some ev →
-      ev.analysis = some an →
-      checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
-        ∀ e ∈ cp.trail, e.literal ≠ an.asserting.norm)
     (hrange : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SchedulerReachable cfg →
       cfg.conflict = some ev → ev.analysis = some an →
@@ -877,7 +896,7 @@ theorem restorationStepPreserves_of_site {leaf : Assignment → Bool}
   exact restorationPreReachable_of_success_avoiding hsnap hbs
     (hcert hreach hconf hana)
     (hstable hreach hconf hana) (hneg hreach hconf hana)
-    (hsurv hreach hconf hana hcp) (hfresh hreach hconf hana hcp)
+    (hsurv hreach hconf hana hcp)
     (hrange hreach hconf hana) hp
 
 end LeanFzn.Solver.UIP

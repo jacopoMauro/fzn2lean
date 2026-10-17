@@ -47,10 +47,18 @@ theorem boxPropagators_safe
       ⟨i, c, hdc2, hrun2⟩ | ⟨i, c, hdc2, hrun2⟩ |
       ⟨i, c, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
       ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-      ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-      ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-      ⟨lc, li, lb2, ldca, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-      ⟨ais, hadca, hrunad⟩
+      ⟨ic, jc, kc, hdcc, hrunc⟩ |
+      ⟨lc, li, lb2, ldca, hrunl⟩ |
+      ⟨ais, hadca, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+      ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+      ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+      ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+      ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+      ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+      ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+      ⟨iab, kab, hdcAb, hrunAb⟩ |
+      ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+      ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
     · rw [hdc2] at hdc
       exact (propLe_safe st i j).1 l r hrun2 a hfit (hsol.2 _ hdc)
     · rw [hdc2] at hdc
@@ -93,26 +101,53 @@ theorem boxPropagators_safe
     · rw [hdcc] at hdc
       exact (propBoolOr_safe st ic jc kc).1 l r hrunc a hfit
         (hsol.2 _ hdc)
-    · rw [hdcd] at hdc
-      exact (propMin_safe st id jd kd).1 l r hrund a hfit
-        (hsol.2 _ hdc)
-    · rw [hdce] at hdc
-      exact (propMax_safe st ie je ke).1 l r hrune a hfit
-        (hsol.2 _ hdc)
-    · rw [hdcg] at hdc
-      exact (propAbs_safe st ig kg).1 l r hrung a hfit
-        (hsol.2 _ hdc)
     · rw [ldca] at hdc
       have hlenL : lc.length = li.length :=
         hlinE _ hdc lc li lb2 rfl
       exact (propLinEq2_safe st lc li lb2 hlenL).1 l r hrunl a hfit
         (hsol.2 _ hdc)
-    · rw [hdct] at hdc
-      exact (propTimes_safe st ti tj tk2).1 l r hrunt a hfit
-        (hsol.2 _ hdc)
     · rw [hadca] at hdc
       exact (propAllDiffLCG_safe st ais).1 l r hrunad a hfit
         (hsol.2 _ hdc)
+    · rw [hdcR] at hdc
+      exact (propLinLeReif_safe st lre lri lrb lrr).1 l r hrunR a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcN] at hdc
+      exact (propLinNe_safe st lnc lni lnb).1 l r hrunN a hfit
+        (hsol.2 _ hdc)
+    · exact (propMin_safe st imn jmn kmn).1 l r hrunMn a hfit
+        (hdcMn _ (hsol.2 _ hdc))
+    · exact (propMax_safe st imx jmx kmx).1 l r hrunMx a hfit
+        (hdcMx _ (hsol.2 _ hdc))
+    · rw [hdcLR] at hdc
+      exact (propLeReifSlot_safe st ilr jlr rlr).1 l r hrunLR a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcE] at hdc
+      exact (propEqReifSlot_safe st ieq jeq req hviewst).1 l r hrunE a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcNE] at hdc
+      exact (propNeReifSlot_safe st ine jne rne hviewst).1 l r hrunNE a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcEqR] at hdc
+      exact (propLinEqReif_safe st lq1 leqs leqb leqr).1 l r hrunEqR a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcNeR] at hdc
+      exact (propLinNeReif_safe st lq2 lnis lnib lnir).1 l r hrunNeR a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcTt] at hdc
+      exact (propTimes_safe st itt jtt ktt).1 l r hrunTt a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcAb] at hdc
+      exact (propAbs_safe st iab kab).1 l r hrunAb a hfit (hsol.2 _ hdc)
+    · rw [hdcD] at hdc
+      exact (propDiv_safe st od1 od2 od3).1 l r hrunD a hfit (hsol.2 _ hdc)
+    · rw [hdcM] at hdc
+      exact (propMod_safe st om1 om2 om3).1 l r hrunM a hfit (hsol.2 _ hdc)
+    · exact (propCheck_implied_elim hrunLn).elim
+    · rw [hdcG] at hdc
+      exact (propMaxGen_safe st osG rG).1 l r hrunG a hfit (hsol.2 _ hdc)
+    · rw [hdcH] at hdc
+      exact (propMinGen_safe st osH rH).1 l r hrunH a hfit (hsol.2 _ hdc)
   · intro p hp c hrun a hsol hfit
     obtain ⟨dc, hdc, hprop⟩ := hprops p hp
     rcases propagatorOfProved_run hprop hrun with
@@ -122,10 +157,18 @@ theorem boxPropagators_safe
       ⟨i, k, hdc2, hrun2⟩ | ⟨i, k, hdc2, hrun2⟩ |
       ⟨i, k, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
       ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-      ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-      ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-      ⟨lc, li, lb2, ldca, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-      ⟨ais, hadca, hrunad⟩
+      ⟨ic, jc, kc, hdcc, hrunc⟩ |
+      ⟨lc, li, lb2, ldca, hrunl⟩ |
+      ⟨ais, hadca, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+      ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+      ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+      ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+      ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+      ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+      ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+      ⟨iab, kab, hdcAb, hrunAb⟩ |
+      ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+      ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
     · rw [hdc2] at hdc
       exact (propLe_safe st i j).2.1 c hrun2 a hfit (hsol.2 _ hdc)
     · rw [hdc2] at hdc
@@ -167,26 +210,53 @@ theorem boxPropagators_safe
     · rw [hdcc] at hdc
       exact (propBoolOr_safe st ic jc kc).2.1 c hrunc a hfit
         (hsol.2 _ hdc)
-    · rw [hdcd] at hdc
-      exact (propMin_safe st id jd kd).2.1 c hrund a hfit
-        (hsol.2 _ hdc)
-    · rw [hdce] at hdc
-      exact (propMax_safe st ie je ke).2.1 c hrune a hfit
-        (hsol.2 _ hdc)
-    · rw [hdcg] at hdc
-      exact (propAbs_safe st ig kg).2.1 c hrung a hfit
-        (hsol.2 _ hdc)
     · rw [ldca] at hdc
       have hlenL : lc.length = li.length :=
         hlinE _ hdc lc li lb2 rfl
       exact (propLinEq2_safe st lc li lb2 hlenL).2.1 c hrunl a hfit
         (hsol.2 _ hdc)
-    · rw [hdct] at hdc
-      exact (propTimes_safe st ti tj tk2).2.1 c hrunt a hfit
-        (hsol.2 _ hdc)
     · rw [hadca] at hdc
       exact (propAllDiffLCG_safe st ais).2.1 c hrunad a hfit
         (hsol.2 _ hdc)
+    · rw [hdcR] at hdc
+      exact (propLinLeReif_safe st lre lri lrb lrr).2.1 c hrunR a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcN] at hdc
+      exact (propLinNe_safe st lnc lni lnb).2.1 c hrunN a hfit
+        (hsol.2 _ hdc)
+    · exact (propMin_safe st imn jmn kmn).2.1 c hrunMn a hfit
+        (hdcMn _ (hsol.2 _ hdc))
+    · exact (propMax_safe st imx jmx kmx).2.1 c hrunMx a hfit
+        (hdcMx _ (hsol.2 _ hdc))
+    · rw [hdcLR] at hdc
+      exact (propLeReifSlot_safe st ilr jlr rlr).2.1 c hrunLR a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcE] at hdc
+      exact (propEqReifSlot_safe st ieq jeq req hviewst).2.1 c hrunE a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcNE] at hdc
+      exact (propNeReifSlot_safe st ine jne rne hviewst).2.1 c hrunNE a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcEqR] at hdc
+      exact (propLinEqReif_safe st lq1 leqs leqb leqr).2.1 c hrunEqR a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcNeR] at hdc
+      exact (propLinNeReif_safe st lq2 lnis lnib lnir).2.1 c hrunNeR a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcTt] at hdc
+      exact (propTimes_safe st itt jtt ktt).2.1 c hrunTt a hfit
+        (hsol.2 _ hdc)
+    · rw [hdcAb] at hdc
+      exact (propAbs_safe st iab kab).2.1 c hrunAb a hfit (hsol.2 _ hdc)
+    · rw [hdcD] at hdc
+      exact (propDiv_safe st od1 od2 od3).2.1 c hrunD a hfit (hsol.2 _ hdc)
+    · rw [hdcM] at hdc
+      exact (propMod_safe st om1 om2 om3).2.1 c hrunM a hfit (hsol.2 _ hdc)
+    · exact propCheck_conflict_false hrunLn hfit (hsol.2 _ hdc)
+    · rw [hdcG] at hdc
+      exact (propMaxGen_safe st osG rG).2.1 c hrunG a hfit (hsol.2 _ hdc)
+    · rw [hdcH] at hdc
+      exact (propMinGen_safe st osH rH).2.1 c hrunH a hfit (hsol.2 _ hdc)
 
 
 /-- Implication reasons are globally entailed, independently of the observation trail. -/
@@ -199,7 +269,12 @@ theorem boxPropagators_reasons
     (hlin : ∀ dc ∈ problem.constraints, ∀ coeffs is b,
       dc = .linLe coeffs is b → coeffs.length = is.length)
     (hlinE : ∀ dc ∈ problem.constraints, ∀ coeffs is b,
-      dc = .linEq coeffs is b → coeffs.length = is.length) :
+      dc = .linEq coeffs is b → coeffs.length = is.length)
+    (hlreif : ∀ dc ∈ problem.constraints, ∀ coeffs is b r,
+      dc = .linLeReif coeffs is b r →
+        ∀ i ∈ is, i < problem.domains.length)
+    (hlad : ∀ dc ∈ problem.constraints, ∀ is, dc = .allDiff is →
+        ∀ i ∈ is, i < problem.domains.length) :
     ∀ st, ∀ p ∈ props, ∀ l r, p.run st = .implied l r →
       Reason.Valid problem DomConstraint.SatisfiedBy r l ∧
         (∀ q ∈ r.clause, q = q.norm) := by
@@ -212,10 +287,18 @@ theorem boxPropagators_reasons
     ⟨i, c, hdc2, hrun2⟩ | ⟨i, c, hdc2, hrun2⟩ |
     ⟨i, c, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
     ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-    ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-    ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-    ⟨lc, li, lb2, hdcl, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-    ⟨ais, hdcai, hrunad⟩
+    ⟨ic, jc, kc, hdcc, hrunc⟩ |
+    ⟨lc, li, lb2, hdcl, hrunl⟩ |
+    ⟨ais, hdcai, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+    ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+    ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+    ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+    ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+    ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+    ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+    ⟨iab, kab, hdcAb, hrunAb⟩ |
+    ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+    ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
   · rw [hdc2] at hdc
     exact propLe_reason_valid hdc hrun2
   · rw [hdc2] at hdc
@@ -247,24 +330,55 @@ theorem boxPropagators_reasons
     exact propBoolAnd_reason_safe_sat hdc hrunb
   · rw [hdcc] at hdc
     exact propBoolOr_reason_safe_sat hdc hrunc
-  · rw [hdcd] at hdc
-    exact propMin_reason_valid hdc hrund
-  · rw [hdce] at hdc
-    exact propMax_reason_valid hdc hrune
-  · rw [hdcg] at hdc
-    exact propAbs_reason_valid hdc hrung
   · rw [hdcl] at hdc
     have hlenL : lc.length = li.length :=
       hlinE _ hdc lc li lb2 rfl
     exact propLinEq2_reason_valid hdc hlenL hrunl
-  · rw [hdct] at hdc
-    exact propTimes_reason_valid hdc hrunt
-  · rw [hdcai] at hdc
-    exact propAllDiffLCG_reason_valid hrunad
+  · -- allDiff: the value eliminations' state-free reason validity (the
+    -- problem-level operand-range gate pins the fixed and the target
+    -- slot in range)
+    have hlad' : ∀ i ∈ ais, i < problem.domains.length :=
+      fun i hi => hlad dc hdc ais hdcai i hi
+    rw [hdcai] at hdc
+    exact propAllDiffLCG_reason_valid hview hdc hlad' hrunad
+  · rw [hdcR] at hdc
+    exact propLinLeReif_reason_valid hview hdc hlreif hrunR
+  · rw [hdcN] at hdc
+    exact propLinNe_reason_valid hdc hrunN
+  · exact propMin_reason_valid (fun a ha => hdcMn _ (ha.2 _ hdc)) hrunMn
+  · exact propMax_reason_valid (fun a ha => hdcMx _ (ha.2 _ hdc)) hrunMx
+  · rw [hdcLR] at hdc
+    exact propLeReifSlot_reason_valid hdc hrunLR
+  · rw [hdcE] at hdc
+    exact propEqReifSlot_reason_valid hview hdc hrunE
+  · rw [hdcNE] at hdc
+    exact propNeReifSlot_reason_valid hview hdc hrunNE
+  · rw [hdcEqR] at hdc
+    exact propLinEqReif_reason_valid hdc hrunEqR
+  · rw [hdcNeR] at hdc
+    exact propLinNeReif_reason_valid hdc hrunNeR
+  · rw [hdcTt] at hdc
+    exact propTimes_reason_valid hdc hrunTt
+  · rw [hdcAb] at hdc
+    exact propAbs_reason_valid hdc hrunAb
+  · rw [hdcD] at hdc
+    exact propDiv_reason_valid hdc hrunD
+  · rw [hdcM] at hdc
+    exact propMod_reason_valid hdc hrunM
+  · exact (propCheck_implied_elim hrunLn).elim
+  · rw [hdcG] at hdc
+    exact propMaxGen_reason_valid (fun a ha => ha.2 _ hdc) hrunG
+  · rw [hdcH] at hdc
+    exact propMinGen_reason_valid (fun a ha => ha.2 _ hdc) hrunH
 
-
-/-- Every nonempty raw propagator conflict is globally entailed. Empty
-explanations certify only local exclusion and are deliberately excluded. -/
+/-- Every nonempty raw propagator conflict is entailed at every internal
+solution that is FAITHFUL to the state the propagator read (`FrameFaithful`:
+the solution reads, at every slot, a value of the sort of the slot's current
+domain values - automatic when the state's domains are sub-domains of a
+shape-typed int-viewed problem box, `frameFaithful_of_domSub`). The premise is
+consumed only by the `neSlot`, `allDiff` and `propCheck` arms (their
+explained clauses); every other family is state-free. Empty explanations certify only local
+exclusion and are deliberately excluded. -/
 theorem boxPropagators_conflicts
     {problem : Problem DomConstraint Unit}
     (hview : IntViewedDoms problem.domains)
@@ -277,8 +391,9 @@ theorem boxPropagators_conflicts
       dc = .linEq coeffs is b → coeffs.length = is.length)
     (st : State) (p : Propagator) (hp : p ∈ props) (cc : Clause)
     (hrun : p.run st = .conflict cc) (hne0 : cc ≠ []) :
-    cc.EntailedBy problem DomConstraint.SatisfiedBy := by
-  intro a ha
+    ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
+      FrameFaithful st.domains a → cc.SatisfiedBy a := by
+  intro a ha hfaith
   obtain ⟨dc, hdc, hprop⟩ := hprops p hp
   rcases propagatorOfProved_run hprop hrun with
     ⟨i, j, hdc2, hrun2⟩ | ⟨i, j, hdc2, hrun2⟩ | ⟨i, j, hdc2, hrun2⟩ |
@@ -287,18 +402,27 @@ theorem boxPropagators_conflicts
       ⟨i, c2, hdc2, hrun2⟩ | ⟨i, c2, hdc2, hrun2⟩ |
       ⟨i, c2, hdc2, hrun2⟩ | ⟨i, v, hdc2, hrun2⟩ |
     ⟨ia, ja, hdca, hruna⟩ | ⟨ib, jb, kb, hdcb, hrunb⟩ |
-    ⟨ic, jc, kc, hdcc, hrunc⟩ | ⟨id, jd, kd, hdcd, hrund⟩ |
-    ⟨ie, je, ke, hdce, hrune⟩ | ⟨ig, kg, hdcg, hrung⟩ |
-    ⟨lc, li, lb2, hdcl, hrunl⟩ | ⟨ti, tj, tk2, hdct, hrunt⟩ |
-    ⟨ais, hdcai, hrunad⟩
+    ⟨ic, jc, kc, hdcc, hrunc⟩ |
+    ⟨lc, li, lb2, hdcl, hrunl⟩ |
+    ⟨ais, hdcai, hrunad⟩ | ⟨lre, lri, lrb, lrr, hdcR, hrunR⟩ |
+    ⟨lnc, lni, lnb, hdcN, hrunN⟩ | ⟨imn, jmn, kmn, hdcMn, hrunMn⟩ | ⟨imx, jmx, kmx, hdcMx, hrunMx⟩ |
+    ⟨ilr, jlr, rlr, hdcLR, hrunLR⟩ |
+    ⟨ieq, jeq, req, hdcE, hrunE⟩ | ⟨ine, jne, rne, hdcNE, hrunNE⟩ |
+    ⟨lq1, leqs, leqb, leqr, hdcEqR, hrunEqR⟩ |
+    ⟨lq2, lnis, lnib, lnir, hdcNeR, hrunNeR⟩ |
+    ⟨itt, jtt, ktt, hdcTt, hrunTt⟩ |
+    ⟨iab, kab, hdcAb, hrunAb⟩ |
+    ⟨od1, od2, od3, hdcD, hrunD⟩ | ⟨om1, om2, om3, hdcM, hrunM⟩ |
+    ⟨_, hrunLn⟩ | ⟨osG, rG, hdcG, hrunG⟩ | ⟨osH, rH, hdcH, hrunH⟩
   · rw [hdc2] at hdc
     exact propLe_conflict_entitled hdc hrun2 a ha
   · rw [hdc2] at hdc
     exact propLt_conflict_entitled hdc hrun2 a ha
   · rw [hdc2] at hdc
     exact propEq_conflict_entitled hview hdc hrun2 a ha
-  · -- neSlot: its conflict clause is EMPTY, contradicting cc ≠ []
-    exact absurd rfl (propNe_conflict_clause_empty hrun2 ▸ hne0)
+  · -- neSlot: the explained clause `[x ≠ c, y ≠ c]` / `[x = ¬b, y = ¬b]`
+    rw [hdc2] at hdc
+    exact propNe_conflict_entailed hrun2 hne0 (ha.2 _ hdc) hfaith
   · rw [hdc2] at hdc
     exact propPlus_conflict_entitled hdc hrun2 a ha
   · rw [hdc2] at hdc
@@ -321,19 +445,43 @@ theorem boxPropagators_conflicts
     exact propBoolAnd_entitled hdc hrunb a ha
   · rw [hdcc] at hdc
     exact propBoolOr_entitled hdc hrunc a ha
-  · rw [hdcd] at hdc
-    exact propMin_entitled hdc hrund a ha
-  · rw [hdce] at hdc
-    exact propMax_entitled hdc hrune a ha
-  · rw [hdcg] at hdc
-    exact propAbs_entitled hdc hrung a ha
   · rw [hdcl] at hdc
     have hlenL : lc.length = li.length :=
       hlinE _ hdc lc li lb2 rfl
     exact propLinEq2_entitled hdc hlenL hrunl a ha
-  · rw [hdct] at hdc
-    exact propTimes_entitled hdc hrunt a ha
-  · -- allDiff: its conflict clause is EMPTY, contradicting cc ≠ []
-    exact absurd rfl (propAllDiffLCG_conflict_clause_empty hrunad ▸ hne0)
+  · -- allDiff: the explained Hall clause
+    rw [hdcai] at hdc
+    exact propAllDiffLCG_conflict_entailed hrunad hne0 (ha.2 _ hdc) hfaith
+  · -- linLeReif: the pinned delegation's conflict entitlement
+    rw [hdcR] at hdc
+    exact propLinLeReif_entitled hrunR hfaith (ha.2 _ hdc)
+  · rw [hdcN] at hdc
+    exact propLinNe_entitled hrunN (ha.2 _ hdc)
+  · exact propMin_entitled (fun a ha => hdcMn _ (ha.2 _ hdc)) hrunMn a ha
+  · exact propMax_entitled (fun a ha => hdcMx _ (ha.2 _ hdc)) hrunMx a ha
+  · rw [hdcLR] at hdc
+    exact propLeReifSlot_entitled hdc hrunLR a ha
+  · rw [hdcE] at hdc
+    exact propEqReifSlot_entitled hview hdc hrunE a hfaith ha
+  · rw [hdcNE] at hdc
+    exact propNeReifSlot_entitled hview hdc hrunNE a hfaith ha
+  · rw [hdcEqR] at hdc
+    exact propLinEqReif_entitled hrunEqR hfaith (ha.2 _ hdc)
+  · rw [hdcNeR] at hdc
+    exact propLinNeReif_entitled hrunNeR hfaith (ha.2 _ hdc)
+  · rw [hdcTt] at hdc
+    exact propTimes_entitled hdc hrunTt a ha
+  · rw [hdcAb] at hdc
+    exact propAbs_entitled hdc hrunAb a ha
+  · rw [hdcD] at hdc
+    exact propDiv_entitled hdc hrunD a ha
+  · rw [hdcM] at hdc
+    exact propMod_entitled hdc hrunM a ha
+  · -- `propCheck`: the faithful solution differs from the forced assignment
+    exact propCheck_conflict_faithful hrunLn hfaith (ha.2 _ hdc)
+  · rw [hdcG] at hdc
+    exact propMaxGen_entitled (fun a ha => ha.2 _ hdc) hrunG a ha
+  · rw [hdcH] at hdc
+    exact propMinGen_entitled (fun a ha => ha.2 _ hdc) hrunH a ha
 
 end LeanFzn.Solver.Propagation

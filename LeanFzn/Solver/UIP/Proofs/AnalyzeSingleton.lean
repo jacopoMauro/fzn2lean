@@ -1,24 +1,22 @@
 /-
 File: LeanFzn/Solver/UIP/Proofs/AnalyzeSingleton.lean
-analysis has no below-level tail)
 
-Purpose: the N1 analyzer fact. A UNIT conflict clause analyzed by
-`analyzeAtAllowance` can only mark a falfisier at the CURRENT level: the
-root-level and below-level `markLit` outcomes leave the mark set empty,
-and `nextPivot` on the empty mark set returns `none`, so those runs die
-before producing a result. Consequently the analyzed `below` list is
-ALWAYS empty for a singleton input — the learned analysis clause is
-exactly `[uip.negate]`, the shape N1's unit profile needs (together with
-`supported_conflict_clause_unit`, which supplies the singleton clause).
+Purpose: the N1 analyzer fact on the LCG analyzer (R1a). A UNIT conflict
+clause `[q]` analyzed by `analyzeAtAllowance` can only succeed through a
+CURRENT-level mark: the root-drop, level-0 and below-level outcomes of
+`markLitAt` leave the mark set empty, and pivot selection on the empty mark
+set stops with `none`. Consequently the analyzed `below` list is ALWAYS empty
+for a singleton input, and the UIP is the literal of a current-level trail
+entry that IMPLIES `¬q` (semantic falsifier, `impliesP`).
 
-  §1 `nextPivot_nil` / the empty-state helpers;
-  §2 `markLit_empty_marks_case` — the inversion of `markLit` at the empty
-     state that survives a `some` result;
-  §3 `analyzeAtAllowance_singleton_below` — the main theorem, with the
-     Boolean regression example.
+  §1 the work-empty helpers;
+  §2 `analyzeAtAllowance_singleton_uip` — the shape theorem, and its
+     corollary `analyzeAtAllowance_singleton_below`;
+  §3 `learnedEntailed_singleton_run` — entailment transport: if `q` holds at
+     every leaf solution, so does the learned singleton `[(uip.negate).norm]`
+     (`impliesP_negate_sound`).
 
-NO `sorry`, NO custom axiom. Registration owes the umbrella import line
-`LeanFzn.Solver.UIP.Proofs.AnalyzeSingleton` in `LeanFzn.Solver/LeanFzn.Solver.UIP.lean`.
+NO `sorry`, NO custom axiom.
 -/
 
 import LeanFzn.Solver.Propagation.AnalysisInvariants
@@ -30,172 +28,118 @@ namespace LeanFzn.Solver.UIP
 open LeanFzn.Semantics LeanFzn.Solver.Core LeanFzn.Solver.Propagation LeanFzn.Solver.Propagation.DomainFiltering
 open LeanFzn LeanFzn.Solver.Core
 
-/-! ## §1 Empty-state helpers -/
+/-! ## §1 Work-empty helpers -/
 
-/-- `nextPivot` on the empty mark set finds nothing. -/
-theorem nextPivot_nil (trail : List TrailEntry) : nextPivot trail [] = none := by
-  unfold nextPivot
-  simp
-
-/-- The empty worklist with no marks cannot produce a result (any learnt
-list). -/
-theorem analyzeStep_emptyMarks_none (trail : List TrailEntry) (lvl : Nat) :
-    ∀ (fuel : Nat) (l : List (Literal × Nat)),
-      analyzeStep trail lvl fuel [] none [] l = none := by
+/-- With nothing to scan and nothing marked, the analysis stops with `none`. -/
+theorem analyzeLoop_workNil_noMarks {orig : List Domain} {trail : List TrailEntry}
+    {lvl : Nat} {st : AnalyzerState} (hw : st.work = []) (hm : st.marks = []) :
+    ∀ fuel, analyzeLoop orig trail lvl fuel st = none := by
   intro fuel
   cases fuel with
-  | zero => intro l; rfl
-  | succ k => intro l; simp only [analyzeStep, nextPivot_nil]
+  | zero => rfl
+  | succ f =>
+      obtain ⟨work, skip, bound, marks, learnt⟩ := st
+      simp only at hw hm
+      subst hw hm
+      simp [analyzeLoop, analyzeNext]
 
-/-- The empty singleton clause `[[]]` with no marks cannot produce a result
-(any learnt list): the empty clause drops and the empty worklist dies
-through `nextPivot_nil`. -/
-theorem analyzeStep_singletonNil_emptyMarks_none (trail : List TrailEntry)
-    (lvl : Nat) :
-    ∀ (fuel : Nat) (l : List (Literal × Nat)),
-      analyzeStep trail lvl fuel [[]] none [] l = none := by
-  intro fuel
+/-- With nothing to scan and the single mark `i`, the analysis returns the
+learnt list and the literal of entry `i`. -/
+theorem analyzeLoop_workNil_singleMark {orig : List Domain} {trail : List TrailEntry}
+    {lvl : Nat} {st : AnalyzerState} {i : Nat} {e : TrailEntry}
+    (hw : st.work = []) (hm : st.marks = [i]) (he : trail[i]? = some e)
+    {r : List (Literal × Nat) × Literal} :
+    ∀ fuel, analyzeLoop orig trail lvl fuel st = some r → r = (st.learnt, e.literal) := by
+  intro fuel h
   cases fuel with
-  | zero => intro l; rfl
-  | succ k =>
-      intro l
-      cases k with
-      | zero => rfl
-      | succ k' => simp only [analyzeStep, nextPivot_nil]
+  | zero => simp [analyzeLoop] at h
+  | succ f =>
+      obtain ⟨work, skip, bound, marks, learnt⟩ := st
+      simp only at hw hm
+      subst hw hm
+      simp [analyzeLoop, analyzeNext, he] at h
+      exact h.symm
 
-/-! ## §2 The `markLit` outcome inversion at the empty state -/
+/-! ## §2 The singleton shape -/
 
-/-- **THE MARKING INVERSION**: a `markLit` call at the empty state whose
-mark set is NONEMPTY can only have taken the current-level branch — the
-mark is the single entry it found, its level is the analysis level, and
-the learnt list stayed empty. (The root-level, below-level and shortcut
-outcomes all leave `marks = []`.) -/
-theorem markLit_empty_marks_case {trail : List TrailEntry} {lvl : Nat}
-    {q0 : Literal} {m : List TrailEntry} {l : List (Literal × Nat)}
-    (hm : markLit trail lvl [] [] q0 = some (m, l)) (hne : m ≠ []) :
-    ∃ e : TrailEntry, m = [e] ∧ e.level = lvl ∧ l = [] := by
-  have h1 : ([].any fun (m : TrailEntry) =>
-      litEqB m.literal (q0.norm).negate.norm) = false := rfl
-  have h2 : ([].any fun (p : Literal × Nat) => litEqB p.1 (q0.norm)) = false :=
-    rfl
-  have hm' : markLit trail lvl [] [] q0.norm = some (m, l) := by
-    unfold markLit at hm ⊢
-    simp only [norm_norm] at hm ⊢
-    exact hm
-  cases hf : findEntryOf trail (q0.norm).negate with
-  | some e =>
-      rw [markLit_eq_of_lookup h1 h2 hf] at hm'
-      split at hm'
-      · rename_i hb
-        obtain ⟨hm1, -⟩ := Prod.mk.inj (Option.some.inj hm')
-        exact absurd hm1.symm hne
-      · split at hm'
-        · rename_i hb
-          obtain ⟨hm1, hm2⟩ := Prod.mk.inj (Option.some.inj hm')
-          exact ⟨e, hm1.symm, beq_iff_eq.mp hb, hm2.symm⟩
-        · rename_i hb
-          obtain ⟨hm1, -⟩ := Prod.mk.inj (Option.some.inj hm')
-          exact absurd hm1.symm hne
-  | none =>
-      unfold markLit at hm
-      simp only [h1, h2, hf, Bool.false_eq_true, if_false] at hm
-      cases hf₂ : findEntryOf trail (orderUpgrade trail (q0.norm)).negate with
-      | none =>
-          simp only [hf₂] at hm
-          cases hm
-      | some e =>
-          simp only [hf₂] at hm
-          split at hm
-          · rename_i hb
-            obtain ⟨hm1, -⟩ := Prod.mk.inj (Option.some.inj hm)
-            exact absurd hm1.symm hne
-          · split at hm
-            · rename_i hb
-              obtain ⟨hm1, hm2⟩ := Prod.mk.inj (Option.some.inj hm)
-              exact ⟨e, hm1.symm, beq_iff_eq.mp hb, hm2.symm⟩
-            · rename_i hb
-              obtain ⟨hm1, -⟩ := Prod.mk.inj (Option.some.inj hm)
-              exact absurd hm1.symm hne
-
-/-! ## §3 The main theorem -/
-
-/-- **N1 `analyzeAtAllowance_singleton_below`**: a singleton conflict
-clause's analysis never records a below-level falsifier — the allowance
-list is empty. The mark survives only in the current-level branch, where
-the final filter empties it and the learnt list is returned unchanged. -/
-theorem analyzeAtAllowance_singleton_below {trail : List TrailEntry}
+/-- **THE SINGLETON ANALYSIS SHAPE**: a successful `analyzeAtAllowance` run on
+`[q]` has an EMPTY below list, and its UIP is the literal of a trail entry at
+the analysis level that implies the negation of the scanned literal. -/
+theorem analyzeAtAllowance_singleton_uip {orig : List Domain} {trail : List TrailEntry}
     {lvl : Nat} {q : Literal} {below : List (Literal × Nat)} {uip : Literal}
-    (h : analyzeAtAllowance trail lvl [q] = some (below, uip)) : below = [] := by
+    (h : analyzeAtAllowance orig trail lvl [q] = some (below, uip)) :
+    below = [] ∧ ∃ e ∈ trail, e.level = lvl ∧
+      impliesP orig e.literal q.norm.norm.negate.norm = true ∧ uip = e.literal := by
   unfold analyzeAtAllowance at h
-  suffices hgen : ∀ fuel, analyzeStep trail lvl fuel [[q]] none [] [] =
-      some (below, uip) → below = [] from hgen _ h
-  intro fuel
+  generalize analysisFuel trail [q] = fuel at h
   cases fuel with
-  | zero =>
-      intro h
-      simp only [analyzeStep] at h
-      exact absurd h (by simp)
+  | zero => simp [analyzeLoop] at h
   | succ f₁ =>
-      cases f₁ with
-      | zero =>
-          intro h
-          simp only [analyzeStep, skipEq, Bool.false_eq_true, if_false] at h
-          cases hm0 : markLit trail lvl [] [] q.norm <;> simp_all
-      | succ f₂ =>
-          cases f₂ with
-          | zero =>
-              intro h
-              simp only [analyzeStep, skipEq, Bool.false_eq_true, if_false] at h
-              cases hm0 : markLit trail lvl [] [] q.norm <;> simp_all
-          | succ f₃ =>
-              intro h
-              simp only [analyzeStep, skipEq, Bool.false_eq_true, if_false] at h
-              cases hm : markLit trail lvl [] [] q.norm with
-              | none =>
-                  simp only [hm] at h
-                  cases h
-              | some p =>
-                  obtain ⟨m₁, l₁⟩ := p
-                  simp only [hm] at h
-                  change analyzeStep trail lvl (Nat.succ f₃) [] none m₁ l₁ =
-                    some (below, uip) at h
-                  cases m₁ with
-                  | nil =>
-                      exact absurd h (by
-                        rw [analyzeStep_emptyMarks_none trail lvl (Nat.succ f₃)
-                          l₁]
-                        simp)
-                  | cons e rest =>
-                      have hne : (e :: rest) ≠ [] := by simp
-                      obtain ⟨e₁, heq, -, hl₁⟩ :=
-                        markLit_empty_marks_case hm hne
-                      injection heq with hee hrest
-                      subst hrest
-                      rw [hee] at h
-                      rw [hl₁] at h
-                      simp only [analyzeStep] at h
-                      cases hnp : nextPivot trail [e₁] with
-                      | none =>
-                          simp only [hnp] at h
-                          cases h
-                      | some e₂ =>
-                          obtain ⟨m, hm_mem, hm_lit⟩ :=
-                            nextPivot_mark trail [e₁] e₂ hnp
-                          have hme : m = e₁ := by simpa using hm_mem
-                          subst hme
-                          have hliteq : litEqB m.literal e₂.literal = true := by
-                            rw [hm_lit]
-                            exact litEqB_self e₂.literal
-                          simp only [hnp, List.filter_cons, List.filter_nil,
-                            hliteq, Bool.not_true, Bool.false_eq_true, if_false,
-                            if_true, List.isEmpty_nil] at h
-                          exact (Prod.mk.inj (Option.some.inj h)).1.symm
+      cases hmk : markLitAt orig trail lvl none [] [] q.norm with
+      | none =>
+          simp [analyzeLoop, analyzeNext, initAnalysisState, skipEq, hmk] at h
+      | some mp =>
+          obtain ⟨m', l'⟩ := mp
+          have h1 : analyzeLoop orig trail lvl f₁
+              { work := [[]], skip := none, bound := none, marks := m', learnt := l' }
+              = some (below, uip) := by
+            simpa [analyzeLoop, analyzeNext, initAnalysisState, skipEq, hmk] using h
+          cases f₁ with
+          | zero => simp [analyzeLoop] at h1
+          | succ f₂ =>
+              have h2 : analyzeLoop orig trail lvl f₂
+                  { work := [], skip := none, bound := none, marks := m', learnt := l' }
+                  = some (below, uip) := by
+                simpa [analyzeLoop, analyzeNext] using h1
+              rcases markLitAt_spec hmk with ⟨-, rfl, rfl⟩ | ⟨i, e, he, hp, -, hcase⟩
+              · rw [analyzeLoop_workNil_noMarks rfl rfl] at h2; cases h2
+              · rcases hcase with ⟨-, rfl, rfl⟩ | ⟨hlv, -, hm', hi, rfl⟩ |
+                  ⟨-, -, rfl, -⟩
+                · rw [analyzeLoop_workNil_noMarks rfl rfl] at h2; cases h2
+                · have hmi : m' = [i] := by
+                    rcases hm' with rfl | rfl
+                    · cases hi
+                    · rfl
+                  subst hmi
+                  have hr := analyzeLoop_workNil_singleMark rfl rfl he f₂ h2
+                  simp only [Prod.mk.injEq] at hr
+                  exact ⟨hr.1, e, List.mem_of_getElem? he, hlv, hp, hr.2⟩
+                · rw [analyzeLoop_workNil_noMarks rfl rfl] at h2; cases h2
 
-/-- The Boolean regression instance: a `boolEq` conflict's singleton
-analysis returns the empty below-list. -/
+/-- **N1 `analyzeAtAllowance_singleton_below`**: a singleton conflict clause's
+analysis never records a below-level falsifier. -/
+theorem analyzeAtAllowance_singleton_below {orig : List Domain} {trail : List TrailEntry}
+    {lvl : Nat} {q : Literal} {below : List (Literal × Nat)} {uip : Literal}
+    (h : analyzeAtAllowance orig trail lvl [q] = some (below, uip)) : below = [] :=
+  (analyzeAtAllowance_singleton_uip h).1
+
+/-! ## §3 Entailment transport -/
+
+/-- THE ENTAILMENT TRANSPORT across the singleton analysis: if the scanned
+literal `q` holds at every leaf solution, so does the analyzed singleton
+clause `[(uip.negate).norm]` — the UIP's literal implies `¬q`, so it is FALSE
+wherever `q` is true (`impliesP_negate_sound`). -/
+theorem learnedEntailed_singleton_run {leaf : Assignment → Bool} {orig : List Domain}
+    {q uip : Literal} (hfit : ∀ a, leaf a = true → a.Fits orig)
+    (hqent : ∀ a, leaf a = true → q.eval a = some true)
+    (huip : ∃ e : TrailEntry, impliesP orig e.literal q.norm.norm.negate.norm = true ∧
+      uip = e.literal) :
+    LearnedEntailed leaf [[(uip.negate).norm]] := by
+  obtain ⟨e, hp, rfl⟩ := huip
+  intro c hc a hleaf
+  rw [List.mem_singleton] at hc
+  rw [hc]
+  refine ⟨(e.literal.negate).norm, List.mem_singleton_self _, ?_⟩
+  have hq : q.norm.norm.eval a = some true := by
+    rw [Literal.norm_eval, Literal.norm_eval]; exact hqent a hleaf
+  rw [Literal.norm_eval, Literal.eval_negate_false_iff]
+  exact impliesP_negate_sound hp (hfit a hleaf) hq
+
+/-- The Boolean regression instance: a `boolEq` conflict's singleton analysis
+over a Boolean original domain returns the empty below-list. -/
 example :
-    analyzeAtAllowance
+    analyzeAtAllowance [[.bool false, .bool true]]
       [{ literal := posBool 0 true, level := 1, reason := none }] 1
-      [posBool 0 false] = some ([], posBool 0 true) := rfl
+      [posBool 0 false] = some ([], posBool 0 true) := by decide
 
 end LeanFzn.Solver.UIP

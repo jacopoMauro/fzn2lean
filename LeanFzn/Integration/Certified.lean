@@ -41,6 +41,7 @@ import LeanFzn.Solver.Propagation.DomainConstraints
 import LeanFzn.Compiler.Proofs.Exact
 
 import LeanFzn.Integration.Chronological
+import LeanFzn.Integration.Proofs.CompiledShape
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 
@@ -466,7 +467,27 @@ theorem compiled_linLe_shape
         ⟨k, y, i, _, _, _, hdc3⟩ |
         ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
         ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
-        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, _, _, _, _, hlen, hdc3⟩ |
+        ⟨elems1, elems2, ps, ns, _, _, _, _, hdc3⟩ |
+        ⟨elems, r, is2, k2b, _, _, _, _, hdc3⟩ |
+        ⟨xb, yb, ib, k2b, _, _, _, _, hdc3⟩ |
+        ⟨xb, yb, ib, jb, _, _, _, _, hdc3⟩ |
+        ⟨elems, xs, xb, yb, ib, k2b, _, _, _, _, _, hdc3⟩ |
+        ⟨elems, is2, xb, yb, ib, k2b, _, _, _, _, _, hdc3⟩ |
+        ⟨elems, is2, xb, yb, ib, k2b, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, r, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, r, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, r, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, r, k, _, _, _, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, r, k, _, _, _, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, r, k, _, _, _, _, _, _, hdc3⟩ |
+        ⟨a₀, a₁, a₂, o₀, o₁, o₂, _, _, _, _, _, hdc3⟩ |
+        ⟨a₀, a₁, a₂, o₀, o₁, o₂, _, _, _, _, _, hdc3⟩ |
+        ⟨a₀, a₁, a₂, o₀, o₁, o₂, _, _, _, _, _, hdc3⟩ |
+        ⟨a₀, a₁, a₂, o₀, o₁, o₂, _, _, _, _, _, hdc3⟩ |
+        ⟨x, elems, is2, k2b, _, _, _, _, hdc3⟩ |
+        ⟨x, elems, is2, k2b, _, _, _, _, hdc3⟩
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
@@ -482,6 +503,26 @@ theorem compiled_linLe_shape
         injection hdcsome with h1 h2
         rw [← h1, ← h2] at hlen
         simpa using hlen
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
@@ -794,7 +835,27 @@ theorem compiled_linEq_shape
         ⟨k, y, i, _, _, _, hdc3⟩ |
         ⟨x, y, i, j, _, _, _, _, hdc3⟩ |
         ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
-        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩
+        ⟨x, y, z, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, _, _, _, _, hlen, hdc3⟩ |
+        ⟨elems1, elems2, ps, ns, _, _, _, _, hdc3⟩ |
+        ⟨elems, r, is2, k2b, _, _, _, _, hdc3⟩ |
+        ⟨xb, yb, ib, k2b, _, _, _, _, hdc3⟩ |
+        ⟨xb, yb, ib, jb, _, _, _, _, hdc3⟩ |
+        ⟨elems, xs, xb, yb, ib, k2b, _, _, _, _, _, hdc3⟩ |
+        ⟨elems, is2, xb, yb, ib, k2b, _, _, _, _, _, hdc3⟩ |
+        ⟨elems, is2, xb, yb, ib, k2b, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, r, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, r, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨x, y, r, i, j, k, _, _, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, r, k, _, _, _, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, r, k, _, _, _, _, _, _, hdc3⟩ |
+        ⟨ks, elems, coeffs2, is2, b2, r, k, _, _, _, _, _, _, hdc3⟩ |
+        ⟨a₀, a₁, a₂, o₀, o₁, o₂, _, _, _, _, _, hdc3⟩ |
+        ⟨a₀, a₁, a₂, o₀, o₁, o₂, _, _, _, _, _, hdc3⟩ |
+        ⟨a₀, a₁, a₂, o₀, o₁, o₂, _, _, _, _, _, hdc3⟩ |
+        ⟨a₀, a₁, a₂, o₀, o₁, o₂, _, _, _, _, _, hdc3⟩ |
+        ⟨x, elems, is2, k2b, _, _, _, _, hdc3⟩ |
+        ⟨x, elems, is2, k2b, _, _, _, _, hdc3⟩
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
@@ -809,6 +870,26 @@ theorem compiled_linEq_shape
         injection hdcsome with h1 h2
         rw [← h1, ← h2] at hlen
         simpa using hlen
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
+      · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
       · rw [hdc3] at hdcsome; exact absurd hdcsome (by simp)
@@ -888,27 +969,75 @@ theorem solve_certified_sat_real
 
 
 /-- Successfully compiled, certified-gate-passing models enable the proved
-    CP propagators; they never enter the malformed-internal fallback. -/
+    CP propagators; they never enter the malformed-internal fallback.
+
+    PLAN L1b: the `domPruningOkB` gate gained the reified-`linLe`
+    operand-range/arity conjunct, whose premise `hreif` is supplied here
+    explicitly; PLAN L8 adds the `all_different` operand-range conjunct
+    (premise `hlad`, likewise supplied explicitly).  Rationale: slot
+    ranges are treated as RUNTIME gates in
+    this development (`LcgCompiledKit.kitGateB`/`slots_of_gate` are never
+    discharged from `compileModel` either); a compiler-side proof that the
+    extractor's `linIndices`/`nameIndex` lookups and the named
+    `compileConstraint` arms stay in range is a separate follow-up, and no
+    theorem consumes this lemma, so no other statement depends on the
+    premises.  At runtime `domPruningKit` re-checks the gate, so compiled
+    models keep the kit whenever their slots are in range (which the
+    compiler guarantees operationally). -/
 theorem compiled_domPruningOk
     {m : LeanFzn.Model} {problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit}
     {compiled : LeanFzn.Compiler.CompiledProblem DomConstraint}
     (hc : LeanFzn.Compiler.compileModel m = .ok compiled)
+    (hlcg : problem.domains = compiled.domains)
     (hcons : problem.constraints = compiled.constraints)
+    (hreif : ∀ dc ∈ problem.constraints, ∀ coeffs is b r,
+      dc = .linLeReif coeffs is b r →
+        (∀ i ∈ is, i < problem.domains.length) ∧ coeffs.length = is.length)
+    (hlad : ∀ dc ∈ problem.constraints, ∀ is, dc = .allDiff is →
+      ∀ i ∈ is, i < problem.domains.length)
     (hgate : gateOk problem = true) : domPruningOkB problem = true := by
   rw [domPruningOkB, Bool.and_eq_true]
   constructor
+  · rw [Bool.and_eq_true]
+    constructor
+    · apply List.all_eq_true.mpr
+      intro d hd
+      apply List.all_eq_true.mpr
+      intro v hv
+      simpa using intViewed_of_gate hgate d hd v hv
+    · apply List.all_eq_true.mpr
+      intro c hc'
+      rw [hcons] at hc'
+      cases c with
+      | linLe cs is b => simpa using compiled_linLe_shape hc hc' rfl
+      | linEq cs is b => simpa using compiled_linEq_shape hc hc' rfl
+      | linLeReif cs is b r =>
+          obtain ⟨hrange, harity⟩ :=
+            hreif _ (by rw [hcons]; exact hc') cs is b r rfl
+          rw [Bool.and_eq_true]
+          refine ⟨?_, ?_⟩
+          · exact List.all_eq_true.mpr (fun i hi =>
+              decide_eq_true_eq.mpr (hrange i hi))
+          · simpa using harity
+      | allDiff is =>
+          exact List.all_eq_true.mpr (fun i hi =>
+            decide_eq_true_eq.mpr
+              (hlad _ (by rw [hcons]; exact hc') is rfl i hi))
+      | _ => rfl
   · apply List.all_eq_true.mpr
     intro d hd
-    apply List.all_eq_true.mpr
-    intro v hv
-    simpa using intViewed_of_gate hgate d hd v hv
-  · apply List.all_eq_true.mpr
-    intro c hc'
-    rw [hcons] at hc'
-    cases c with
-    | linLe cs is b => simpa using compiled_linLe_shape hc hc' rfl
-    | linEq cs is b => simpa using compiled_linEq_shape hc hc' rfl
-    | _ => rfl
+    rw [Bool.or_eq_true]
+    rcases LeanFzn.Integration.shapeTypedDomains_of_compileModel_toLCG hc hlcg d hd with hi | hb
+    · left
+      apply List.all_eq_true.mpr
+      intro v hv
+      obtain ⟨k, rfl⟩ := hi v hv
+      rfl
+    · right
+      apply List.all_eq_true.mpr
+      intro v hv
+      obtain ⟨k, rfl⟩ := hb v hv
+      rfl
 
 /-- **THE WIDENED CERTIFIED LCG FRONT DOOR (SAT, multi-value
     domains)**: on ANY gate-passing compiled problem (nonempty

@@ -101,7 +101,7 @@ theorem backjumpStep_ne_sat {leaf : Assignment → Bool}
           rw [hcp] at hcf
           simp only [] at hcf
           cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-              an.learned).perform cfg.branch cfg.original cfg.props with
+              an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
           | none =>
               rw [hp] at hcf
               cases hcf
@@ -133,7 +133,7 @@ theorem backjumpStep_ne_unsat {leaf : Assignment → Bool}
           rw [hcp] at hcf
           simp only [] at hcf
           cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-              an.learned).perform cfg.branch cfg.original cfg.props with
+              an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
           | none =>
               rw [hp] at hcf
               cases hcf
@@ -167,7 +167,7 @@ theorem backjumpStep_fallback_dead {leaf : Assignment → Bool}
           rw [hcp] at hcf
           simp only [] at hcf
           cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-              an.learned).perform cfg.branch cfg.original cfg.props with
+              an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
           | none =>
               rw [hp] at hcf
               cases hcf
@@ -199,7 +199,7 @@ theorem backjumpStep_localExclude_dead {leaf : Assignment → Bool}
           rw [hcp] at hcf
           simp only [] at hcf
           cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-              an.learned).perform cfg.branch cfg.original cfg.props with
+              an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
           | none =>
               rw [hp] at hcf
               simp only [] at hcf
@@ -248,7 +248,7 @@ theorem schedulerNext_localExclude_dead {leaf : Assignment → Bool}
           | none =>
               rw [hd] at hcf
               simp only [] at hcf
-              cases ht : terminalResult cfg.original cfg.props cfg.branch with
+              cases ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch with
               | stable bs =>
                   rw [ht] at hcf
                   simp only [] at hcf
@@ -448,7 +448,7 @@ theorem schedulerNext_eq_sat_imp {leaf : Assignment → Bool}
           | none =>
               rw [hd] at h
               simp only [] at h
-              cases ht : terminalResult cfg.original cfg.props cfg.branch with
+              cases ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch with
               | stable bs =>
                   rw [ht] at h
                   simp only [] at h
@@ -481,7 +481,7 @@ theorem schedulerNext_eq_unsat_cases {leaf : Assignment → Bool}
     (cfg.pending = [] ∧ cfg.status = .dead) ∨
       (cfg.conflict = none ∧ cfg.status = .active ∧ cfg.branch.level = 0 ∧
         ∃ (bs : BranchState leaf) (cs learned : List Clause),
-          cs ≠ [] ∧ terminalResult cfg.original cfg.props cfg.branch =
+          cs ≠ [] ∧ terminalResult cfg.orig cfg.original cfg.props cfg.branch =
             .conflict bs cs learned) := by
   unfold schedulerNext at h
   cases hc : cfg.conflict with
@@ -510,7 +510,7 @@ theorem schedulerNext_eq_unsat_cases {leaf : Assignment → Bool}
           | none =>
               rw [hd] at h
               simp only [] at h
-              cases ht : terminalResult cfg.original cfg.props cfg.branch with
+              cases ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch with
               | stable bs =>
                   rw [ht] at h
                   simp only [] at h
@@ -768,28 +768,11 @@ state (`terminalResult` returns `.conflict bs cs (filter …)` on its input
 `bs`). Extracted from the equation so callers can transfer coverage stated
 at the carried state to the configuration's own branch. -/
 theorem terminalResult_conflict_state_eq {leaf : Assignment → Bool}
-    {original : List Clause} {props : List Propagator}
+    {orig : List Domain} {original : List Clause} {props : List Propagator}
     {bs : BranchState leaf} {s : BranchState leaf} {cs learned : List Clause}
-    (ht : terminalResult original props bs = .conflict s cs learned) :
-    s = bs := by
-  unfold terminalResult at ht
-  cases hne : nextPruningEvent original props bs.frame bs.learned with
-  | stable =>
-      simp only [hne] at ht
-      cases ht
-  | conflict cs' =>
-      simp only [hne] at ht
-      injection ht with h _ _
-      exact h.symm
-  | implied l c lr fl =>
-      simp only [hne] at ht
-      cases hff : filterFrame l bs.frame with
-      | none =>
-          simp only [hff] at ht
-          cases ht
-      | some g =>
-          simp only [hff] at ht
-          cases ht
+    (ht : terminalResult orig original props bs = .conflict s cs learned) :
+    s = bs :=
+  (terminalResult_conflict_cases ht).1
 
 /-- **THE GUARDED ROOT-CONFLICT EXCLUSION (A1)**: a reachable branch whose
 closure terminal event IS a conflict (`terminalResult … = .conflict bs cs
@@ -809,10 +792,12 @@ theorem rootConflictExcludes_of_terminalEvent {leaf : Assignment → Bool}
     (hbridge : RootFactsBridge leaf cfg.branch)
     (hlent : LearnedEntailed leaf cfg.branch.learned)
     (hc : ClosureContract leaf orig cfg.original cfg.props)
-    (ht : terminalResult cfg.original cfg.props cfg.branch =
+    (horig : cfg.orig = orig)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .conflict bs cs learned) :
     ∀ a, OriginalLeaves leaf orig a → False := by
   have hspec := terminalResult_spec hc hreach
+  rw [horig] at ht
   rw [ht] at hspec
   have hbs : bs = cfg.branch := terminalResult_conflict_state_eq ht
   subst hbs
@@ -864,7 +849,7 @@ theorem phaseNext_unsat_excludes {orig : List Domain} {leaf : Assignment → Boo
       ⟨hconf, hact, hlv, bs, cs, learned, hne, ht⟩
     · exact exhausted hreach hp hstat horig
     · exact rootConflictExcludes_of_terminalEvent (hbr hreach horig)
-        (hbridge hreach horig) (hlent hreach) (hc hreach horig) ht
+        (hbridge hreach horig) (hlent hreach) (hc hreach horig) horig ht
   · exact exhausted (schedulerReachable_successor hreach hn_succ) hn_pend
       hn_dead (hn_orig.trans horig)
   · exact exhausted (schedulerReachable_successor

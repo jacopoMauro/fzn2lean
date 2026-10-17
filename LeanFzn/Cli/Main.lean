@@ -19,9 +19,11 @@ DAG:
   LeanFzn + LeanFzn/Compiler/Cli -> Main -> leanfzn executable
 -/
 
+import LeanFzn.Integration.LcgOptimize
 import LeanFzn.Parser.Parser
 import LeanFzn.Checker.Check
 import LeanFzn.Integration.CertifiedSolve
+import LeanFzn.Integration.Optimize
 
 namespace LeanFzn.Cli
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
@@ -184,6 +186,40 @@ private def parseSolveFlags (args : List String) :
           | .error e => .error e
   go args
 
+/-- Optimization models: certified branch-and-bound over the certified
+    chronological solver, streamed (`optimizeStream`, theorem
+    `optimizeStream_eq` ties its emissions to the pure run's
+    solutions).  Each improving solution is printed followed by
+    `----------` as soon as it is found; `==========` follows once the
+    last improving bound is certified infeasible (optimality, theorem
+    `optimizeCertified_optimal`); a model with no solution prints
+    `=====UNSATISFIABLE=====` (`optimizeCertified_unsat`).  Exit codes as
+    for satisfy models; 3 if the run could not complete. -/
+private def runOptimize (model : Model) : IO UInt32 := do
+  match ← LeanFzn.Integration.optimizeStream LeanFzn.Integration.lcgSolver model
+      (fun store => do
+        IO.println (LeanFzn.Integration.emitCertifiedSolution model store)
+        -- PLAN E3: FLUSH after every improving solution. Without it the
+        -- stdout buffer is lost when the process is killed (e.g. by
+        -- `timeout`), so no `----------` is ever visible before the kill
+        -- (the E3 check failed with 0 lines on a 5 s-killed run).
+        (← IO.getStdout).flush) with
+  | .error reason =>
+      IO.eprintln s!"leanfzn: {reason}"
+      return 3
+  | .ok summary =>
+      let run := summary.run
+      if run.complete then
+        if run.sols.isEmpty then
+          IO.println "=====UNSATISFIABLE====="
+          return 1
+        else
+          IO.println LeanFzn.Integration.optimumMarker
+          return 0
+      else
+        IO.eprintln "leanfzn: optimization incomplete: the model is outside the certified gate"
+        return 3
+
 /-- The `solve` subcommand: parse the model, run the certified front
     door, and report the verdict. -/
 private def runSolve (args : List String) : IO UInt32 := do
@@ -198,6 +234,10 @@ private def runSolve (args : List String) : IO UInt32 := do
           return 2
       | .ok model =>
           if LeanFzn.Checker.wellFormedFastB model then
+           match model.solve with
+           | .minimize _ _ => runOptimize model
+           | .maximize _ _ => runOptimize model
+           | .satisfy _ =>
             match LeanFzn.Integration.solveCertified model with
             | .sat store =>
                 -- emit the satisfying assignment as a solution text

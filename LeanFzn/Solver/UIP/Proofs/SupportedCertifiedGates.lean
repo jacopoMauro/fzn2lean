@@ -42,9 +42,10 @@ theorem solveSupportedPhase_sat_of_gates {orig : List Domain}
     {original : List Clause} {props : List Propagator} {leaf : Assignment → Bool}
     (P : SupportedPhasePremises orig original props leaf)
     (hc : SupportedArmInvGatesCore orig original props leaf)
-    {w : Assignment} (hrun : solveSupportedPhase P = .sat w) :
+    (hent : LearnedEntailed leaf original)
+    {w : Assignment} (hrun : solveSupportedPhase P hent = .sat w) :
     SolutionWitness leaf orig w :=
-  solveSupportedPhase_sat_solution P
+  solveSupportedPhase_sat_solution P hent
     (fun cfg w hreach _ hstep =>
       supportedSat_of_core hc hreach hstep)
     hrun
@@ -64,9 +65,10 @@ theorem solveSupportedPhase_unsat_of_gates {orig : List Domain}
       RootFactsBridge leaf cfg.branch)
     (hlent : ∀ {cfg : SchedulerConfig leaf}, SupportedReach orig original props cfg →
       LearnedEntailed leaf cfg.branch.learned)
-    (hrun : solveSupportedPhase P = .unsat) :
+    (hent : LearnedEntailed leaf original)
+    (hrun : solveSupportedPhase P hent = .unsat) :
     ∀ a, OriginalLeaves leaf orig a → False :=
-  solveSupportedPhase_unsat_excludes P
+  solveSupportedPhase_unsat_excludes P hent
     (fun cfg hreach _ hstep =>
       supportedPhaseNext_unsat_excludes
         (supportedInvariantDiscipline_of_gates hc.toSupportedArmInvGates)

@@ -343,7 +343,7 @@ theorem stepConsume_some_shape {cfg next : SchedulerConfig leaf}
   rw [hp] at h
   simp only [Option.some.injEq] at h
   subst h
-  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+  exact ⟨resumePending_frame _ _ _, rfl, rfl, resumePending_learned _ _ _, rfl⟩
 
 /-- The successor's work list is the predecessor's work list minus its dead
 head: the consumed alternative becomes the current frame. -/
@@ -393,16 +393,17 @@ theorem stepConsume_missing_checkpoint_no_retirement
     (hp : cfg.pending = f :: rest)
     (hcp : checkpointAt cfg.checkpoints f.2.length = none)
     (h : stepConsume cfg = some next) :
-    next.branch.trail = canonicalTrail cfg.orig f ∧
+    (∃ ex, next.branch.trail = canonicalTrail cfg.orig f ++ ex ∧
+      ∀ e ∈ ex, e.level = f.2.length) ∧
       next.branch.level = f.2.length ∧ next.pending = rest ∧
       next.branch.learned = cfg.branch.learned := by
   have hbranch := stepConsume_branch_of_no_checkpoint hp hcp h
   obtain ⟨-, hpend, -, hlearn, -⟩ := stepConsume_some_shape hp h
   refine ⟨?_, ?_, hpend, hlearn⟩
   · rw [hbranch]
-    rfl
+    exact resumePending_trail cfg.orig cfg.branch f
   · rw [hbranch]
-    rfl
+    exact resumePending_level cfg.orig cfg.branch f
 
 /-- COVERAGE OF THE CONSUME STEP AT THE ACTUAL PREDECESSOR: every leaf
 solution enumerated by the old work list (`branch.frame :: f :: rest`) is

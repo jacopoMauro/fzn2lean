@@ -163,11 +163,12 @@ TRUTH TABLE of the provider's two hypotheses over `perform`'s result:
 /-- Shape lemma: a successful `perform` is the explained closure of the
 narrowed executed checkpoint. -/
 theorem perform_shape {leaf : Assignment → Bool} {p : BackjumpPlan leaf}
-    {bs : BranchState leaf} {orig : List Clause} {props : List Propagator}
-    {restored : BranchState leaf} (h : p.perform bs orig props = some restored) :
+    {bs : BranchState leaf} {dom : List Domain} {orig : List Clause}
+    {props : List Propagator}
+    {restored : BranchState leaf} (h : p.perform bs dom orig props = some restored) :
     ∃ g, filterFrame p.asserting p.checkpoint.frame = some g ∧
-      restored = explainedClosure orig props
-        ((p.execute (bs.learnGlobal p.learned)).narrowFrame g) := by
+      restored = explainedClosure dom orig props (syncAll dom
+        ((p.execute (bs.learnGlobal p.learned)).narrowFrame g)) := by
   unfold BackjumpPlan.perform BackjumpPlan.restoreNarrow at h
   cases hf : filterFrame p.asserting p.checkpoint.frame with
   | none => simp [hf] at h
@@ -179,15 +180,18 @@ theorem perform_shape {leaf : Assignment → Bool} {p : BackjumpPlan leaf}
 `filterFrame` is mass-nonincreasing (`filterFrame_mass_le`) and the
 closure is mass-nonincreasing (`explainedClosure_mass`). -/
 theorem perform_frame_mass_le {leaf : Assignment → Bool}
-    {p : BackjumpPlan leaf} {bs : BranchState leaf} {orig : List Clause}
+    {p : BackjumpPlan leaf} {bs : BranchState leaf} {dom : List Domain}
+    {orig : List Clause}
     {props : List Propagator} {restored : BranchState leaf}
-    (h : p.perform bs orig props = some restored) :
+    (h : p.perform bs dom orig props = some restored) :
     Frame.mass restored.frame ≤ Frame.mass p.checkpoint.frame := by
   obtain ⟨g, hg, rfl⟩ := perform_shape h
-  have h1 : Frame.mass (explainedClosure orig props
-      ((p.execute (bs.learnGlobal p.learned)).narrowFrame g)).frame
-      ≤ Frame.mass ((p.execute (bs.learnGlobal p.learned)).narrowFrame g).frame :=
-    explainedClosure_mass orig props _
+  have h1 : Frame.mass (explainedClosure dom orig props (syncAll dom
+      ((p.execute (bs.learnGlobal p.learned)).narrowFrame g))).frame
+      ≤ Frame.mass ((p.execute (bs.learnGlobal p.learned)).narrowFrame g).frame := by
+    have := explainedClosure_mass dom orig props (syncAll dom
+      ((p.execute (bs.learnGlobal p.learned)).narrowFrame g))
+    rwa [syncAll_frame] at this
   have h2 : Frame.mass ((p.execute (bs.learnGlobal p.learned)).narrowFrame g).frame
       = Frame.mass g := rfl
   have h3 : Frame.mass g ≤ Frame.mass p.checkpoint.frame :=
@@ -266,27 +270,29 @@ deduction selector is `none` there, and the closure stops (via the
 EXISTING fixpoint lemma `explainedClosure_eq_self_of_deduction_none`,
 `SchedulerStep.lean`). The witness's asserting clause is exactly `[]`. -/
 private theorem explainedClosure_of_learned_emptyClause {leaf : Assignment → Bool}
+    {dom : List Domain}
     {bs : BranchState leaf} (hdb : bs.learned = ([] : Clause) :: []) :
-    explainedClosure ([] : List Clause) [] bs = bs := by
+    explainedClosure dom ([] : List Clause) [] bs = bs := by
   apply explainedClosure_eq_self_of_deduction_none
   have hev : nextPruningEvent ([] : List Clause) [] bs.frame bs.learned
-      = .conflict [] := by
+      = .conflict [[]] := by
     rw [hdb]
     simp only [nextPruningEvent, scanDatabase, clauseRemaining, List.filter_nil]
   rw [explainedDeduction, hev]
 
 /-- The witness satisfies all three `JumpDecrease` premises. -/
 private theorem perform0 (leaf : Assignment → Bool) :
-    (p0 leaf).perform (cfg0 leaf).branch (cfg0 leaf).original
+    (p0 leaf).perform (cfg0 leaf).branch (cfg0 leaf).orig (cfg0 leaf).original
         (cfg0 leaf).props = some (restored0 leaf) := by
-  have hcl : explainedClosure ([] : List Clause) []
-      (((p0 leaf).execute
+  have hcl : explainedClosure (cfg0 leaf).orig ([] : List Clause) []
+      (syncAll (cfg0 leaf).orig (((p0 leaf).execute
         ((cfg0 leaf).branch.learnGlobal (p0 leaf).learned)).narrowFrame
-        ([d0], []))
-      = (((p0 leaf).execute
+        ([d0], [])))
+      = (syncAll (cfg0 leaf).orig (((p0 leaf).execute
         ((cfg0 leaf).branch.learnGlobal (p0 leaf).learned)).narrowFrame
-        ([d0], [])) := by
+        ([d0], []))) := by
     apply explainedClosure_of_learned_emptyClause
+    rw [syncAll_learned]
     show (((p0 leaf).execute
       ((cfg0 leaf).branch.learnGlobal (p0 leaf).learned)).narrowFrame
       ([d0], [])).learned = ([] : Clause) :: []
@@ -300,6 +306,7 @@ private theorem perform0 (leaf : Assignment → Bool) :
   simp only [Option.map_some]
   rw [hcl]
   simp only [restored0]
+  rfl
 
 private theorem checkpoint0 (leaf : Assignment → Bool) :
     checkpointAt (cfg0 leaf).checkpoints an0.backjumpLevel = some (cp0 leaf) :=
@@ -381,7 +388,7 @@ def DebtDecrease (leaf : Assignment → Bool) : Prop :=
     ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     -- the successor's raw cost may RISE (refuted above); the repair
     -- charges it against the newly registered dead region instead:
     branchCost restored.frame.1 <
@@ -401,7 +408,7 @@ def JumpDecreaseOfDebt (leaf : Assignment → Bool) : Prop :=
     ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     branchCost restored.frame.1 < branchCost cfg.branch.frame.1
 
 /-- VACUOUS BRIDGE, kept for the record: this proves that the

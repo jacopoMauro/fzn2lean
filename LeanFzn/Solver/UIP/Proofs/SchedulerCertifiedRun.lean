@@ -65,17 +65,18 @@ theorem solvePhaseCompiled_sat_solution {leaf : Assignment → Bool}
     {problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit}
     (P : CompiledPhasePremises (leaf := leaf) problem)
     (hpres : ReachableArmsPreserveReach leaf)
-    (original : List Clause) (props : List Propagator) {w : Assignment}
-    (hrun : solvePhaseCompiled (leaf := leaf) P original props = .sat w) :
+    (original : List Clause) (props : List Propagator)
+    (hent : LearnedEntailed leaf original) {w : Assignment}
+    (hrun : solvePhaseCompiled (leaf := leaf) P original props hent = .sat w) :
     SolutionWitness leaf problem.domains w :=
   W1.run_sat_solution_sorted
-    (reachablePhaseProgressSorted_of_premises P.halignDB P.hdb P.hbr)
+    (reachablePhaseProgressSorted_of_premises P.halignDB P.hbr)
     (fun _ _ hreach hsucc => phaseNext_reachable_succ hreach hsucc)
     (phaseNextOrigFrame problem.domains leaf)
     (RunAssembly.phaseNextSatSolution_of_reachPreserve
       (orig := problem.domains) hpres)
     (SchedulerConfig.init problem.domains original props)
-    (schedulerReachable_init problem.domains original props) rfl hrun
+    (schedulerReachable_init problem.domains original props hent) rfl hrun
 
 /-- **D1 UNSAT TRANSFER**: a `.unsat` verdict of the compiled entry excludes
 every leaf solution of the run's original box. W1's `run_unsat_excludes`;
@@ -100,15 +101,16 @@ theorem solvePhaseCompiled_unsat_excludes {leaf : Assignment → Bool}
       cfg.orig = problem.domains →
         ClosureContract leaf problem.domains cfg.original cfg.props)
     (original : List Clause) (props : List Propagator)
-    (hrun : solvePhaseCompiled (leaf := leaf) P original props = .unsat) :
+    (hent : LearnedEntailed leaf original)
+    (hrun : solvePhaseCompiled (leaf := leaf) P original props hent = .unsat) :
     ∀ a, OriginalLeaves leaf problem.domains a → False :=
   W1.run_unsat_excludes_sorted
-    (reachablePhaseProgressSorted_of_premises P.halignDB P.hdb P.hbr)
+    (reachablePhaseProgressSorted_of_premises P.halignDB P.hbr)
     (fun _ _ hreach hsucc => phaseNext_reachable_succ hreach hsucc)
     (phaseNextOrigFrame problem.domains leaf)
     (RunAssembly.phaseNextUnsatTerminal_of_runPremises hinv hdead hbr hbridge
       hlent hc)
     (SchedulerConfig.init problem.domains original props)
-    (schedulerReachable_init problem.domains original props) rfl hrun
+    (schedulerReachable_init problem.domains original props hent) rfl hrun
 
 end LeanFzn.Solver.UIP

@@ -61,6 +61,7 @@ open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation L
 theorem propagatorsOfProved_conflictraw
     {problem : Problem DomConstraint Unit}
     (hview : IntViewedDoms problem.domains)
+    (hshape : DomsShapeTyped problem.domains)
     {props : List Propagator}
     (hprops : ∀ p ∈ props, ∃ dc ∈ problem.constraints,
       propagatorOfProved dc = some p)
@@ -82,7 +83,7 @@ theorem propagatorsOfProved_conflictraw
         cc ≠ [] →
         Clause.EntailedBy problem DomConstraint.SatisfiedBy cc := by
   intro st hnone hinv _hdist cc hrep _hanalyze hccne
-  exact propagatorsOfProved_conflictEntitled hview
+  exact propagatorsOfProved_conflictEntitled hview hshape
     (problem := problem) (props := props)
     _hsolvable hprops hlin hlinE hdb st hnone hinv cc hrep hccne
 

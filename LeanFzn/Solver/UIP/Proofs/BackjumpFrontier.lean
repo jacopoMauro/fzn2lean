@@ -50,7 +50,30 @@ def _root_.LeanFzn.Solver.Propagation.BackjumpPlan.entry (p : BackjumpPlan leaf)
 asserting entry. -/
 theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_trail' (p : BackjumpPlan leaf)
     (bs : BranchState leaf) :
-    (p.execute bs).trail = p.checkpoint.trail ++ [p.entry] := rfl
+    (p.execute bs).trail = p.checkpoint.trail ++ p.assertExtra := rfl
+
+/-- Every appended entry is the plan's entry. -/
+theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_mem' (p : BackjumpPlan leaf)
+    (bs : BranchState leaf) {e : TrailEntry} (he : e ∈ (p.execute bs).trail) :
+    e ∈ p.checkpoint.trail ∨ e = p.entry :=
+  BackjumpPlan.execute_mem p bs he
+
+/-- Either the entry was skipped, or the trail is exactly checkpoint ++ entry. -/
+theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_trail_cases (p : BackjumpPlan leaf)
+    (bs : BranchState leaf) :
+    ((p.execute bs).trail = p.checkpoint.trail ∧
+      ∃ e ∈ p.checkpoint.trail, e.literal = p.asserting.norm) ∨
+    ((p.execute bs).trail = p.checkpoint.trail ++ [p.entry] ∧
+      ∀ e ∈ p.checkpoint.trail, e.literal ≠ p.asserting.norm) := by
+  unfold BackjumpPlan.execute BackjumpPlan.assertExtra
+  split
+  · next h =>
+    refine Or.inl ⟨by simp, ?_⟩
+    simpa only [List.any_eq_true, decide_eq_true_eq] using h
+  · next h =>
+    refine Or.inr ⟨rfl, fun e he heq => h ?_⟩
+    simp only [List.any_eq_true, decide_eq_true_eq]
+    exact ⟨e, he, heq⟩
 
 /-! ## Well-formedness preservation -/
 
@@ -73,23 +96,20 @@ theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_wellFormed {p : B
   refine ⟨?_, ?_, ?_, ?_, hbs⟩
   · -- trail levels are bounded by the target level
     intro e he
-    rw [BackjumpPlan.execute_trail'] at he
-    rcases trail_append_entry_mem he with he | rfl
+    rcases BackjumpPlan.execute_mem' p bs he with he | rfl
     · rw [hcpLevel] at hlev
       exact hlev e he
     · simp only [BackjumpPlan.entry]
       exact Nat.le_refl _
   · -- normalization
     intro e he
-    rw [BackjumpPlan.execute_trail'] at he
-    rcases trail_append_entry_mem he with he | rfl
+    rcases BackjumpPlan.execute_mem' p bs he with he | rfl
     · exact hnorm e he
     · simp only [BackjumpPlan.entry]
       rw [norm_norm]
   · -- reason validity
     intro e he r hr
-    rw [BackjumpPlan.execute_trail'] at he
-    rcases trail_append_entry_mem he with he | rfl
+    rcases BackjumpPlan.execute_mem' p bs he with he | rfl
     · exact hreason e he r hr
     · have hr' : { clause := p.learned } = r := by
         simpa only [BackjumpPlan.entry, Option.mem_some_iff] using hr
@@ -97,7 +117,10 @@ theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_wellFormed {p : B
       exact ⟨hent, hpivot⟩
   · -- chronology
     intro e he r hr q hq hne
-    rw [BackjumpPlan.execute_trail'] at he
+    rcases BackjumpPlan.execute_trail_cases p bs with ⟨htr, -⟩ | ⟨htr, -⟩
+    · rw [htr] at he ⊢
+      exact hchron0 e he r hr q hq hne
+    rw [htr] at he ⊢
     rcases trail_append_entry_mem he with he | rfl
     · obtain ⟨e'', he'', heq, hlt⟩ := hchron0 e he r hr q hq hne
       exact ⟨e'', trail_mem_append he'' _, heq, earlierThan_extend hlt⟩
@@ -125,8 +148,7 @@ theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_represents_forwar
     (p.execute bs).Represents a := by
   refine ⟨hframe, ?_, hlearn⟩
   intro e he
-  rw [BackjumpPlan.execute_trail'] at he
-  rcases trail_append_entry_mem he with he | rfl
+  rcases BackjumpPlan.execute_mem' p bs he with he | rfl
   · exact htrail e he
   · simpa only [BackjumpPlan.entry] using hassert
 
@@ -140,10 +162,13 @@ theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_satisfies_learned
     p.learned.SatisfiedBy a := by
   obtain ⟨_, htrail, _⟩ := hrep
   refine ⟨p.asserting.norm, hpivot, ?_⟩
-  have := htrail p.entry (by
-    rw [BackjumpPlan.execute_trail']
-    exact List.mem_append.mpr (Or.inr (List.mem_singleton_self _)))
-  simpa only [BackjumpPlan.entry] using this
+  rcases BackjumpPlan.execute_trail_cases p bs with ⟨htr, e, he, hel⟩ | ⟨htr, -⟩
+  · have := htrail e (by rw [htr]; exact he)
+    rwa [hel] at this
+  · have := htrail p.entry (by
+      rw [htr]
+      exact List.mem_append.mpr (Or.inr (List.mem_singleton_self _)))
+    simpa only [BackjumpPlan.entry] using this
 
 /-! ## Classification soundness
 
@@ -381,15 +406,15 @@ entries, and every appended entry sits at the input state's own
 checkpoint restoration and the asserting enqueue, the closure adds only
 target-level entries, so the successor's trail extends the executed
 trail without disturbing any checkpoint prefix below the target. -/
-theorem explainedClosure_trail_extends (original : List Clause)
+theorem explainedClosure_trail_extends (orig : List Domain) (original : List Clause)
     (props : List Propagator) (bs : BranchState leaf) :
     ∃ extra : List TrailEntry,
-      (explainedClosure original props bs).trail = bs.trail ++ extra ∧
+      (explainedClosure orig original props bs).trail = bs.trail ++ extra ∧
         ∀ e ∈ extra, e.level = bs.level := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel →
       ∃ extra : List TrailEntry,
-        (explainedClosure original props bs).trail = bs.trail ++ extra ∧
+        (explainedClosure orig original props bs).trail = bs.trail ++ extra ∧
           ∀ e ∈ extra, e.level = bs.level from
     h (Frame.mass bs.frame) bs (Nat.le_refl _)
   intro fuel
@@ -409,34 +434,34 @@ theorem explainedClosure_trail_extends (original : List Clause)
     split
     · exact ⟨[], by simp⟩
     · rename_i d _
-      have hmass : Frame.mass
-          (narrowState bs d.frame d.literal d.reason d.learned).frame ≤ fuel := by
-        simp only [narrowState]
+      have hmass : Frame.mass (stepNarrowSync orig bs d).frame ≤ fuel := by
+        simp only [stepNarrowSync_frame]
         have := d.decreases
         omega
-      obtain ⟨extra, hextra, hlev⟩ :=
-        ih (narrowState bs d.frame d.literal d.reason d.learned) hmass
+      obtain ⟨extra, hextra, hlev⟩ := ih (stepNarrowSync orig bs d) hmass
+      obtain ⟨ex, hex, hexl⟩ := stepNarrowSync_trail orig bs d
       refine ⟨{ literal := d.literal.norm, level := bs.level,
-                reason := some { clause := d.reason } } :: extra, ?_, ?_⟩
-      · rw [hextra]
-        simp only [narrowState]
-        rw [List.append_assoc, List.singleton_append]
+                reason := some { clause := d.reason } } :: (ex ++ extra), ?_, ?_⟩
+      · rw [hextra, hex]
+        simp [List.append_assoc]
       · intro e he
         rcases List.mem_cons.mp he with he | he
         · rw [he]
-        · rw [hlev e he]
-          simp only [narrowState]
+        · rcases List.mem_append.mp he with he | he
+          · exact hexl e he
+          · rw [hlev e he]
+            simp only [stepNarrowSync_level]
 
 /-- The explained closure only ever REPLACES the frame by a filtered frame:
 every assignment still covered after the closure was already covered before
 it. Fuel induction mirroring `explainedClosure_level`; the single-step
 descent is `filterFrame_refines` on the deduction's own `filtered` call. -/
-theorem explainedClosure_frame_descends (original : List Clause)
+theorem explainedClosure_frame_descends (orig : List Domain) (original : List Clause)
     (props : List Propagator) (bs : BranchState leaf) :
-    FrameDescendsFrom (explainedClosure original props bs).frame bs.frame := by
+    FrameDescendsFrom (explainedClosure orig original props bs).frame bs.frame := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel →
-      FrameDescendsFrom (explainedClosure original props bs).frame bs.frame from
+      FrameDescendsFrom (explainedClosure orig original props bs).frame bs.frame from
     h (Frame.mass bs.frame) bs (Nat.le_refl _)
   intro fuel
   induction fuel with
@@ -455,15 +480,13 @@ theorem explainedClosure_frame_descends (original : List Clause)
     split
     · exact FrameDescendsFrom.refl _
     · rename_i d _
-      have hmass : Frame.mass
-          (narrowState bs d.frame d.literal d.reason d.learned).frame ≤ fuel := by
-        simp only [narrowState]
+      have hmass : Frame.mass (stepNarrowSync orig bs d).frame ≤ fuel := by
+        simp only [stepNarrowSync_frame]
         have := d.decreases
         omega
-      have hstep : FrameDescendsFrom
-          (narrowState bs d.frame d.literal d.reason d.learned).frame bs.frame :=
+      have hstep : FrameDescendsFrom (stepNarrowSync orig bs d).frame bs.frame :=
         fun a hc =>
-          filterFrame_refines d.filtered (by simpa only [narrowState] using hc)
+          filterFrame_refines d.filtered (by simpa only [stepNarrowSync_frame] using hc)
       exact FrameDescendsFrom.trans (ih _ hmass) hstep
 
 /-- SUCCESSOR-CHECKPOINT IDENTITY from its three named parts: the level

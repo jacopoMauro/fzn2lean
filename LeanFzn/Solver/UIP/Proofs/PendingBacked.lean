@@ -487,7 +487,7 @@ theorem canonicalTrail_sorted (orig : List Domain) (f : BranchFrame) :
 from the predecessor. -/
 theorem canonicalTrail_wellFormed {orig : List Domain} {f : BranchFrame}
     {bs : BranchState leaf} (hlearn : LearnedEntailed leaf bs.learned) :
-    (resumePending orig bs f).WellFormed := by
+    (resumePendingBase orig bs f).WellFormed := by
   refine ⟨?_, ?_, ?_, ?_, ?_⟩
   · intro e he
     show e.level ≤ f.2.length
@@ -980,10 +980,10 @@ theorem canonicalTrail_distinct {orig : List Domain} {f : BranchFrame} :
 /-- **R1 CORE: THE CANONICAL RESUME IS REACHABLE.** Every missing-checkpoint
 resume's successor state satisfies the full eight-field `ReachableState`
 of the frame's own box — the pending frame is its own retained snapshot. -/
-theorem resumePending_reachable {leaf : Assignment → Bool} {orig : List Domain}
+theorem resumePendingBase_reachable {leaf : Assignment → Bool} {orig : List Domain}
     {bs : BranchState leaf} {f : BranchFrame}
     (h : ReachableState leaf orig bs) (hb : PendingBacked orig f) :
-    ReachableState leaf orig (resumePending orig bs f) where
+    ReachableState leaf orig (resumePendingBase orig bs f) where
   length_ok := hb.full_len
   full_fits := hb.fit
   prefix_forced := prefix_forced_canonical hb.shape hb.pins hb.fit
@@ -992,6 +992,17 @@ theorem resumePending_reachable {leaf : Assignment → Bool} {orig : List Domain
   wf := canonicalTrail_wellFormed h.wf.2.2.2.2
   sorted := canonicalTrail_sorted orig f
   distinct := canonicalTrail_distinct
+
+/-- R1d: the synchronised resume (`syncAll` of the canonical base) is
+reachable as well; the only new input is that every leaf solution fits the
+box (the explanation clauses of the synchronised literals are valid over the
+ORIGINAL domains). -/
+theorem resumePending_reachable {leaf : Assignment → Bool} {orig : List Domain}
+    {bs : BranchState leaf} {f : BranchFrame}
+    (h : ReachableState leaf orig bs) (hb : PendingBacked orig f)
+    (hfits : ∀ a, leaf a = true → a.Fits orig) :
+    ReachableState leaf orig (resumePending orig bs f) :=
+  syncAll_reachable (resumePendingBase_reachable h hb) hfits
 
 /-- **R1 CONSUMER (route (b))**: the missing-checkpoint consume resumes a
 reachable branch — the successor's `ReachableState` at the predecessor's
@@ -1005,10 +1016,11 @@ theorem stepConsume_reachable_missing_checkpoint {leaf : Assignment → Bool}
     (hcp : checkpointAt cfg.checkpoints f.2.length = none)
     (h : stepConsume cfg = some next)
     (hreach : ReachableState leaf cfg.orig cfg.branch)
-    (hb : PendingBacked cfg.orig f) :
+    (hb : PendingBacked cfg.orig f)
+    (hfits : ∀ a, leaf a = true → a.Fits cfg.orig) :
     ReachableState leaf cfg.orig next.branch := by
   rw [stepConsume_branch_of_no_checkpoint hp hcp h]
-  exact resumePending_reachable hreach hb
+  exact resumePending_reachable hreach hb hfits
 
 /-! ## §5 R2a: pending-side producers, preservation and the run invariant
 
@@ -1321,10 +1333,11 @@ theorem stepConsume_reachable_of_backedList {leaf : Assignment → Bool}
     (hcp : checkpointAt cfg.checkpoints f.2.length = none)
     (h : stepConsume cfg = some next)
     (hreach : ReachableState leaf cfg.orig cfg.branch)
-    (hpend : PendingBackedList cfg.orig cfg.pending) :
+    (hpend : PendingBackedList cfg.orig cfg.pending)
+    (hfits : ∀ a, leaf a = true → a.Fits cfg.orig) :
     ReachableState leaf cfg.orig next.branch :=
   stepConsume_reachable_missing_checkpoint hp hcp h hreach
-    (hpend f (by rw [hp]; exact List.mem_cons_self ..))
+    (hpend f (by rw [hp]; exact List.mem_cons_self ..)) hfits
 
 /-- The consume site's head frame is backed (for consumers that need the
 frame's own backing rather than the resumed state's reachability). -/
@@ -1342,8 +1355,7 @@ theorem stepPropagate_prefixPinned {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} (d : ProductiveDeduction leaf cfg.branch)
     (h : PrefixPinned cfg.branch.frame.2) :
     PrefixPinned (stepPropagate cfg d).branch.frame.2 := by
-  show PrefixPinned d.frame.2
-  rw [filterFrame_prefix d.filtered]
+  rw [stepPropagate_branch_frame, filterFrame_prefix d.filtered]
   exact h
 
 /-- The split's pinned child extends the prefix by the split data's own
@@ -1373,12 +1385,12 @@ theorem stepDecideSkip_prefixPinned {leaf : Assignment → Bool}
 /-- The explained closure only ever narrows the frame by `filterFrame`
 (each step's frame comes from the deduction's own `filtered` call), so it
 never changes the chosen prefix. -/
-theorem explainedClosure_prefix (original : List Clause)
+theorem explainedClosure_prefix (orig : List Domain) (original : List Clause)
     (props : List Propagator) (bs : BranchState leaf) :
-    (explainedClosure original props bs).frame.2 = bs.frame.2 := by
+    (explainedClosure orig original props bs).frame.2 = bs.frame.2 := by
   suffices h : ∀ (fuel : Nat) (bs : BranchState leaf),
       Frame.mass bs.frame ≤ fuel →
-      (explainedClosure original props bs).frame.2 = bs.frame.2 from
+      (explainedClosure orig original props bs).frame.2 = bs.frame.2 from
     h (Frame.mass bs.frame) bs (Nat.le_refl _)
   intro fuel
   induction fuel with
@@ -1397,13 +1409,12 @@ theorem explainedClosure_prefix (original : List Clause)
       split
       · rfl
       · rename_i d _
-        have hmass : Frame.mass
-            (narrowState bs d.frame d.literal d.reason d.learned).frame ≤ fuel := by
-          simp only [narrowState]
+        have hmass : Frame.mass (stepNarrowSync orig bs d).frame ≤ fuel := by
+          simp only [stepNarrowSync_frame]
           have := d.decreases
           omega
-        rw [ih (narrowState bs d.frame d.literal d.reason d.learned) hmass]
-        simp only [narrowState]
+        rw [ih (stepNarrowSync orig bs d) hmass]
+        simp only [stepNarrowSync_frame]
         exact filterFrame_prefix d.filtered
 
 /-- The restored-and-narrowed state of a plan keeps the checkpoint frame's
@@ -1428,7 +1439,7 @@ selected checkpoint frame's prefix is pinned", which the run invariant
 `PendingSideInv.checkpoints` maintains. -/
 theorem perform_prefix {p : BackjumpPlan leaf} {bs s : BranchState leaf}
     {original : List Clause} {props : List Propagator}
-    (h : p.perform bs original props = some s) :
+    (h : p.perform bs orig original props = some s) :
     PrefixPinned p.checkpoint.frame.2 → PrefixPinned s.frame.2 := by
   intro hp
   unfold BackjumpPlan.perform at h
@@ -1437,13 +1448,15 @@ theorem perform_prefix {p : BackjumpPlan leaf} {bs s : BranchState leaf}
   | some t =>
       rw [hr] at h
       simp only [Option.map_some, Option.some.injEq] at h
-      rw [← h, explainedClosure_prefix]
+      rw [← h]
+      show PrefixPinned (explainedClosure orig original props (syncAll orig t)).frame.2
+      rw [explainedClosure_prefix, syncAll_frame]
       exact restoreNarrow_prefix hr hp
 
 theorem stepLearnBackjumpAssert_prefixPinned {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {p : BackjumpPlan leaf} {ev : ConflictEvidence}
     {restored : BranchState leaf}
-    (hperf : p.perform cfg.branch cfg.original cfg.props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original cfg.props = some restored)
     (hpcp : PrefixPinned p.checkpoint.frame.2) :
     PrefixPinned (stepLearnBackjumpAssert cfg p ev restored).branch.frame.2 := by
   show PrefixPinned restored.frame.2
@@ -1606,7 +1619,7 @@ supplies it — see `PendingSideInv.stepLearnBackjumpAssert_ofCheckpoint`). -/
 theorem PendingSideInv.stepLearnBackjumpAssert {orig : List Domain}
     {cfg : SchedulerConfig leaf} {p : BackjumpPlan leaf} {ev : ConflictEvidence}
     {restored : BranchState leaf} (h : PendingSideInv orig cfg)
-    (hperf : p.perform cfg.branch cfg.original cfg.props = some restored)
+    (hperf : p.perform cfg.branch cfg.orig cfg.original cfg.props = some restored)
     (hpcp : PrefixPinned p.checkpoint.frame.2) :
     PendingSideInv orig (stepLearnBackjumpAssert cfg p ev restored) where
   branch := stepLearnBackjumpAssert_prefixPinned hperf hpcp
@@ -1627,7 +1640,7 @@ theorem PendingSideInv.stepLearnBackjumpAssert_ofCheckpoint {orig : List Domain}
     {learned : Clause} (h : PendingSideInv orig cfg)
     (hcp : cp ∈ cfg.checkpoints)
     (hperf : (BackjumpPlan.ofCheckpoint cp cfg.branch asserting learned).perform
-      cfg.branch cfg.original cfg.props = some restored) :
+      cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     PendingSideInv orig (LeanFzn.Solver.UIP.stepLearnBackjumpAssert cfg
       (BackjumpPlan.ofCheckpoint cp cfg.branch asserting learned) ev restored) := by
   have hpcp : PrefixPinned

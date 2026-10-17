@@ -260,6 +260,11 @@ theorem rank_lt_propagate (cfg : SchedulerConfig leaf)
     RankLt (SchedulerRank (stepPropagate cfg d)) (SchedulerRank cfg) := by
   have hcost : branchCost d.frame.1 ≤ branchCost cfg.branch.frame.1 :=
     filterFrame_cost_le d.filtered
+  have e1 : SchedulerRank (stepPropagate cfg d) =
+      (frontierCost (d.frame :: cfg.pending),
+        (Frame.mass d.frame, cfg.branch.level)) := by
+    simp [SchedulerRank, SchedulerConfig.frontier, stepPropagate, narrowState]
+  rw [e1]
   rcases Nat.lt_or_eq_of_le hcost with hlt | heq
   · exact Or.inl (frontierCost_frame_lt hlt cfg.pending)
   · exact Or.inr ⟨frontierCost_frame_congr heq cfg.pending, Or.inl d.decreases⟩
@@ -324,7 +329,7 @@ theorem stepConsume_frame_of_pending_cons {cfg next : SchedulerConfig leaf}
   rw [hp] at h
   simp only [Option.some.injEq] at h
   subst h
-  exact ⟨rfl, rfl⟩
+  exact ⟨resumePending_frame _ _ _, rfl⟩
 
 /-- The consume arm's decrease: the dead current frame leaves the frontier
 and the consumed pending frame becomes it — the rank's first component
@@ -359,7 +364,7 @@ theorem arm_decide {leaf : Assignment → Bool}
     {l : Literal} {v : Value} {vs : Domain} {doms : List Domain}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .stable bs)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs)
     (hw : leafWitness leaf cfg = none)
     (hsplit : splitData cfg.branch.frame = some (l, v, vs, doms))
     (hred : TrailRedundant cfg.branch.trail l = false) :
@@ -373,7 +378,7 @@ theorem arm_sat {leaf : Assignment → Bool} {cfg : SchedulerConfig leaf}
     {bs : BranchState leaf} {w : Assignment}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .stable bs)
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs)
     (hw : leafWitness leaf cfg = some w) :
     schedulerNext cfg = .sat w :=
   C2d.schedulerNext_eq_stable_sat hconf hstatus hd ht hw
@@ -388,13 +393,13 @@ theorem arm_analyzeConflict {leaf : Assignment → Bool}
     {c : Clause} {rest : List Clause} {learned : List Clause}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch =
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .conflict bs (c :: rest) learned)
     (hlevel : cfg.branch.level ≠ 0) :
     schedulerNext cfg = .analyzeConflict (stepAnalyzeConflictCounted cfg c learned
-        (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) c ∧
+        (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) c ∧
       SchedulerRank (stepAnalyzeConflictCounted cfg c learned
-        (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+        (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
         = SchedulerRank cfg :=
   ⟨C2d.schedulerNext_eq_conflict_analyze hconf hstatus hd ht hlevel, rfl⟩
 
@@ -409,7 +414,7 @@ theorem arm_learnBackjumpAssert {leaf : Assignment → Bool}
     (h : cfg.conflict = some ev) (ha : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-      cfg.branch cfg.original cfg.props = some restored) :
+      cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     schedulerNext cfg =
       .learnBackjumpAssert
         (stepLearnBackjumpAssert cfg
@@ -425,7 +430,7 @@ theorem arm_localExclude {leaf : Assignment → Bool}
     {l : Option Literal} {reason : Option Clause} {learned : List Clause}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch = .localExcluded bs l
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch = .localExcluded bs l
       reason learned) :
     schedulerNext cfg =
       .localExclude (stepLocalExclude cfg learned (branchRegion cfg)) ∧
@@ -534,7 +539,7 @@ theorem backjumpStep_not_analyzeConflict (cfg : SchedulerConfig leaf)
       | none => simp only [backjumpStep, ha, hcp] at hc; cases hc
       | some cp =>
           cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-              an.learned).perform cfg.branch cfg.original cfg.props with
+              an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
           | none => simp only [backjumpStep, ha, hcp, hp] at hc; cases hc
           | some restored => simp only [backjumpStep, ha, hcp, hp] at hc; cases hc
 

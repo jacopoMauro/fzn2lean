@@ -9,7 +9,7 @@ Purpose:
 
   R1's `reachable_analysis_success` exposes the recorded analysis as
   `an = ConflictAnalysis.ofUIP below uip` with
-  `analyzeAtAllowance cfg.branch.trail cfg.branch.level ev.clause
+  `analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level ev.clause
      = some (below, uip)`.
   (`Proofs/SchedulerReachable.lean:406`.)
 
@@ -150,15 +150,9 @@ theorem recordedAnalysis_normFalsified {leaf : Assignment → Bool}
   subst heq
   have hL : (ConflictAnalysis.ofUIP below uip).normalized.learned
       = (uip.negate :: below.map (fun p => p.1)).map Literal.norm := rfl
-  have hbf : BelowFalsified bs.trail below := by
-    unfold analyzeAtAllowance at hrun
-    exact analyzeStep_invariants bs.trail bs.level
-      (analysisFuel bs.trail ev.clause) [ev.clause] none [] []
-      (analyzerInvariant_init bs.trail bs.level) below uip hrun
-  obtain ⟨m, hm, hmlit, -⟩ :=
-    analyzeStep_uip_on_trail bs.trail bs.level
-      (analysisFuel bs.trail ev.clause) [ev.clause] none [] []
-      (analyzerInvariant_init bs.trail bs.level) below uip hrun
+  obtain ⟨hm0, hl0⟩ := lcgInv_init bs.trail bs.level ev.clause
+  obtain ⟨hbf, i, m, hmi, hmlit, -⟩ := analyzeLoop_inv _ _ below uip hm0 hl0 hrun
+  have hm : m ∈ bs.trail := List.mem_of_getElem? hmi
   have hnorm : ∀ e ∈ bs.trail, e.literal = e.literal.norm :=
     (analyzerTrailOk_of_reachable hreach).norm
   have huipnorm : uip = uip.norm := by
@@ -173,9 +167,9 @@ theorem recordedAnalysis_normFalsified {leaf : Assignment → Bool}
       simpa [norm_negate_norm_local, Literal.negate_negate]
         using hmlit.trans huipnorm⟩
   · obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hq₀
-    obtain ⟨e, hfe, helit, -⟩ := hbf p hp
-    exact ⟨e, findEntryOf_mem _ _ _ hfe,
-      by simpa [norm_negate_norm_local p.1] using helit⟩
+    obtain ⟨e, he, hp1, -⟩ := hbf p hp
+    exact ⟨e, he, by
+      rw [norm_negate_norm_local, hp1, lcg_learnt_negate_norm (hnorm e he)]⟩
 
 /-- The EXACT `FalsifiedByTrail` shape under the single missing
 hypothesis, NAMED: every recorded below literal has a normal negation.
@@ -186,31 +180,28 @@ def BelowNegateStable (below : List (Literal × Nat)) : Prop :=
   ∀ p ∈ below, (p.1.negate).norm = p.1.negate
 
 theorem recordedAnalysisFalsified_of_belowStable {leaf : Assignment → Bool}
-    {bs : BranchState leaf} {c : Clause} {an : ConflictAnalysis}
+    {orig : List Domain} {bs : BranchState leaf} {c : Clause} {an : ConflictAnalysis}
     {below : List (Literal × Nat)} {uip : Literal}
-    (hrun : analyzeAtAllowance bs.trail bs.level c = some (below, uip))
+    (hnorm : ∀ e ∈ bs.trail, e.literal = e.literal.norm)
+    (hrun : analyzeAtAllowance orig bs.trail bs.level c = some (below, uip))
     (han : an = ConflictAnalysis.ofUIP below uip)
     (hstable : BelowNegateStable below) :
     FalsifiedByTrail bs an.learned := by
   subst han
   have hL : (ConflictAnalysis.ofUIP below uip).learned
       = uip.negate :: below.map (fun p => p.1) := rfl
-  have hbf : BelowFalsified bs.trail below := by
-    unfold analyzeAtAllowance at hrun
-    exact analyzeStep_invariants bs.trail bs.level
-      (analysisFuel bs.trail c) [c] none [] []
-      (analyzerInvariant_init bs.trail bs.level) below uip hrun
-  obtain ⟨m, hm, hmlit, -⟩ :=
-    analyzeStep_uip_on_trail bs.trail bs.level
-      (analysisFuel bs.trail c) [c] none [] []
-      (analyzerInvariant_init bs.trail bs.level) below uip hrun
+  obtain ⟨hm0, hl0⟩ := lcgInv_init bs.trail bs.level c
+  obtain ⟨hbf, i, m, hmi, hmlit, -⟩ := analyzeLoop_inv _ _ below uip hm0 hl0 hrun
+  have hm : m ∈ bs.trail := List.mem_of_getElem? hmi
   intro q hq
   rw [hL] at hq
   rcases List.mem_cons.mp hq with rfl | hq
   · exact ⟨m, hm, by rw [Literal.negate_negate]; exact hmlit⟩
   · obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hq
-    obtain ⟨e, hfe, helit, -⟩ := hbf p hp
-    exact ⟨e, findEntryOf_mem _ _ _ hfe, (hstable p hp ▸ helit)⟩
+    obtain ⟨e, he, hp1, -⟩ := hbf p hp
+    have helit : e.literal = (p.1.negate).norm := by
+      rw [hp1, lcg_learnt_negate_norm (hnorm e he)]
+    exact ⟨e, he, (hstable p hp ▸ helit)⟩
 
 /-! ## §3 The missing hypothesis is NOT vacuously true
 
@@ -242,10 +233,11 @@ def gapClause : Clause :=
   [⟨Atom.boolEq 0 false, false⟩, ⟨Atom.boolEq 1 false, false⟩]
 
 /-- The executable run of the witness: a completed allowance run
-(`rfl`, no `native_decide`). -/
+(`decide`, no `native_decide`), over Boolean original domains. -/
 theorem analyzeAtAllowance_gap_run :
-    analyzeAtAllowance gapTrail 2 gapClause
-      = some ([(posBool 0 true, 1)], posBool 1 false) := rfl
+    analyzeAtAllowance [[.bool false, .bool true], [.bool false, .bool true]]
+        gapTrail 2 gapClause
+      = some ([(posBool 0 true, 1)], posBool 1 false) := by decide
 
 /-- `BelowFalsified` holds on the witness (norm tenor), so the missing
 link is exclusively the normalization gap. -/

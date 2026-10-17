@@ -122,7 +122,7 @@ theorem identifiesChain_of_reach {orig : List Domain} {original : List Clause}
         simp only [SchedulerConfig.init, List.mem_singleton] at hcp
         subst hcp
         simpa only [SchedulerConfig.init, rootCheckpoint] using
-          rootCheckpoint_identifies_init leaf orig
+          rootCheckpoint_identifies_init leaf orig original
       · exact ⟨fun cp' h => by simp at h, trivial⟩
   | step hrec hs ih =>
       clear cfg
@@ -159,7 +159,7 @@ theorem identifiesChain_of_reach {orig : List Domain} {original : List Clause}
                 · simpa only [stepChronologicalFallback] using ih.2
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hs
                     simp only [] at hs
@@ -372,7 +372,7 @@ theorem checkpointsStrictPrefix_of_reach {orig : List Domain}
                   (by simpa only [stepChronologicalFallback] using hlt)
             | some cpsel =>
                 cases hp : (BackjumpPlan.ofCheckpoint cpsel cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hs
                     simp only [] at hs
@@ -503,18 +503,27 @@ theorem checkpointsStrictPrefix_of_reach {orig : List Domain}
           subst hs
           intro L cp hcp hlt
           have hlev : L < cfg.branch.level := by
-            simpa only [stepPropagate, narrowState] using hlt
+            simpa only [stepPropagate_branch_level] using hlt
           obtain ⟨mid, hmid, hmidlev⟩ :=
             ih (by simpa only [stepPropagate] using hcp) hlev
+          obtain ⟨-, -, -, ex, hex, hexl⟩ := syncSlot_shape cfg.orig
+            (narrowState cfg.branch d.frame d.literal d.reason d.learned) d.literal.atom.slot
           refine ⟨mid ++ [(⟨d.literal.norm, cfg.branch.level,
-            some { clause := d.reason }⟩ : TrailEntry)], ?_, ?_⟩
-          · simp only [stepPropagate, narrowState]
-            rw [hmid, List.append_assoc]
+            some { clause := d.reason }⟩ : TrailEntry)] ++ ex, ?_, ?_⟩
+          · simp only [stepPropagate]
+            rw [hex]
+            simp only [narrowState]
+            rw [hmid]
+            simp [List.append_assoc]
           · intro e he
-            rcases List.mem_append.mp he with he | he
+            have he' : e ∈ mid ∨ e = (⟨d.literal.norm, cfg.branch.level,
+                some { clause := d.reason }⟩ : TrailEntry) ∨ e ∈ ex := by
+              simpa [or_assoc] using he
+            rcases he' with he | he | he
             · exact hmidlev e he
-            · rw [List.mem_singleton] at he
-              subst he
+            · subst he
+              exact hlev
+            · rw [hexl e he]
               exact hlev
         · -- ARM 2 / ARM 3 / ARM 6: the guarded stable dispatch
           rw [hnt] at hs
@@ -723,12 +732,8 @@ theorem supportedHfresh_of_reach {orig : List Domain} {original : List Clause}
     rw [hmid]
     exact List.mem_append.mpr (Or.inl he)
   -- the UIP witness sits on the trail at the conflict level
-  have hrun' := hrun
-  unfold analyzeAtAllowance at hrun'
   obtain ⟨m, hm, hmlit, -⟩ :=
-    analyzeStep_uip_on_trail cfg.branch.trail cfg.branch.level
-      (analysisFuel cfg.branch.trail ev.clause) [ev.clause] none [] []
-      (analyzerInvariant_init cfg.branch.trail cfg.branch.level) below uip hrun'
+    analyzeAtAllowance_uip_on_trail hrun
   -- an inhabited branch frame: both literals hold at a covered assignment
   obtain ⟨a, hcov⟩ := hinhab hreach
   have hbs := hbr hreach
@@ -816,7 +821,12 @@ mapped head of `ofUIP`), C1's pool alignment
 (`recordedAnalysis_learned_poolAligned`) and the pool slot-range lemma
 above. The single premise `hv` is C1's run-wide trail-vocabulary family
 (`BranchTrailVocabulary`, `TrailVocabularyProducers`); `hbr` is the joint
-induction's per-site branch-reachability component. -/
+induction's per-site branch-reachability component.
+
+LEGACY (C2b): `hv` is REFUTED along actual runs of a registered unit
+instance (`ExtendedPoolProducers.branchTrailVocabulary_refuted_on_run`);
+no entry consumes this lemma. The premise-free replacement is
+`TrailSlotRange.supportedHrange_of_run`. -/
 theorem supportedHrange_of_premises {orig : List Domain} {original : List Clause}
     {props : List Propagator} {leaf : Assignment → Bool}
     (hbr : ∀ {cfg : SchedulerConfig leaf},

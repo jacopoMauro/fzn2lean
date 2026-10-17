@@ -67,7 +67,7 @@ def domOfLit (doms : List (List Value)) (l : Literal) : List (List Value) :=
       else
         updateSlot doms s (fun d => domFilterInt (fun p => p > k) d)
   | .boolEq s b =>
-      updateSlot doms s (fun _ => [.bool (if l.positive then b else !b)])
+      updateSlot doms s (fun d => d.filter (fun v => v.eqB (.bool (if l.positive then b else !b))))
   | .intNe s k =>
       if l.positive then
         updateSlot doms s (fun d => domFilterInt (fun p => p ≠ k) d)

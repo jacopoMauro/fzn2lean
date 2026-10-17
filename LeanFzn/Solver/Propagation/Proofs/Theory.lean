@@ -1856,10 +1856,11 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
           · rw [hs]
             by_cases hrange : sl < doms.length
             · rw [length_getD_updateSlot_eq doms sl _ hrange]
-              exact Nat.le_refl _
+              exact Nat.le_trans (List.length_filter_le _ _) (hall sl)
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
-              rw [setSlot_eq_self_of_le doms [.bool (!b)] sl hge]
+              rw [setSlot_eq_self_of_le doms ((doms.getD sl []).filter
+                (fun v => v.eqB (Value.bool !b))) sl hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s
@@ -1918,10 +1919,11 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
           · rw [hs]
             by_cases hrange : sl < doms.length
             · rw [length_getD_updateSlot_eq doms sl _ hrange]
-              exact Nat.le_refl _
+              exact Nat.le_trans (List.length_filter_le _ _) (hall sl)
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
-              rw [setSlot_eq_self_of_le doms [.bool b] sl hge]
+              rw [setSlot_eq_self_of_le doms ((doms.getD sl []).filter
+                (fun v => v.eqB (Value.bool b))) sl hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s

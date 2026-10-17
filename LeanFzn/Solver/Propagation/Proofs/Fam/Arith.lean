@@ -1090,7 +1090,8 @@ theorem propAbs_safe (st : State) (i k : Nat) :
 theorem propMin_reason_valid
     {problem : Problem DomConstraint Unit}
     {st : State} {i j k : Nat} {l : Literal} {r : Reason}
-    (hprob : DomConstraint.minSlot i j k ∈ problem.constraints)
+    (hprob : ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
+      (DomConstraint.minSlot i j k).SatisfiedBy a)
     (hrun : propMin st i j k = .implied l r) :
     Reason.Valid problem DomConstraint.SatisfiedBy r l ∧
       (∀ q ∈ r.clause, q = q.norm) := by
@@ -1120,7 +1121,7 @@ theorem propMin_reason_valid
             [negLe k (min xi' yj' - 1), posLe i (xi' - 1),
               posLe j (yj' - 1)] := by rw [hcl]
         rw [hcl2]
-        exact arith_min_nogood_lo_k_true (ha.2 _ hprob)
+        exact arith_min_nogood_lo_k_true (hprob _ ha)
       · rcases List.mem_cons.mp hrest1 with h2' | hrest2
         · -- emission 2: implied posLe k (min xi yj)
           obtain ⟨hl, hcl⟩ := narrowHi_implied_inv (Eq.symm h2')
@@ -1134,7 +1135,7 @@ theorem propMin_reason_valid
               [posLe k (min xi yj), negLe i xi, negLe j yj] := by
             rw [hcl]
           rw [hcl2]
-          exact arith_min_nogood_hi_k_true (ha.2 _ hprob)
+          exact arith_min_nogood_hi_k_true (hprob _ ha)
         · rcases List.mem_cons.mp hrest2 with h3' | hrest3
           · -- emission 3: implied negLe i (zk'−1), 2-literal nogood
             obtain ⟨hl, hcl⟩ := narrowLo_implied_inv (Eq.symm h3')
@@ -1147,7 +1148,7 @@ theorem propMin_reason_valid
             have hcl2 : r.clause =
                 [negLe i (zk' - 1), posLe k (zk' - 1)] := by rw [hcl]
             rw [hcl2]
-            exact arith_min_nogood_lo_i_true (ha.2 _ hprob)
+            exact arith_min_nogood_lo_i_true (hprob _ ha)
           · -- emission 4: implied negLe j (zk'−1)
             obtain ⟨hl, hcl⟩ := narrowLo_implied_inv (Eq.symm
               (List.mem_singleton.mp hrest3))
@@ -1160,14 +1161,15 @@ theorem propMin_reason_valid
             have hcl2 : r.clause =
                 [negLe j (zk' - 1), posLe k (zk' - 1)] := by rw [hcl]
             rw [hcl2]
-            exact arith_min_nogood_lo_j_true (ha.2 _ hprob)
+            exact arith_min_nogood_lo_j_true (hprob _ ha)
   next => exact absurd hrun (by intro hc; simp at hc)
 
 /-- The state-free reason-validity lemma for the `maxSlot` family. -/
 theorem propMax_reason_valid
     {problem : Problem DomConstraint Unit}
     {st : State} {i j k : Nat} {l : Literal} {r : Reason}
-    (hprob : DomConstraint.maxSlot i j k ∈ problem.constraints)
+    (hprob : ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
+      (DomConstraint.maxSlot i j k).SatisfiedBy a)
     (hrun : propMax st i j k = .implied l r) :
     Reason.Valid problem DomConstraint.SatisfiedBy r l ∧
       (∀ q ∈ r.clause, q = q.norm) := by
@@ -1195,7 +1197,7 @@ theorem propMax_reason_valid
             [negLe k (max xi' yj' - 1), posLe i (xi' - 1),
               posLe j (yj' - 1)] := by rw [hcl]
         rw [hcl2]
-        exact arith_max_nogood_lo_k_true (ha.2 _ hprob)
+        exact arith_max_nogood_lo_k_true (hprob _ ha)
       · rcases List.mem_cons.mp hrest1 with h2' | hrest2
         · obtain ⟨hl, hcl⟩ := narrowHi_implied_inv (Eq.symm h2')
           have hpivmem : l ∈ r.clause := by
@@ -1208,7 +1210,7 @@ theorem propMax_reason_valid
               [posLe k (max xi yj), negLe i xi, negLe j yj] := by
             rw [hcl]
           rw [hcl2]
-          exact arith_max_nogood_hi_k_true (ha.2 _ hprob)
+          exact arith_max_nogood_hi_k_true (hprob _ ha)
         · rcases List.mem_cons.mp hrest2 with h3' | hrest3
           · obtain ⟨hl, hcl⟩ := narrowHi_implied_inv (Eq.symm h3')
             have hpivmem : l ∈ r.clause := by
@@ -1220,7 +1222,7 @@ theorem propMax_reason_valid
             have hcl2 : r.clause =
                 [posLe i zk, negLe k zk] := by rw [hcl]
             rw [hcl2]
-            exact arith_max_nogood_hi_i_true (ha.2 _ hprob)
+            exact arith_max_nogood_hi_i_true (hprob _ ha)
           · obtain ⟨hl, hcl⟩ := narrowHi_implied_inv (Eq.symm
               (List.mem_singleton.mp hrest3))
             have hpivmem : l ∈ r.clause := by
@@ -1232,7 +1234,7 @@ theorem propMax_reason_valid
             have hcl2 : r.clause =
                 [posLe j zk, negLe k zk] := by rw [hcl]
             rw [hcl2]
-            exact arith_max_nogood_hi_j_true (ha.2 _ hprob)
+            exact arith_max_nogood_hi_j_true (hprob _ ha)
   next => exact absurd hrun (by intro hc; simp at hc)
 
 /-- The state-free reason-validity lemma for the `absSlot`
@@ -1337,7 +1339,8 @@ theorem propAbs_reason_valid
 theorem propMin_entitled
     {problem : Problem DomConstraint Unit} {st : State} {i j k : Nat}
     {c : Clause}
-    (hprob : DomConstraint.minSlot i j k ∈ problem.constraints)
+    (hprob : ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
+      (DomConstraint.minSlot i j k).SatisfiedBy a)
     (hrun : propMin st i j k = .conflict c)
     (a : Assignment)
     (ha : ProblemSolution problem DomConstraint.SatisfiedBy a) :
@@ -1358,29 +1361,30 @@ theorem propMin_entitled
       · obtain ⟨_, _, _, _, _, hcc⟩ :=
           narrowLo_conflict_inv (Eq.symm h1')
         rw [hcc]
-        exact arith_min_nogood_lo_k_true (ha.2 _ hprob)
+        exact arith_min_nogood_lo_k_true (hprob _ ha)
       · rcases List.mem_cons.mp hrest1 with h2' | hrest2
         · obtain ⟨_, _, _, _, _, hcc⟩ :=
             narrowHi_conflict_inv (Eq.symm h2')
           rw [hcc]
-          exact arith_min_nogood_hi_k_true (ha.2 _ hprob)
+          exact arith_min_nogood_hi_k_true (hprob _ ha)
         · rcases List.mem_cons.mp hrest2 with h3' | hrest3
           · obtain ⟨_, _, _, _, _, hcc⟩ :=
               narrowLo_conflict_inv (Eq.symm h3')
             rw [hcc]
-            exact arith_min_nogood_lo_i_true (ha.2 _ hprob)
+            exact arith_min_nogood_lo_i_true (hprob _ ha)
           · obtain ⟨_, _, _, _, _, hcc⟩ :=
               narrowLo_conflict_inv (Eq.symm
                 (List.mem_singleton.mp hrest3))
             rw [hcc]
-            exact arith_min_nogood_lo_j_true (ha.2 _ hprob)
+            exact arith_min_nogood_lo_j_true (hprob _ ha)
   next => exact absurd hrun (by intro hc; simp at hc)
 
 /-- The state-free conflict entitlement for the `maxSlot` family. -/
 theorem propMax_entitled
     {problem : Problem DomConstraint Unit} {st : State} {i j k : Nat}
     {c : Clause}
-    (hprob : DomConstraint.maxSlot i j k ∈ problem.constraints)
+    (hprob : ∀ a, ProblemSolution problem DomConstraint.SatisfiedBy a →
+      (DomConstraint.maxSlot i j k).SatisfiedBy a)
     (hrun : propMax st i j k = .conflict c)
     (a : Assignment)
     (ha : ProblemSolution problem DomConstraint.SatisfiedBy a) :
@@ -1401,22 +1405,22 @@ theorem propMax_entitled
       · obtain ⟨_, _, _, _, _, hcc⟩ :=
           narrowLo_conflict_inv (Eq.symm h1')
         rw [hcc]
-        exact arith_max_nogood_lo_k_true (ha.2 _ hprob)
+        exact arith_max_nogood_lo_k_true (hprob _ ha)
       · rcases List.mem_cons.mp hrest1 with h2' | hrest2
         · obtain ⟨_, _, _, _, _, hcc⟩ :=
             narrowHi_conflict_inv (Eq.symm h2')
           rw [hcc]
-          exact arith_max_nogood_hi_k_true (ha.2 _ hprob)
+          exact arith_max_nogood_hi_k_true (hprob _ ha)
         · rcases List.mem_cons.mp hrest2 with h3' | hrest3
           · obtain ⟨_, _, _, _, _, hcc⟩ :=
               narrowHi_conflict_inv (Eq.symm h3')
             rw [hcc]
-            exact arith_max_nogood_hi_i_true (ha.2 _ hprob)
+            exact arith_max_nogood_hi_i_true (hprob _ ha)
           · obtain ⟨_, _, _, _, _, hcc⟩ :=
               narrowHi_conflict_inv (Eq.symm
                 (List.mem_singleton.mp hrest3))
             rw [hcc]
-            exact arith_max_nogood_hi_j_true (ha.2 _ hprob)
+            exact arith_max_nogood_hi_j_true (hprob _ ha)
   next => exact absurd hrun (by intro hc; simp at hc)
 
 /-- The state-free conflict entitlement for the `absSlot` family. -/
@@ -1468,6 +1472,898 @@ theorem propAbs_entitled
               rw [hcc]
               exact arith_abs_nogood_lo_i_true (ha.2 _ hprob)
   next => exact absurd hrun (by intro hc; simp at hc)
+
+/-! ## L3: the pair / two-element array shapes reduce to the slot forms
+
+`minPair`/`maxPair` over three SLOT operands imply the corresponding
+`minSlot`/`maxSlot` (NOT the two-element `minGen`/`maxGen`, whose
+`minValue` reading ignores a non-integer tail element) (a bang read `a[i]!` is an integer only when
+the slot is in range, since the default value is Boolean). -/
+
+theorem slotBang_int {a : List Value} {i : Nat} {p : Int}
+    (h : a[i]! = .int p) : a[i]? = some (.int p) := by
+  by_cases hi : i < a.length
+  · rw [getElem!_pos a i hi] at h
+    rw [List.getElem?_eq_getElem hi]; exact congrArg some h
+  · rw [getElem!_neg a i hi] at h
+    exact absurd h (by intro hc; cases hc)
+
+theorem minPair_imp_minSlot (i j k : Nat) (a : Assignment)
+    (h : (DomConstraint.minPair (.slot i) (.slot j) (.slot k)).SatisfiedBy a) :
+    (DomConstraint.minSlot i j k).SatisfiedBy a := by
+  obtain ⟨p, q, hp, hq, hr⟩ := h
+  simp only [DomIntArg.read_slot] at hp hq hr
+  exact ⟨p, q, _, slotBang_int hp, slotBang_int hq, slotBang_int hr, rfl⟩
+
+theorem maxPair_imp_maxSlot (i j k : Nat) (a : Assignment)
+    (h : (DomConstraint.maxPair (.slot i) (.slot j) (.slot k)).SatisfiedBy a) :
+    (DomConstraint.maxSlot i j k).SatisfiedBy a := by
+  obtain ⟨p, q, hp, hq, hr⟩ := h
+  simp only [DomIntArg.read_slot] at hp hq hr
+  exact ⟨p, q, _, slotBang_int hp, slotBang_int hq, slotBang_int hr, rfl⟩
+
+/-! ## The `int_div`/`int_mod` bound propagators (PLAN L7) -/
+
+/-- The definite value of a divisor operand: a literal's integer, or a
+    slot whose domain is EXACTLY the integer singleton `[.int d]` (the
+    shape the frame invariant's `FixExpl` explains, which both the
+    zero-divisor conflict and the divisor-matching causes consume). -/
+def divPin (st : State) : DomIntArg → Option Int
+  | .lit d => some d
+  | .slot j =>
+      match st.domains.getD j [] with
+      | [.int d] => some d
+      | _ => none
+
+/-- The conflict clause of a divisor pinned to `0`: the removal literal
+    `o_j ≠ 0` for a slot, the empty clause for a literal `0`. -/
+def divZeroClause : DomIntArg → Clause
+  | .lit _ => []
+  | .slot j => [posNe j 0]
+
+/-- The divisor-matching causes: `[j ≤ d−1, j ≥ d+1]` on a slot divisor
+    (false exactly when the slot reads `d`), nothing on a literal. -/
+def divMatchCauses : DomIntArg → Int → Clause
+  | .lit _, _ => []
+  | .slot j, d => [posLe j (d - 1), negLe j d]
+
+/-- Forward hull of `tdiv` over `[pl, ph]` with divisor `d ≠ 0`. -/
+def divResLo (d pl ph : Int) : Int := min (Int.tdiv pl d) (Int.tdiv ph d)
+def divResHi (d pl ph : Int) : Int := max (Int.tdiv pl d) (Int.tdiv ph d)
+
+/-- Mod hull over `[pl, ph]` with divisor `d ≠ 0`. -/
+def modHullLo (d pl ph : Int) : Int :=
+  if Int.tdiv pl d = Int.tdiv ph d then Int.tmod pl d else -(absValue d - 1)
+def modHullHi (d pl ph : Int) : Int :=
+  if Int.tdiv pl d = Int.tdiv ph d then Int.tmod ph d else absValue d - 1
+
+/-- The `divGen` lower-arm reason: the pivot `k ≥ divResLo d pl ph − 1`
+    with the divisor-matching and dividend-bound causes. -/
+def divReasonLo (o₂ : DomIntArg) (i k : Nat) (d pl ph : Int) : Clause :=
+  match o₂ with
+  | .lit _ => [negLe k (divResLo d pl ph - 1), posLe i (pl - 1), negLe i ph]
+  | .slot j => [negLe k (divResLo d pl ph - 1), posLe j (d - 1), negLe j d,
+      posLe i (pl - 1), negLe i ph]
+
+/-- The `divGen` upper-arm reason: the pivot `k ≤ divResHi d pl ph` with
+    the divisor-matching and dividend-bound causes. -/
+def divReasonHi (o₂ : DomIntArg) (i k : Nat) (d pl ph : Int) : Clause :=
+  match o₂ with
+  | .lit _ => [posLe k (divResHi d pl ph), posLe i (pl - 1), negLe i ph]
+  | .slot j => [posLe k (divResHi d pl ph), posLe j (d - 1), negLe j d,
+      posLe i (pl - 1), negLe i ph]
+
+/-- The `modGen` lower-arm reason. -/
+def modReasonLo (o₂ : DomIntArg) (i k : Nat) (d pl ph : Int) : Clause :=
+  match o₂ with
+  | .lit _ => [negLe k (modHullLo d pl ph - 1), posLe i (pl - 1), negLe i ph]
+  | .slot j => [negLe k (modHullLo d pl ph - 1), posLe j (d - 1), negLe j d,
+      posLe i (pl - 1), negLe i ph]
+
+/-- The `modGen` upper-arm reason. -/
+def modReasonHi (o₂ : DomIntArg) (i k : Nat) (d pl ph : Int) : Clause :=
+  match o₂ with
+  | .lit _ => [posLe k (modHullHi d pl ph), posLe i (pl - 1), negLe i ph]
+  | .slot j => [posLe k (modHullHi d pl ph), posLe j (d - 1), negLe j d,
+      posLe i (pl - 1), negLe i ph]
+
+/-- The explained `int_div` bound propagator: with a definite nonzero
+    divisor `d` and the dividend slot `i` bounded by `[pl, ph]`, narrow
+    the result slot `k` into the truncated-quotient hull.  A divisor
+    pinned to `0` is a conflict. -/
+def propDiv (st : State) (o₁ o₂ r : DomIntArg) : PropagationResult :=
+  match divPin st o₂ with
+  | some d =>
+      if d = 0 then .conflict (divZeroClause o₂)
+      else
+        match o₁, r with
+        | .slot i, .slot k =>
+            match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []) with
+            | some pl, some ph =>
+                firstEvent
+                  [narrowLo st k (divResLo d pl ph) (divReasonLo o₂ i k d pl ph),
+                   narrowHi st k (divResHi d pl ph) (divReasonHi o₂ i k d pl ph)]
+            | _, _ => .stable
+        | _, _ => .stable
+  | none => .stable
+
+/-- The explained `int_mod` bound propagator: the `modGen` twin of
+    `propDiv`, narrowing the result slot into the truncated-remainder
+    hull. -/
+def propMod (st : State) (o₁ o₂ r : DomIntArg) : PropagationResult :=
+  match divPin st o₂ with
+  | some d =>
+      if d = 0 then .conflict (divZeroClause o₂)
+      else
+        match o₁, r with
+        | .slot i, .slot k =>
+            match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []) with
+            | some pl, some ph =>
+                firstEvent
+                  [narrowLo st k (modHullLo d pl ph) (modReasonLo o₂ i k d pl ph),
+                   narrowHi st k (modHullHi d pl ph) (modReasonHi o₂ i k d pl ph)]
+            | _, _ => .stable
+        | _, _ => .stable
+  | none => .stable
+
+/-! ### The pinned-divisor inversion and reading lemmas -/
+
+/-- The pinned slot domain is exactly the integer singleton `[.int d]`
+    (the `FixExpl` shape the zero-divisor conflict consumes). -/
+theorem divPin_slot_dom {st : State} {j : Nat} {d : Int}
+    (h : divPin st (.slot j) = some d) :
+    st.domains.getD j [] = [.int d] := by
+  simp only [divPin] at h
+  split at h
+  · rename_i d' hdom
+    injection h with hd
+    subst hd
+    exact hdom
+  · exact absurd h (by simp)
+
+/-- A pinned slot domain's integer extrema are both `d`. -/
+theorem divPin_slot {st : State} {j : Nat} {d : Int}
+    (h : divPin st (.slot j) = some d) :
+    domMinI (st.domains.getD j []) = some d ∧
+      domMaxI (st.domains.getD j []) = some d := by
+  have hdom := divPin_slot_dom h
+  constructor <;> (rw [hdom]; rfl)
+
+/-- A slot int read from a `DomIntArg` bang read. -/
+theorem slotInt_of_read_slot {a : Assignment} {i : Nat} {p : Int}
+    (h : DomIntArg.read a (.slot i) = .int p) : slotInt a i = some p :=
+  slotInt_of_int_read (slotBang_int (by simpa [DomIntArg.read_slot] using h))
+
+/-- At a FITTING assignment, a pinned divisor reads exactly `d`. -/
+theorem divPin_read {st : State} {a : Assignment} {o₂ : DomIntArg} {d : Int}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hpin : divPin st o₂ = some d) :
+    ∀ q, DomIntArg.read a o₂ = .int q → q = d := by
+  intro q hq
+  cases o₂ with
+  | lit d' =>
+      have hd' : d' = d := by simpa [divPin] using hpin
+      have hqq : d' = q := by simpa [DomIntArg.read_lit] using hq
+      omega
+  | slot j =>
+      obtain ⟨hlo, hhi⟩ := divPin_slot hpin
+      have hq' : slotInt a j = some q := slotInt_of_read_slot hq
+      have h1 : d ≤ q := fits_min_bound hfit hlo hq'
+      have h2 : q ≤ d := fits_max_bound hfit hhi hq'
+      omega
+
+/-- At ANY assignment, a pinned divisor either reads `d` or one of the
+    divisor-matching causes is true. -/
+theorem divMatch_covers {st : State} {a : Assignment} {o₂ : DomIntArg}
+    {d : Int} (hpin : divPin st o₂ = some d) :
+    ∀ q, DomIntArg.read a o₂ = .int q → q = d ∨
+      ∃ l ∈ divMatchCauses o₂ d, l.eval a = some true := by
+  intro q hq
+  cases o₂ with
+  | lit d' =>
+      have hd' : d' = d := by simpa [divPin] using hpin
+      refine Or.inl ?_
+      have hqq : d' = q := by simpa [DomIntArg.read_lit] using hq
+      omega
+  | slot j =>
+      by_cases hqd : q = d
+      · exact Or.inl hqd
+      · have hq' : slotInt a j = some q := slotInt_of_read_slot hq
+        by_cases hlt : q ≤ d - 1
+        · exact Or.inr ⟨posLe j (d - 1), by simp [divMatchCauses],
+            by rw [eval_posLe_iff]; exact ⟨q, hq', hlt⟩⟩
+        · exact Or.inr ⟨negLe j d, by simp [divMatchCauses],
+            by rw [eval_negLe_iff]; exact ⟨q, hq', by omega⟩⟩
+
+/-! ### The truncation arithmetic -/
+
+theorem tdiv_eq_neg_tdiv_neg {p d : Int} (_hneg : d < 0) :
+    Int.tdiv p d = -(Int.tdiv p (-d)) := by
+  have h := Int.tdiv_neg p (-d)
+  rw [Int.neg_neg] at h
+  exact h
+
+theorem tdiv_mem_hull {p d pl ph : Int} (hd : d ≠ 0)
+    (h1 : pl ≤ p) (h2 : p ≤ ph) :
+    divResLo d pl ph ≤ Int.tdiv p d ∧ Int.tdiv p d ≤ divResHi d pl ph := by
+  rcases Int.lt_trichotomy d 0 with hneg | hzero | hpos
+  · have hd' : 0 < -d := by omega
+    have e1 : Int.tdiv p d = -(Int.tdiv p (-d)) := tdiv_eq_neg_tdiv_neg hneg
+    have e2 : Int.tdiv ph d = -(Int.tdiv ph (-d)) := tdiv_eq_neg_tdiv_neg hneg
+    have e3 : Int.tdiv pl d = -(Int.tdiv pl (-d)) := tdiv_eq_neg_tdiv_neg hneg
+    have m1 : Int.tdiv pl (-d) ≤ Int.tdiv p (-d) := Int.tdiv_le_tdiv hd' h1
+    have m2 : Int.tdiv p (-d) ≤ Int.tdiv ph (-d) := Int.tdiv_le_tdiv hd' h2
+    unfold divResLo divResHi
+    rw [e1, e2, e3]
+    constructor <;> omega
+  · exact absurd hzero hd
+  · have m1 : Int.tdiv pl d ≤ Int.tdiv p d := Int.tdiv_le_tdiv hpos h1
+    have m2 : Int.tdiv p d ≤ Int.tdiv ph d := Int.tdiv_le_tdiv hpos h2
+    unfold divResLo divResHi
+    constructor <;> omega
+
+theorem tmod_bounds {p d : Int} (hd : d ≠ 0) :
+    -(absValue d - 1) ≤ Int.tmod p d ∧ Int.tmod p d ≤ absValue d - 1 := by
+  have hpos : ∀ {e : Int}, 0 < e → -e < Int.tmod p e ∧ Int.tmod p e < e := fun h =>
+    ⟨Int.lt_tmod_of_pos p h, Int.tmod_lt_of_pos p h⟩
+  rcases Int.lt_trichotomy d 0 with hneg | hzero | hgt
+  · have hd' : 0 < -d := by omega
+    have e : Int.tmod p d = Int.tmod p (-d) := by
+      have h := Int.tmod_neg p (-d)
+      rw [Int.neg_neg] at h
+      exact h
+    obtain ⟨hb1, hb2⟩ := hpos hd'
+    have ha : absValue d = -d := arith_absValue_of_neg hneg
+    rw [e, ha]
+    omega
+  · exact absurd hzero hd
+  · obtain ⟨hb1, hb2⟩ := hpos hgt
+    have ha : absValue d = d := arith_absValue_of_nonneg (by omega)
+    rw [ha]
+    omega
+
+theorem tmod_mem_hull {p d pl ph : Int} (hd : d ≠ 0)
+    (h1 : pl ≤ p) (h2 : p ≤ ph) :
+    modHullLo d pl ph ≤ Int.tmod p d ∧ Int.tmod p d ≤ modHullHi d pl ph := by
+  by_cases hq : Int.tdiv pl d = Int.tdiv ph d
+  · have hconst : Int.tdiv p d = Int.tdiv pl d := by
+      rcases Int.lt_trichotomy d 0 with hneg | hzero | hpos
+      · have hd' : 0 < -d := by omega
+        have e1 : Int.tdiv p d = -(Int.tdiv p (-d)) := tdiv_eq_neg_tdiv_neg hneg
+        have e2 : Int.tdiv pl d = -(Int.tdiv pl (-d)) := tdiv_eq_neg_tdiv_neg hneg
+        have e3 : Int.tdiv ph d = -(Int.tdiv ph (-d)) := tdiv_eq_neg_tdiv_neg hneg
+        have m1 : Int.tdiv pl (-d) ≤ Int.tdiv p (-d) := Int.tdiv_le_tdiv hd' h1
+        have m2 : Int.tdiv p (-d) ≤ Int.tdiv ph (-d) := Int.tdiv_le_tdiv hd' h2
+        have hgh : Int.tdiv ph (-d) = Int.tdiv pl (-d) := by omega
+        omega
+      · exact absurd hzero hd
+      · have m1 : Int.tdiv pl d ≤ Int.tdiv p d := Int.tdiv_le_tdiv hpos h1
+        have m2 : Int.tdiv p d ≤ Int.tdiv ph d := Int.tdiv_le_tdiv hpos h2
+        omega
+    have hid : ∀ x : Int, x - d * (Int.tdiv x d) = Int.tmod x d := by
+      intro x
+      have h := Int.mul_tdiv_add_tmod x d
+      omega
+    have hl : modHullLo d pl ph = Int.tmod pl d := by
+      unfold modHullLo; rw [if_pos hq]
+    have hh : modHullHi d pl ph = Int.tmod ph d := by
+      unfold modHullHi; rw [if_pos hq]
+    rw [hl, hh, ← hid p, ← hid pl, ← hid ph, hconst, ← hq]
+    constructor <;> omega
+  · have hl : modHullLo d pl ph = -(absValue d - 1) := by
+      unfold modHullLo; rw [if_neg hq]
+    have hh : modHullHi d pl ph = absValue d - 1 := by
+      unfold modHullHi; rw [if_neg hq]
+    rw [hl, hh]
+    exact tmod_bounds hd
+
+/-! ### Cause-membership helpers -/
+
+theorem divMatchCauses_mem_lo {o₂ : DomIntArg} {d pl ph : Int} {i k : Nat}
+    {l : Literal} (h : l ∈ divMatchCauses o₂ d) :
+    l ∈ divReasonLo o₂ i k d pl ph := by
+  cases o₂ with
+  | lit d' => simp [divMatchCauses] at h
+  | slot j =>
+      rcases List.mem_cons.mp h with rfl | h
+      · exact List.mem_cons_of_mem _ (List.mem_cons_self)
+      · rw [List.mem_singleton.mp h]
+        exact List.mem_cons_of_mem _
+          (List.mem_cons_of_mem _ (List.mem_cons_self))
+
+theorem divMatchCauses_mem_hi {o₂ : DomIntArg} {d pl ph : Int} {i k : Nat}
+    {l : Literal} (h : l ∈ divMatchCauses o₂ d) :
+    l ∈ divReasonHi o₂ i k d pl ph := by
+  cases o₂ with
+  | lit d' => simp [divMatchCauses] at h
+  | slot j =>
+      rcases List.mem_cons.mp h with rfl | h
+      · exact List.mem_cons_of_mem _ (List.mem_cons_self)
+      · rw [List.mem_singleton.mp h]
+        exact List.mem_cons_of_mem _
+          (List.mem_cons_of_mem _ (List.mem_cons_self))
+
+theorem divMatchCauses_mem_modlo {o₂ : DomIntArg} {d pl ph : Int} {i k : Nat}
+    {l : Literal} (h : l ∈ divMatchCauses o₂ d) :
+    l ∈ modReasonLo o₂ i k d pl ph := by
+  cases o₂ with
+  | lit d' => simp [divMatchCauses] at h
+  | slot j =>
+      rcases List.mem_cons.mp h with rfl | h
+      · exact List.mem_cons_of_mem _ (List.mem_cons_self)
+      · rw [List.mem_singleton.mp h]
+        exact List.mem_cons_of_mem _
+          (List.mem_cons_of_mem _ (List.mem_cons_self))
+
+theorem divMatchCauses_mem_modhi {o₂ : DomIntArg} {d pl ph : Int} {i k : Nat}
+    {l : Literal} (h : l ∈ divMatchCauses o₂ d) :
+    l ∈ modReasonHi o₂ i k d pl ph := by
+  cases o₂ with
+  | lit d' => simp [divMatchCauses] at h
+  | slot j =>
+      rcases List.mem_cons.mp h with rfl | h
+      · exact List.mem_cons_of_mem _ (List.mem_cons_self)
+      · rw [List.mem_singleton.mp h]
+        exact List.mem_cons_of_mem _
+          (List.mem_cons_of_mem _ (List.mem_cons_self))
+
+/-! ### The nogood kernels -/
+
+/-- `divGen` lower-arm nogood: `[k ≥ lo−1, (divisor causes), i ≤ pl−1,
+    i ≥ ph+1]` with `lo = divResLo d pl ph` — if the dividend is below
+    `pl` the third literal is true, above `ph` the fourth, and inside
+    the interval (with the divisor reading `d`, forced by the cause
+    falsity) the hull bound makes the head true. -/
+theorem arith_div_nogood_lo_true {a : Assignment} {i k : Nat} {o₂ : DomIntArg}
+    {d pl ph : Int} (_hd : d ≠ 0)
+    (hdc : ∀ q, DomIntArg.read a o₂ = .int q → q = d ∨
+      ∃ l ∈ divMatchCauses o₂ d, l.eval a = some true)
+    (hcons : (DomConstraint.divGen (.slot i) o₂ (.slot k)).SatisfiedBy a) :
+    ∃ l ∈ divReasonLo o₂ i k d pl ph, l.eval a = some true := by
+  obtain ⟨p, q, hp, hq, hq0, hr⟩ := hcons
+  have hp' : slotInt a i = some p := slotInt_of_read_slot hp
+  have hr' : slotInt a k = some (Int.tdiv p q) := slotInt_of_read_slot hr
+  rcases hdc q hq with hqd | ⟨l, hl, hltrue⟩
+  · by_cases h1 : p ≤ pl - 1
+    · exact ⟨posLe i (pl - 1), by cases o₂ <;> simp [divReasonLo],
+        by rw [eval_posLe_iff]; exact ⟨p, hp', h1⟩⟩
+    · by_cases h2 : ph + 1 ≤ p
+      · exact ⟨negLe i ph, by cases o₂ <;> simp [divReasonLo],
+          by rw [eval_negLe_iff]; exact ⟨p, hp', h2⟩⟩
+      · have hb : divResLo d pl ph ≤ Int.tdiv p q := by
+          rw [← hqd]
+          exact (tdiv_mem_hull hq0 (by omega : pl ≤ p) (by omega : p ≤ ph)).1
+        exact ⟨negLe k (divResLo d pl ph - 1),
+          by cases o₂ <;> simp [divReasonLo],
+          by rw [eval_negLe_iff]; exact ⟨Int.tdiv p q, hr', by omega⟩⟩
+  · exact ⟨l, divMatchCauses_mem_lo hl, hltrue⟩
+
+theorem arith_div_nogood_hi_true {a : Assignment} {i k : Nat} {o₂ : DomIntArg}
+    {d pl ph : Int} (_hd : d ≠ 0)
+    (hdc : ∀ q, DomIntArg.read a o₂ = .int q → q = d ∨
+      ∃ l ∈ divMatchCauses o₂ d, l.eval a = some true)
+    (hcons : (DomConstraint.divGen (.slot i) o₂ (.slot k)).SatisfiedBy a) :
+    ∃ l ∈ divReasonHi o₂ i k d pl ph, l.eval a = some true := by
+  obtain ⟨p, q, hp, hq, hq0, hr⟩ := hcons
+  have hp' : slotInt a i = some p := slotInt_of_read_slot hp
+  have hr' : slotInt a k = some (Int.tdiv p q) := slotInt_of_read_slot hr
+  rcases hdc q hq with hqd | ⟨l, hl, hltrue⟩
+  · by_cases h1 : p ≤ pl - 1
+    · exact ⟨posLe i (pl - 1), by cases o₂ <;> simp [divReasonHi],
+        by rw [eval_posLe_iff]; exact ⟨p, hp', h1⟩⟩
+    · by_cases h2 : ph + 1 ≤ p
+      · exact ⟨negLe i ph, by cases o₂ <;> simp [divReasonHi],
+          by rw [eval_negLe_iff]; exact ⟨p, hp', h2⟩⟩
+      · have hb : Int.tdiv p q ≤ divResHi d pl ph := by
+          rw [← hqd]
+          exact (tdiv_mem_hull hq0 (by omega : pl ≤ p) (by omega : p ≤ ph)).2
+        exact ⟨posLe k (divResHi d pl ph),
+          by cases o₂ <;> simp [divReasonHi],
+          by rw [eval_posLe_iff]; exact ⟨Int.tdiv p q, hr', by omega⟩⟩
+  · exact ⟨l, divMatchCauses_mem_hi hl, hltrue⟩
+
+theorem arith_mod_nogood_lo_true {a : Assignment} {i k : Nat} {o₂ : DomIntArg}
+    {d pl ph : Int} (_hd : d ≠ 0)
+    (hdc : ∀ q, DomIntArg.read a o₂ = .int q → q = d ∨
+      ∃ l ∈ divMatchCauses o₂ d, l.eval a = some true)
+    (hcons : (DomConstraint.modGen (.slot i) o₂ (.slot k)).SatisfiedBy a) :
+    ∃ l ∈ modReasonLo o₂ i k d pl ph, l.eval a = some true := by
+  obtain ⟨p, q, hp, hq, hq0, hr⟩ := hcons
+  have hp' : slotInt a i = some p := slotInt_of_read_slot hp
+  have hr' : slotInt a k = some (Int.tmod p q) := slotInt_of_read_slot hr
+  rcases hdc q hq with hqd | ⟨l, hl, hltrue⟩
+  · by_cases h1 : p ≤ pl - 1
+    · exact ⟨posLe i (pl - 1), by cases o₂ <;> simp [modReasonLo],
+        by rw [eval_posLe_iff]; exact ⟨p, hp', h1⟩⟩
+    · by_cases h2 : ph + 1 ≤ p
+      · exact ⟨negLe i ph, by cases o₂ <;> simp [modReasonLo],
+          by rw [eval_negLe_iff]; exact ⟨p, hp', h2⟩⟩
+      · have hb : modHullLo d pl ph ≤ Int.tmod p q := by
+          rw [← hqd]
+          exact (tmod_mem_hull hq0 (by omega : pl ≤ p) (by omega : p ≤ ph)).1
+        exact ⟨negLe k (modHullLo d pl ph - 1),
+          by cases o₂ <;> simp [modReasonLo],
+          by rw [eval_negLe_iff]; exact ⟨Int.tmod p q, hr', by omega⟩⟩
+  · exact ⟨l, divMatchCauses_mem_modlo hl, hltrue⟩
+
+theorem arith_mod_nogood_hi_true {a : Assignment} {i k : Nat} {o₂ : DomIntArg}
+    {d pl ph : Int} (_hd : d ≠ 0)
+    (hdc : ∀ q, DomIntArg.read a o₂ = .int q → q = d ∨
+      ∃ l ∈ divMatchCauses o₂ d, l.eval a = some true)
+    (hcons : (DomConstraint.modGen (.slot i) o₂ (.slot k)).SatisfiedBy a) :
+    ∃ l ∈ modReasonHi o₂ i k d pl ph, l.eval a = some true := by
+  obtain ⟨p, q, hp, hq, hq0, hr⟩ := hcons
+  have hp' : slotInt a i = some p := slotInt_of_read_slot hp
+  have hr' : slotInt a k = some (Int.tmod p q) := slotInt_of_read_slot hr
+  rcases hdc q hq with hqd | ⟨l, hl, hltrue⟩
+  · by_cases h1 : p ≤ pl - 1
+    · exact ⟨posLe i (pl - 1), by cases o₂ <;> simp [modReasonHi],
+        by rw [eval_posLe_iff]; exact ⟨p, hp', h1⟩⟩
+    · by_cases h2 : ph + 1 ≤ p
+      · exact ⟨negLe i ph, by cases o₂ <;> simp [modReasonHi],
+          by rw [eval_negLe_iff]; exact ⟨p, hp', h2⟩⟩
+      · have hb : Int.tmod p q ≤ modHullHi d pl ph := by
+          rw [← hqd]
+          exact (tmod_mem_hull hq0 (by omega : pl ≤ p) (by omega : p ≤ ph)).2
+        exact ⟨posLe k (modHullHi d pl ph),
+          by cases o₂ <;> simp [modReasonHi],
+          by rw [eval_posLe_iff]; exact ⟨Int.tmod p q, hr', by omega⟩⟩
+  · exact ⟨l, divMatchCauses_mem_modhi hl, hltrue⟩
+
+/-- The zero-divisor conflict kernel: `[o_j ≠ 0]` (or the empty clause on
+    a literal `0`) carries a true literal at every `divGen`/`modGen`
+    solution. -/
+theorem arith_div_zero_true {st : State} {a : Assignment} {o₁ o₂ r : DomIntArg}
+    {d : Int} (hzero : d = 0) (hpin : divPin st o₂ = some d)
+    (hcons : (DomConstraint.divGen o₁ o₂ r).SatisfiedBy a) :
+    ∃ l ∈ divZeroClause o₂, l.eval a = some true := by
+  obtain ⟨p, q, _hp, hq, hq0, _hr⟩ := hcons
+  cases o₂ with
+  | lit d' =>
+      have hd' : d' = d := by simpa [divPin] using hpin
+      have hqd : d' = q := by simpa [DomIntArg.read_lit] using hq
+      omega
+  | slot j =>
+      refine ⟨posNe j 0, by simp [divZeroClause], ?_⟩
+      rw [eval_posNe_iff]
+      exact ⟨q, slotInt_of_read_slot hq, hq0⟩
+
+theorem arith_mod_zero_true {st : State} {a : Assignment} {o₁ o₂ r : DomIntArg}
+    {d : Int} (hzero : d = 0) (hpin : divPin st o₂ = some d)
+    (hcons : (DomConstraint.modGen o₁ o₂ r).SatisfiedBy a) :
+    ∃ l ∈ divZeroClause o₂, l.eval a = some true := by
+  obtain ⟨p, q, _hp, hq, hq0, _hr⟩ := hcons
+  cases o₂ with
+  | lit d' =>
+      have hd' : d' = d := by simpa [divPin] using hpin
+      have hqd : d' = q := by simpa [DomIntArg.read_lit] using hq
+      omega
+  | slot j =>
+      refine ⟨posNe j 0, by simp [divZeroClause], ?_⟩
+      rw [eval_posNe_iff]
+      exact ⟨q, slotInt_of_read_slot hq, hq0⟩
+
+
+/-! ### The safety triples -/
+
+theorem propDiv_safe (st : State) (o₁ o₂ r : DomIntArg) :
+    (∀ l rsn, propDiv st o₁ o₂ r = .implied l rsn →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.divGen o₁ o₂ r).SatisfiedBy a → l.eval a = some true) ∧
+    (∀ c, propDiv st o₁ o₂ r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.divGen o₁ o₂ r).SatisfiedBy a → False) ∧
+    (∀ c, propDiv st o₁ o₂ r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.divGen o₁ o₂ r).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  have hno : ∀ c, propDiv st o₁ o₂ r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.divGen o₁ o₂ r).SatisfiedBy a → False := by
+    intro c hrun a hfit hcons
+    unfold propDiv at hrun
+    split at hrun
+    · rename_i x d hpin
+      split at hrun
+      · rename_i hd0
+        obtain ⟨p, q, _hp, hq, hq0, _hr⟩ := hcons
+        have hqeq : q = d := divPin_read hfit hpin q hq
+        omega
+      · split at hrun
+        · rename_i i k
+          split at hrun
+          · rename_i pl ph hpl hph
+            rcases firstEvent_mem
+                [narrowLo st k (divResLo d pl ph) (divReasonLo o₂ i k d pl ph),
+                 narrowHi st k (divResHi d pl ph) (divReasonHi o₂ i k d pl ph)]
+                (.conflict c) hrun with hstable | hmem
+            · exact absurd hstable (by intro hc; cases hc)
+            · obtain ⟨p, q, hp, hq, hq0, hr⟩ := hcons
+              have hqeq : q = d := divPin_read hfit hpin q hq
+              have hp' : slotInt a i = some p := slotInt_of_read_slot hp
+              have hrs' : slotInt a k = some (Int.tdiv p q) := slotInt_of_read_slot hr
+              have hpl' : pl ≤ p := fits_min_bound hfit hpl hp'
+              have hph' : p ≤ ph := fits_max_bound hfit hph hp'
+              have hbq := (tdiv_mem_hull hq0 hpl' hph')
+              have hdLo : divResLo d pl ph = divResLo q pl ph := by rw [hqeq]
+              have hdHi : divResHi d pl ph = divResHi q pl ph := by rw [hqeq]
+              have hdt : Int.tdiv p d = Int.tdiv p q := by rw [hqeq]
+              rcases List.mem_cons.mp hmem with h1 | hrest
+              · obtain ⟨_mn, mx, _hmn, hmx, hlt, _⟩ :=
+                  narrowLo_conflict_inv (Eq.symm h1)
+                have hrmx : Int.tdiv p q ≤ mx := fits_max_bound hfit hmx hrs'
+                omega
+              · obtain ⟨mn, _mx, hmn, _hmx, hgt, _⟩ :=
+                  narrowHi_conflict_inv (Eq.symm (List.mem_singleton.mp hrest))
+                have hrmn : mn ≤ Int.tdiv p q := fits_min_bound hfit hmn hrs'
+                omega
+          · exact absurd hrun (by intro hc; simp at hc)
+        · exact absurd hrun (by intro hc; simp at hc)
+    · exact absurd hrun (by intro hc; simp at hc)
+  refine ⟨?_, hno, ?_⟩
+  · intro l rsn hrun a hfit hcons
+    unfold propDiv at hrun
+    split at hrun
+    · rename_i x d hpin
+      split at hrun
+      · rename_i hd0
+        exact absurd hrun (by intro hc; cases hc)
+      · split at hrun
+        · rename_i i k
+          split at hrun
+          · rename_i pl ph hpl hph
+            rcases firstEvent_mem
+                [narrowLo st k (divResLo d pl ph) (divReasonLo o₂ i k d pl ph),
+                 narrowHi st k (divResHi d pl ph) (divReasonHi o₂ i k d pl ph)]
+                (.implied l rsn) hrun with hstable | hmem
+            · exact absurd hstable (by intro hc; cases hc)
+            · obtain ⟨p, q, hp, hq, hq0, hr⟩ := hcons
+              have hqeq : q = d := divPin_read hfit hpin q hq
+              have hp' : slotInt a i = some p := slotInt_of_read_slot hp
+              have hrs' : slotInt a k = some (Int.tdiv p q) := slotInt_of_read_slot hr
+              have hpl' : pl ≤ p := fits_min_bound hfit hpl hp'
+              have hph' : p ≤ ph := fits_max_bound hfit hph hp'
+              have hbq := (tdiv_mem_hull hq0 hpl' hph')
+              have hdLo : divResLo d pl ph = divResLo q pl ph := by rw [hqeq]
+              have hdHi : divResHi d pl ph = divResHi q pl ph := by rw [hqeq]
+              have hdt : Int.tdiv p d = Int.tdiv p q := by rw [hqeq]
+              rcases List.mem_cons.mp hmem with h1 | hrest
+              · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1)
+                subst hl
+                rw [eval_negLe_iff]
+                exact ⟨Int.tdiv p q, hrs', by omega⟩
+              · obtain ⟨hl, _⟩ := narrowHi_implied_inv
+                  (Eq.symm (List.mem_singleton.mp hrest))
+                subst hl
+                rw [eval_posLe_iff]
+                exact ⟨Int.tdiv p q, hrs', by omega⟩
+          · exact absurd hrun (by intro hc; simp at hc)
+        · exact absurd hrun (by intro hc; simp at hc)
+    · exact absurd hrun (by intro hc; simp at hc)
+  · intro c hrun a hfit hcons
+    exact False.elim (hno c hrun a hfit hcons)
+
+theorem propMod_safe (st : State) (o₁ o₂ r : DomIntArg) :
+    (∀ l rsn, propMod st o₁ o₂ r = .implied l rsn →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.modGen o₁ o₂ r).SatisfiedBy a → l.eval a = some true) ∧
+    (∀ c, propMod st o₁ o₂ r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.modGen o₁ o₂ r).SatisfiedBy a → False) ∧
+    (∀ c, propMod st o₁ o₂ r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.modGen o₁ o₂ r).SatisfiedBy a →
+        ∃ l ∈ c, l.eval a = some true) := by
+  have hno : ∀ c, propMod st o₁ o₂ r = .conflict c →
+      ∀ a, Core.Assignment.Fits st.domains a →
+        (DomConstraint.modGen o₁ o₂ r).SatisfiedBy a → False := by
+    intro c hrun a hfit hcons
+    unfold propMod at hrun
+    split at hrun
+    · rename_i x d hpin
+      split at hrun
+      · rename_i hd0
+        obtain ⟨p, q, _hp, hq, hq0, _hr⟩ := hcons
+        have hqeq : q = d := divPin_read hfit hpin q hq
+        omega
+      · split at hrun
+        · rename_i i k
+          split at hrun
+          · rename_i pl ph hpl hph
+            rcases firstEvent_mem
+                [narrowLo st k (modHullLo d pl ph) (modReasonLo o₂ i k d pl ph),
+                 narrowHi st k (modHullHi d pl ph) (modReasonHi o₂ i k d pl ph)]
+                (.conflict c) hrun with hstable | hmem
+            · exact absurd hstable (by intro hc; cases hc)
+            · obtain ⟨p, q, hp, hq, hq0, hr⟩ := hcons
+              have hqeq : q = d := divPin_read hfit hpin q hq
+              have hp' : slotInt a i = some p := slotInt_of_read_slot hp
+              have hrs' : slotInt a k = some (Int.tmod p q) := slotInt_of_read_slot hr
+              have hpl' : pl ≤ p := fits_min_bound hfit hpl hp'
+              have hph' : p ≤ ph := fits_max_bound hfit hph hp'
+              have hbq := (tmod_mem_hull hq0 hpl' hph')
+              have hdLo : modHullLo d pl ph = modHullLo q pl ph := by rw [hqeq]
+              have hdHi : modHullHi d pl ph = modHullHi q pl ph := by rw [hqeq]
+              have hdt : Int.tmod p d = Int.tmod p q := by rw [hqeq]
+              rcases List.mem_cons.mp hmem with h1 | hrest
+              · obtain ⟨_mn, mx, _hmn, hmx, hlt, _⟩ :=
+                  narrowLo_conflict_inv (Eq.symm h1)
+                have hrmx : Int.tmod p q ≤ mx := fits_max_bound hfit hmx hrs'
+                omega
+              · obtain ⟨mn, _mx, hmn, _hmx, hgt, _⟩ :=
+                  narrowHi_conflict_inv (Eq.symm (List.mem_singleton.mp hrest))
+                have hrmn : mn ≤ Int.tmod p q := fits_min_bound hfit hmn hrs'
+                omega
+          · exact absurd hrun (by intro hc; simp at hc)
+        · exact absurd hrun (by intro hc; simp at hc)
+    · exact absurd hrun (by intro hc; simp at hc)
+  refine ⟨?_, hno, ?_⟩
+  · intro l rsn hrun a hfit hcons
+    unfold propMod at hrun
+    split at hrun
+    · rename_i x d hpin
+      split at hrun
+      · rename_i hd0
+        exact absurd hrun (by intro hc; cases hc)
+      · split at hrun
+        · rename_i i k
+          split at hrun
+          · rename_i pl ph hpl hph
+            rcases firstEvent_mem
+                [narrowLo st k (modHullLo d pl ph) (modReasonLo o₂ i k d pl ph),
+                 narrowHi st k (modHullHi d pl ph) (modReasonHi o₂ i k d pl ph)]
+                (.implied l rsn) hrun with hstable | hmem
+            · exact absurd hstable (by intro hc; cases hc)
+            · obtain ⟨p, q, hp, hq, hq0, hr⟩ := hcons
+              have hqeq : q = d := divPin_read hfit hpin q hq
+              have hp' : slotInt a i = some p := slotInt_of_read_slot hp
+              have hrs' : slotInt a k = some (Int.tmod p q) := slotInt_of_read_slot hr
+              have hpl' : pl ≤ p := fits_min_bound hfit hpl hp'
+              have hph' : p ≤ ph := fits_max_bound hfit hph hp'
+              have hbq := (tmod_mem_hull hq0 hpl' hph')
+              have hdLo : modHullLo d pl ph = modHullLo q pl ph := by rw [hqeq]
+              have hdHi : modHullHi d pl ph = modHullHi q pl ph := by rw [hqeq]
+              have hdt : Int.tmod p d = Int.tmod p q := by rw [hqeq]
+              rcases List.mem_cons.mp hmem with h1 | hrest
+              · obtain ⟨hl, _⟩ := narrowLo_implied_inv (Eq.symm h1)
+                subst hl
+                rw [eval_negLe_iff]
+                exact ⟨Int.tmod p q, hrs', by omega⟩
+              · obtain ⟨hl, _⟩ := narrowHi_implied_inv
+                  (Eq.symm (List.mem_singleton.mp hrest))
+                subst hl
+                rw [eval_posLe_iff]
+                exact ⟨Int.tmod p q, hrs', by omega⟩
+          · exact absurd hrun (by intro hc; simp at hc)
+        · exact absurd hrun (by intro hc; simp at hc)
+    · exact absurd hrun (by intro hc; simp at hc)
+  · intro c hrun a hfit hcons
+    exact False.elim (hno c hrun a hfit hcons)
+
+
+/-! ### Reason validity and entitlement -/
+
+theorem propDiv_reason_valid
+    {problem : Problem DomConstraint Unit}
+    {st : State} {o₁ o₂ r : DomIntArg} {l : Literal} {rsn : Reason}
+    (hprob : DomConstraint.divGen o₁ o₂ r ∈ problem.constraints)
+    (hrun : propDiv st o₁ o₂ r = .implied l rsn) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rsn l ∧
+      (∀ q ∈ rsn.clause, q = q.norm) := by
+  unfold propDiv at hrun
+  split at hrun
+  · rename_i x d hpin
+    split at hrun
+    · exact absurd hrun (by intro hc; cases hc)
+    · rename_i hd0
+      split at hrun
+      · rename_i i k
+        split at hrun
+        · rename_i pl ph hpl hph
+          rcases firstEvent_mem
+              [narrowLo st k (divResLo d pl ph) (divReasonLo o₂ i k d pl ph),
+               narrowHi st k (divResHi d pl ph) (divReasonHi o₂ i k d pl ph)]
+              (.implied l rsn) hrun with hstable | hmem
+          · exact absurd hstable (by intro hc; cases hc)
+          · rcases List.mem_cons.mp hmem with h1 | hrest
+            · obtain ⟨hl, hcl⟩ := narrowLo_implied_inv (Eq.symm h1)
+              have hpivmem : l ∈ rsn.clause := by
+                subst hl; rw [hcl]; cases o₂ <;> simp [divReasonLo]
+              refine ⟨arith_reason_valid_of_clause_true hpivmem ?_,
+                arith_reason_clause_norm_sf hcl ?_⟩
+              · intro a ha
+                have hcl2 : rsn.clause = divReasonLo o₂ i k d pl ph := by rw [hcl]
+                rw [hcl2]
+                exact arith_div_nogood_lo_true hd0 (divMatch_covers hpin)
+                  (ha.2 _ hprob)
+              · intro q hq
+                cases o₂ with
+                | lit d' =>
+                    simp only [divReasonLo, List.mem_cons, List.mem_nil_iff,
+                      or_false] at hq
+                    rcases hq with rfl | rfl | rfl <;> rfl
+                | slot j =>
+                    simp only [divReasonLo, List.mem_cons, List.mem_nil_iff,
+                      or_false] at hq
+                    rcases hq with rfl | rfl | rfl | rfl | rfl <;> rfl
+            · obtain ⟨hl, hcl⟩ := narrowHi_implied_inv
+                (Eq.symm (List.mem_singleton.mp hrest))
+              have hpivmem : l ∈ rsn.clause := by
+                subst hl; rw [hcl]; cases o₂ <;> simp [divReasonHi]
+              refine ⟨arith_reason_valid_of_clause_true hpivmem ?_,
+                arith_reason_clause_norm_sf hcl ?_⟩
+              · intro a ha
+                have hcl2 : rsn.clause = divReasonHi o₂ i k d pl ph := by rw [hcl]
+                rw [hcl2]
+                exact arith_div_nogood_hi_true hd0 (divMatch_covers hpin)
+                  (ha.2 _ hprob)
+              · intro q hq
+                cases o₂ with
+                | lit d' =>
+                    simp only [divReasonHi, List.mem_cons, List.mem_nil_iff,
+                      or_false] at hq
+                    rcases hq with rfl | rfl | rfl <;> rfl
+                | slot j =>
+                    simp only [divReasonHi, List.mem_cons, List.mem_nil_iff,
+                      or_false] at hq
+                    rcases hq with rfl | rfl | rfl | rfl | rfl <;> rfl
+        · exact absurd hrun (by intro hc; simp at hc)
+      · exact absurd hrun (by intro hc; simp at hc)
+  · exact absurd hrun (by intro hc; simp at hc)
+
+theorem propMod_reason_valid
+    {problem : Problem DomConstraint Unit}
+    {st : State} {o₁ o₂ r : DomIntArg} {l : Literal} {rsn : Reason}
+    (hprob : DomConstraint.modGen o₁ o₂ r ∈ problem.constraints)
+    (hrun : propMod st o₁ o₂ r = .implied l rsn) :
+    Reason.Valid problem DomConstraint.SatisfiedBy rsn l ∧
+      (∀ q ∈ rsn.clause, q = q.norm) := by
+  unfold propMod at hrun
+  split at hrun
+  · rename_i x d hpin
+    split at hrun
+    · exact absurd hrun (by intro hc; cases hc)
+    · rename_i hd0
+      split at hrun
+      · rename_i i k
+        split at hrun
+        · rename_i pl ph hpl hph
+          rcases firstEvent_mem
+              [narrowLo st k (modHullLo d pl ph) (modReasonLo o₂ i k d pl ph),
+               narrowHi st k (modHullHi d pl ph) (modReasonHi o₂ i k d pl ph)]
+              (.implied l rsn) hrun with hstable | hmem
+          · exact absurd hstable (by intro hc; cases hc)
+          · rcases List.mem_cons.mp hmem with h1 | hrest
+            · obtain ⟨hl, hcl⟩ := narrowLo_implied_inv (Eq.symm h1)
+              have hpivmem : l ∈ rsn.clause := by
+                subst hl; rw [hcl]; cases o₂ <;> simp [modReasonLo]
+              refine ⟨arith_reason_valid_of_clause_true hpivmem ?_,
+                arith_reason_clause_norm_sf hcl ?_⟩
+              · intro a ha
+                have hcl2 : rsn.clause = modReasonLo o₂ i k d pl ph := by rw [hcl]
+                rw [hcl2]
+                exact arith_mod_nogood_lo_true hd0 (divMatch_covers hpin)
+                  (ha.2 _ hprob)
+              · intro q hq
+                cases o₂ with
+                | lit d' =>
+                    simp only [modReasonLo, List.mem_cons, List.mem_nil_iff,
+                      or_false] at hq
+                    rcases hq with rfl | rfl | rfl <;> rfl
+                | slot j =>
+                    simp only [modReasonLo, List.mem_cons, List.mem_nil_iff,
+                      or_false] at hq
+                    rcases hq with rfl | rfl | rfl | rfl | rfl <;> rfl
+            · obtain ⟨hl, hcl⟩ := narrowHi_implied_inv
+                (Eq.symm (List.mem_singleton.mp hrest))
+              have hpivmem : l ∈ rsn.clause := by
+                subst hl; rw [hcl]; cases o₂ <;> simp [modReasonHi]
+              refine ⟨arith_reason_valid_of_clause_true hpivmem ?_,
+                arith_reason_clause_norm_sf hcl ?_⟩
+              · intro a ha
+                have hcl2 : rsn.clause = modReasonHi o₂ i k d pl ph := by rw [hcl]
+                rw [hcl2]
+                exact arith_mod_nogood_hi_true hd0 (divMatch_covers hpin)
+                  (ha.2 _ hprob)
+              · intro q hq
+                cases o₂ with
+                | lit d' =>
+                    simp only [modReasonHi, List.mem_cons, List.mem_nil_iff,
+                      or_false] at hq
+                    rcases hq with rfl | rfl | rfl <;> rfl
+                | slot j =>
+                    simp only [modReasonHi, List.mem_cons, List.mem_nil_iff,
+                      or_false] at hq
+                    rcases hq with rfl | rfl | rfl | rfl | rfl <;> rfl
+        · exact absurd hrun (by intro hc; simp at hc)
+      · exact absurd hrun (by intro hc; simp at hc)
+  · exact absurd hrun (by intro hc; simp at hc)
+
+theorem propDiv_entitled
+    {problem : Problem DomConstraint Unit} {st : State} {o₁ o₂ r : DomIntArg}
+    {c : Clause}
+    (hprob : DomConstraint.divGen o₁ o₂ r ∈ problem.constraints)
+    (hrun : propDiv st o₁ o₂ r = .conflict c)
+    (a : Assignment)
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a) :
+    ∃ l ∈ c, l.eval a = some true := by
+  unfold propDiv at hrun
+  split at hrun
+  · rename_i x d hpin
+    split at hrun
+    · rename_i hd0
+      have hc : c = divZeroClause o₂ := by
+        have hinj := hrun
+        simp only [PropagationResult.conflict.injEq] at hinj
+        exact hinj.symm
+      rw [hc]
+      exact arith_div_zero_true hd0 hpin (ha.2 _ hprob)
+    · rename_i hd0
+      split at hrun
+      · rename_i i k
+        split at hrun
+        · rename_i pl ph hpl hph
+          rcases firstEvent_mem
+              [narrowLo st k (divResLo d pl ph) (divReasonLo o₂ i k d pl ph),
+               narrowHi st k (divResHi d pl ph) (divReasonHi o₂ i k d pl ph)]
+              (.conflict c) hrun with hstable | hmem
+          · exact absurd hstable (by intro hc; cases hc)
+          · rcases List.mem_cons.mp hmem with h1 | hrest
+            · obtain ⟨_, _, _, _, _, hcc⟩ := narrowLo_conflict_inv (Eq.symm h1)
+              rw [hcc]
+              exact arith_div_nogood_lo_true hd0 (divMatch_covers hpin)
+                (ha.2 _ hprob)
+            · obtain ⟨_, _, _, _, _, hcc⟩ :=
+                narrowHi_conflict_inv (Eq.symm (List.mem_singleton.mp hrest))
+              rw [hcc]
+              exact arith_div_nogood_hi_true hd0 (divMatch_covers hpin)
+                (ha.2 _ hprob)
+        · exact absurd hrun (by intro hc; simp at hc)
+      · exact absurd hrun (by intro hc; simp at hc)
+  · exact absurd hrun (by intro hc; simp at hc)
+
+theorem propMod_entitled
+    {problem : Problem DomConstraint Unit} {st : State} {o₁ o₂ r : DomIntArg}
+    {c : Clause}
+    (hprob : DomConstraint.modGen o₁ o₂ r ∈ problem.constraints)
+    (hrun : propMod st o₁ o₂ r = .conflict c)
+    (a : Assignment)
+    (ha : ProblemSolution problem DomConstraint.SatisfiedBy a) :
+    ∃ l ∈ c, l.eval a = some true := by
+  unfold propMod at hrun
+  split at hrun
+  · rename_i x d hpin
+    split at hrun
+    · rename_i hd0
+      have hc : c = divZeroClause o₂ := by
+        have hinj := hrun
+        simp only [PropagationResult.conflict.injEq] at hinj
+        exact hinj.symm
+      rw [hc]
+      exact arith_mod_zero_true hd0 hpin (ha.2 _ hprob)
+    · rename_i hd0
+      split at hrun
+      · rename_i i k
+        split at hrun
+        · rename_i pl ph hpl hph
+          rcases firstEvent_mem
+              [narrowLo st k (modHullLo d pl ph) (modReasonLo o₂ i k d pl ph),
+               narrowHi st k (modHullHi d pl ph) (modReasonHi o₂ i k d pl ph)]
+              (.conflict c) hrun with hstable | hmem
+          · exact absurd hstable (by intro hc; cases hc)
+          · rcases List.mem_cons.mp hmem with h1 | hrest
+            · obtain ⟨_, _, _, _, _, hcc⟩ := narrowLo_conflict_inv (Eq.symm h1)
+              rw [hcc]
+              exact arith_mod_nogood_lo_true hd0 (divMatch_covers hpin)
+                (ha.2 _ hprob)
+            · obtain ⟨_, _, _, _, _, hcc⟩ :=
+                narrowHi_conflict_inv (Eq.symm (List.mem_singleton.mp hrest))
+              rw [hcc]
+              exact arith_mod_nogood_hi_true hd0 (divMatch_covers hpin)
+                (ha.2 _ hprob)
+        · exact absurd hrun (by intro hc; simp at hc)
+      · exact absurd hrun (by intro hc; simp at hc)
+  · exact absurd hrun (by intro hc; cases hc)
 
 /-! ## The standalone packaging
 
@@ -1602,6 +2498,14 @@ Every theorem above uses only the standard axioms. -/
 #print axioms propMin_reason_valid
 #print axioms propMax_reason_valid
 #print axioms propAbs_reason_valid
+#print axioms divPin_slot_dom
+#print axioms divPin_slot
+#print axioms propDiv_safe
+#print axioms propMod_safe
+#print axioms propDiv_entitled
+#print axioms propMod_entitled
+#print axioms propDiv_reason_valid
+#print axioms propMod_reason_valid
 #print axioms propagatorOfProvedB6_mem
 #print axioms propagatorOfProvedB6_run
 #print axioms minSlot_pack

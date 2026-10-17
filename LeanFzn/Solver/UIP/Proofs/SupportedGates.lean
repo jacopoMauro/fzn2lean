@@ -68,7 +68,7 @@ theorem supportedReachableBranch_of_preserve {orig : List Domain}
     SupportedBranchInvariant orig original props leaf := by
   intro cfg h
   induction h with
-  | init => exact reachable_init leaf orig
+  | init hent => exact reachable_seed leaf orig original hent
   | step hrec heq ih => exact hpres hrec heq ih
 
 /-- The supported `hbr` premise exactly as the gate fields consume it. -/
@@ -139,7 +139,7 @@ structure SupportedArmGates (orig : List Domain) (original : List Clause)
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     RestorationPreReachable leaf orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch
@@ -198,7 +198,7 @@ structure SupportedArmInvGatesCore (orig : List Domain) (original : List Clause)
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     RestorationPreReachable leaf orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch
@@ -208,7 +208,7 @@ structure SupportedArmInvGatesCore (orig : List Domain) (original : List Clause)
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
       ∀ cp' ∈ (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
           restored).checkpoints,
@@ -221,14 +221,14 @@ structure SupportedArmInvGatesCore (orig : List Domain) (original : List Clause)
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
       BackjumpCovers leaf orig cfg
         (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
           restored)
   hdeadStableNone : ∀ {cfg : SchedulerConfig leaf} {bs : BranchState leaf},
     SupportedReach orig original props cfg →
-    terminalResult cfg.original cfg.props cfg.branch = .stable bs →
+    terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs →
     leafWitness leaf cfg = none →
     splitData cfg.branch.frame = none →
       ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
@@ -250,7 +250,7 @@ structure SupportedArmInvGatesCore (orig : List Domain) (original : List Clause)
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = none →
+        cfg.branch cfg.orig cfg.original cfg.props = none →
       DeadRegion.Sound leaf (checkpointRegion cp)
   hconsumeInv : ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
     {rest : List BranchFrame}, SupportedReach orig original props cfg →
@@ -290,13 +290,13 @@ structure SupportedArmInvGates (orig : List Domain) (original : List Clause)
   hdeadConflictNil : ∀ {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     {cs learned : List Clause}, SupportedReach orig original props cfg →
     ReachableState leaf orig cfg.branch →
-    terminalResult cfg.original cfg.props cfg.branch = .conflict bs cs learned →
+    terminalResult cfg.orig cfg.original cfg.props cfg.branch = .conflict bs cs learned →
     cs = [] → ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
   hdeadLocalExcluded : ∀ {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     {lit : Option Literal} {reason : Option Clause} {learned : List Clause},
     SupportedReach orig original props cfg →
     ReachableState leaf orig cfg.branch →
-    terminalResult cfg.original cfg.props cfg.branch =
+    terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .localExcluded bs lit reason learned →
       ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
 

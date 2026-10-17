@@ -25,6 +25,7 @@ NO `sorry`, NO custom axiom. Registration owes the umbrella import line
 
 import LeanFzn.Solver.UIP.Proofs.PendingBacked
 import LeanFzn.Solver.UIP.Proofs.SupportedDatabaseFacts
+import LeanFzn.Solver.UIP.Proofs.SyncVocabulary
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler
 
 
@@ -33,86 +34,6 @@ open LeanFzn.Semantics LeanFzn.Solver.Core LeanFzn.Solver.Propagation LeanFzn.So
 open LeanFzn LeanFzn.Solver.Core
 
 /-! ## §1 The value-literal pool bridges -/
-
-/-- In-range `getD` reads the element. -/
-theorem getD_eq_getElem_of_lt {α : Type} {l : List α} {i : Nat} {d : α}
-    (h : i < l.length) : l.getD i d = l[i] := by
-  rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem h]
-  rfl
-
-theorem slotAtomPool_mem_atomPoolBase_aux (ds : List Domain) :
-    ∀ (off s : Nat) (a : Atom), s < ds.length →
-      a ∈ slotAtomPool (off + s) (ds.getD s []) → a ∈ atomPoolBase off ds := by
-  induction ds with
-  | nil =>
-      intro off s a hs
-      exact absurd hs (by simp)
-  | cons d ds ih =>
-      intro off s a hs h
-      cases s with
-      | zero =>
-          have h1 : (d :: ds).getD 0 [] = d := by
-            rw [List.getD_eq_getElem?_getD, List.getElem?_cons_zero]
-            rfl
-          have h' : a ∈ slotAtomPool off d := by rwa [h1] at h
-          exact List.mem_append_left _ h'
-      | succ s =>
-          have h1 : (d :: ds).getD (s + 1) [] = ds.getD s [] := by
-            rw [List.getD_eq_getElem?_getD, List.getD_eq_getElem?_getD,
-              List.getElem?_cons_succ]
-          have hs' : s < ds.length := by simpa using hs
-          have h2 : off + (s + 1) = (off + 1) + s := by omega
-          have h' : a ∈ slotAtomPool ((off + 1) + s) (ds.getD s []) := by
-            rwa [h1, h2] at h
-          exact List.mem_append_right _ (ih (off + 1) s a hs' h')
-
-/-- A slot atom drawn from the slot's own domain is in the base atom pool. -/
-theorem slotAtomPool_mem_atomPoolBase {ds : List Domain} {s : Nat} {a : Atom}
-    (hs : s < ds.length) (h : a ∈ slotAtomPool s (ds.getD s [])) :
-    a ∈ atomPoolBase 0 ds :=
-  slotAtomPool_mem_atomPoolBase_aux ds 0 s a hs (by simpa using h)
-
-/-- Both Boolean polarities of a slot's pin atom are pooled, for every
-domain (a Boolean pin never needs a value representative). -/
-theorem boolEq_mem_slotAtomPool (s : Nat) (d : Domain) (b : Bool) :
-    Atom.boolEq s b ∈ slotAtomPool s d :=
-  List.mem_append_left _ (by cases b <;> simp)
-
-/-- A value-removal atom at a domain value is pooled. -/
-theorem intNe_mem_slotAtomPool {s : Nat} {d : Domain} {i : Int}
-    (h : i ∈ vocabDomInts d) : Atom.intNe s i ∈ slotAtomPool s d :=
-  List.mem_append_right _ (List.mem_map.mpr ⟨i, h, rfl⟩)
-
-/-- **THE PIN-LITERAL POOL BRIDGE**: a `valueLiteral` output of a value
-present at slot `s` of the box normalizes into the pool. -/
-theorem valueLiteral_norm_mem_litPool {orig : List Domain} {s : Nat}
-    {v : Value} {l : Literal} (hs : s < orig.length)
-    (hv : v ∈ orig.getD s []) (hl : valueLiteral s v = some l) :
-    l.norm ∈ litPool orig := by
-  have hslot : orig.getD s [] = orig[s] := getD_eq_getElem_of_lt hs
-  rw [hslot] at hv
-  cases v with
-  | bool b =>
-      have hb : l = posBool s b := by simpa [valueLiteral] using hl.symm
-      subst hb
-      have ha : Atom.boolEq s b ∈ slotAtomPool s (orig.getD s []) := by
-        rw [hslot]
-        exact boolEq_mem_slotAtomPool s (orig[s]) b
-      show posLit (Atom.boolEq s b) ∈ litPool orig
-      exact posLit_mem (List.mem_append_left _
-        (slotAtomPool_mem_atomPoolBase hs ha))
-  | int i =>
-      have hi : l = negNe s i := by simpa [valueLiteral] using hl.symm
-      subst hi
-      have ha : Atom.intNe s i ∈ slotAtomPool s (orig.getD s []) := by
-        rw [hslot]
-        exact intNe_mem_slotAtomPool
-          (List.mem_filterMap.mpr ⟨Value.int i, hv, rfl⟩)
-      show negLit (Atom.intNe s i) ∈ litPool orig
-      exact negLit_mem (List.mem_append_left _
-        (slotAtomPool_mem_atomPoolBase hs ha))
-  | setOfInt _ => simp [valueLiteral] at hl
-  | array _ => simp [valueLiteral] at hl
 
 /-- **THE RETIRE-LITERAL POOL BRIDGE**: the retirement literal of such a
 pin (`l.negate.norm` — the falsifier form the canonical trail stores)
@@ -215,7 +136,8 @@ theorem resumePending_branchTrailVocabulary {leaf : Assignment → Bool}
     {orig : List Domain} {bs : BranchState leaf} {f : BranchFrame}
     (hb : PendingBacked orig f) :
     BranchTrailVocabulary orig (resumePending orig bs f) :=
-  canonicalTrail_vocabulary hb
+  syncAll_trail_vocab (orig := orig) _ (P := litPool orig) (fun l hl => hl)
+    (canonicalTrail_vocabulary hb)
 
 /-- The pending resume carries the input database verbatim (`learned :=
 bs.learned` is definitional), so database alignment transports through the
@@ -223,8 +145,9 @@ resume — the DATABASE half of the consume-route payload discipline. -/
 theorem resumePending_databaseAligned {leaf : Assignment → Bool}
     {orig : List Domain} {bs : BranchState leaf} {f : BranchFrame}
     (h : DatabaseAligned orig bs.learned) :
-    DatabaseAligned orig (resumePending orig bs f).learned :=
-  h
+    DatabaseAligned orig (resumePending orig bs f).learned := by
+  rw [resumePending_learned]
+  exact h
 
 /-! ## §3 The recorded-analysis jump payload at a canonical resume -/
 

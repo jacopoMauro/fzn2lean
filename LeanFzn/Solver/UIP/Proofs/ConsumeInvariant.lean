@@ -25,9 +25,10 @@ theorem stepConsume_invariant_of_components {leaf : Assignment → Bool}
     (hcov : cfg.coverage)
     (hdead : ∀ a, leaf a = true → FrameCovers cfg.branch.frame a →
       (∃ r ∈ cfg.log.regions, r.mem a = true) ∨
-      (∃ c ∈ cfg.branch.learned, ¬ c.SatisfiedBy a)) :
+      (∃ c ∈ cfg.branch.learned, ¬ c.SatisfiedBy a))
+    (hfits : ∀ a, leaf a = true → a.Fits cfg.orig) :
     SchedulerInvariant next := by
-  have hr := stepConsume_reachable_of_inv hp hs hbr hpend rfl
+  have hr := stepConsume_reachable_of_inv hp hs hbr hpend rfl hfits
   have hi := hpend.stepConsume hp hs
   obtain ⟨hf, hps, hl, hlearn, hstatus⟩ := stepConsume_some_shape hp hs
   have ho : next.orig = cfg.orig := by

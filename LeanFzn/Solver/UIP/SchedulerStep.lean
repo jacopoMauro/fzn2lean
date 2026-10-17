@@ -52,6 +52,8 @@ DAG:
 -/
 
 import LeanFzn.Solver.UIP.SchedulerState
+import LeanFzn.Solver.UIP.Proofs.SchedulerVocabulary
+import LeanFzn.Solver.Propagation.FrameSync
 import LeanFzn.Solver.Propagation.ConflictResolution    -- analysisFuel
 import LeanFzn.Solver.Propagation.AnalysisProgress      -- initAnalysisState
 import LeanFzn.Solver.Propagation.AnalysisEventsCore    -- analyzeEvents, analyzeEventsExpansions
@@ -246,7 +248,9 @@ freshly learned clause). No counter changes (§2.7). -/
 def stepPropagate (cfg : SchedulerConfig leaf)
     (d : ProductiveDeduction leaf cfg.branch) : SchedulerConfig leaf :=
   { cfg with
-    branch := narrowState cfg.branch d.frame d.literal d.reason d.learned
+    branch := syncSlot cfg.orig
+      (narrowState cfg.branch d.frame d.literal d.reason d.learned)
+      d.literal.atom.slot
     status := .active
     stats := cfg.stats.add { propagations := 1 } }
 
@@ -297,6 +301,28 @@ def stepDecideSkip (cfg : SchedulerConfig leaf) (v : Value)
     branch := { cfg.branch with frame := (doms, cfg.branch.frame.2 ++ [v]) }
     status := .active }
 
+/-- Runtime novelty guard (cheap): true when the sorted canonical form
+`canonicalSorted cfg.orig` of `c` may already occur among the sorted canonical
+forms of the learned database (it is implied by equality of those forms). The
+pool literals of `c` are compared; database clauses are first filtered by the
+pool-free inclusion, so only near-duplicates pay for pool tests. -/
+def learnedRepeats (cfg : SchedulerConfig leaf) (c : Clause) : Bool :=
+  let P := litPool cfg.orig
+  let csP := (c.map Literal.norm).filter (fun x => decide (x ∈ P))
+  cfg.branch.learned.any fun d =>
+    let ds := d.map Literal.norm
+    csP.all (fun x => decide (x ∈ ds)) &&
+      ds.all (fun x => decide (x ∈ csP) || !decide (x ∈ P))
+
+/-- The analysis the recording site stores: the normalised allowance analysis,
+DROPPED (so the scheduler takes the chronological fallback) when its learned
+clause repeats a database clause (novelty at every jump by construction). -/
+def recordedAnalysis (cfg : SchedulerConfig leaf) (c : Clause) :
+    Option ConflictAnalysis :=
+  ((analyzeAtAllowance cfg.orig cfg.branch.trail cfg.branch.level c).map
+    (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized)).filter
+    (fun an => !learnedRepeats cfg an.learned)
+
 /-- 4. CONFLICT ANALYSIS: record the conflict evidence — the reported
 clause, the closure's entailed new clauses, and the allowance run
 (`analyzeAtAllowance`, producing `none` when there is no asserting
@@ -324,8 +350,7 @@ def stepAnalyzeConflict (cfg : SchedulerConfig leaf) (c : Clause)
     conflict := some
       { clause := c
         learned := learned
-        analysis := (analyzeAtAllowance cfg.branch.trail cfg.branch.level c).map
-          (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized) }
+        analysis := recordedAnalysis cfg c }
     stats := cfg.stats.add { conflicts := 1 } }
 
 /-- The `analyzeConflict` transition with C3's counted resolution number:
@@ -426,7 +451,35 @@ def stepConsume (cfg : SchedulerConfig leaf) : Option (SchedulerConfig leaf) :=
 @[simp] theorem stepPropagate_branch (cfg : SchedulerConfig leaf)
     (d : ProductiveDeduction leaf cfg.branch) :
     (stepPropagate cfg d).branch
-      = narrowState cfg.branch d.frame d.literal d.reason d.learned := rfl
+      = syncSlot cfg.orig
+          (narrowState cfg.branch d.frame d.literal d.reason d.learned)
+          d.literal.atom.slot := rfl
+
+@[simp] theorem stepPropagate_branch_frame (cfg : SchedulerConfig leaf)
+    (d : ProductiveDeduction leaf cfg.branch) :
+    (stepPropagate cfg d).branch.frame = d.frame := by
+  simp [stepPropagate, narrowState]
+
+@[simp] theorem stepPropagate_branch_level (cfg : SchedulerConfig leaf)
+    (d : ProductiveDeduction leaf cfg.branch) :
+    (stepPropagate cfg d).branch.level = cfg.branch.level := by
+  simp [stepPropagate, narrowState]
+
+@[simp] theorem stepPropagate_branch_learned (cfg : SchedulerConfig leaf)
+    (d : ProductiveDeduction leaf cfg.branch) :
+    (stepPropagate cfg d).branch.learned = d.learned ++ cfg.branch.learned := by
+  simp [stepPropagate, narrowState]
+
+/-- The synchronised propagation successor is reachable as soon as the
+narrowed state is (the sync pushes valid, explained literals). -/
+theorem stepPropagate_branch_reachable {orig : List Domain}
+    {cfg : SchedulerConfig leaf} (d : ProductiveDeduction leaf cfg.branch)
+    (horig : cfg.orig = orig) (hfits : ∀ a, leaf a = true → a.Fits orig)
+    (h : ReachableState leaf orig
+      (narrowState cfg.branch d.frame d.literal d.reason d.learned)) :
+    ReachableState leaf orig (stepPropagate cfg d).branch := by
+  subst horig
+  exact syncSlot_reachable _ h hfits
 
 @[simp] theorem stepPropagate_pending (cfg : SchedulerConfig leaf)
     (d : ProductiveDeduction leaf cfg.branch) :
@@ -522,33 +575,21 @@ trail and level (the evidence-coherence obligation, discharged by `rfl`). -/
 theorem stepAnalyzeConflict_analysis (cfg : SchedulerConfig leaf) (c : Clause)
     (learned : List Clause) :
     ((stepAnalyzeConflict cfg c learned).conflict.map ConflictEvidence.analysis)
-      = some ((analyzeAtAllowance cfg.branch.trail cfg.branch.level c).map
-          (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized)) := rfl
+      = some (recordedAnalysis cfg c) := rfl
 
 /-- The recording site's map related to the reference analysis: the
 normalized allowance image is the reference `analyzeWithAllowance` record
 mapped through the canonical form (the same `Option.map` chain). -/
-theorem analyzeWithAllowance_eq_ofUIP_normalized (bs : BranchState leaf)
+theorem analyzeWithAllowance_eq_ofUIP_normalized (orig : List Domain) (bs : BranchState leaf)
     (c : Clause) :
-    (bs.analyzeWithAllowance c).map ConflictAnalysis.normalized
-      = (analyzeAtAllowance bs.trail bs.level c).map
+    (bs.analyzeWithAllowance orig c).map ConflictAnalysis.normalized
+      = (analyzeAtAllowance orig bs.trail bs.level c).map
           (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized) := by
   rw [analyzeWithAllowance_eq_ofUIP]
-  cases analyzeAtAllowance bs.trail bs.level c with
+  cases analyzeAtAllowance orig bs.trail bs.level c with
   | none => rfl
   | some p => cases p with
     | mk below uip => rfl
-
-/-- The recorded analysis IS the reference analysis UP TO THE CANONICAL FORM:
-the evidence the `analyzeConflict` transition records is
-`BranchState.analyzeWithAllowance` of the pre-state, mapped through
-`ConflictAnalysis.normalized` — so C2 can cite the existing analyzer
-theorems and the certificate transfer. -/
-theorem stepAnalyzeConflict_analysis_eq (cfg : SchedulerConfig leaf)
-    (c : Clause) (learned : List Clause) :
-    ((stepAnalyzeConflict cfg c learned).conflict.map ConflictEvidence.analysis)
-      = some ((cfg.branch.analyzeWithAllowance c).map ConflictAnalysis.normalized) := by
-  rw [stepAnalyzeConflict_analysis, analyzeWithAllowance_eq_ofUIP_normalized]
 
 /-! ### The counted analyze site (O1 wiring)
 
@@ -614,8 +655,7 @@ the counted run. -/
     (c : Clause) (learned : List Clause) (n : Nat) :
     ((stepAnalyzeConflictCounted cfg c learned n).conflict.map
         ConflictEvidence.analysis)
-      = some ((analyzeAtAllowance cfg.branch.trail cfg.branch.level c).map
-          (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized)) := rfl
+      = some (recordedAnalysis cfg c) := rfl
 
 /-- The counted recording site's evidence, destructured: the reported
 clause, the closure's new clauses, and exactly the computed-allowance
@@ -625,9 +665,7 @@ theorem stepAnalyzeConflictCounted_evidence {cfg : SchedulerConfig leaf}
     {c : Clause} {learned : List Clause} {n : Nat} {ev : ConflictEvidence}
     (h : (stepAnalyzeConflictCounted cfg c learned n).conflict = some ev) :
     ev.clause = c ∧ ev.learned = learned ∧
-      ev.analysis
-        = (analyzeAtAllowance cfg.branch.trail cfg.branch.level c).map
-            (fun p => (ConflictAnalysis.ofUIP p.1 p.2).normalized) := by
+      ev.analysis = recordedAnalysis cfg c := by
   simp only [stepAnalyzeConflictCounted, stepAnalyzeConflict,
     SchedulerConfig.countResolutions, Option.map_some,
     Option.some.injEq] at h
@@ -789,7 +827,7 @@ def conflictStep (cfg : SchedulerConfig leaf) (cs : List Clause)
   | c :: _ =>
       if cfg.branch.level = 0 then .unsat
       else .analyzeConflict (stepAnalyzeConflictCounted cfg c learned
-        (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) c
+        (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) c
 
 /-- The consume dispatch: resume or report UNSAT. -/
 def consumeStep (cfg : SchedulerConfig leaf) : SchedulerTransition leaf :=
@@ -879,7 +917,7 @@ def backjumpStep (cfg : SchedulerConfig leaf) (ev : ConflictEvidence) :
           .chronologicalFallback (stepChronologicalFallback cfg (branchRegion cfg))
       | some cp =>
           let p := BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned
-          match p.perform cfg.branch cfg.original cfg.props with
+          match p.perform cfg.branch cfg.orig cfg.original cfg.props with
           | none =>
               -- the assertion rejects the restored ancestor: the CHECKPOINT's
               -- prefix is the dead region, not the current branch's
@@ -903,7 +941,7 @@ def schedulerNext (cfg : SchedulerConfig leaf) : SchedulerTransition leaf :=
           match explainedDeduction cfg.original cfg.props cfg.branch with
           | some d => .propagate (stepPropagate cfg d)
           | none =>
-              match terminalResult cfg.original cfg.props cfg.branch with
+              match terminalResult cfg.orig cfg.original cfg.props cfg.branch with
               | .stable _ => stableStepGuarded cfg
               | .conflict _ cs learned => conflictStep cfg cs learned
               | .localExcluded _ _ _ learned =>
@@ -920,19 +958,22 @@ theorem explainedDeduction_eq_none_of_event_stable (original : List Clause)
   rw [explainedDeduction, h]
 
 /-- When no productive deduction is selected, the closure is the identity. -/
-theorem explainedClosure_eq_self_of_deduction_none (original : List Clause)
+theorem explainedClosure_eq_self_of_deduction_none (orig : List Domain)
+    (original : List Clause)
     (props : List Propagator) (bs : BranchState leaf)
     (h : explainedDeduction original props bs = none) :
-    explainedClosure original props bs = bs := by
+    explainedClosure orig original props bs = bs := by
   rw [explainedClosure, h]
 
 /-- At a fixpoint the result-returning closure reports A2's terminal
 classification — the dispatch's `terminalResult` call agrees with
 `explainedClosureResult` at every site that uses it. -/
 theorem explainedClosureResult_eq_terminalResult_of_deduction_none
-    (original : List Clause) (props : List Propagator) (bs : BranchState leaf)
+    (orig : List Domain) (original : List Clause) (props : List Propagator)
+    (bs : BranchState leaf)
     (h : explainedDeduction original props bs = none) :
-    explainedClosureResult original props bs = terminalResult original props bs := by
+    explainedClosureResult orig original props bs
+      = terminalResult orig original props bs := by
   rw [explainedClosureResult, h]
 
 /-! ## The component fixture (C1 done criteria)
@@ -991,16 +1032,22 @@ def fixtureCfg : SchedulerConfig fixtureLeaf :=
     pending := []
     log := {} }
 
-/-- The fixture's restored state: the exact `perform` result (the closure
-is the identity here because the fixture registers no clauses/propagators,
-and the learned unit clause is no longer productive in the narrowed
-frame). -/
-def fixtureRestored : BranchState fixtureLeaf :=
+/-- The fixture's restored state before the frame/trail synchronisation
+(the closure is the identity here because the fixture registers no
+clauses/propagators, and the learned unit clause is no longer productive in
+the narrowed frame). -/
+def fixtureRestoredPre : BranchState fixtureLeaf :=
   { frame := fixtureNarrowedFrame
     trail := [{ literal := fixtureAsserting.norm, level := 1,
                 reason := some { clause := fixtureLearned } }]
     level := 1
     learned := [fixtureLearned] }
+
+/-- The fixture's restored state: the exact `perform` result (the
+synchronised state: the narrowed frame fixes slot 1 to `1`, and the new
+bound literal is recorded). -/
+def fixtureRestored : BranchState fixtureLeaf :=
+  syncAll fixtureCfg.orig fixtureRestoredPre
 
 /-- The restoration/insertion/narrowing part of `perform` on the fixture,
 before propagation resumes. -/
@@ -1010,7 +1057,7 @@ def fixtureRestoredRaw : BranchState fixtureLeaf :=
 
 /-- The raw restored state is the hand-written fixture state: exact
 restoration, the single asserting entry, the inserted learned clause. -/
-theorem fixtureRestoredRaw_eq : fixtureRestoredRaw = fixtureRestored := rfl
+theorem fixtureRestoredRaw_eq : fixtureRestoredRaw = fixtureRestoredPre := rfl
 
 /-- The fixture's recorded conflict evidence (analysis `none`: the jump's
 evidence is the plan and the restored state here). -/
@@ -1057,9 +1104,9 @@ theorem fixturePlan_filter :
 exact restoration, assertion narrowing, recorded reason, and resumed
 propagation (the fixture's closure is the identity). -/
 theorem fixturePlan_perform :
-    fixturePlan.perform fixtureCfg.branch [] [] = some fixtureRestored := by
+    fixturePlan.perform fixtureCfg.branch fixtureCfg.orig [] [] = some fixtureRestored := by
   have hnone : explainedDeduction ([] : List Clause) ([] : List Propagator)
-      fixtureRestoredRaw = none := rfl
+      (syncAll fixtureCfg.orig fixtureRestoredRaw) = none := rfl
   have hraw : (fixturePlan.execute
         (fixtureCfg.branch.learnGlobal fixturePlan.learned)).narrowFrame
         fixtureNarrowedFrame = fixtureRestoredRaw := rfl
@@ -1067,8 +1114,9 @@ theorem fixturePlan_perform :
   rw [show filterFrame fixturePlan.asserting fixturePlan.checkpoint.frame
       = some fixtureNarrowedFrame from rfl]
   simp only [Option.map_some]
-  rw [hraw, explainedClosure_eq_self_of_deduction_none _ _ _ hnone,
+  rw [hraw, explainedClosure_eq_self_of_deduction_none _ _ _ _ hnone,
     fixtureRestoredRaw_eq]
+  rfl
 
 /-- The fixture's source and narrowed frames differ (their prefixes have
 different lengths) — the frame change the fixture exhibits. -/

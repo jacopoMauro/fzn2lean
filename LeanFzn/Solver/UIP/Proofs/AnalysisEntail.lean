@@ -26,14 +26,13 @@ Two layers, each exported:
    at the PRE-state (its branch is unchanged by the recording step, so
    the site's own `ReachableState` rewrites back to the pre-state).
 
-§2 THE SINGLETON-ANALYSIS TRANSPORT (the unit kit).
-   `analyzeAtAllowance_singleton_uip`: a successful singleton run's
-   `below` list is empty AND its UIP is the normalized negation of the
-   scanned literal `q.norm` or of its `orderUpgrade` — the markLit
-   falsifier shape of the CURRENT level. `learnedEntailed_singleton_run`
-   then transports entailment of `q` to entailment of the learned
-   singleton `[(uip.negate).norm]` (`orderUpgrade_weaken`,
-   `negate_norm_square`, `Literal.norm_eval`).
+§2 THE SINGLETON-ANALYSIS TRANSPORT (the unit kit; R1a: now in
+   `AnalyzeSingleton.lean`). `analyzeAtAllowance_singleton_uip`: a
+   successful singleton run's `below` list is empty AND its UIP is the
+   literal of a current-level trail entry that IMPLIES `¬q` (the LCG
+   analyzer's semantic falsifier). `learnedEntailed_singleton_run` then
+   transports entailment of `q` to the learned singleton
+   `[(uip.negate).norm]` (`impliesP_negate_sound`).
 
 §3 THE BRIDGE. `unitAnalysisEntailed_site` composes them under the unit
 kit (`props = dcs.filterMap propagatorOfProved`, every `unitFamilyB dc =
@@ -44,13 +43,14 @@ assembly consumes (SupportedReach → ClosureContract → ReachableState →
 cfg.conflict = some ev → ev.analysis = some an → LearnedEntailed leaf
 [an.learned]), with NO residual beyond the kit equations.
 
-FINDING (recorded, not hidden): the kit-independent §1 shows the general
-bridge's only remaining ingredient is the analyzer's resolution-soundness
-argument for ARBITRARY conflict clauses, which needs a further premise
-than the site shape provides — a root-facts discipline for level-0
-falsifiers (`markLit`'s root-drop outcome is justified by level-0 trail
-facts holding at every leaf solution, `RootFacts`/`RootFactsBridge` at
-the compiled level; `ClosureContract` supplies no such field). The unit
+FINDING (recorded, not hidden; R1a update): the general bridge for
+ARBITRARY conflict clauses is now `analyzeAtAllowance_learnedEntailed`
+(`RestorationCertificate.lean`), whose premises beyond the site shape are
+exactly: every trail reason clause is entailed, level-0 trail literals hold
+at every leaf solution (root facts), and every leaf solution fits the
+original domains (the LCG root drop). `ClosureContract` supplies none of the
+first two as a field, so the site-level general bridge remains open (owner:
+U1a/U1c). The unit
 kit avoids the premise entirely: a SUCCESSFUL singleton run can only mark
 a CURRENT-level falsifier, so no root-drop occurs (`markLit_inv`'s third
 disjunct).
@@ -61,6 +61,7 @@ NO `sorry`, NO custom axiom. Registration owes the umbrella import line
 
 import LeanFzn.Solver.UIP.Proofs.SupportedRun
 import LeanFzn.Solver.UIP.Proofs.SchedulerConflict
+import LeanFzn.Solver.UIP.Proofs.UnitRunSupported
 import LeanFzn.Solver.UIP.Proofs.SchedulerReachable
 import LeanFzn.Solver.UIP.Proofs.AnalyzeSingleton
 import LeanFzn.Solver.Propagation.Proofs.BranchState
@@ -93,11 +94,11 @@ theorem schedulerNext_successor_recording_or_none {leaf : Assignment → Bool}
     (hsucc : t.successor = some cfg') :
     cfg'.conflict = none ∨
       ∃ (cs learned : List Clause) (c : Clause) (rest : List Clause),
-        terminalResult cfg.original cfg.props cfg.branch
+        terminalResult cfg.orig cfg.original cfg.props cfg.branch
             = .conflict cfg.branch cs learned ∧
           cs = c :: rest ∧
           cfg' = stepAnalyzeConflictCounted cfg c learned
-            (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c) := by
+            (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c) := by
   cases hst : cfg.status with
   | dead =>
       have ht : consumeStep cfg = t := by
@@ -116,7 +117,7 @@ theorem schedulerNext_successor_recording_or_none {leaf : Assignment → Bool}
           cases hsucc
           exact Or.inl (by rw [stepPropagate_conflict, hc])
       | none =>
-          cases htt : terminalResult cfg.original cfg.props cfg.branch with
+          cases htt : terminalResult cfg.orig cfg.original cfg.props cfg.branch with
           | stable st =>
               have ht : stableStepGuarded cfg = t := by
                 simp only [schedulerNext, hc, hst, hd, htt] at hnext
@@ -132,7 +133,7 @@ theorem schedulerNext_successor_recording_or_none {leaf : Assignment → Bool}
                 hnone | ⟨c, rest, hcs, heq⟩
               · exact Or.inl hnone
               · have hst : st = cfg.branch :=
-                  (nextPruningEvent_of_terminalResult_conflict htt).2.1
+                  (terminalResult_conflict_cases htt).1
                 exact Or.inr ⟨cs, learned, c, rest, by rw [← hst], hcs, heq⟩
           | localExcluded st lit reason learned =>
               have ht :
@@ -178,22 +179,34 @@ theorem recordedClause_entailed_of_step {orig : List Domain}
       · rw [hcfg] at hbr hconf
         rw [hcs] at htr
         obtain ⟨hcl, -, -⟩ := stepAnalyzeConflictCounted_evidence hconf
-        -- the closure's conflict event at the PRE-state
-        have hevnt : nextPruningEvent cfg.original cfg.props cfg.branch.frame
-            cfg.branch.learned = .conflict (c :: rest) :=
-          (nextPruningEvent_of_terminalResult_conflict htr).1
-        rw [SupportedReach.original_eq hrec, SupportedReach.props_eq hrec] at hevnt
-        -- the recording step leaves the branch unchanged
+        -- the closure's terminal conflict at the PRE-state: the scan's own
+        -- conflict event, or (R1c) a filter-rejected implied reason
         have hbr₀ : ReachableState leaf orig cfg.branch := by
           simpa only [stepAnalyzeConflictCounted_branch, stepAnalyzeConflict_branch]
             using hbr
-        have hcsent : LearnedEntailed leaf (c :: rest) :=
-          hcontract.conflictEntailed cfg.branch hbr₀ (c :: rest) hevnt
+        obtain ⟨-, hcase⟩ := terminalResult_conflict_cases htr
         have hcent : LearnedEntailed leaf [c] := by
-          intro c' hc' a ha
-          rw [List.mem_singleton] at hc'
-          rw [hc']
-          exact hcsent c (List.mem_cons_self ..) a ha
+          rcases hcase with ⟨hevnt, -⟩ | ⟨l, c', lr, fl, hevnt, -, hcs', -⟩ |
+              ⟨w, -, hw, hcs', -⟩
+          · rw [SupportedReach.original_eq hrec, SupportedReach.props_eq hrec] at hevnt
+            have hcsent : LearnedEntailed leaf (c :: rest) :=
+              hcontract.conflictEntailed cfg.branch hbr₀ (c :: rest) hevnt
+            intro c' hc' a ha
+            rw [List.mem_singleton] at hc'
+            rw [hc']
+            exact hcsent c (List.mem_cons_self ..) a ha
+          · rw [SupportedReach.original_eq hrec, SupportedReach.props_eq hrec] at hevnt
+            injection hcs' with hc' _
+            rw [hc']
+            exact hcontract.reasonEntailed cfg.branch hbr₀ l c' lr fl hevnt
+          · -- R1c: the wipe-out clause is entailed by the original box
+            injection hcs' with hc' _
+            rw [SupportedReach.orig_eq hrec] at hw
+            rw [hc']
+            intro c'' hc'' a ha
+            rw [List.mem_singleton] at hc''
+            rw [hc'']
+            exact wipeoutClause_entailed hw (hcontract.leafFits a ha)
         rw [hcl]
         exact hcent
 
@@ -219,126 +232,11 @@ theorem recordedClause_entailed_of_supported {orig : List Domain}
       intro ev hbr hconf
       exact recordedClause_entailed_of_step hcontract hrec hs hbr hconf
 
-/-! ## §2 The singleton analysis shape and its entailment transport -/
+/-! ## §2 The singleton analysis shape and its entailment transport
 
-/-- THE SINGLETON ANALYSIS SHAPE: a successful `analyzeAtAllowance` run on
-a singleton clause `[q]` has an EMPTY below list and returns a UIP that is
-the normalized negation of the scanned literal's normal form `q.norm` or
-of its `orderUpgrade` — the only `markLit` outcome compatible with a
-nonempty mark set and a surviving run is the CURRENT-level mark
-(`markLit_inv`'s third disjunct), and `nextPivot`'s match returns that
-mark's literal (`nextPivot_mark`). -/
-theorem analyzeAtAllowance_singleton_uip {trail : List TrailEntry}
-    {lvl : Nat} {q : Literal} {below : List (Literal × Nat)} {uip : Literal}
-    (h : analyzeAtAllowance trail lvl [q] = some (below, uip)) :
-    below = [] ∧
-      ∃ q' : Literal, (q' = q.norm ∨ q' = orderUpgrade trail q.norm) ∧
-        uip = q'.negate.norm := by
-  unfold analyzeAtAllowance at h
-  suffices hgen : ∀ fuel : Nat,
-      analyzeStep trail lvl fuel [[q]] none [] [] = some (below, uip) →
-      below = [] ∧ ∃ q' : Literal,
-        (q' = q.norm ∨ q' = orderUpgrade trail q.norm) ∧
-          uip = q'.negate.norm from hgen _ h
-  intro fuel
-  cases fuel with
-  | zero =>
-      intro h
-      simp only [analyzeStep] at h
-      exact absurd h (by simp)
-  | succ f₁ =>
-      cases f₁ with
-      | zero =>
-          intro h
-          simp only [analyzeStep, skipEq, Bool.false_eq_true, if_false] at h
-          cases hm0 : markLit trail lvl [] [] q.norm <;> simp_all
-      | succ f₂ =>
-          cases f₂ with
-          | zero =>
-              intro h
-              simp only [analyzeStep, skipEq, Bool.false_eq_true, if_false] at h
-              cases hm0 : markLit trail lvl [] [] q.norm <;> simp_all
-          | succ f₃ =>
-              intro h
-              simp only [analyzeStep, skipEq, Bool.false_eq_true, if_false] at h
-              cases hm : markLit trail lvl [] [] q.norm with
-              | none =>
-                  simp only [hm] at h
-                  cases h
-              | some p =>
-                  obtain ⟨m₁, l₁⟩ := p
-                  simp only [hm] at h
-                  change analyzeStep trail lvl (Nat.succ f₃) [] none m₁ l₁ =
-                    some (below, uip) at h
-                  cases m₁ with
-                  | nil =>
-                      exact absurd h (by
-                        rw [analyzeStep_emptyMarks_none trail lvl (Nat.succ f₃) l₁]
-                        simp)
-                  | cons e rest =>
-                      rcases markLit_inv trail lvl [] [] q.norm (e :: rest) l₁ hm with
-                        ⟨m, hm_mem, -, -, -⟩ |
-                        ⟨p, hp_mem, -, -, -⟩ |
-                        ⟨e₂, -, q', hq', helit, hmarks, hl₁, -⟩ |
-                        ⟨e₂, -, q', hq', helit, hmarks, -, -, -⟩ |
-                        ⟨e₂, -, q', hq', helit, hmarks, -, -⟩
-                      · exact absurd hm_mem (by simp)
-                      · exact absurd hp_mem (by simp)
-                      · rw [hl₁] at h
-                        rw [hmarks] at h
-                        simp only [analyzeStep] at h
-                        cases hnp : nextPivot trail [e₂] with
-                        | none =>
-                            simp only [hnp] at h
-                            cases h
-                        | some e₃ =>
-                            obtain ⟨m, hm_mem', hm_lit⟩ :=
-                              nextPivot_mark trail [e₂] e₃ hnp
-                            have hme : m = e₂ := by simpa using hm_mem'
-                            subst hme
-                            have hliteq : litEqB m.literal e₃.literal = true := by
-                              rw [hm_lit]
-                              exact litEqB_self e₃.literal
-                            simp only [hnp, List.filter_cons, List.filter_nil,
-                              hliteq, Bool.not_true, Bool.false_eq_true,
-                              if_false, if_true, List.isEmpty_nil] at h
-                            obtain ⟨hbl, huip⟩ := Prod.mk.inj (Option.some.inj h)
-                            refine ⟨hbl.symm, q', ?_, ?_⟩
-                            · rcases hq' with hqq | hqq
-                              · left
-                                rw [hqq, norm_norm]
-                              · right
-                                rw [hqq, norm_norm]
-                            · rw [← huip, ← hm_lit, helit]
-                      · exact absurd hmarks (by simp)
-                      · exact absurd hmarks (by simp)
-
-/-- THE ENTAILMENT TRANSPORT across the singleton analysis: if the scanned
-literal `q` holds at every leaf solution, so does the analyzed singleton
-clause `[(uip.negate).norm]`. The UIP is (the normalized negation of) `q`
-or of `q`'s order upgrade — both WEAKER than `q` (`orderUpgrade_weaken`),
-so the witness transfers through `negate_norm_square` and
-`Literal.norm_eval`. -/
-theorem learnedEntailed_singleton_run {leaf : Assignment → Bool}
-    {trail : List TrailEntry} {q uip : Literal}
-    (hqent : ∀ a, leaf a = true → q.eval a = some true)
-    (huip : ∃ q' : Literal,
-      (q' = q.norm ∨ q' = orderUpgrade trail q.norm) ∧ uip = q'.negate.norm) :
-    LearnedEntailed leaf [[(uip.negate).norm]] := by
-  obtain ⟨q', hq'case, huip'⟩ := huip
-  rw [huip', negate_norm_square q']
-  intro c hc a hleaf
-  rw [List.mem_singleton] at hc
-  rw [hc]
-  refine ⟨q'.norm, List.mem_singleton_self _, ?_⟩
-  rw [Literal.norm_eval q' a]
-  rcases hq'case with hqq | hqq
-  · rw [hqq, Literal.norm_eval q a]
-    exact hqent a hleaf
-  · rw [hqq]
-    exact orderUpgrade_weaken trail q.norm a (by
-      rw [Literal.norm_eval q a]
-      exact hqent a hleaf)
+R1a: `analyzeAtAllowance_singleton_uip` and `learnedEntailed_singleton_run`
+now live in `AnalyzeSingleton.lean` (the LCG analyzer's singleton shape: the
+UIP is a current-level trail literal IMPLYING `¬q`). -/
 
 /-! ## §3 The site lemma and the family shape
 
@@ -358,6 +256,7 @@ theorem unitAnalysisEntailed_site {orig : List Domain}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     {cfg : SchedulerConfig leaf} {ev : ConflictEvidence} {an : ConflictAnalysis}
     (hreach : SupportedReach orig original props cfg)
     (hcontract : ClosureContract leaf orig original props)
@@ -369,8 +268,7 @@ theorem unitAnalysisEntailed_site {orig : List Domain}
     recordedClause_entailed_of_supported hcontract hreach hbr hconf
   -- the unit kit's recorded event is a NORMALIZED singleton (N1)
   obtain ⟨⟨q, hq, -⟩, -⟩ :=
-    (unitRunInvariant_of_reachable (leaf := leaf) hSupp hreach.reachable
-      (by rw [SupportedReach.props_eq hreach, hprops])).recorded ev hconf
+    (unitRunInvariant_of_supported hprops hSupp hgate hreach).recorded ev hconf
   -- the recorded analysis is a genuine successful canonical allowance run
   obtain ⟨below, uip, hrun, hcanon⟩ :=
     reachable_analysis_success leaf cfg ev an hreach.reachable hconf hana
@@ -390,7 +288,9 @@ theorem unitAnalysisEntailed_site {orig : List Domain}
       ConflictAnalysis.ofUIP_learned, hbelow]
     simp
   rw [hlearned]
-  exact learnedEntailed_singleton_run hqent huipshape
+  obtain ⟨e, -, -, hp, hu⟩ := huipshape
+  rw [SupportedReach.orig_eq hreach] at hp
+  exact learnedEntailed_singleton_run hcontract.leafFits hqent ⟨e, hp, hu⟩
 
 /-- **THE `hAnalysisEntail` FAMILY (I1-B)**: the exact premise shape the I1
 assembly (`SupportedInstance.supportedHpre_unitKit_of_site` /
@@ -401,14 +301,15 @@ theorem hAnalysisEntail_unitKit {orig : List Domain}
     {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props) :
     ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
       ReachableState leaf orig cfg.branch → cfg.conflict = some ev →
       ev.analysis = some an → LearnedEntailed leaf [an.learned] :=
   fun hreach hcontract hbr hconf hana =>
-    unitAnalysisEntailed_site hprops hSupp hreach hcontract hbr hconf hana
+    unitAnalysisEntailed_site hprops hSupp hgate hreach hcontract hbr hconf hana
 
 /-! ## §4 Consumer-shape regressions (the I1-A interface, verbatim)
 
@@ -423,39 +324,35 @@ accepted where the assembly expects it. -/
 example {orig : List Domain} {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
-    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true) :
+    (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props) :
     (∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SupportedReach orig original props cfg →
       ClosureContract leaf orig original props →
       ReachableState leaf orig cfg.branch → cfg.conflict = some ev →
       ev.analysis = some an → LearnedEntailed leaf [an.learned]) :=
-  hAnalysisEntail_unitKit hprops hSupp
+  hAnalysisEntail_unitKit hprops hSupp hgate
 
 -- the assembly's call site: the family applied at site facts
 example {orig : List Domain} {original : List Clause} {props : List Propagator}
     {leaf : Assignment → Bool} {dcs : List DomConstraint}
     (hprops : props = dcs.filterMap propagatorOfProved)
     (hSupp : ∀ dc ∈ dcs, unitFamilyB dc = true)
+    (hgate : UnitKitGate (leaf := leaf) orig original props)
     {cfg : SchedulerConfig leaf} {ev : ConflictEvidence} {an : ConflictAnalysis}
     (hreach : SupportedReach orig original props cfg)
     (hcontract : ClosureContract leaf orig original props)
     (hbs : ReachableState leaf orig cfg.branch)
     (hconf : cfg.conflict = some ev) (hana : ev.analysis = some an) :
     LearnedEntailed leaf [an.learned] :=
-  (hAnalysisEntail_unitKit hprops hSupp) hreach hcontract hbs hconf hana
+  (hAnalysisEntail_unitKit hprops hSupp hgate) hreach hcontract hbs hconf hana
 
--- NON-VACUITY: the concrete Boolean singleton run of
--- `Proofs/SchedulerConflict.lean`'s N1 regressions, read through the
--- shape lemma — the analyzed UIP's normalized negation is exactly the
--- scanned clause literal, so the learned singleton transports the
--- conflict clause's entailment verbatim.
-example : (analyzeAtAllowance
+-- NON-VACUITY: a concrete Boolean singleton run over a Boolean original
+-- domain, read through the shape lemma — the analyzed UIP's normalized
+-- negation is exactly the scanned clause literal.
+example : (analyzeAtAllowance [[.bool false, .bool true]]
       [{ literal := posBool 0 true, level := 1, reason := none }] 1
       [posBool 0 false]).map (fun p => p.2.negate.norm)
-    = some (posBool 0 false).norm := by
-  rw [show analyzeAtAllowance
-      [{ literal := posBool 0 true, level := 1, reason := none }] 1
-      [posBool 0 false] = some ([], posBool 0 true) from rfl]
-  rfl
+    = some (posBool 0 false).norm := by decide
 
 end LeanFzn.Solver.UIP

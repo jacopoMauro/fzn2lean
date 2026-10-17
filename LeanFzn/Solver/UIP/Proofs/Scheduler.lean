@@ -337,21 +337,21 @@ theorem analyzeConflict_then_fallback_rank_lt {leaf : Assignment → Bool}
     {f : BranchFrame} {rest : List BranchFrame} {next : SchedulerConfig leaf}
     (hp : (stepChronologicalFallback
         (stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
         (branchRegion (stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)))).pending =
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)))).pending =
         f :: rest)
     (h : stepConsume (stepChronologicalFallback
         (stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
         (branchRegion (stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)))) = some next) :
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)))) = some next) :
     RankLt (SchedulerRank next) (SchedulerRank cfg) := by
   have h2 := arm_fallback_then_consume
     (cfg := stepAnalyzeConflictCounted cfg c learned
-      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) hp h
+      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) hp h
   rwa [show SchedulerRank (stepAnalyzeConflictCounted cfg c learned
-      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
       = SchedulerRank cfg from rfl] at h2
 
 /-- ANALYZE SITE → CHECKPOINT-EXCLUSION LANDING (PROVED): the recorded
@@ -364,17 +364,17 @@ theorem analyzeConflict_then_localExclude_rank_lt {leaf : Assignment → Bool}
     {learned' : List Clause} {r : DeadRegion}
     {f : BranchFrame} {rest : List BranchFrame} {next : SchedulerConfig leaf}
     (hp : (stepLocalExclude (stepAnalyzeConflictCounted cfg c learned
-        (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) learned'
+        (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) learned'
         r).pending = f :: rest)
     (h : stepConsume (stepLocalExclude (stepAnalyzeConflictCounted cfg c learned
-        (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+        (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
         learned' r) = some next) :
     RankLt (SchedulerRank next) (SchedulerRank cfg) := by
   have h2 := arm_localExclude_then_consume
     (cfg := stepAnalyzeConflictCounted cfg c learned
-      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) hp h
+      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) hp h
   rwa [show SchedulerRank (stepAnalyzeConflictCounted cfg c learned
-      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
       = SchedulerRank cfg from rfl] at h2
 
 /-- The still-OPEN single-step decrease of the learn/backjump/assert arm,
@@ -398,7 +398,7 @@ def JumpDecrease (leaf : Assignment → Bool) : Prop :=
     ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     RankLt
       (SchedulerRank (stepLearnBackjumpAssert cfg
         (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
@@ -434,7 +434,7 @@ theorem jumpDecrease_of_frontier_eq_of_mass {leaf : Assignment → Bool}
       ev.analysis = some an →
       checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-          cfg.branch cfg.original cfg.props = some restored →
+          cfg.branch cfg.orig cfg.original cfg.props = some restored →
       frontierCost (SchedulerConfig.frontier (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
           restored)) = frontierCost (SchedulerConfig.frontier cfg) ∧
@@ -458,7 +458,7 @@ theorem jump_arm_rank_lt {leaf : Assignment → Bool}
     (h : cfg.conflict = some ev) (ha : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-      cfg.branch cfg.original cfg.props = some restored) :
+      cfg.branch cfg.orig cfg.original cfg.props = some restored) :
     schedulerNext cfg =
       .learnBackjumpAssert
         (stepLearnBackjumpAssert cfg
@@ -479,36 +479,37 @@ theorem analyzeConflict_then_jump_rank_lt {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {c : Clause} {learned : List Clause}
     (hjump : JumpDecrease leaf) {ev : ConflictEvidence}
     (hev : (stepAnalyzeConflictCounted cfg c learned
-      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).conflict
+      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).conflict
       = some ev)
     {an : ConflictAnalysis} (ha : ev.analysis = some an)
     {cp : DecisionCheckpoint leaf}
     (hcp : checkpointAt (stepAnalyzeConflictCounted cfg c learned
-        (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).checkpoints
+        (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).checkpoints
       an.backjumpLevel = some cp)
     {restored : BranchState leaf}
     (hp : (BackjumpPlan.ofCheckpoint cp
         (stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
         an.asserting an.learned).perform
         (stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
+        cfg.orig
         cfg.original cfg.props = some restored) :
     RankLt
       (SchedulerRank (stepLearnBackjumpAssert
         (stepAnalyzeConflictCounted cfg c learned
-          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
         (BackjumpPlan.ofCheckpoint cp
           (stepAnalyzeConflictCounted cfg c learned
-            (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+            (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
           an.asserting an.learned)
         ev restored))
       (SchedulerRank cfg) := by
   have h := hjump (stepAnalyzeConflictCounted cfg c learned
-    (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) ev an cp restored
+    (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) ev an cp restored
     ha hcp hp
   rwa [show SchedulerRank (stepAnalyzeConflictCounted cfg c learned
-      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
       = SchedulerRank cfg from rfl] at h
 
 /-! ### The phase assembly: `PhaseProgress` CLOSED modulo `JumpDecrease`
@@ -580,7 +581,7 @@ theorem phaseProgress_of_jumpDecrease {leaf : Assignment → Bool}
             simp only [phaseNext, hnext, backjumpStep, ha, hcp, hc]
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 -- the assertion rejects the restored ancestor: localExclude
                 -- stutter → forced consume
@@ -700,7 +701,7 @@ theorem phaseProgress_of_jumpDecrease {leaf : Assignment → Bool}
             -- (the recorded config is the COUNTED site: `conflictStep` wires
             -- the executed analyzer's pivot expansions into it)
             cases hev : (stepAnalyzeConflictCounted cfg c learned
-                (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).conflict with
+                (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).conflict with
             | none =>
                 simp [stepAnalyzeConflictCounted, stepAnalyzeConflict,
                   SchedulerConfig.countResolutions] at hev
@@ -710,9 +711,9 @@ theorem phaseProgress_of_jumpDecrease {leaf : Assignment → Bool}
                     refine phase_compose_consume
                       (n := stepChronologicalFallback
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                         (branchRegion (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))))
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))))
                       ?_ (fun hp h => analyzeConflict_then_fallback_rank_lt
                         (cfg := cfg) (c := c) (learned := learned) hp h) hsucc
                     simp only [phaseNext, hnext, conflictStep, if_neg hlv, hev,
@@ -720,23 +721,27 @@ theorem phaseProgress_of_jumpDecrease {leaf : Assignment → Bool}
                 | some an =>
                     have hstep_orig :
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).original
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).original
                           = cfg.original := rfl
                     have hstep_props :
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).props
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).props
                           = cfg.props := rfl
+                    have hstep_dom :
+                        (stepAnalyzeConflictCounted cfg c learned
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).orig
+                          = cfg.orig := rfl
                     cases hcp : checkpointAt
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).checkpoints
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).checkpoints
                         an.backjumpLevel with
                     | none =>
                         refine phase_compose_consume
                           (n := stepChronologicalFallback
                             (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                             (branchRegion (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))))
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))))
                           ?_ (fun hp h => analyzeConflict_then_fallback_rank_lt
                             (cfg := cfg) (c := c) (learned := learned) hp h) hsucc
                         simp only [phaseNext, hnext, conflictStep, if_neg hlv,
@@ -744,23 +749,24 @@ theorem phaseProgress_of_jumpDecrease {leaf : Assignment → Bool}
                     | some cp =>
                         cases hp : (BackjumpPlan.ofCheckpoint cp
                             (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
                             an.asserting an.learned).perform
                             (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
+                            cfg.orig
                             cfg.original cfg.props with
                         | none =>
                             -- checkpoint rejection → localExclude → consume
                             refine phase_compose_consume
                               (n := stepLocalExclude
                                 (stepAnalyzeConflictCounted cfg c learned
-                                  (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                                  (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                                 ev.learned (checkpointRegion cp))
                               ?_ (fun hp' h => analyzeConflict_then_localExclude_rank_lt
                                 (cfg := cfg) (c := c) (learned := learned)
                                 hp' h) hsucc
                             simp only [phaseNext, hnext, conflictStep, if_neg hlv,
-                              hev, backjumpStep, ha, hcp, hstep_orig, hstep_props, hp]
+                              hev, backjumpStep, ha, hcp, hstep_orig, hstep_props, hstep_dom, hp]
                         | some restored =>
                             -- the recorded jump: decrease = the analyze-site
                             -- composition of `JumpDecrease`
@@ -768,18 +774,18 @@ theorem phaseProgress_of_jumpDecrease {leaf : Assignment → Bool}
                                 .learnBackjumpAssert
                                   (stepLearnBackjumpAssert
                                     (stepAnalyzeConflictCounted cfg c learned
-                                      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                                      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                                     (BackjumpPlan.ofCheckpoint cp
                                       (stepAnalyzeConflictCounted cfg c learned
-                                        (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+                                        (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
                                       an.asserting an.learned) ev restored)
                                   (BackjumpPlan.ofCheckpoint cp
                                     (stepAnalyzeConflictCounted cfg c learned
-                                      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+                                      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
                                     an.asserting an.learned) an := by
                               simp only [phaseNext, hnext, conflictStep,
                                 if_neg hlv, hev, backjumpStep, ha, hcp,
-                                hstep_orig, hstep_props, hp]
+                                hstep_orig, hstep_props, hstep_dom, hp]
                             rw [hpe] at hsucc
                             simp only [successor_learnBackjumpAssert,
                               Option.some.injEq] at hsucc
@@ -869,7 +875,7 @@ theorem not_dispatcherProgress_of_localExclude_site {leaf : Assignment → Bool}
     {l : Option Literal} {reason : Option Clause} {learned : List Clause}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch =
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .localExcluded bs l reason learned) :
     ¬ DispatcherProgressNaive leaf := by
   obtain ⟨hnext, hstut⟩ := C3a.arm_localExclude hconf hstatus hd ht
@@ -883,7 +889,7 @@ theorem not_dispatcherProgress_of_analyzeConflict_site {leaf : Assignment → Bo
     {c : Clause} {rest : List Clause} {learned : List Clause}
     (hconf : cfg.conflict = none) (hstatus : cfg.status = .active)
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = none)
-    (ht : terminalResult cfg.original cfg.props cfg.branch =
+    (ht : terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .conflict bs (c :: rest) learned)
     (hlevel : cfg.branch.level ≠ 0) :
     ¬ DispatcherProgressNaive leaf := by

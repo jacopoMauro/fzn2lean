@@ -143,7 +143,7 @@ theorem checkpointsBelow_propagate {leaf : Assignment → Bool}
     {cfg : SchedulerConfig leaf} {d : ProductiveDeduction leaf cfg.branch}
     (h : CheckpointsBelow cfg) : CheckpointsBelow (stepPropagate cfg d) := by
   intro cp hcp
-  exact h cp (by simpa [stepPropagate] using hcp)
+  simpa [stepPropagate, narrowState] using h cp (by simpa [stepPropagate] using hcp)
 
 /-- `decide` keeps the checkpoint-level discipline: the pushed checkpoint
 is the PARENT snapshot (level = parent level, REPAIRED by the integration
@@ -236,9 +236,10 @@ theorem checkpointsBelow_consume {leaf : Assignment → Bool}
 invariant (`schedulerInvariant_init`, S0) — a re-export so the C2d
 assembly cites a single name per transition. -/
 theorem schedulerForward_init (leaf : Assignment → Bool)
-    (orig : List Domain) (original : List Clause) (props : List Propagator) :
+    (orig : List Domain) (original : List Clause) (props : List Propagator)
+    (hent : LearnedEntailed leaf original) :
     RootInvariant leaf orig original props :=
-  schedulerInvariant_init leaf orig original props
+  schedulerInvariant_init leaf orig original props hent
 
 /-- The root also satisfies the checkpoint-level discipline. -/
 theorem schedulerForward_init_checkpointsBelow (leaf : Assignment → Bool)
@@ -259,7 +260,8 @@ theorem stepPropagate_reachable {leaf : Assignment → Bool}
     {d : ProductiveDeduction leaf cfg.branch}
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = some d) :
     ReachableState leaf cfg.orig (stepPropagate cfg d).branch :=
-  explainedDeduction_narrow_reachable hc hinv.reachable hu hd
+  syncSlot_reachable _ (explainedDeduction_narrow_reachable hc hinv.reachable hu hd)
+    hc.leafFits
 
 /-- `propagate` never touches the pending frontier. -/
 theorem stepPropagate_pending_fits {leaf : Assignment → Bool}
@@ -277,7 +279,8 @@ theorem stepPropagate_branch_fits {leaf : Assignment → Bool}
     (d : ProductiveDeduction leaf cfg.branch) :
     ∀ i v, v ∈ (Frame.domains (stepPropagate cfg d).branch.frame).getD i [] →
       v ∈ cfg.orig.getD i [] :=
-  fun i v hv => hinv.branch_fits i v (Frame.domains_subsets d.filtered i v hv)
+  fun i v hv => hinv.branch_fits i v (Frame.domains_subsets d.filtered i v
+    (by simpa [stepPropagate, narrowState] using hv))
 
 /-- PRE-EXISTING CHECKPOINT IDENTITY under propagation: the trail append
 stays at the checkpoint-identifying shape (all later entries at or above
@@ -292,19 +295,28 @@ theorem stepPropagate_checkpoints_identify {leaf : Assignment → Bool}
   have hmem : cp ∈ cfg.checkpoints := by simpa [stepPropagate] using hcp
   obtain ⟨hlev, ⟨mid, htrail, hmid⟩, hdesc⟩ := hinv.checkpoints_identify cp hmem
   have hle : cp.level ≤ cfg.branch.level := hlevel cp hmem
-  refine ⟨hlev, ⟨mid ++ [(⟨d.literal.norm, cfg.branch.level,
-      some { clause := d.reason }⟩ : TrailEntry)], ?_, ?_⟩, ?_⟩
-  · simp only [stepPropagate, narrowState]
-    rw [htrail, List.append_assoc]
+  obtain ⟨-, -, -, ex, hex, hexl⟩ := syncSlot_shape cfg.orig
+    (narrowState cfg.branch d.frame d.literal d.reason d.learned) d.literal.atom.slot
+  refine ⟨hlev, ⟨mid ++ ([(⟨d.literal.norm, cfg.branch.level,
+      some { clause := d.reason }⟩ : TrailEntry)] ++ ex), ?_, ?_⟩, ?_⟩
+  · simp only [stepPropagate]
+    rw [hex]
+    simp only [narrowState]
+    rw [htrail, List.append_assoc, List.append_assoc]
   · intro e he
-    rcases List.mem_append.mp he with he | he
+    have he' : e ∈ mid ∨ e = (⟨d.literal.norm, cfg.branch.level,
+        some { clause := d.reason }⟩ : TrailEntry) ∨ e ∈ ex := by
+      simpa [or_assoc] using he
+    rcases he' with he | he | he
     · exact hmid e he
-    · simp only [List.mem_singleton] at he
-      rw [he]
+    · rw [he]
       show cp.level ≤ cfg.branch.level
       exact hle
+    · rw [hexl e he]
+      exact hle
   · intro a ha
-    exact hdesc a (filterFrame_refines d.filtered ha)
+    exact hdesc a (filterFrame_refines d.filtered
+      (by simpa [stepPropagate, narrowState] using ha))
 
 /-- FIELD-ONLY VARIANT of `stepPropagate_checkpoints_identify` (J1 hident
 wrapper): the supported identifies+chain induction carries only the
@@ -319,19 +331,28 @@ theorem stepPropagate_checkpoints_identify_of_identifies {leaf : Assignment → 
   have hmem : cp ∈ cfg.checkpoints := by simpa [stepPropagate] using hcp
   obtain ⟨hlev, ⟨mid, htrail, hmid⟩, hdesc⟩ := hident cp hmem
   have hle : cp.level ≤ cfg.branch.level := hlevel cp hmem
-  refine ⟨hlev, ⟨mid ++ [(⟨d.literal.norm, cfg.branch.level,
-      some { clause := d.reason }⟩ : TrailEntry)], ?_, ?_⟩, ?_⟩
-  · simp only [stepPropagate, narrowState]
-    rw [htrail, List.append_assoc]
+  obtain ⟨-, -, -, ex, hex, hexl⟩ := syncSlot_shape cfg.orig
+    (narrowState cfg.branch d.frame d.literal d.reason d.learned) d.literal.atom.slot
+  refine ⟨hlev, ⟨mid ++ ([(⟨d.literal.norm, cfg.branch.level,
+      some { clause := d.reason }⟩ : TrailEntry)] ++ ex), ?_, ?_⟩, ?_⟩
+  · simp only [stepPropagate]
+    rw [hex]
+    simp only [narrowState]
+    rw [htrail, List.append_assoc, List.append_assoc]
   · intro e he
-    rcases List.mem_append.mp he with he | he
+    have he' : e ∈ mid ∨ e = (⟨d.literal.norm, cfg.branch.level,
+        some { clause := d.reason }⟩ : TrailEntry) ∨ e ∈ ex := by
+      simpa [or_assoc] using he
+    rcases he' with he | he | he
     · exact hmid e he
-    · simp only [List.mem_singleton] at he
-      rw [he]
+    · rw [he]
       show cp.level ≤ cfg.branch.level
       exact hle
+    · rw [hexl e he]
+      exact hle
   · intro a ha
-    exact hdesc a (filterFrame_refines d.filtered ha)
+    exact hdesc a (filterFrame_refines d.filtered
+      (by simpa [stepPropagate, narrowState] using ha))
 
 /-- COVERAGE under propagation: no leaf solution is lost. Every remaining
 leaf solution is represented, hence satisfies the deduced literal (the
@@ -359,12 +380,12 @@ theorem stepPropagate_covers {leaf : Assignment → Bool}
       obtain ⟨g, hg, hcov'⟩ := filterFrame_preserves hcov hlit'
       have hg' : g = d.frame := Option.some.inj (hg.symm.trans d.filtered)
       subst hg'
-      exact ⟨d.frame, List.mem_cons_self .., hcov'⟩
+      exact ⟨d.frame, by simp [SchedulerConfig.frontier, stepPropagate, narrowState], hcov'⟩
     · left
       exact ⟨f, List.mem_cons_of_mem _ hf, hcov⟩
   · right
     rcases hdb with ⟨c, hc', hnc⟩
-    exact ⟨c, List.mem_append.mpr (Or.inr hc'), hnc⟩
+    exact ⟨c, by simpa [stepPropagate, narrowState] using Or.inr hc', hnc⟩
 
 /-- SIBLING PROVENANCE of the learned payload (E1's discipline): the
 clause the deduction records carries `ClauseProvenance` from the contract
@@ -380,7 +401,13 @@ theorem stepPropagate_clauseProvenance {leaf : Assignment → Bool}
     (hd : explainedDeduction cfg.original cfg.props cfg.branch = some d) :
     ClauseProvenance leaf (stepPropagate cfg d).branch d.reason := by
   obtain ⟨lr, fl, hev⟩ := explainedDeduction_event hd
-  exact clauseProvenance_of_contract hc hinv.reachable hu hev
+  refine clauseProvenance_mono ?_ (clauseProvenance_of_contract hc hinv.reachable hu hev)
+  obtain ⟨-, -, -, ex, hex, -⟩ := syncSlot_shape cfg.orig
+    (narrowState cfg.branch d.frame d.literal d.reason d.learned) d.literal.atom.slot
+  intro e he
+  simp only [stepPropagate]
+  rw [hex]
+  exact List.mem_append_left _ he
 
 /-- The learned payload of `explainedDeduction` is exactly the reason
 clause (or nothing): the purity fact `learnedProvenance_narrow_of_members`
@@ -441,7 +468,13 @@ theorem stepPropagate_learnedProvenance {leaf : Assignment → Bool}
       (narrowState cfg.branch d.frame d.literal d.reason d.learned) :=
     learnedProvenance_narrow_of_members (g := d.frame) hprov hpivot hchron
       (fun c' hc' => hmem c' hc')
-  exact h
+  obtain ⟨-, -, -, ex, hex, -⟩ := syncSlot_shape cfg.orig
+    (narrowState cfg.branch d.frame d.literal d.reason d.learned) d.literal.atom.slot
+  refine learnedProvenance_mono ?_ (by simp [stepPropagate]) h
+  intro e he
+  simp only [stepPropagate]
+  rw [hex]
+  exact List.mem_append_left _ he
 
 /-- INVARIANT PRESERVATION for `propagate`, field by field. `log_sound`
 and `learned_entailed` are carried through (`propagate` never touches the
@@ -467,7 +500,7 @@ theorem stepPropagate_invariant {leaf : Assignment → Bool}
     exact hinv.log_sound
   · -- learned_entailed: new clauses entailed, old ones untouched
     intro c hcmem
-    rcases List.mem_append.mp hcmem with hcmem | hcmem
+    rcases List.mem_append.mp (by simpa [stepPropagate, narrowState] using hcmem) with hcmem | hcmem
     · refine fun c' hc' => ?_
       rw [List.mem_singleton] at hc'
       rw [hc']

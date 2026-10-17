@@ -7,6 +7,7 @@ DAG: frame/clauses -> Pruning -> certified kits -> public solve entry.
 import LeanFzn.Solver.Propagation.FrameFilter
 import LeanFzn.Solver.Propagation.ClausePropagation
 import LeanFzn.Solver.Propagation.PruningTypes
+import LeanFzn.Solver.Propagation.Propagate
 open LeanFzn.Semantics LeanFzn.Solver.Propagation
 
 
@@ -42,12 +43,15 @@ inductive PruningEvent where
   | conflict (clauses : List Clause)
   | implied (literal : Literal) (clause : Clause) (learnReason fromLearned : Bool)
 
-/-- Clauses are unit relative to the finite domains, not merely syntactic trail pins. -/
+/-- Clauses are unit relative to the finite domains, not merely syntactic trail pins.
+A database clause with no remaining literal is reported as a conflict ON THAT
+CLAUSE (R1c conflict routing): the scheduler analyses it instead of excluding
+the branch locally. -/
 def scanDatabase (original : List Clause) (f : BranchFrame) : List Clause → PruningEvent
   | [] => .stable
   | c :: rest =>
     match clauseRemaining f c with
-    | [] => .conflict []
+    | [] => .conflict [c]
     | [l] => if productive l f then .implied l c false (!(original.contains c))
              else scanDatabase original f rest
     | _ => scanDatabase original f rest
@@ -115,8 +119,16 @@ structure PropagationContract (leaf : Assignment → Bool) (props : List Propaga
     p.run (frameState f) = .implied l r →
     ∀ a, leaf a = true → r.clause.SatisfiedBy a
 
+  /-- A non-empty propagator conflict clause is true at every leaf solution
+      that is FAITHFUL to the frame the propagator read (it reads, at every
+      slot, an int-viewed value of the sort of the slot's current domain
+      values). The premise is what the explained `neSlot`/`allDiff` clauses
+      need (a mixed-sort raw/view collision is the only way the raw
+      disequality can hold while the clause's view-literals are false); every
+      consumer discharges it from `frameFaithful_of_domSub` at a frame that is
+      a sub-box of a shape-typed int-viewed box all leaf solutions fit. -/
   conflictReason : ∀ f, frameViewedB f = true → ∀ p ∈ props, ∀ c,
     p.run (frameState f) = .conflict c → c ≠ [] →
-    ∀ a, leaf a = true → c.SatisfiedBy a
+    ∀ a, leaf a = true → FrameFaithful (Frame.domains f) a → c.SatisfiedBy a
 
 end LeanFzn.Solver.Propagation

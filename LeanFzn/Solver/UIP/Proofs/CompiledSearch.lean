@@ -76,12 +76,6 @@ structure CompiledPhasePremises {leaf : Assignment → Bool}
   literals in the OWN box's literal pool (database-side pool alignment). -/
   halignDB : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
     ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPool cfg.orig
-  /-- S4/S5: reachable branches carrying recorded evidence keep an
-  unfalsified database (C1's site-restated form: no claim at
-  non-evidence states). -/
-  hdb : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence},
-    SchedulerReachable cfg → cfg.conflict = some ev →
-    DatabaseUnfalsified cfg.branch
   /-- S5/B4: the reachable branch invariant in SELF-`orig` form
   (production: `hbr_of_reachPreserve` from `ReachableArmsPreserveReach`). -/
   hbr : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
@@ -93,7 +87,7 @@ def compiledPhaseKernel {leaf : Assignment → Bool}
     {problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit}
     (P : CompiledPhasePremises (leaf := leaf) problem) : ReachablePhaseKernel leaf :=
   reachablePhaseKernelSorted
-    (reachablePhaseProgressSorted_of_premises P.halignDB P.hdb P.hbr)
+    (reachablePhaseProgressSorted_of_premises P.halignDB P.hbr)
     (fun _ _ hreach hsucc => phaseNext_reachable_succ hreach hsucc)
 
 /-- **THE D1 PUBLIC DRIVER ENTRY**: X2's computable `runPhaseFromSorted`
@@ -103,12 +97,13 @@ fuel, no axiom, no hidden premise. -/
 def solvePhaseCompiled {leaf : Assignment → Bool}
     {problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit}
     (P : CompiledPhasePremises (leaf := leaf) problem)
-    (original : List Clause) (props : List Propagator) : DriverResult leaf :=
+    (original : List Clause) (props : List Propagator)
+    (hent : LearnedEntailed leaf original) : DriverResult leaf :=
   runPhaseFromSorted
-    (reachablePhaseProgressSorted_of_premises P.halignDB P.hdb P.hbr)
+    (reachablePhaseProgressSorted_of_premises P.halignDB P.hbr)
     (fun _ _ hreach hsucc => phaseNext_reachable_succ hreach hsucc)
     (SchedulerConfig.init problem.domains original props)
-    (schedulerReachable_init problem.domains original props)
+    (schedulerReachable_init problem.domains original props hent)
 
 /-- Agreement with P5's verified well-founded driver (X2's
 `runPhase_eq_runReachable`): the compiled entry returns `runReachable`'s
@@ -116,11 +111,12 @@ result on the root configuration. -/
 theorem solvePhaseCompiled_eq_runReachable {leaf : Assignment → Bool}
     {problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit}
     (P : CompiledPhasePremises (leaf := leaf) problem)
-    (original : List Clause) (props : List Propagator) :
-    solvePhaseCompiled (leaf := leaf) P original props =
+    (original : List Clause) (props : List Propagator)
+    (hent : LearnedEntailed leaf original) :
+    solvePhaseCompiled (leaf := leaf) P original props hent =
       runReachable (compiledPhaseKernel P)
         (SchedulerConfig.init problem.domains original props)
-        (schedulerReachable_init problem.domains original props) := by
+        (schedulerReachable_init problem.domains original props hent) := by
   exact runPhase_eq_runReachable _ _ _
 
 /- **D1 SAT/UNSAT TRANSFERS moved to `Proofs/SchedulerCertifiedRun.lean`**
@@ -134,8 +130,9 @@ input — pure well-founded recursion, no fuel and no runtime contract. -/
 theorem solvePhaseCompiled_total {leaf : Assignment → Bool}
     {problem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit}
     (P : CompiledPhasePremises (leaf := leaf) problem)
-    (original : List Clause) (props : List Propagator) :
-    ∃ r : DriverResult leaf, solvePhaseCompiled (leaf := leaf) P original props = r :=
+    (original : List Clause) (props : List Propagator)
+    (hent : LearnedEntailed leaf original) :
+    ∃ r : DriverResult leaf, solvePhaseCompiled (leaf := leaf) P original props hent = r :=
   ⟨_, rfl⟩
 
 end LeanFzn.Solver.UIP

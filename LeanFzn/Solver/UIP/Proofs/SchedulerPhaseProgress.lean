@@ -335,31 +335,50 @@ def ReachableJumpRanked {leaf : Assignment → Bool} : Prop :=
     c0.conflict = some ev →
     ev.analysis = some an →
     (BackjumpPlan.ofCheckpoint cp c0.branch an.asserting an.learned).perform
-        c0.branch c0.original c0.props = some restored →
+        c0.branch c0.orig c0.original c0.props = some restored →
     PhaseLt (selfRank (stepLearnBackjumpAssert c0
         (BackjumpPlan.ofCheckpoint cp c0.branch an.asserting an.learned) ev restored))
       (selfRank c0)
 
 /-- PROOF of the residual from P4 + the three named P4 premises, all
 SELF-RELATIVE (G1): pool membership at the configuration's own box,
-unfalsified database, branch reachability of the configuration's own box. -/
+NOVELTY of the recorded analysis (RESTATED by R1c: this premise was
+`DatabaseUnfalsified cfg.branch`, which conflict routing falsifies at
+database-sourced sites; the unfalsified-database discharge is kept as
+`jumpNovelty_of_dbUnfalsified_site`), branch reachability of the
+configuration's own box. -/
 theorem reachableJumpRanked_of_premises {leaf : Assignment → Bool}
     (hpool : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
       {an : ConflictAnalysis}, SchedulerReachable cfg → cfg.conflict = some ev →
         ev.analysis = some an →
           Clause.canonicalClause an.learned ∈ clausePool cfg.orig)
-    (hdb : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence},
-      SchedulerReachable cfg → cfg.conflict = some ev →
-      DatabaseUnfalsified cfg.branch)
+    (hnov : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
+      {an : ConflictAnalysis}, SchedulerReachable cfg → cfg.conflict = some ev →
+        ev.analysis = some an → JumpNovelty cfg.branch.learned an)
     (hbr : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       ReachableState leaf cfg.orig cfg.branch) :
     ReachableJumpRanked (leaf := leaf) := by
   intro c0 cp ev an restored hreach hconf hana hperf
-  have h := P4.phaseLt_stepLearnBackjumpAssert_of_reachable
+  have h := P4.phaseLt_stepLearnBackjumpAssert_of_novelty (ev := ev)
     (hpool hreach hconf hana) hperf
     (planMatchesAnalysis_ofCheckpoint cp c0.branch an)
-    (hdb hreach hconf) rfl (hbr hreach) hreach hconf hana
+    (hnov hreach hconf hana)
   simpa only [selfRank, stepLearnBackjumpAssert_orig] using h
+
+/-- The OLD discharge of the novelty premise (kept by R1c): on a reachable
+recorded site whose learned database is unfalsified, the recorded analysis is
+novel. Valid at the propagator-sourced sites; it does NOT hold at routed
+(database-sourced) sites, which is why the rank theorems now take the
+novelty itself. -/
+theorem jumpNovelty_of_dbUnfalsified_site {leaf : Assignment → Bool}
+    {cfg : SchedulerConfig leaf} {ev : ConflictEvidence} {an : ConflictAnalysis}
+    (hdb : DatabaseUnfalsified cfg.branch)
+    (hbr : ReachableState leaf cfg.orig cfg.branch)
+    (hreach : SchedulerReachable cfg) (hconf : cfg.conflict = some ev)
+    (hana : ev.analysis = some an) :
+    JumpNovelty cfg.branch.learned an :=
+  jumpNovelty_of_unfalsified hdb
+    (recordedAnalysis_normFalsified (bs := cfg.branch) rfl hbr hreach hconf hana)
 
 /-! ## §4 The assembly: every phase arm allocated
 
@@ -442,7 +461,7 @@ theorem reachablePhaseProgress_of_arms {leaf : Assignment → Bool}
       (restored : BranchState leaf),
       R c0 → c0.conflict = some ev → ev.analysis = some an →
       (BackjumpPlan.ofCheckpoint cp c0.branch an.asserting an.learned).perform
-          c0.branch c0.original c0.props = some restored →
+          c0.branch c0.orig c0.original c0.props = some restored →
         PhaseLt (rank (stepLearnBackjumpAssert c0
             (BackjumpPlan.ofCheckpoint cp c0.branch an.asserting an.learned) ev
             restored)) (rank c0)) :
@@ -471,7 +490,7 @@ theorem reachablePhaseProgress_of_arms {leaf : Assignment → Bool}
             rfl
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 -- the assertion rejects the restored ancestor: localExclude
                 -- stutter → forced consume
@@ -591,7 +610,7 @@ theorem reachablePhaseProgress_of_arms {leaf : Assignment → Bool}
             simp at hsucc
           · -- ARM 4: the analyze site — resolved through the recorded route
             cases hev : (stepAnalyzeConflictCounted cfg c learned
-                (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).conflict with
+                (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).conflict with
             | none =>
                 simp [stepAnalyzeConflictCounted, stepAnalyzeConflict,
                   SchedulerConfig.countResolutions] at hev
@@ -599,22 +618,22 @@ theorem reachablePhaseProgress_of_arms {leaf : Assignment → Bool}
                 -- the recorded config is a REAL dispatcher successor
                 have hsuccN : (conflictStep cfg (c :: rest) learned).successor =
                     some (stepAnalyzeConflictCounted cfg c learned
-                      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) := by
+                      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) := by
                   simp only [conflictStep, if_neg hlv]
                   rfl
                 have hreachN : R (stepAnalyzeConflictCounted cfg c
-                    learned (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)) :=
+                    learned (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)) :=
                   Rstep hreach (by rw [hnext]; exact hsuccN)
                 have hstut := phaseRank_analyzeConflictCounted_stutter cfg c learned
-                  (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)
+                  (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)
                 cases ha : ev.analysis with
                 | none =>
                     refine phase_compose_consume_ranked
                       (n := stepChronologicalFallback
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                         (branchRegion (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))))
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))))
                       ?_ (fun hp h => ?_) hsucc
                     · simp only [phaseNext, hnext, conflictStep, if_neg hlv, hev,
                         backjumpStep, ha]
@@ -624,23 +643,27 @@ theorem reachablePhaseProgress_of_arms {leaf : Assignment → Bool}
                 | some an =>
                     have hstep_orig :
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).original
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).original
                           = cfg.original := rfl
                     have hstep_props :
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).props
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).props
                           = cfg.props := rfl
+                    have hstep_dom :
+                        (stepAnalyzeConflictCounted cfg c learned
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).orig
+                          = cfg.orig := rfl
                     cases hcp : checkpointAt
                         (stepAnalyzeConflictCounted cfg c learned
-                          (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).checkpoints
+                          (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).checkpoints
                         an.backjumpLevel with
                     | none =>
                         refine phase_compose_consume_ranked
                           (n := stepChronologicalFallback
                             (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                             (branchRegion (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))))
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))))
                           ?_ (fun hp h => ?_) hsucc
                         · simp only [phaseNext, hnext, conflictStep, if_neg hlv,
                             hev, backjumpStep, ha, hcp]
@@ -650,21 +673,22 @@ theorem reachablePhaseProgress_of_arms {leaf : Assignment → Bool}
                     | some cp =>
                         cases hp : (BackjumpPlan.ofCheckpoint cp
                             (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
                             an.asserting an.learned).perform
                             (stepAnalyzeConflictCounted cfg c learned
-                              (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+                              (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
+                            cfg.orig
                             cfg.original cfg.props with
                         | none =>
                             -- checkpoint rejection → localExclude → consume
                             refine phase_compose_consume_ranked
                               (n := stepLocalExclude
                                 (stepAnalyzeConflictCounted cfg c learned
-                                  (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                                  (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                                 ev.learned (checkpointRegion cp))
                               ?_ (fun hp' h => ?_) hsucc
                             · simp only [phaseNext, hnext, conflictStep, if_neg hlv,
-                                hev, backjumpStep, ha, hcp, hstep_orig, hstep_props, hp]
+                                hev, backjumpStep, ha, hcp, hstep_orig, hstep_props, hstep_dom, hp]
                               rfl
                             · have h' := localExclude_then_consume_ranked hp' h
                               simpa only [hstut] using h'
@@ -675,25 +699,25 @@ theorem reachablePhaseProgress_of_arms {leaf : Assignment → Bool}
                                 .learnBackjumpAssert
                                   (stepLearnBackjumpAssert
                                     (stepAnalyzeConflictCounted cfg c learned
-                                      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                                      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                                     (BackjumpPlan.ofCheckpoint cp
                                       (stepAnalyzeConflictCounted cfg c learned
-                                        (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+                                        (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
                                       an.asserting an.learned) ev restored)
                                   (BackjumpPlan.ofCheckpoint cp
                                     (stepAnalyzeConflictCounted cfg c learned
-                                      (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c)).branch
+                                      (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c)).branch
                                     an.asserting an.learned) an := by
                               simp only [phaseNext, hnext, conflictStep,
                                 if_neg hlv, hev, backjumpStep, ha, hcp,
-                                hstep_orig, hstep_props, hp]
+                                hstep_orig, hstep_props, hstep_dom, hp]
                             rw [hpe] at hsucc
                             simp only [successor_learnBackjumpAssert,
                               Option.some.injEq] at hsucc
                             cases hsucc
                             simpa only [hstut] using hjump
                               (stepAnalyzeConflictCounted cfg c learned
-                                (analyzeEventsExpansions cfg.branch.trail cfg.branch.level c))
+                                (analyzeEventsExpansions cfg.orig cfg.branch.trail cfg.branch.level c))
                               cp ev an restored hreachN hev ha hp
     · -- ARM 6: localExcluded → localExclude stutter → forced consume
       refine phase_compose_consume_ranked
@@ -737,7 +761,8 @@ theorem phase_compose_consume_sorted {orig : List Domain}
 /-- **THE P5 ASSEMBLY (frozen name, G1 SELF-RANK INSTANCE)**:
 `ReachablePhaseProgress` holds from P4's three named inputs, all
 SELF-RELATIVE: `hpool` (canonical-pool membership at the configuration's
-own box), `hdb` (unfalsified database), `hbr` (branch reachability over the
+own box), `hnov` (novelty of the recorded analysis, restated by R1c from the
+unfalsified-database premise), `hbr` (branch reachability over the
 configuration's own box). Derived from the generic rank-parameterized
 assembly at `rank := selfRank cfg = PhaseRank cfg.orig cfg`, with every
 per-arm decrease bridged from its P3 statement by the definitional `orig`
@@ -747,9 +772,9 @@ theorem reachablePhaseProgressRanked_of_premises {leaf : Assignment → Bool}
       {an : ConflictAnalysis}, SchedulerReachable cfg → cfg.conflict = some ev →
         ev.analysis = some an →
           Clause.canonicalClause an.learned ∈ clausePool cfg.orig)
-    (hdb : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence},
-      SchedulerReachable cfg → cfg.conflict = some ev →
-      DatabaseUnfalsified cfg.branch)
+    (hnov : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
+      {an : ConflictAnalysis}, SchedulerReachable cfg → cfg.conflict = some ev →
+        ev.analysis = some an → JumpNovelty cfg.branch.learned an)
     (hbr : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       ReachableState leaf cfg.orig cfg.branch) :
     ReachablePhaseProgressSelf (leaf := leaf) :=
@@ -779,22 +804,22 @@ theorem reachablePhaseProgressRanked_of_premises {leaf : Assignment → Bool}
     (fun cfg c learned n =>
       selfRank_analyzeConflictCounted_stutter cfg c learned n)
     (fun c0 cp ev an restored =>
-      reachableJumpRanked_of_premises hpool hdb hbr c0 cp ev an restored)
+      reachableJumpRanked_of_premises hpool hnov hbr c0 cp ev an restored)
 
 /-- **THE C2 SORTED SELF-RANK INSTANCE**: `ReachablePhaseProgressSorted`
 holds from the order-insensitive components' SELF-RELATIVE premises —
-`hdb` (unfalsified database), `hbr` (branch reachability over the
+`hnov` (sorted novelty of the recorded analysis; RESTATED by R1c from the
+unfalsified-database premise `hdb`, which conflict routing falsifies at
+database-sourced sites — the old discharge is
+`P4.sortedNovelty_of_unfalsified`), `hbr` (branch reachability over the
 configuration's own box), `halignDB` (database-side literal pool alignment
-at the configuration's own box) — with the sorted jump decrease
-`P4.phaseLtSorted_stepLearnBackjumpAssert`, whose novelty premise is
-DISCHARGED by `P4.sortedNovelty_of_unfalsified` (no `hpool`, no sublist
+at the configuration's own box, no longer consumed by the jump arm but kept
+as the pool-side premise of the bundle) — with the sorted jump decrease
+`P4.phaseLtSorted_stepLearnBackjumpAssert` (no `hpool`, no sublist
 ordering, no `AnalysisDiffersFromConflict`). -/
 theorem reachablePhaseProgressSorted_of_premises {leaf : Assignment → Bool}
     (halignDB : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       ∀ c ∈ cfg.branch.learned, ∀ q ∈ c, q.norm ∈ litPool cfg.orig)
-    (hdb : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence},
-      SchedulerReachable cfg → cfg.conflict = some ev →
-      DatabaseUnfalsified cfg.branch)
     (hbr : ∀ {cfg : SchedulerConfig leaf}, SchedulerReachable cfg →
       ReachableState leaf cfg.orig cfg.branch) :
     ReachablePhaseProgressSorted (leaf := leaf) :=
@@ -830,9 +855,7 @@ theorem reachablePhaseProgressSorted_of_premises {leaf : Assignment → Bool}
           (BackjumpPlan.ofCheckpoint cp c0.branch an.asserting an.learned) ev
           restored)) (PhaseRankSorted c0.orig c0)
       exact P4.phaseLtSorted_stepLearnBackjumpAssert
-        (P4.sortedNovelty_of_unfalsified (halignDB hreach) (hdb hreach hconf)
-          (recordedAnalysis_normFalsified (bs := c0.branch) rfl (hbr hreach)
-            hreach hconf hana))
+        (P4.sortedNovelty_of_not_repeats (reachable_analysis_novel hreach hconf hana))
         hperf (planMatchesAnalysis_ofCheckpoint cp c0.branch an))
 
 /-- Sorted-rank FALLBACK-then-consume landing (alias of P4's). -/

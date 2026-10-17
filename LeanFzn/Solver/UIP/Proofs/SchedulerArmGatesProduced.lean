@@ -94,7 +94,7 @@ structure ArmInvGatesCore (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     RestorationPreReachable leaf cfg.orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch
@@ -104,7 +104,7 @@ structure ArmInvGatesCore (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
       ∀ cp' ∈ (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
           restored).checkpoints,
@@ -117,14 +117,14 @@ structure ArmInvGatesCore (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
       BackjumpCovers leaf cfg.orig cfg
         (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
           restored)
   hdeadStableNone : ∀ {cfg : SchedulerConfig leaf} {bs : BranchState leaf},
     SchedulerReachable cfg →
-    terminalResult cfg.original cfg.props cfg.branch = .stable bs →
+    terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs →
     leafWitness leaf cfg = none →
     splitData cfg.branch.frame = none →
       ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
@@ -145,7 +145,7 @@ structure ArmInvGatesCore (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = none →
+        cfg.branch cfg.orig cfg.original cfg.props = none →
       DeadRegion.Sound leaf (checkpointRegion cp)
   hconsumeInv : ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
     {rest : List BranchFrame}, SchedulerReachable cfg →

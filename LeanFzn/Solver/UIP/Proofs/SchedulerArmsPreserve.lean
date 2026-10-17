@@ -115,7 +115,7 @@ theorem stepLearnBackjumpAssert_branch_reachable
     (hconf : cfg.conflict = some ev) (hana : ev.analysis = some an)
     (hcp : checkpointAt cfg.checkpoints an.backjumpLevel = some cp)
     (hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-      an.learned).perform cfg.branch cfg.original cfg.props = some restored)
+      an.learned).perform cfg.branch cfg.orig cfg.original cfg.props = some restored)
     (hpre : RestorationPreReachable leaf cfg.orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch)
@@ -167,10 +167,10 @@ theorem jumpFrameAlternative_of_recorded_analysis_norm
     {orig : List Domain} {cfg : SchedulerConfig leaf} {ev : ConflictEvidence}
     {restored : BranchState leaf} {bs : BranchState leaf}
     {an : ConflictAnalysis}
-    {p : BackjumpPlan leaf} {original : List Clause} {props : List Propagator}
+    {p : BackjumpPlan leaf} {dom : List Domain} {original : List Clause} {props : List Propagator}
     (hb : cfg.branch = bs) (hreach : ReachableState leaf orig bs)
     (hana : ev.analysis = some an) (hplan : p.learned = an.learned)
-    (hperform : p.perform bs original props = some restored)
+    (hperform : p.perform bs dom original props = some restored)
     (hfals : FalsifiedByTrailNorm bs an.learned) :
     JumpFrameAlternative leaf orig cfg ev restored := by
   have _ := hana
@@ -203,7 +203,7 @@ theorem stepLearnBackjumpAssert_coverage_of_recorded_analysis_norm
     (hb : cfg.branch = bs) (hreach : ReachableState leaf cfg.orig bs)
     (hconf : cfg.conflict = some ev) (hana : ev.analysis = some an)
     (hplan : p.learned = an.learned)
-    (hperform : p.perform bs cfg.original cfg.props = some restored) :
+    (hperform : p.perform bs cfg.orig cfg.original cfg.props = some restored) :
     (stepLearnBackjumpAssert cfg p ev restored).coverage :=
   stepLearnBackjumpAssert_coverage_from_facts hcov
     (jumpFrameAlternative_of_recorded_analysis_norm hb hreach hana hplan
@@ -223,7 +223,7 @@ theorem reachableBranchInvariant_of_reachPreserve
     ReachableBranchInvariant leaf := by
   intro cfg h
   induction h with
-  | init orig original props => exact reachable_init leaf orig
+  | init orig original props hent => exact reachable_seed leaf orig original hent
   | step hnext hsucc hr ih =>
       have h' := hpres hr (hnext ▸ hsucc) ih
       rw [W1.schedulerNext_succ_orig (hnext ▸ hsucc)]
@@ -335,7 +335,7 @@ structure ArmGates (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     RestorationPreReachable leaf cfg.orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch
@@ -392,7 +392,7 @@ theorem reachableArmsPreserveReach_of_gates {leaf : Assignment → Bool}
             exact hbs
         | some cp =>
             cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                an.learned).perform cfg.branch cfg.original cfg.props with
+                an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
             | none =>
                 -- perform rejected → localExclude with the recorded payload
                 rw [ha] at hsucc
@@ -439,8 +439,8 @@ theorem reachableArmsPreserveReach_of_gates {leaf : Assignment → Bool}
       rw [hnext] at hsucc
       simp only [successor_propagate, Option.some.injEq] at hsucc
       subst hsucc
-      exact explainedDeduction_narrow_reachable (hg.hclos hreach) hbs
-        (hg.hunit hreach) hd
+      exact syncSlot_reachable _ (explainedDeduction_narrow_reachable (hg.hclos hreach) hbs
+        (hg.hunit hreach) hd) (hg.hclos hreach).leafFits
     · -- ARM 2 / ARM 3 / ARM 6: the guarded stable dispatch
       rw [hnext] at hsucc
       unfold stableStepGuarded at hsucc
@@ -638,7 +638,7 @@ structure ArmInvGates (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
     RestorationPreReachable leaf cfg.orig
       (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned)
       cfg.branch
@@ -648,7 +648,7 @@ structure ArmInvGates (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
       ∀ cp' ∈ (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
           restored).checkpoints,
@@ -661,27 +661,27 @@ structure ArmInvGates (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = some restored →
+        cfg.branch cfg.orig cfg.original cfg.props = some restored →
       BackjumpCovers leaf cfg.orig cfg
         (stepLearnBackjumpAssert cfg
           (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned) ev
           restored)
   hdeadStableNone : ∀ {cfg : SchedulerConfig leaf} {bs : BranchState leaf},
     SchedulerReachable cfg →
-    terminalResult cfg.original cfg.props cfg.branch = .stable bs →
+    terminalResult cfg.orig cfg.original cfg.props cfg.branch = .stable bs →
     leafWitness leaf cfg = none →
     splitData cfg.branch.frame = none →
       ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
   hdeadConflictNil : ∀ {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     {cs learned : List Clause}, SchedulerReachable cfg →
     ReachableState leaf cfg.orig cfg.branch →
-    terminalResult cfg.original cfg.props cfg.branch = .conflict bs cs learned →
+    terminalResult cfg.orig cfg.original cfg.props cfg.branch = .conflict bs cs learned →
     cs = [] → ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
   hdeadLocalExcluded : ∀ {cfg : SchedulerConfig leaf} {bs : BranchState leaf}
     {lit : Option Literal} {reason : Option Clause} {learned : List Clause},
     SchedulerReachable cfg →
     ReachableState leaf cfg.orig cfg.branch →
-    terminalResult cfg.original cfg.props cfg.branch =
+    terminalResult cfg.orig cfg.original cfg.props cfg.branch =
       .localExcluded bs lit reason learned →
       ∀ a, leaf a = true → FrameCovers cfg.branch.frame a → False
   hdeadFallbackNone : ∀ {cfg : SchedulerConfig leaf} {ev : ConflictEvidence},
@@ -703,7 +703,7 @@ structure ArmInvGates (leaf : Assignment → Bool) : Prop where
     cfg.conflict = some ev → ev.analysis = some an →
     checkpointAt cfg.checkpoints an.backjumpLevel = some cp →
     (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting an.learned).perform
-        cfg.branch cfg.original cfg.props = none →
+        cfg.branch cfg.orig cfg.original cfg.props = none →
       DeadRegion.Sound leaf (checkpointRegion cp)
   hconsumeInv : ∀ {cfg next : SchedulerConfig leaf} {f : BranchFrame}
     {rest : List BranchFrame}, SchedulerReachable cfg →
@@ -745,7 +745,7 @@ theorem reachableInvariantDiscipline_of_gates {leaf : Assignment → Bool}
     ∀ (cfg : SchedulerConfig leaf), SchedulerReachable cfg → SchedulerInvariant cfg := by
   intro cfg hreach
   induction hreach with
-  | init orig original props => exact schedulerInvariant_init leaf orig original props
+  | init orig original props hent => exact schedulerInvariant_init leaf orig original props hent
   | step hnext hsucc hreach ih =>
       -- name the generalized index variables (`induction` hid them behind
       -- inaccessible names; the stale outer `cfg` is dropped first)
@@ -785,7 +785,7 @@ theorem reachableInvariantDiscipline_of_gates {leaf : Assignment → Bool}
                   (hg.hdeadFallbackNoCp hreach hc ha hcp)
             | some cp =>
                 cases hp : (BackjumpPlan.ofCheckpoint cp cfg.branch an.asserting
-                    an.learned).perform cfg.branch cfg.original cfg.props with
+                    an.learned).perform cfg.branch cfg.orig cfg.original cfg.props with
                 | none =>
                     rw [ha] at hsuccP
                     simp only [] at hsuccP

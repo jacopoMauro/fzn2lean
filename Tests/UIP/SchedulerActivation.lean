@@ -95,10 +95,14 @@ def driveReachN {leaf : Assignment → Bool} (n : Nat) (cfg : SchedulerConfig le
 
 /-! ## 2. The activation fixture -/
 
-/-- The 5-slot int box: slot 1 holds {7,9} for the assertion `x1 > 7`. -/
+/-- The 5-slot int box: slot 1 holds {7,9} for the assertion `x1 > 7`.
+R1a: slots 0, 2 and 4 also admit a value above the trail's bounds (6, 10, 3),
+so the fixture's conflict literals `x0 > 5`, `x2 > 9`, `x4 > 2` are NOT false
+under the original domains — otherwise the LCG analyzer's root drop would
+(soundly) discard them and the multi-resolution shape would collapse. -/
 def actBox : List Domain :=
-  [[.int 0, .int 1], [.int 7, .int 9], [.int 0, .int 1], [.int 0, .int 1],
-   [.int 0, .int 1]]
+  [[.int 0, .int 1, .int 6], [.int 7, .int 9], [.int 0, .int 1, .int 10],
+   [.int 0, .int 1], [.int 0, .int 1, .int 3]]
 
 /-- A real propagator: reports T1's `mConflict` on any 5-slot box (all its
 values are int-viewed, so the box is scanned). -/
@@ -203,7 +207,7 @@ def satCfg : SchedulerConfig satLeaf :=
 
 /-- The real dispatcher run from `init`, threaded with the PROVED
 reachability closure. -/
-def satRun := driveReachN 4 satCfg (schedulerReachable_init _ _ _)
+def satRun := driveReachN 4 satCfg (schedulerReachable_init _ _ _ (fun _ hc => absurd hc (List.not_mem_nil)))
 
 -- The from-init prefix observed on the SAT path records no reason
 -- resolutions, no backjump and no asserting enqueue (nothing to learn).

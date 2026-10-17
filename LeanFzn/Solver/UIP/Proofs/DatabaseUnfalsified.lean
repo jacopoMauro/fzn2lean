@@ -29,12 +29,12 @@ Purpose (Prem2 of P2/P4 — the `hdb` premise):
     (`databaseUnfalsifiedExcept_of_unfalsified`), so every P4 consumer
     keeps a drop-in replacement.
 
-  * REACHABLE DISCHARGE (§3, PROVED): the task premise "the scan reports
-    the first falsified stored clause" does NOT match the code: a
-    DATABASE conflict is reported as `.conflict []` (no clause!), which
-    `conflictStep` routes to `.localExclude`, so the ANALYZED site's
-    `ev.clause` is a PROPAGATOR report (`scanPropagators`) — and there
-    `scanDatabase` is `.stable`. At a reachable inhabited branch the
+  * REACHABLE DISCHARGE (§3, PROVED): since R1c's conflict routing a
+    DATABASE conflict is reported as `.conflict [c]` with the stored clause
+    `c` and is ANALYZED; there the unfalsifiedness claim is NOT made (the
+    stored conflict clause is frame-refuted, and later stored clauses may
+    be too). At a PROPAGATOR-reported analyzed site `scanDatabase` is
+    `.stable`. At a reachable inhabited branch the
     stable scan REFUTES norm-falsification of every stored clause
     (`clauseRemaining_eq_nil_of_normFalsified`), so the UNQUALIFIED
     `DatabaseUnfalsified bs` holds at the analyzed site — stronger than
@@ -285,23 +285,48 @@ theorem databaseUnfalsifiedExcept_of_scanDatabase_stable
   databaseUnfalsifiedExcept_of_unfalsified
     (databaseUnfalsified_of_scanDatabase_stable hreach hinhab hstable)
 
-/-- The ANALYZED conflict shape forces the database scan stable: a
-    nonempty reported clause list can only come from `scanPropagators`
-    (a database conflict reports `.conflict []`). -/
-theorem scanDatabase_stable_of_nextPruningEvent_conflict_cons
+/-- The ANALYZED conflict shape (R1c routing): a nonempty reported clause
+    list comes EITHER from `scanPropagators` (then the database scan is
+    stable) OR from the database scan itself, which reports exactly the
+    first stored clause with no remaining literal. -/
+theorem scanDatabase_stable_or_dbConflict_of_nextPruningEvent_conflict_cons
     {original : List Clause} {props : List Propagator} {f : BranchFrame}
     {db : List Clause} {c : Clause} {rest : List Clause}
     (h : nextPruningEvent original props f db = .conflict (c :: rest)) :
-    scanDatabase original f db = .stable := by
+    scanDatabase original f db = .stable ∨
+      (scanDatabase original f db = .conflict [c] ∧ rest = [] ∧ c ∈ db ∧
+        clauseRemaining f c = []) := by
   rcases nextPruningEvent_conflict_cases h with hsd | ⟨hsd, -, -⟩
-  · -- a DATABASE conflict reports the empty clause list
-    obtain ⟨_, _, _, hnil⟩ := scanDatabase_conflict_facts hsd
-    simp at hnil
+  · obtain ⟨d, hd, hrem, hcs⟩ := scanDatabase_conflict_facts hsd
+    injection hcs with hcd hrest
+    subst hcd hrest
+    exact Or.inr ⟨hsd, rfl, hd, hrem⟩
+  · exact Or.inl hsd
+
+/-- The PROPAGATOR-sourced analyzed conflict forces the database scan
+    stable. RESTATED by R1c: before the conflict routing a database conflict
+    reported `.conflict []`, so every analyzed (`c :: rest`) event had a
+    stable database scan; now a database conflict reports its own clause,
+    so the conclusion needs the explicit premise that the database scan
+    did not report a conflict (`hndb`). -/
+theorem scanDatabase_stable_of_nextPruningEvent_conflict_cons
+    {original : List Clause} {props : List Propagator} {f : BranchFrame}
+    {db : List Clause} {c : Clause} {rest : List Clause}
+    (h : nextPruningEvent original props f db = .conflict (c :: rest))
+    (hndb : ∀ cs, scanDatabase original f db ≠ .conflict cs) :
+    scanDatabase original f db = .stable := by
+  rcases scanDatabase_stable_or_dbConflict_of_nextPruningEvent_conflict_cons h with
+    hsd | ⟨hsd, -⟩
   · exact hsd
+  · exact absurd hsd (hndb _)
 
 /-- **EVENT-LEVEL EXPORT**: at a reachable inhabited branch, whenever the
-    closure event is an ANALYZED conflict (`c :: rest`), the refinement
-    (in fact the unqualified invariant) holds for the reported clause. -/
+    closure event is an ANALYZED PROPAGATOR conflict (`c :: rest` with the
+    database scan not in conflict — premise `hndb`, added by R1c), the
+    refinement (in fact the unqualified invariant) holds for the reported
+    clause. At a DATABASE conflict the stored conflict clause is itself
+    frame-refuted and other stored clauses may be too, so no
+    unfalsifiedness claim is made there. -/
 theorem databaseUnfalsifiedExcept_of_nextPruningEvent_conflict_cons
     {leaf : Assignment → Bool} {orig : List Domain} {bs : BranchState leaf}
     (hreach : ReachableState leaf orig bs)
@@ -309,10 +334,11 @@ theorem databaseUnfalsifiedExcept_of_nextPruningEvent_conflict_cons
     {original : List Clause} {props : List Propagator} {c : Clause}
     {rest : List Clause}
     (h : nextPruningEvent original props bs.frame bs.learned
-      = .conflict (c :: rest)) :
+      = .conflict (c :: rest))
+    (hndb : ∀ cs, scanDatabase original bs.frame bs.learned ≠ .conflict cs) :
     DatabaseUnfalsifiedExcept bs c :=
   databaseUnfalsifiedExcept_of_scanDatabase_stable hreach hinhab
-    (scanDatabase_stable_of_nextPruningEvent_conflict_cons h) c
+    (scanDatabase_stable_of_nextPruningEvent_conflict_cons h hndb) c
 
 /-! ## §4 The side condition is not a theorem
 

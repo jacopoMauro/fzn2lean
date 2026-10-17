@@ -159,16 +159,13 @@ once (`markLit` deduplicates against `marks`) and each mark re-seeds at
 most one reason clause, so the worklist's total literal consumption is
 at most `len * (reasonBudget + 1)`.
 
-**Status (B1 landed, `AnalysisCompletion.lean`):** the sufficiency is
-now PROVED — `analysis_complete_of_reachable` shows that on every
-reachable analyzer input the executable fuel cannot be exhausted
-(`analyzeTrace` observes a semantic stop), and
-`analyzeAtAllowance_stops` identifies `analyzeAtAllowance`'s result with
-that completed trace's verdict. The historical constant stays only as
-the floor of `analysisFuel` (`analyzeAtAllowance_dominates`), never as
-the driver's allowance. The remaining refinement (dropping the `max`
-floor) is B1's recorded residual, not a soundness gap: `analysisFuel`
-is what the executable runs with and what B2's certificate consumes. -/
+**Status (R1a, `AnalysisCompletion.lean`):** the scheduler's LCG analyzer
+runs at `analysisFuel` = its initial termination potential plus one, and
+`analysis_complete` shows UNCONDITIONALLY (no reachable-input premise) that
+the fuel cannot be exhausted; `analyzeAtAllowance_stops` identifies
+`analyzeAtAllowance`'s result with that completed trace's verdict. The
+historical constant and `analysisAllowance` are no longer used by the
+driver. -/
 
 /-! ## The analyzer contract bridge
 
@@ -205,16 +202,15 @@ theorem analyzeClassified_success_semanticStop {leaf : Assignment → Bool}
     {orig : List Domain} {bs : BranchState leaf}
     {below : List (Literal × Nat)} {uip : Literal}
     (hin : AnalyzerInput leaf bs) (hreach : ReachableState leaf orig bs)
-    (hcl : analyzeClassified bs.trail bs.level hin.conflict
+    (hcl : analyzeClassified orig bs.trail bs.level hin.conflict
       = .success below uip) :
-    analyzeAtAllowance bs.trail bs.level hin.conflict = some (below, uip) ∧
+    analyzeAtAllowance orig bs.trail bs.level hin.conflict = some (below, uip) ∧
     (∃ k, k ≤ analysisFuel bs.trail hin.conflict ∧
-      analyzeTrace bs.trail bs.level (analysisFuel bs.trail hin.conflict)
+      analyzeTrace orig bs.trail bs.level (analysisFuel bs.trail hin.conflict)
         (initAnalysisState hin.conflict) = some (k, some (below, uip))) := by
-  have hA : analyzeAtAllowance bs.trail bs.level hin.conflict
+  have hA : analyzeAtAllowance orig bs.trail bs.level hin.conflict
       = some (below, uip) := analyzeClassified_eq_success_iff_of_allowance.mp hcl
-  obtain ⟨k, hk, htr, -⟩ := analyzeAtAllowance_stops hin.conflict hin.nonempty
-    (analyzerReachable_of_reachable hreach hin.conflict)
+  obtain ⟨k, hk, htr, -⟩ := analyzeAtAllowance_stops orig bs.trail bs.level hin.conflict
   exact ⟨hA, k, hk, by rw [hA] at htr; exact htr⟩
 
 /-- ROOT CONTRADICTION with semantic-stop evidence: level 0, no analysis
@@ -223,24 +219,20 @@ exclusions, and a completed trace that stopped in `none`. -/
 theorem analyzeClassified_root_semanticStop {leaf : Assignment → Bool}
     {orig : List Domain} {bs : BranchState leaf}
     (hin : AnalyzerInput leaf bs) (hreach : ReachableState leaf orig bs)
-    (hroot : analyzeClassified bs.trail bs.level hin.conflict
+    (hroot : analyzeClassified orig bs.trail bs.level hin.conflict
       = .rootContradiction) :
     bs.level = 0 ∧
-    analyzeAtAllowance bs.trail bs.level hin.conflict = none ∧
+    analyzeAtAllowance orig bs.trail bs.level hin.conflict = none ∧
     ConflictShape.ofConflict bs.level hin.conflict = .root ∧
     (∀ a, leaf a = true →
       (∀ e ∈ bs.trail, e.literal.eval a = some true) → False) ∧
     (∀ a, leaf a = true → bs.Represents a → False) ∧
     (∃ k, k ≤ analysisFuel bs.trail hin.conflict ∧
-      analyzeTrace bs.trail 0 (analysisFuel bs.trail hin.conflict)
+      analyzeTrace orig bs.trail 0 (analysisFuel bs.trail hin.conflict)
         (initAnalysisState hin.conflict) = some (k, none)) := by
   obtain ⟨hlvl0, hA, hshape, hexcl, hrep⟩ :=
     analyzeClassified_root_contradiction hin hreach hroot
-  have hr : AnalyzerReachable bs.trail 0 hin.conflict
-      (initAnalysisState hin.conflict) := by
-    have h := analyzerReachable_of_reachable hreach hin.conflict
-    rwa [hlvl0] at h
-  have htr := analyzeClassified_root_trace hin.conflict hin.nonempty hr
+  have htr := analyzeClassified_root_trace hin.conflict
     (by rwa [hlvl0] at hroot)
   exact ⟨hlvl0, hA, hshape, hexcl, hrep, htr⟩
 
@@ -250,19 +242,18 @@ that stopped in `none`. NEVER an UNSAT verdict. -/
 theorem analyzeClassified_unsupported_semanticStop {leaf : Assignment → Bool}
     {orig : List Domain} {bs : BranchState leaf}
     (hin : AnalyzerInput leaf bs) (hreach : ReachableState leaf orig bs)
-    (huns : analyzeClassified bs.trail bs.level hin.conflict
+    (huns : analyzeClassified orig bs.trail bs.level hin.conflict
       = .unsupported) :
     bs.level ≠ 0 ∧
-    analyzeAtAllowance bs.trail bs.level hin.conflict = none ∧
-    bs.analyzeWithAllowance hin.conflict = none ∧
+    analyzeAtAllowance orig bs.trail bs.level hin.conflict = none ∧
+    bs.analyzeWithAllowance orig hin.conflict = none ∧
     ConflictShape.ofConflict bs.level hin.conflict = .analyzable ∧
     (∃ k, k ≤ analysisFuel bs.trail hin.conflict ∧
-      analyzeTrace bs.trail bs.level (analysisFuel bs.trail hin.conflict)
+      analyzeTrace orig bs.trail bs.level (analysisFuel bs.trail hin.conflict)
         (initAnalysisState hin.conflict) = some (k, none)) := by
   obtain ⟨hlvl, hA, hana, hshape⟩ :=
     analyzeClassified_unsupported_local hin hreach huns
-  obtain ⟨-, htr⟩ := analyzeClassified_unsupported_trace hin.conflict
-    hin.nonempty (analyzerReachable_of_reachable hreach hin.conflict) huns
+  obtain ⟨-, htr⟩ := analyzeClassified_unsupported_trace hin.conflict huns
   exact ⟨hlvl, hA, hana, hshape, htr⟩
 
 /-- THE A-PRIORI ROOT EXCLUSION (INTERFACES §2.3, ledger item 18): with
@@ -274,7 +265,7 @@ theorem analyzeClassified_root_excludes_all
     {constraintHolds : Constraint → Assignment → Prop}
     {leaf : Assignment → Bool} {orig : List Domain} {bs : BranchState leaf}
     (hin : AnalyzerInput leaf bs) (hreach : ReachableState leaf orig bs)
-    (hroot : analyzeClassified bs.trail bs.level hin.conflict
+    (hroot : analyzeClassified orig bs.trail bs.level hin.conflict
       = .rootContradiction)
     (hrootFacts : RootFacts problem constraintHolds bs.trail)
     (hleafSol : ∀ a, leaf a = true → ProblemSolution problem constraintHolds a) :
@@ -300,23 +291,22 @@ theorem analyzeClassified_success_certificate_semanticStop
     (hreach : ReachableState leaf orig bs)
     (hpos : 0 < bs.level)
     (hne : 1 ≤ c.length)
-    (hcl : analyzeClassified bs.trail bs.level c = .success below uip)
+    (hcl : analyzeClassified orig bs.trail bs.level c = .success below uip)
     (hconf : Clause.EntailedBy problem constraintHolds c)
     (hleafSol : ∀ a, leaf a = true → ProblemSolution problem constraintHolds a)
+    (hfits : ∀ a, leaf a = true → a.Fits orig)
     (hreasons : ∀ e ∈ bs.trail, ∀ r ∈ e.reason,
       Reason.Valid problem constraintHolds r e.literal)
-    (hrootFacts : RootFacts problem constraintHolds bs.trail)
-    (hrnorm : ∀ e ∈ bs.trail, ∀ r ∈ e.reason, ∀ l ∈ r.clause, l = l.norm) :
+    (hrootFacts : RootFacts problem constraintHolds bs.trail) :
     RestorationCertificate leaf bs (ConflictAnalysis.ofRun below uip) ∧
     (∃ k, k ≤ analysisFuel bs.trail c ∧
-      analyzeTrace bs.trail bs.level (analysisFuel bs.trail c)
+      analyzeTrace orig bs.trail bs.level (analysisFuel bs.trail c)
         (initAnalysisState c) = some (k, some (below, uip))) := by
   refine ⟨analyzeClassified_success_certificate_of_problem hreach hpos hcl
-    hconf hleafSol hreasons hrootFacts hrnorm, ?_⟩
-  have hA : analyzeAtAllowance bs.trail bs.level c = some (below, uip) :=
+    hconf hleafSol hfits hreasons hrootFacts, ?_⟩
+  have hA : analyzeAtAllowance orig bs.trail bs.level c = some (below, uip) :=
     analyzeClassified_eq_success_iff_of_allowance.mp hcl
-  obtain ⟨k, hk, htr, -⟩ := analyzeAtAllowance_stops c hne
-    (analyzerReachable_of_reachable hreach c)
+  obtain ⟨k, hk, htr, -⟩ := analyzeAtAllowance_stops orig bs.trail bs.level c
   exact ⟨k, hk, by rw [hA] at htr; exact htr⟩
 
 /-! ## B2 — the restoration/enqueue bridge at `BackjumpPlan.execute`
@@ -333,10 +323,22 @@ trail discipline survives under the enqueue's absence check. -/
 checkpoint's frame and trail, the target level, the CURRENT database and
 the single asserting entry. Definitional, so every bridge below applies
 to C1's object without re-derivation. -/
-theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_eq_restoreAssert (p : BackjumpPlan leaf)
+theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_cases (p : BackjumpPlan leaf)
     (bs : BranchState leaf) :
-    p.execute bs = bs.restoreAssert p.checkpoint.frame p.checkpoint.trail
-      p.target p.asserting p.learned := rfl
+    (p.execute bs = bs.restoreAssert p.checkpoint.frame p.checkpoint.trail
+      p.target p.asserting p.learned ∧
+      ∀ e ∈ p.checkpoint.trail, e.literal ≠ p.asserting.norm) ∨
+    (p.execute bs = bs.restoreFrame p.checkpoint.frame p.checkpoint.trail p.target ∧
+      ∃ e ∈ p.checkpoint.trail, e.literal = p.asserting.norm) := by
+  unfold BackjumpPlan.execute BackjumpPlan.assertExtra
+  split
+  · next h =>
+    refine Or.inr ⟨by simp [BranchState.restoreFrame], ?_⟩
+    simpa only [List.any_eq_true, decide_eq_true_eq] using h
+  · next h =>
+    refine Or.inl ⟨rfl, fun e he heq => h ?_⟩
+    simp only [List.any_eq_true, decide_eq_true_eq]
+    exact ⟨e, he, heq⟩
 
 /-- WELL-FORMEDNESS OF THE EXECUTED PLAN, DERIVED: the restored-and-
 asserted state is well formed from (i) the checkpoint's own
@@ -371,10 +373,12 @@ theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_wellFormed_of_cer
       rw [hlev] at hle
       exact hle
     · exact hreach.wf.2.2.2.2
-  rw [BackjumpPlan.execute_eq_restoreAssert, ← hanA, ← hanL]
-  exact restoreAssert_wellFormed_of_certificate hpre' hcert
-    (hcert.asserting_norm_mem_of_stable hstable)
-    (restore_chronology_of_certificate hcert hstable hsurv hneg)
+  rcases BackjumpPlan.execute_cases p bs with ⟨hx, -⟩ | ⟨hx, -⟩
+  · rw [hx, ← hanA, ← hanL]
+    exact restoreAssert_wellFormed_of_certificate hpre' hcert
+      (hcert.asserting_norm_mem_of_stable hstable)
+      (restore_chronology_of_certificate hcert hstable hsurv hneg)
+  · rw [hx]; exact hpre'
 
 /-- REPRESENTATION OF THE EXECUTED PLAN, DERIVED: every leaf solution
 covered by the checkpoint's frame and satisfying the checkpoint trail,
@@ -394,9 +398,11 @@ theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_represents_of_cer
     (hframe : FrameCovers p.checkpoint.frame a)
     (hleaf : leaf a = true) :
     (p.execute bs).Represents a := by
-  rw [BackjumpPlan.execute_eq_restoreAssert, ← hanA, ← hanL, ← hpb]
-  exact restoreAssert_represents_of_certificate hcert hsurv htrail hlearn
-    hframe hleaf
+  rcases BackjumpPlan.execute_cases p bs with ⟨hx, -⟩ | ⟨hx, -⟩
+  · rw [hx, ← hanA, ← hanL, ← hpb]
+    exact restoreAssert_represents_of_certificate hcert hsurv htrail hlearn
+      hframe hleaf
+  · rw [hx]; exact ⟨hframe, htrail, hlearn⟩
 
 /-- THE EXECUTED PLAN'S TRAIL KEEPS THE DISCIPLINE: restoring the
 checkpoint trail and appending the normalized asserting entry is
@@ -407,10 +413,12 @@ theorem _root_.LeanFzn.Solver.Propagation.BackjumpPlan.execute_distinct_of_absen
     {leaf : Assignment → Bool} {p : BackjumpPlan leaf} {bs : BranchState leaf}
     (hdist : TrailLiteralsDistinct p.checkpoint.trail)
     (hnorm : ∀ e ∈ p.checkpoint.trail, e.literal = e.literal.norm)
-    (hfresh : ∀ e ∈ p.checkpoint.trail, e.literal ≠ p.asserting.norm) :
+    :
     TrailLiteralsDistinct (p.execute bs).trail := by
-  rw [BackjumpPlan.execute_eq_restoreAssert, BranchState.restoreAssert_trail]
-  exact TrailLiteralsDistinct.enqueue hdist hnorm hfresh
+  rcases BackjumpPlan.execute_cases p bs with ⟨hx, hfresh⟩ | ⟨hx, -⟩
+  · rw [hx, BranchState.restoreAssert_trail]
+    exact TrailLiteralsDistinct.enqueue hdist hnorm hfresh
+  · rw [hx]; exact hdist
 
 /-- TYPED FILTERING AT THE EXECUTED PLAN — REJECTION: if the plan's
 assertion rejects the checkpoint frame, no surviving leaf solution is

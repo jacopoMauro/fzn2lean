@@ -252,7 +252,8 @@ theorem phaseRank_wf {leaf : Assignment → Bool} (orig : List Domain) :
 
 theorem stepPropagate_learned_eq (cfg : SchedulerConfig leaf)
     (d : ProductiveDeduction leaf cfg.branch) :
-    (stepPropagate cfg d).branch.learned = d.learned ++ cfg.branch.learned := rfl
+    (stepPropagate cfg d).branch.learned = d.learned ++ cfg.branch.learned :=
+  stepPropagate_branch_learned cfg d
 
 theorem stepLocalExclude_learned_eq (cfg : SchedulerConfig leaf)
     (learned : List Clause) (r : DeadRegion) :
@@ -332,6 +333,11 @@ theorem phaseRank_lt_propagate (orig : List Domain) (cfg : SchedulerConfig leaf)
   · refine Or.inr ⟨heq, ?_⟩
     have hcost : branchCost d.frame.1 ≤ branchCost cfg.branch.frame.1 :=
       filterFrame_cost_le d.filtered
+    have e1 : (PhaseRank orig (stepPropagate cfg d)).snd =
+        (frontierCost (d.frame :: cfg.pending), Frame.mass d.frame,
+          statusWeight (stepPropagate cfg d).status) := by
+      simp [PhaseRank, SchedulerConfig.frontier, narrowState]
+    rw [e1]
     rcases Nat.lt_or_eq_of_le hcost with hclt | hceq
     · exact Or.inl (C3a.frontierCost_frame_lt hclt cfg.pending)
     · exact Or.inr ⟨C3a.frontierCost_frame_congr hceq cfg.pending, Or.inl d.decreases⟩

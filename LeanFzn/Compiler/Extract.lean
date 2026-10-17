@@ -88,6 +88,7 @@ Recognized predicate-argument shapes (all other shapes are skipped):
 | `int_lin_eq([c₁,…], [x₁,…], b)` (par       | `linEq [c₁,…] [i₁,…] b` |
 |  coeff array, slot array, int literal)      |                       |
 | `int_lin_le([c₁,…], [x₁,…], b)`             | `linLe [c₁,…] [i₁,…] b` |
+| `int_lin_ne([c₁,…], [x₁,…], b)`             | `linNe [c₁,…] [i₁,…] b` |
 | `int_times(x, y, z)` (three slot names)     | `timesSlot i j k`     |
 | `int_min(x, y, z)` (three slot names)       | `minSlot i j k`       |
 | `int_max(x, y, z)` (three slot names)       | `maxSlot i j k`       |
@@ -161,6 +162,21 @@ def linIndices : List String → ArrayLiteral → Option (List Nat)
       | some i => (linIndices names rest).map (fun is => i :: is)
       | none => none
   | _, _ => none
+
+/-- The integer literals of an `array_int_element` constant array:
+    every element must be an integer literal, in order. -/
+def intLits : ArrayLiteral → Option (List Int)
+  | [] => some []
+  | .lit (.int k) :: rest => (intLits rest).map (fun ks => k :: ks)
+  | _ :: _ => none
+
+/-- The general integer operand of an `int_max` / `int_min` / `int_div` /
+    `int_mod` argument (PLAN C6): a slot name resolves to its position,
+    an integer literal to itself. -/
+def intArgOf (names : List String) : BasicExpr → Option DomIntArg
+  | .ident x => (nameIndex names x.name).map DomIntArg.slot
+  | .lit (.int k) => some (.lit k)
+  | _ => none
 
 /-- The slot-indexed reading of one model constraint, if its shape is
     one the propagators understand (see the module table).  `names`
@@ -240,6 +256,10 @@ def extractConstraint (names : List String) (c : ConstraintItem) : Option DomCon
             nameIndex names z.name with
           | some i, some j, some k => some (.minSlot i j k)
           | _, _, _ => none
+      | [.basic a₀, .basic a₁, .basic a₂] =>
+          match intArgOf names a₀, intArgOf names a₁, intArgOf names a₂ with
+          | some o₀, some o₁, some o₂ => some (.minPair o₀ o₁ o₂)
+          | _, _, _ => none
       | _ => none
   | "int_max" =>
       match c.args with
@@ -247,6 +267,10 @@ def extractConstraint (names : List String) (c : ConstraintItem) : Option DomCon
           match nameIndex names x.name, nameIndex names y.name,
             nameIndex names z.name with
           | some i, some j, some k => some (.maxSlot i j k)
+          | _, _, _ => none
+      | [.basic a₀, .basic a₁, .basic a₂] =>
+          match intArgOf names a₀, intArgOf names a₁, intArgOf names a₂ with
+          | some o₀, some o₁, some o₂ => some (.maxPair o₀ o₁ o₂)
           | _, _, _ => none
       | _ => none
   | "int_abs" =>
@@ -289,6 +313,153 @@ def extractConstraint (names : List String) (c : ConstraintItem) : Option DomCon
             nameIndex names z.name with
           | some i, some j, some k => some (.boolOrSlot i j k)
           | _, _, _ => none
+      | _ => none
+  | "int_lin_ne" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b))] =>
+          match linCoeffs ks, linIndices names elems with
+          | some coeffs, some is =>
+              if coeffs.length == is.length then some (.linNe coeffs is b) else none
+          | _, _ => none
+      | _ => none
+  | "bool_clause" =>
+      match c.args with
+      | [.array elems1, .array elems2] =>
+          match linIndices names elems1, linIndices names elems2 with
+          | some ps, some ns => some (.boolClauseSlot ps ns)
+          | _, _ => none
+      | _ => none
+  | "array_bool_and" =>
+      match c.args with
+      | [.array elems, .basic (.ident r)] =>
+          match linIndices names elems, nameIndex names r.name with
+          | some is, some k => some (.arrayBoolAndSlot is k)
+          | _, _ => none
+      | _ => none
+  | "bool2int" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match nameIndex names x.name, nameIndex names y.name with
+          | some i, some k => some (.bool2intSlot i k)
+          | _, _ => none
+      | _ => none
+  | "bool_eq" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match nameIndex names x.name, nameIndex names y.name with
+          | some i, some j => some (.boolEqSlot i j)
+          | _, _ => none
+      | _ => none
+  | "array_int_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.ident y)] =>
+          match intLits elems, nameIndex names x.name,
+            nameIndex names y.name with
+          | some xs, some i, some k => some (.arrayIntElementSlot xs i k)
+          | _, _, _ => none
+      | _ => none
+  | "array_var_int_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.ident y)] =>
+          match linIndices names elems, nameIndex names x.name,
+            nameIndex names y.name with
+          | some is, some i, some k => some (.arrayVarIntElementSlot is i k)
+          | _, _, _ => none
+      | _ => none
+  | "array_var_bool_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.ident y)] =>
+          match linIndices names elems, nameIndex names x.name,
+            nameIndex names y.name with
+          | some is, some i, some k => some (.arrayVarBoolElementSlot is i k)
+          | _, _, _ => none
+      | _ => none
+  | "int_eq_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident r)] =>
+          match nameIndex names x.name, nameIndex names y.name,
+            nameIndex names r.name with
+          | some i, some j, some k => some (.eqReifSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "int_le_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident r)] =>
+          match nameIndex names x.name, nameIndex names y.name,
+            nameIndex names r.name with
+          | some i, some j, some k => some (.leReifSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "int_ne_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident r)] =>
+          match nameIndex names x.name, nameIndex names y.name,
+            nameIndex names r.name with
+          | some i, some j, some k => some (.neReifSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "int_lin_eq_reif" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b)),
+          .basic (.ident r)] =>
+          match linCoeffs ks, linIndices names elems,
+            nameIndex names r.name with
+          | some coeffs, some is, some k =>
+              if coeffs.length == is.length then
+                some (.linEqReif coeffs is b k) else none
+          | _, _, _ => none
+      | _ => none
+  | "int_lin_le_reif" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b)),
+          .basic (.ident r)] =>
+          match linCoeffs ks, linIndices names elems,
+            nameIndex names r.name with
+          | some coeffs, some is, some k =>
+              if coeffs.length == is.length then
+                some (.linLeReif coeffs is b k) else none
+          | _, _, _ => none
+      | _ => none
+  | "int_lin_ne_reif" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b)),
+          .basic (.ident r)] =>
+          match linCoeffs ks, linIndices names elems,
+            nameIndex names r.name with
+          | some coeffs, some is, some k =>
+              if coeffs.length == is.length then
+                some (.linNeReif coeffs is b k) else none
+          | _, _, _ => none
+      | _ => none
+  | "int_div" =>
+      match c.args with
+      | [.basic a₀, .basic a₁, .basic a₂] =>
+          match intArgOf names a₀, intArgOf names a₁, intArgOf names a₂ with
+          | some o₀, some o₁, some o₂ => some (.divGen o₀ o₁ o₂)
+          | _, _, _ => none
+      | _ => none
+  | "int_mod" =>
+      match c.args with
+      | [.basic a₀, .basic a₁, .basic a₂] =>
+          match intArgOf names a₀, intArgOf names a₁, intArgOf names a₂ with
+          | some o₀, some o₁, some o₂ => some (.modGen o₀ o₁ o₂)
+          | _, _, _ => none
+      | _ => none
+  | "array_int_maximum" =>
+      match c.args with
+      | [.basic (.ident x), .array elems] =>
+          match nameIndex names x.name, linIndices names elems with
+          | some k, some is =>
+              some (.maxGen (is.map DomIntArg.slot) (.slot k))
+          | _, _ => none
+      | _ => none
+  | "array_int_minimum" =>
+      match c.args with
+      | [.basic (.ident x), .array elems] =>
+          match nameIndex names x.name, linIndices names elems with
+          | some k, some is =>
+              some (.minGen (is.map DomIntArg.slot) (.slot k))
+          | _, _ => none
       | _ => none
   | _ => none
 
@@ -354,6 +525,95 @@ theorem fullInterp_of_extracted'' (n : String)
   all_goals
     simp only [fullInterp]
     rw [if_neg (by decide)]
+
+/-- The same bridge for `int_lin_ne` (C1). -/
+theorem fullInterp_of_extracted_linNe (n : String) (hn : n = "int_lin_ne") :
+    fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
+  subst hn
+  simp only [fullInterp]
+  rw [if_neg (by decide)]
+
+/-- The same bridge for `bool_clause` (C2). -/
+theorem fullInterp_of_extracted_boolClause (n : String)
+    (hn : n = "bool_clause") :
+    fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
+  subst hn
+  simp only [fullInterp]
+  rw [if_neg (by decide)]
+
+/-- The same bridge for the C3 Boolean families (`array_bool_and`,
+    `bool2int`, `bool_eq`). -/
+theorem fullInterp_of_extracted_boolArr (n : String)
+    (hn : n = "array_bool_and" ∨ n = "bool2int" ∨ n = "bool_eq") :
+    fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
+  rcases hn with rfl | rfl | rfl
+  all_goals
+    simp only [fullInterp]
+    rw [if_neg (by decide)]
+
+/-- The same bridge for the C4 element families (`array_int_element`,
+    `array_var_int_element`, `array_var_bool_element`). -/
+theorem fullInterp_of_extracted_elem (n : String)
+    (hn : n = "array_int_element" ∨ n = "array_var_int_element"
+      ∨ n = "array_var_bool_element") :
+    fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
+  rcases hn with rfl | rfl | rfl
+  all_goals
+    simp only [fullInterp]
+    rw [if_neg (by decide)]
+
+/-- The same bridge for the C5 reified families (`int_eq_reif`,
+    `int_le_reif`, `int_ne_reif`, `int_lin_eq_reif`, `int_lin_le_reif`,
+    `int_lin_ne_reif`). -/
+theorem fullInterp_of_extracted_reif (n : String)
+    (hn : n = "int_eq_reif" ∨ n = "int_le_reif" ∨ n = "int_ne_reif"
+      ∨ n = "int_lin_eq_reif" ∨ n = "int_lin_le_reif"
+      ∨ n = "int_lin_ne_reif") :
+    fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
+  rcases hn with rfl | rfl | rfl | rfl | rfl | rfl
+  all_goals
+    simp only [fullInterp]
+    rw [if_neg (by decide)]
+
+/-- The same bridge for the C6 general-arithmetic families (`int_div`,
+    `int_mod`) and array maximum/minimum forms (`array_int_maximum`,
+    `array_int_minimum`); `int_max`/`int_min` are covered by
+    `fullInterp_of_extracted''`. -/
+theorem fullInterp_of_extracted_arith (n : String)
+    (hn : n = "int_div" ∨ n = "int_mod" ∨ n = "array_int_maximum"
+      ∨ n = "array_int_minimum") :
+    fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
+  rcases hn with rfl | rfl | rfl | rfl
+  all_goals
+    simp only [fullInterp]
+    rw [if_neg (by decide)]
+
+/-- An in-bounds bang read is the option read (the `getElem_as_some`
+    form of `Compiler/Proofs/CompileCore`, base-layer copy). -/
+theorem getElem_bang_some {a : List Value} {i : Nat} (h : i < a.length) :
+    a[i]? = some a[i]! := by
+  rw [List.getElem!_eq_getElem?_getD, List.getElem?_eq_getElem h]
+  rfl
+
+/-- A slot list's bang-read `eqB` disjunction agrees with the
+    option-read `slotIsBoolB` disjunction, at in-bounds slots. -/
+theorem bang_any_eqB_iff_slotIsBoolB {a : List Value} {is : List Nat}
+    {b : Bool} (hin : ∀ i ∈ is, i < a.length) :
+    ((is.map (fun i => a[i]!)).any (fun v => v.eqB (.bool b)) = true) ↔
+      (is.any (fun i => slotIsBoolB a i b) = true) := by
+  rw [List.any_eq_true, List.any_eq_true]
+  constructor
+  · rintro ⟨v, hv, hvb⟩
+    obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hv
+    refine ⟨i, hi, ?_⟩
+    unfold slotIsBoolB
+    rw [getElem_bang_some (hin i hi)]
+    exact hvb
+  · rintro ⟨i, hi, hib⟩
+    refine ⟨a[i]!, List.mem_map_of_mem (f := fun i => a[i]!) hi, ?_⟩
+    unfold slotIsBoolB at hib
+    rw [getElem_bang_some (hin i hi)] at hib
+    exact hib
 
 /-- The interpretation of a holding constraint is about its own
     name: transport `hinterp` to the spelled-out name. -/
@@ -444,6 +704,52 @@ theorem mapM_two_const' {store : Store} {c : ConstraintItem}
   | some vy =>
       rw [hsy] at hmap
       exact ⟨vy, rfl, by simpa using hmap.symm⟩
+
+/-- Inversion of argument evaluation for an array argument followed by
+    an identifier argument. -/
+theorem mapM_arr_ident {store : Store} {c : ConstraintItem}
+    {elems : ArrayLiteral} {r : Ident} {args : List Value}
+    (hargs : c.args = [Expr.array elems, Expr.basic (.ident r)])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ vs vr, elems.mapM (BasicExpr.eval store) = some vs ∧
+      store r = some vr ∧ args = [.array vs, vr] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval] at hmap
+  cases h1 : elems.mapM (BasicExpr.eval store) with
+  | none => rw [h1] at hmap; simp at hmap
+  | some vs =>
+      rw [h1] at hmap
+      cases h2 : store r with
+      | none => rw [h2] at hmap; simp at hmap
+      | some vr =>
+          rw [h2] at hmap
+          exact ⟨vs, vr, rfl, rfl, by simpa using hmap.symm⟩
+
+/-- Inversion of argument evaluation for an identifier, an array, and an
+    identifier argument. -/
+theorem mapM_ident_arr_ident {store : Store} {c : ConstraintItem}
+    {x y : Ident} {elems : ArrayLiteral} {args : List Value}
+    (hargs : c.args = [Expr.basic (.ident x), Expr.array elems,
+        Expr.basic (.ident y)])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ vx vs vy, store x = some vx ∧
+      elems.mapM (BasicExpr.eval store) = some vs ∧
+      store y = some vy ∧ args = [vx, .array vs, vy] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval] at hmap
+  cases h1 : store x with
+  | none => rw [h1] at hmap; simp at hmap
+  | some vx =>
+      rw [h1] at hmap
+      cases h2 : elems.mapM (BasicExpr.eval store) with
+      | none => rw [h2] at hmap; simp at hmap
+      | some vs =>
+          rw [h2] at hmap
+          cases h3 : store y with
+          | none => rw [h3] at hmap; simp at hmap
+          | some vy =>
+              rw [h3] at hmap
+              exact ⟨vx, vs, vy, rfl, rfl, rfl, by simpa using hmap.symm⟩
 
 /-- Inversion of `Holds` for `int_eq(slot, slot)`: the store's values
     at the two names are equal. -/
@@ -936,6 +1242,34 @@ theorem mapM_lin {store : Store} {c : ConstraintItem}
           rw [h2] at hmap
           exact ⟨vs1, vs2, rfl, rfl, by simpa using hmap.symm⟩
 
+/-- Inversion of argument evaluation for two array arguments, an
+    integer literal and an identifier (the reified linear shape
+    `int_lin_*_reif(coeffs, xs, b, r)`). -/
+theorem mapM_lin_reif {store : Store} {c : ConstraintItem}
+    {ks elems : ArrayLiteral} {k : Int} {r : Ident} {args : List Value}
+    (hargs : c.args = [Expr.array ks, Expr.array elems,
+        Expr.basic (.lit (.int k)), Expr.basic (.ident r)])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ vs1 vs2 vr, ks.mapM (BasicExpr.eval store) = some vs1 ∧
+      elems.mapM (BasicExpr.eval store) = some vs2 ∧
+      store r = some vr ∧ args = [.array vs1, .array vs2, .int k, vr] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval,
+    BasicLiteral.denote] at hmap
+  cases h1 : ks.mapM (BasicExpr.eval store) with
+  | none => rw [h1] at hmap; simp at hmap
+  | some vs1 =>
+      rw [h1] at hmap
+      cases h2 : elems.mapM (BasicExpr.eval store) with
+      | none => rw [h2] at hmap; simp at hmap
+      | some vs2 =>
+          rw [h2] at hmap
+          cases h3 : store r with
+          | none => rw [h3] at hmap; simp at hmap
+          | some vr =>
+              rw [h3] at hmap
+              exact ⟨vs1, vs2, vr, rfl, rfl, rfl, by simpa using hmap.symm⟩
+
 /-- Inversion of `Holds` for an `int_lin_eq` on slots. -/
 theorem holds_int_lin_eq {store : Store} {c : ConstraintItem}
     {ks elems : ArrayLiteral} {k : Int}
@@ -972,6 +1306,24 @@ theorem holds_int_lin_le {store : Store} {c : ConstraintItem}
   rw [fullInterp_of_extracted' "int_lin_le" (Or.inr (Or.inr (Or.inr rfl)))] at h1
   exact ⟨vs1, vs2, hvs1, hvs2, h1⟩
 
+/-- Inversion of `Holds` for an `int_lin_ne` on slots. -/
+theorem holds_int_lin_ne {store : Store} {c : ConstraintItem}
+    {ks elems : ArrayLiteral} {k : Int}
+    (hname : c.name.name = "int_lin_ne")
+    (hargs : c.args = [Expr.array ks, Expr.array elems,
+        Expr.basic (.lit (.int k))])
+    (h : c.Holds fullInterp store) :
+    ∃ vs1 vs2, ks.mapM (BasicExpr.eval store) = some vs1 ∧
+      elems.mapM (BasicExpr.eval store) = some vs2 ∧
+      dotNe vs1 vs2 k = true := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vs1, vs2, hvs1, hvs2, hargsv⟩ := mapM_lin hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "int_lin_ne") [.array vs1, .array vs2, .int k] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_linNe "int_lin_ne" rfl] at h1
+  exact ⟨vs1, vs2, hvs1, hvs2, h1⟩
+
 /-- Inversion of `Holds` for an explicit-array `all_different`: the
     array's elements all evaluate, and the values are pairwise
     different. -/
@@ -995,6 +1347,428 @@ theorem holds_all_different {store : Store} {c : ConstraintItem}
         interp_of_hname hname hinterp
       rw [fullInterp_of_extracted' "all_different" (Or.inr (Or.inl rfl))] at h1'
       exact ⟨vs, rfl, h1'⟩
+
+/-- Inversion of `Holds` for a `bool_clause` on two slot arrays: both
+    arrays evaluate and the standard disjunction holds. -/
+theorem holds_bool_clause {store : Store} {c : ConstraintItem}
+    {elems1 elems2 : ArrayLiteral}
+    (hname : c.name.name = "bool_clause")
+    (hargs : c.args = [Expr.array elems1, Expr.array elems2])
+    (h : c.Holds fullInterp store) :
+    ∃ vs1 vs2, elems1.mapM (BasicExpr.eval store) = some vs1 ∧
+      elems2.mapM (BasicExpr.eval store) = some vs2 ∧
+      ((vs1.any (fun x => x.eqB (.bool true))) ||
+        (vs2.any (fun y => y.eqB (.bool false)))) = true := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval] at hmap
+  cases h1 : elems1.mapM (BasicExpr.eval store) with
+  | none => rw [h1] at hmap; simp at hmap
+  | some vs1 =>
+      rw [h1] at hmap
+      cases h2 : elems2.mapM (BasicExpr.eval store) with
+      | none => rw [h2] at hmap; simp at hmap
+      | some vs2 =>
+          rw [h2] at hmap
+          have hargsv : args = [.array vs1, .array vs2] :=
+            by simpa using hmap.symm
+          subst hargsv
+          have h1' : fullInterp (Ident.mk "bool_clause")
+              [.array vs1, .array vs2] :=
+            interp_of_hname hname hinterp
+          rw [fullInterp_of_extracted_boolClause "bool_clause" rfl] at h1'
+          exact ⟨vs1, vs2, rfl, rfl, h1'⟩
+
+/-- A slot list's bang-read `eqB` conjunction agrees with the
+    option-read `slotIsBoolB` conjunction, at in-bounds slots (the
+    `all`-twin of `bang_any_eqB_iff_slotIsBoolB`). -/
+theorem bang_all_eqB_iff_slotIsBoolB {a : List Value} {is : List Nat}
+    {b : Bool} (hin : ∀ i ∈ is, i < a.length) :
+    (is.all (fun i => (a[i]!).eqB (.bool b)) = true) ↔
+      (is.all (fun i => slotIsBoolB a i b) = true) := by
+  rw [List.all_eq_true, List.all_eq_true]
+  constructor
+  · intro h i hi
+    have h' := h i hi
+    unfold slotIsBoolB
+    rw [getElem_bang_some (hin i hi)]
+    exact h'
+  · intro h i hi
+    have h' := h i hi
+    unfold slotIsBoolB at h'
+    rw [getElem_bang_some (hin i hi)] at h'
+    exact h'
+
+/-- Inversion of `Holds` for an `array_bool_and` on a slot array and a
+    slot target: the array evaluates and the target Boolean IS the
+    `all` of the element read. -/
+theorem holds_array_bool_and {store : Store} {c : ConstraintItem}
+    {elems : ArrayLiteral} {r : Ident}
+    (hname : c.name.name = "array_bool_and")
+    (hargs : c.args = [Expr.array elems, Expr.basic (.ident r)])
+    (h : c.Holds fullInterp store) :
+    ∃ vs vr, elems.mapM (BasicExpr.eval store) = some vs ∧
+      store r = some vr ∧
+      vr = .bool (vs.all (fun x => x.eqB (.bool true))) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vs, vr, hvs, hsr, hargsv⟩ := mapM_arr_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "array_bool_and") [.array vs, vr] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_boolArr "array_bool_and" (Or.inl rfl)] at h1
+  have hmatch : (match [.array vs, vr] with
+    | [.array xs, .bool r] => r = (xs.all (fun x => x.eqB (.bool true)))
+    | _ => False) := h1
+  cases vr with
+  | bool p => exact ⟨vs, .bool p, hvs, hsr, by simpa using hmatch⟩
+  | int w => exact absurd hmatch (by simp)
+  | setOfInt w => exact absurd hmatch (by simp)
+  | array w => exact absurd hmatch (by simp)
+
+/-- Inversion of `Holds` for a `bool2int`: the store's Boolean source
+    and integer target are related by the 0/1 view. -/
+theorem holds_bool2int {store : Store} {c : ConstraintItem}
+    {b : Ident} {i : Ident}
+    (hname : c.name.name = "bool2int")
+    (hargs : c.args = [Expr.basic (.ident b), Expr.basic (.ident i)])
+    (h : c.Holds fullInterp store) :
+    ∃ p k, store b = some (.bool p) ∧ store i = some (.int k) ∧
+      k = (if p then 1 else 0) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vb, vi, hsb, hsi, hargsv⟩ := mapM_two_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "bool2int") [vb, vi] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_boolArr "bool2int" (Or.inr (Or.inl rfl))] at h1
+  have hmatch : (match [vb, vi] with
+    | [.bool a, .int j] => j = (if a then 1 else 0)
+    | _ => False) := h1
+  cases vb with
+  | bool p =>
+      cases vi with
+      | int k => exact ⟨p, k, hsb, hsi, by simpa using hmatch⟩
+      | bool w => exact absurd hmatch (by simp)
+      | setOfInt w => exact absurd hmatch (by simp)
+      | array w => exact absurd hmatch (by simp)
+  | int w => exact absurd hmatch (by simp)
+  | setOfInt w => exact absurd hmatch (by simp)
+  | array w => exact absurd hmatch (by simp)
+
+/-- Inversion of `Holds` for a `bool_eq`: the store's values at the two
+    names are equal Booleans. -/
+theorem holds_bool_eq {store : Store} {c : ConstraintItem}
+    {x y : Ident}
+    (hname : c.name.name = "bool_eq")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y)])
+    (h : c.Holds fullInterp store) :
+    ∃ p q, store x = some (.bool p) ∧ store y = some (.bool q) ∧
+      p = q := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vx, vy, hsx, hsy, hargsv⟩ := mapM_two_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "bool_eq") [vx, vy] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_boolArr "bool_eq" (Or.inr (Or.inr rfl))] at h1
+  have hmatch : (match [vx, vy] with
+    | [.bool a, .bool b] => a = b
+    | _ => False) := h1
+  cases vx with
+  | bool p =>
+      cases vy with
+      | bool q => exact ⟨p, q, hsx, hsy, by simpa using hmatch⟩
+      | int w => exact absurd hmatch (by simp)
+      | setOfInt w => exact absurd hmatch (by simp)
+      | array w => exact absurd hmatch (by simp)
+  | int w => exact absurd hmatch (by simp)
+  | setOfInt w => exact absurd hmatch (by simp)
+  | array w => exact absurd hmatch (by simp)
+
+/-- Inversion of `Holds` for `int_eq_reif`: the store's two reads and
+    the reification slot's Boolean satisfy the truth-value agreement
+    `R ↔ x = y` of the source predicate. -/
+theorem holds_int_eq_reif {store : Store} {c : ConstraintItem}
+    {x y r : Ident}
+    (hname : c.name.name = "int_eq_reif")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y),
+        Expr.basic (.ident r)])
+    (h : c.Holds fullInterp store) :
+    ∃ (p : Int) (q : Int) (rb : Bool),
+      store x = some (.int p) ∧ store y = some (.int q) ∧
+      store r = some (.bool rb) ∧ (rb = true ↔ p = q) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vx, vy, vr, hsx, hsy, hsz, hargsv⟩ := mapM_three_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "int_eq_reif") [vx, vy, vr] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_reif "int_eq_reif" (Or.inl rfl)] at h1
+  cases vx with
+  | int a =>
+      cases vy with
+      | int b =>
+          cases vr with
+          | bool rb =>
+              exact ⟨a, b, rb, hsx, hsy, hsz,
+                (reif_disj_iff (a = b) rb).mp h1⟩
+          | int w => exfalso; exact h1.elim
+          | setOfInt w => exfalso; exact h1.elim
+          | array w => exfalso; exact h1.elim
+      | bool w => exfalso; exact h1.elim
+      | setOfInt w => exfalso; exact h1.elim
+      | array w => exfalso; exact h1.elim
+  | bool w => exfalso; exact h1.elim
+  | setOfInt w => exfalso; exact h1.elim
+  | array w => exfalso; exact h1.elim
+
+/-- Inversion of `Holds` for `int_le_reif`: the truth-value agreement
+    `R ↔ p ≤ q` of the source predicate. -/
+theorem holds_int_le_reif {store : Store} {c : ConstraintItem}
+    {x y r : Ident}
+    (hname : c.name.name = "int_le_reif")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y),
+        Expr.basic (.ident r)])
+    (h : c.Holds fullInterp store) :
+    ∃ (p : Int) (q : Int) (rb : Bool),
+      store x = some (.int p) ∧ store y = some (.int q) ∧
+      store r = some (.bool rb) ∧ (rb = true ↔ p ≤ q) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vx, vy, vr, hsx, hsy, hsz, hargsv⟩ := mapM_three_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "int_le_reif") [vx, vy, vr] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_reif "int_le_reif"
+    (Or.inr (Or.inl rfl))] at h1
+  cases vx with
+  | int p =>
+      cases vy with
+      | int q =>
+          cases vr with
+          | bool rb =>
+              have hdisj : (rb = true ∧ p ≤ q) ∨ (rb = false ∧ ¬ p ≤ q) := by
+                rcases h1 with ⟨hrb, hle⟩ | ⟨hrb, hgt⟩
+                · exact Or.inl ⟨hrb, hle⟩
+                · exact Or.inr ⟨hrb, fun hle => by omega⟩
+              exact ⟨p, q, rb, hsx, hsy, hsz,
+                (reif_disj_iff (p ≤ q) rb).mp hdisj⟩
+          | int w => exfalso; exact h1.elim
+          | setOfInt w => exfalso; exact h1.elim
+          | array w => exfalso; exact h1.elim
+      | bool w => exfalso; exact h1.elim
+      | setOfInt w => exfalso; exact h1.elim
+      | array w => exfalso; exact h1.elim
+  | bool w => exfalso; exact h1.elim
+  | setOfInt w => exfalso; exact h1.elim
+  | array w => exfalso; exact h1.elim
+
+/-- Inversion of `Holds` for `int_ne_reif`: the truth-value agreement
+    `R ↔ x ≠ y` of the source predicate. -/
+theorem holds_int_ne_reif {store : Store} {c : ConstraintItem}
+    {x y r : Ident}
+    (hname : c.name.name = "int_ne_reif")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.ident y),
+        Expr.basic (.ident r)])
+    (h : c.Holds fullInterp store) :
+    ∃ (p : Int) (q : Int) (rb : Bool),
+      store x = some (.int p) ∧ store y = some (.int q) ∧
+      store r = some (.bool rb) ∧ (rb = true ↔ p ≠ q) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vx, vy, vr, hsx, hsy, hsz, hargsv⟩ := mapM_three_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "int_ne_reif") [vx, vy, vr] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_reif "int_ne_reif"
+    (Or.inr (Or.inr (Or.inl rfl)))] at h1
+  cases vx with
+  | int a =>
+      cases vy with
+      | int b =>
+          cases vr with
+          | bool rb =>
+              have hd : (rb = true ∧ a ≠ b) ∨ (rb = false ∧ a = b) := by
+                rcases h1 with ⟨hrb, hne⟩ | ⟨hrb, heq⟩
+                · exact Or.inl ⟨hrb, hne⟩
+                · exact Or.inr ⟨hrb, heq⟩
+              refine ⟨a, b, rb, hsx, hsy, hsz, ?_⟩
+              rcases hd with ⟨hrb, hne⟩ | ⟨hrb, heq⟩
+              · exact (reif_disj_iff (a ≠ b) rb).mp (Or.inl ⟨hrb, hne⟩)
+              · exact (reif_disj_iff (a ≠ b) rb).mp
+                  (Or.inr ⟨hrb, fun hne => hne heq⟩)
+          | int w => exfalso; exact h1.elim
+          | setOfInt w => exfalso; exact h1.elim
+          | array w => exfalso; exact h1.elim
+      | bool w => exfalso; exact h1.elim
+      | setOfInt w => exfalso; exact h1.elim
+      | array w => exfalso; exact h1.elim
+  | bool w => exfalso; exact h1.elim
+  | setOfInt w => exfalso; exact h1.elim
+  | array w => exfalso; exact h1.elim
+
+/-- Inversion of `Holds` for `int_lin_eq_reif`: the truth-value
+    agreement `R ↔ dotProduct coeffs xs = some b`. -/
+theorem holds_int_lin_eq_reif {store : Store} {c : ConstraintItem}
+    {ks elems : ArrayLiteral} {k : Int} {r : Ident}
+    (hname : c.name.name = "int_lin_eq_reif")
+    (hargs : c.args = [Expr.array ks, Expr.array elems,
+        Expr.basic (.lit (.int k)), Expr.basic (.ident r)])
+    (h : c.Holds fullInterp store) :
+    ∃ (vs1 : List Value) (vs2 : List Value) (rb : Bool),
+      ks.mapM (BasicExpr.eval store) = some vs1 ∧
+      elems.mapM (BasicExpr.eval store) = some vs2 ∧
+      store r = some (.bool rb) ∧
+      (rb = true ↔ dotProduct vs1 vs2 = some k) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vs1, vs2, vr, hvs1, hvs2, hsr, hargsv⟩ := mapM_lin_reif hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "int_lin_eq_reif")
+      [.array vs1, .array vs2, .int k, vr] := interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_reif "int_lin_eq_reif"
+    (Or.inr (Or.inr (Or.inr (Or.inl rfl))))] at h1
+  cases vr with
+  | bool rb =>
+      have hdisj : (rb = true ∧ dotProduct vs1 vs2 = some k) ∨
+          (rb = false ∧ ¬ dotProduct vs1 vs2 = some k) := by
+        rcases h1 with ⟨hrb, hdot⟩ | ⟨hrb, hdot⟩
+        · exact Or.inl ⟨hrb, hdot⟩
+        · exact Or.inr ⟨hrb, hdot⟩
+      exact ⟨vs1, vs2, rb, hvs1, hvs2, hsr,
+        (reif_disj_iff (dotProduct vs1 vs2 = some k) rb).mp hdisj⟩
+  | int w => exfalso; exact h1.elim
+  | setOfInt w => exfalso; exact h1.elim
+  | array w => exfalso; exact h1.elim
+
+/-- Inversion of `Holds` for `int_lin_le_reif`: the truth-value
+    agreement `R ↔ dotLe coeffs xs b`. -/
+theorem holds_int_lin_le_reif {store : Store} {c : ConstraintItem}
+    {ks elems : ArrayLiteral} {k : Int} {r : Ident}
+    (hname : c.name.name = "int_lin_le_reif")
+    (hargs : c.args = [Expr.array ks, Expr.array elems,
+        Expr.basic (.lit (.int k)), Expr.basic (.ident r)])
+    (h : c.Holds fullInterp store) :
+    ∃ (vs1 : List Value) (vs2 : List Value) (rb : Bool),
+      ks.mapM (BasicExpr.eval store) = some vs1 ∧
+      elems.mapM (BasicExpr.eval store) = some vs2 ∧
+      store r = some (.bool rb) ∧
+      (rb = true ↔ dotLe vs1 vs2 k = true) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vs1, vs2, vr, hvs1, hvs2, hsr, hargsv⟩ := mapM_lin_reif hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "int_lin_le_reif")
+      [.array vs1, .array vs2, .int k, vr] := interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_reif "int_lin_le_reif"
+    (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl rfl)))))] at h1
+  cases vr with
+  | bool rb =>
+      have hdisj : (rb = true ∧ dotLe vs1 vs2 k = true) ∨
+          (rb = false ∧ ¬ dotLe vs1 vs2 k = true) := by
+        rcases h1 with ⟨hrb, hle⟩ | ⟨hrb, hle⟩
+        · exact Or.inl ⟨hrb, hle⟩
+        · exact Or.inr ⟨hrb, fun htrue => by rw [hle] at htrue; exact absurd htrue (by simp)⟩
+      exact ⟨vs1, vs2, rb, hvs1, hvs2, hsr,
+        (reif_disj_iff (dotLe vs1 vs2 k = true) rb).mp hdisj⟩
+  | int w => exfalso; exact h1.elim
+  | setOfInt w => exfalso; exact h1.elim
+  | array w => exfalso; exact h1.elim
+
+/-- Inversion of `Holds` for `int_lin_ne_reif`: the truth-value
+    agreement `R ↔ dotNe coeffs xs b`. -/
+theorem holds_int_lin_ne_reif {store : Store} {c : ConstraintItem}
+    {ks elems : ArrayLiteral} {k : Int} {r : Ident}
+    (hname : c.name.name = "int_lin_ne_reif")
+    (hargs : c.args = [Expr.array ks, Expr.array elems,
+        Expr.basic (.lit (.int k)), Expr.basic (.ident r)])
+    (h : c.Holds fullInterp store) :
+    ∃ (vs1 : List Value) (vs2 : List Value) (rb : Bool),
+      ks.mapM (BasicExpr.eval store) = some vs1 ∧
+      elems.mapM (BasicExpr.eval store) = some vs2 ∧
+      store r = some (.bool rb) ∧
+      (rb = true ↔ dotNe vs1 vs2 k = true) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vs1, vs2, vr, hvs1, hvs2, hsr, hargsv⟩ := mapM_lin_reif hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "int_lin_ne_reif")
+      [.array vs1, .array vs2, .int k, vr] := interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_reif "int_lin_ne_reif"
+    (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr rfl)))))] at h1
+  cases vr with
+  | bool rb =>
+      have hdisj : (rb = true ∧ dotNe vs1 vs2 k = true) ∨
+          (rb = false ∧ ¬ dotNe vs1 vs2 k = true) := by
+        rcases h1 with ⟨hrb, hne⟩ | ⟨hrb, hne⟩
+        · exact Or.inl ⟨hrb, hne⟩
+        · exact Or.inr ⟨hrb, fun htrue => by rw [hne] at htrue; exact absurd htrue (by simp)⟩
+      exact ⟨vs1, vs2, rb, hvs1, hvs2, hsr,
+        (reif_disj_iff (dotNe vs1 vs2 k = true) rb).mp hdisj⟩
+  | int w => exfalso; exact h1.elim
+  | setOfInt w => exfalso; exact h1.elim
+  | array w => exfalso; exact h1.elim
+
+/-- Inversion of `Holds` for an `array_int_element` over an explicit
+    constant integer array: the store's values at the index and target
+    names and the source interpretation's 1-based read relation. -/
+theorem holds_array_int_element {store : Store} {c : ConstraintItem}
+    {elems : ArrayLiteral} {x y : Ident}
+    (hname : c.name.name = "array_int_element")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.array elems,
+        Expr.basic (.ident y)])
+    (h : c.Holds fullInterp store) :
+    ∃ vs vx vy, elems.mapM (BasicExpr.eval store) = some vs ∧
+      store x = some vx ∧ store y = some vy ∧
+      (match [vx, .array vs, vy] with
+        | [.int i, .array xs, .int e] => valuesGet1 xs i = some (.int e)
+        | _ => False) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vx, vs, vy, hsx, hvs, hsy, hargsv⟩ :=
+    mapM_ident_arr_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "array_int_element") [vx, .array vs, vy] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_elem "array_int_element" (Or.inl rfl)] at h1
+  exact ⟨vs, vx, vy, hvs, hsx, hsy, h1⟩
+
+/-- Inversion of `Holds` for an `array_var_int_element` over an
+    explicit slot array. -/
+theorem holds_array_var_int_element {store : Store} {c : ConstraintItem}
+    {elems : ArrayLiteral} {x y : Ident}
+    (hname : c.name.name = "array_var_int_element")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.array elems,
+        Expr.basic (.ident y)])
+    (h : c.Holds fullInterp store) :
+    ∃ vs vx vy, elems.mapM (BasicExpr.eval store) = some vs ∧
+      store x = some vx ∧ store y = some vy ∧
+      (match [vx, .array vs, vy] with
+        | [.int i, .array xs, .int e] => valuesGet1 xs i = some (.int e)
+        | _ => False) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vx, vs, vy, hsx, hvs, hsy, hargsv⟩ :=
+    mapM_ident_arr_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "array_var_int_element")
+      [vx, .array vs, vy] := interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_elem "array_var_int_element"
+    (Or.inr (Or.inl rfl))] at h1
+  exact ⟨vs, vx, vy, hvs, hsx, hsy, h1⟩
+
+/-- Inversion of `Holds` for an `array_var_bool_element` over an
+    explicit slot array. -/
+theorem holds_array_var_bool_element {store : Store} {c : ConstraintItem}
+    {elems : ArrayLiteral} {x y : Ident}
+    (hname : c.name.name = "array_var_bool_element")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.array elems,
+        Expr.basic (.ident y)])
+    (h : c.Holds fullInterp store) :
+    ∃ vs vx vy, elems.mapM (BasicExpr.eval store) = some vs ∧
+      store x = some vx ∧ store y = some vy ∧
+      (match [vx, .array vs, vy] with
+        | [.int i, .array xs, .bool e] => valuesGet1 xs i = some (.bool e)
+        | _ => False) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vx, vs, vy, hsx, hvs, hsy, hargsv⟩ :=
+    mapM_ident_arr_ident hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "array_var_bool_element")
+      [vx, .array vs, vy] := interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_elem "array_var_bool_element"
+    (Or.inr (Or.inr rfl))] at h1
+  exact ⟨vs, vx, vy, hvs, hsx, hsy, h1⟩
 
 end HoldsBridge
 
@@ -1039,6 +1813,48 @@ theorem linCoeffs_eval {store : Store} :
       | ident x =>
           simp only [linCoeffs, he] at hcoeffs
           exact absurd hcoeffs (by simp)
+
+/-- The evaluated values of a constant integer array that produced
+    `xs` via `intLits` are exactly the integer views of `xs`. -/
+theorem intLits_eval {store : Store} :
+    ∀ (es : ArrayLiteral) (xs : List Int),
+    intLits es = some xs →
+    es.mapM (BasicExpr.eval store) = some (xs.map Value.int) := by
+  intro es
+  induction es with
+  | nil =>
+      intro xs h
+      have hnil : intLits ([] : ArrayLiteral) = some [] := rfl
+      rw [hnil] at h
+      have hx : xs = [] := (Option.some.inj h).symm
+      subst hx
+      rfl
+  | cons e es ih =>
+      intro xs h
+      cases he : e with
+      | lit l =>
+          cases hl : l with
+          | int k =>
+              simp only [intLits, he, hl] at h
+              cases hrest : intLits es with
+              | none => rw [hrest] at h; exact absurd h (by simp)
+              | some rest =>
+                  rw [hrest] at h
+                  have hcons : k :: rest = xs := Option.some.inj h
+                  subst hcons
+                  simp only [List.mapM_cons, BasicExpr.eval,
+                    BasicLiteral.denote]
+                  rw [ih rest hrest]
+                  rfl
+          | bool b =>
+              simp only [intLits, he, hl] at h
+              exact absurd h (by simp)
+          | set sl =>
+              simp only [intLits, he, hl] at h
+              exact absurd h (by simp)
+      | ident x =>
+          simp only [intLits, he] at h
+          exact absurd h (by simp)
 
 /-- Every position produced by `linIndices` is in bounds for
     `names` (the slot-name list it indexes). -/
@@ -1229,6 +2045,184 @@ theorem allDiff_map_eq {names : List String} {store : Store} {a : List Value}
                   show (n :: rest).map (fun i => a[i]!) = vs
                   rw [hcons, List.map_cons, hread, htail]
 
+/-- Inversion of argument evaluation for an identifier argument followed
+    by an array argument (the `array_int_maximum(m, xs)` argument
+    order). -/
+theorem mapM_ident_arr {store : Store} {c : ConstraintItem}
+    {x : Ident} {elems : ArrayLiteral} {args : List Value}
+    (hargs : c.args = [Expr.basic (.ident x), Expr.array elems])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ vx vs, store x = some vx ∧
+      elems.mapM (BasicExpr.eval store) = some vs ∧ args = [vx, .array vs] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval] at hmap
+  cases h1 : store x with
+  | none => rw [h1] at hmap; simp at hmap
+  | some vx =>
+      rw [h1] at hmap
+      cases h2 : elems.mapM (BasicExpr.eval store) with
+      | none => rw [h2] at hmap; simp at hmap
+      | some vs =>
+          rw [h2] at hmap
+          exact ⟨vx, vs, rfl, rfl, by simpa using hmap.symm⟩
+
+/-- Inversion of argument evaluation for three general basic arguments
+    (the general `int_min`/`int_max`/`int_div`/`int_mod` shapes): each
+    argument evaluates and the evaluated list is the three values. -/
+theorem mapM_three_basic {store : Store} {c : ConstraintItem}
+    {a₀ a₁ a₂ : BasicExpr} {args : List Value}
+    (hargs : c.args = [Expr.basic a₀, Expr.basic a₁, Expr.basic a₂])
+    (hmap : c.args.mapM (Expr.eval store) = some args) :
+    ∃ v₀ v₁ v₂, a₀.eval store = some v₀ ∧ a₁.eval store = some v₁ ∧
+      a₂.eval store = some v₂ ∧ args = [v₀, v₁, v₂] := by
+  rw [hargs] at hmap
+  simp only [List.mapM_cons, List.mapM_nil, Expr.eval] at hmap
+  cases h0 : a₀.eval store with
+  | none => rw [h0] at hmap; simp at hmap
+  | some v₀ =>
+      rw [h0] at hmap
+      cases h1 : a₁.eval store with
+      | none => rw [h1] at hmap; simp at hmap
+      | some v₁ =>
+          rw [h1] at hmap
+          cases h2 : a₂.eval store with
+          | none => rw [h2] at hmap; simp at hmap
+          | some v₂ =>
+              rw [h2] at hmap
+              exact ⟨v₀, v₁, v₂, rfl, rfl, rfl, by simpa using hmap.symm⟩
+
+/-- **The operand read agrees with the store's evaluation**: when the
+    assignment carries the store's values at the slot names, the
+    `DomIntArg` operand that `intArgOf` extracted from a source
+    expression reads the value the store evaluates that expression to
+    (an identifier is the slot's store value, an integer literal
+    denotes itself). -/
+theorem intArgOf_read {names : List String} {store : Store} {a : List Value}
+    {e : BasicExpr} {o : DomIntArg} {v : Value}
+    (hvals : ∀ (i : Nat), i < names.length →
+      ∃ w, a[i]? = some w ∧ store (Ident.mk names[i]!) = some w)
+    (ho : intArgOf names e = some o) (he : BasicExpr.eval store e = some v) :
+    DomIntArg.read a o = v := by
+  cases e with
+  | lit l =>
+      cases l with
+      | int k =>
+          have ho' : o = .lit k :=
+            (Option.some.inj (by simpa [intArgOf] using ho)).symm
+          subst ho'
+          have hv : v = .int k :=
+            (Option.some.inj (by
+              simpa [BasicExpr.eval, BasicLiteral.denote] using he)).symm
+          subst hv
+          rfl
+      | bool b => exact absurd ho (by simp [intArgOf])
+      | set s => exact absurd ho (by simp [intArgOf])
+  | ident x =>
+      simp only [intArgOf] at ho
+      cases hn : nameIndex names x.name with
+      | none => rw [hn] at ho; exact absurd ho (by simp)
+      | some i =>
+          rw [hn] at ho
+          have ho' : o = .slot i := (Option.some.inj (by simpa using ho)).symm
+          subst ho'
+          have hev : store x = some v := by simpa [BasicExpr.eval] using he
+          obtain ⟨hilt, higet⟩ := nameIndex_some names x.name i hn
+          have hnamei : names[i]! = x.name := getElem_of_getElem? hilt higet
+          obtain ⟨w, haw, hsw⟩ := hvals i hilt
+          have hx : Ident.mk names[i]! = x := by
+            obtain ⟨m⟩ := x
+            rw [hnamei]
+          rw [hx] at hsw
+          have hwv : w = v := Option.some.inj (hsw.symm.trans hev)
+          have hsome : a[i]? = some v := by rw [haw, hwv]
+          show a[i]! = v
+          have hilt' : i < a.length :=
+            (List.getElem?_eq_some_iff.mp hsome).choose
+          have hbang : a[i]? = some a[i]! := getElem_bang_some hilt'
+          rw [hbang] at hsome
+          exact Option.some.inj hsome
+
+/-- **Inversion of `Holds` for the general two-operand integer
+    arithmetic predicates** (`int_min`/`int_max`/`int_div`/`int_mod`
+    on general basic arguments, PLAN C6): the three evaluated arguments
+    are integers and satisfy the predicate's arithmetic relation `phi`
+    (for `int_min`/`int_max`, that the third IS the min/max; for
+    `int_div`/`int_mod`, that the second is nonzero and the third the
+    truncated quotient/remainder). -/
+theorem holds_int_arith_gen
+    (op : String) (phi : Int → Int → Int → Prop)
+    (hbridge : fullInterp (Ident.mk op) = stdInterp (Ident.mk op))
+    (hsem : ∀ args : List Value,
+      stdInterp (Ident.mk op) args =
+        (match args with
+        | [.int p, .int q, .int r] => phi p q r
+        | _ => False))
+    {store : Store} {c : ConstraintItem} {a₀ a₁ a₂ : BasicExpr}
+    (hname : c.name.name = op)
+    (hargs : c.args = [Expr.basic a₀, Expr.basic a₁, Expr.basic a₂])
+    (h : c.Holds fullInterp store) :
+    ∃ p q r, a₀.eval store = some (.int p) ∧ a₁.eval store = some (.int q) ∧
+      a₂.eval store = some (.int r) ∧ phi p q r := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨v₀, v₁, v₂, he₀, he₁, he₂, hargsv⟩ := mapM_three_basic hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk op) [v₀, v₁, v₂] :=
+    interp_of_hname hname hinterp
+  rw [hbridge] at h1
+  rw [hsem [v₀, v₁, v₂]] at h1
+  have hmatch : (match [v₀, v₁, v₂] with
+    | [.int p, .int q, .int r] => phi p q r
+    | _ => False) := h1
+  cases v₀ with
+  | int p =>
+      cases v₁ with
+      | int q =>
+          cases v₂ with
+          | int r => exact ⟨p, q, r, he₀, he₁, he₂, by simpa using hmatch⟩
+          | bool w => exact absurd hmatch (by simp)
+          | setOfInt w => exact absurd hmatch (by simp)
+          | array w => exact absurd hmatch (by simp)
+      | bool w => exact absurd hmatch (by simp)
+      | setOfInt w => exact absurd hmatch (by simp)
+      | array w => exact absurd hmatch (by simp)
+  | bool w => exact absurd hmatch (by simp)
+  | setOfInt w => exact absurd hmatch (by simp)
+  | array w => exact absurd hmatch (by simp)
+
+/-- **Inversion of `Holds` for the array extreme forms**
+    (`array_int_maximum`/`array_int_minimum`, result parameter first):
+    the store's value at the result name is an integer and the array's
+    evaluated elements have that value as their `maxValue`/`minValue`. -/
+theorem holds_array_int_extreme
+    (op : String) (hval : List Value → Option Int)
+    (hbridge : fullInterp (Ident.mk op) = stdInterp (Ident.mk op))
+    (hsem : ∀ args : List Value,
+      stdInterp (Ident.mk op) args =
+        (match args with
+        | [.int m, .array xs] => hval xs = some m
+        | _ => False))
+    {store : Store} {c : ConstraintItem} {x : Ident} {elems : ArrayLiteral}
+    (hname : c.name.name = op)
+    (hargs : c.args = [Expr.basic (.ident x), Expr.array elems])
+    (h : c.Holds fullInterp store) :
+    ∃ m vs, store x = some (.int m) ∧
+      elems.mapM (BasicExpr.eval store) = some vs ∧ hval vs = some m := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  obtain ⟨vx, vs, hx, hvs, hargsv⟩ := mapM_ident_arr hargs hmap
+  subst hargsv
+  have h1 : fullInterp (Ident.mk op) [vx, .array vs] :=
+    interp_of_hname hname hinterp
+  rw [hbridge] at h1
+  rw [hsem [vx, .array vs]] at h1
+  have hmatch : (match [vx, .array vs] with
+    | [.int m, .array xs] => hval xs = some m
+    | _ => False) := h1
+  cases vx with
+  | int m => exact ⟨m, vs, hx, hvs, by simpa using hmatch⟩
+  | bool w => exact absurd hmatch (by simp)
+  | setOfInt w => exact absurd hmatch (by simp)
+  | array w => exact absurd hmatch (by simp)
+
 /-- **Extraction inversion**: if `extractConstraint names c`
     produced a constraint, then the model constraint has one of the
     extracted shapes — the name is one of the extracted predicates,
@@ -1314,7 +2308,102 @@ theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
         c.args = [.basic (.ident x), .basic (.ident y),
           Expr.basic (.ident z)] ∧
         nameIndex names x.name = some i ∧ nameIndex names y.name = some j ∧
-        nameIndex names z.name = some k ∧ dc = .boolOrSlot i j k) := by
+        nameIndex names z.name = some k ∧ dc = .boolOrSlot i j k) ∨
+    (∃ ks elems coeffs is b, c.name.name = "int_lin_ne" ∧
+        c.args = [Expr.array ks, Expr.array elems,
+          Expr.basic (.lit (.int b))] ∧
+        linCoeffs ks = some coeffs ∧ linIndices names elems = some is ∧
+        (coeffs.length == is.length) = true ∧ dc = .linNe coeffs is b) ∨
+    (∃ elems1 elems2 ps ns, c.name.name = "bool_clause" ∧
+        c.args = [Expr.array elems1, Expr.array elems2] ∧
+        linIndices names elems1 = some ps ∧
+        linIndices names elems2 = some ns ∧
+        dc = .boolClauseSlot ps ns) ∨
+    (∃ elems r is k, c.name.name = "array_bool_and" ∧
+        c.args = [Expr.array elems, Expr.basic (.ident r)] ∧
+        linIndices names elems = some is ∧
+        nameIndex names r.name = some k ∧
+        dc = .arrayBoolAndSlot is k) ∨
+    (∃ x y i k, c.name.name = "bool2int" ∧
+        c.args = [.basic (.ident x), .basic (.ident y)] ∧
+        nameIndex names x.name = some i ∧ nameIndex names y.name = some k ∧
+        dc = .bool2intSlot i k) ∨
+    (∃ x y i j, c.name.name = "bool_eq" ∧
+        c.args = [.basic (.ident x), .basic (.ident y)] ∧
+        nameIndex names x.name = some i ∧ nameIndex names y.name = some j ∧
+        dc = .boolEqSlot i j) ∨
+    (∃ elems xs x y i k, c.name.name = "array_int_element" ∧
+        c.args = [.basic (.ident x), Expr.array elems, .basic (.ident y)] ∧
+        intLits elems = some xs ∧ nameIndex names x.name = some i ∧
+        nameIndex names y.name = some k ∧
+        dc = .arrayIntElementSlot xs i k) ∨
+    (∃ elems is x y i k, c.name.name = "array_var_int_element" ∧
+        c.args = [.basic (.ident x), Expr.array elems, .basic (.ident y)] ∧
+        linIndices names elems = some is ∧ nameIndex names x.name = some i ∧
+        nameIndex names y.name = some k ∧
+        dc = .arrayVarIntElementSlot is i k) ∨
+    (∃ elems is x y i k, c.name.name = "array_var_bool_element" ∧
+        c.args = [.basic (.ident x), Expr.array elems, .basic (.ident y)] ∧
+        linIndices names elems = some is ∧ nameIndex names x.name = some i ∧
+        nameIndex names y.name = some k ∧
+        dc = .arrayVarBoolElementSlot is i k) ∨
+    (∃ x y r i j k, c.name.name = "int_eq_reif" ∧
+        c.args = [.basic (.ident x), .basic (.ident y),
+          Expr.basic (.ident r)] ∧
+        nameIndex names x.name = some i ∧ nameIndex names y.name = some j ∧
+        nameIndex names r.name = some k ∧ dc = .eqReifSlot i j k) ∨
+    (∃ x y r i j k, c.name.name = "int_le_reif" ∧
+        c.args = [.basic (.ident x), .basic (.ident y),
+          Expr.basic (.ident r)] ∧
+        nameIndex names x.name = some i ∧ nameIndex names y.name = some j ∧
+        nameIndex names r.name = some k ∧ dc = .leReifSlot i j k) ∨
+    (∃ x y r i j k, c.name.name = "int_ne_reif" ∧
+        c.args = [.basic (.ident x), .basic (.ident y),
+          Expr.basic (.ident r)] ∧
+        nameIndex names x.name = some i ∧ nameIndex names y.name = some j ∧
+        nameIndex names r.name = some k ∧ dc = .neReifSlot i j k) ∨
+    (∃ ks elems coeffs is b r k, c.name.name = "int_lin_eq_reif" ∧
+        c.args = [Expr.array ks, Expr.array elems,
+          Expr.basic (.lit (.int b)), Expr.basic (.ident r)] ∧
+        linCoeffs ks = some coeffs ∧ linIndices names elems = some is ∧
+        (coeffs.length == is.length) = true ∧
+        nameIndex names r.name = some k ∧ dc = .linEqReif coeffs is b k) ∨
+    (∃ ks elems coeffs is b r k, c.name.name = "int_lin_le_reif" ∧
+        c.args = [Expr.array ks, Expr.array elems,
+          Expr.basic (.lit (.int b)), Expr.basic (.ident r)] ∧
+        linCoeffs ks = some coeffs ∧ linIndices names elems = some is ∧
+        (coeffs.length == is.length) = true ∧
+        nameIndex names r.name = some k ∧ dc = .linLeReif coeffs is b k) ∨
+    (∃ ks elems coeffs is b r k, c.name.name = "int_lin_ne_reif" ∧
+        c.args = [Expr.array ks, Expr.array elems,
+          Expr.basic (.lit (.int b)), Expr.basic (.ident r)] ∧
+        linCoeffs ks = some coeffs ∧ linIndices names elems = some is ∧
+        (coeffs.length == is.length) = true ∧
+        nameIndex names r.name = some k ∧ dc = .linNeReif coeffs is b k) ∨
+    (∃ a₀ a₁ a₂ o₀ o₁ o₂, c.name.name = "int_min" ∧
+        c.args = [.basic a₀, .basic a₁, .basic a₂] ∧
+        intArgOf names a₀ = some o₀ ∧ intArgOf names a₁ = some o₁ ∧
+        intArgOf names a₂ = some o₂ ∧ dc = .minPair o₀ o₁ o₂) ∨
+    (∃ a₀ a₁ a₂ o₀ o₁ o₂, c.name.name = "int_max" ∧
+        c.args = [.basic a₀, .basic a₁, .basic a₂] ∧
+        intArgOf names a₀ = some o₀ ∧ intArgOf names a₁ = some o₁ ∧
+        intArgOf names a₂ = some o₂ ∧ dc = .maxPair o₀ o₁ o₂) ∨
+    (∃ a₀ a₁ a₂ o₀ o₁ o₂, c.name.name = "int_div" ∧
+        c.args = [.basic a₀, .basic a₁, .basic a₂] ∧
+        intArgOf names a₀ = some o₀ ∧ intArgOf names a₁ = some o₁ ∧
+        intArgOf names a₂ = some o₂ ∧ dc = .divGen o₀ o₁ o₂) ∨
+    (∃ a₀ a₁ a₂ o₀ o₁ o₂, c.name.name = "int_mod" ∧
+        c.args = [.basic a₀, .basic a₁, .basic a₂] ∧
+        intArgOf names a₀ = some o₀ ∧ intArgOf names a₁ = some o₁ ∧
+        intArgOf names a₂ = some o₂ ∧ dc = .modGen o₀ o₁ o₂) ∨
+    (∃ x elems is k, c.name.name = "array_int_maximum" ∧
+        c.args = [.basic (.ident x), .array elems] ∧
+        nameIndex names x.name = some k ∧ linIndices names elems = some is ∧
+        dc = .maxGen (is.map DomIntArg.slot) (.slot k)) ∨
+    (∃ x elems is k, c.name.name = "array_int_minimum" ∧
+        c.args = [.basic (.ident x), .array elems] ∧
+        nameIndex names x.name = some k ∧ linIndices names elems = some is ∧
+        dc = .minGen (is.map DomIntArg.slot) (.slot k)) := by
   rw [extractConstraint] at hdc
   split at hdc
   case h_1 heqname =>
@@ -1438,7 +2527,20 @@ theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
         exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨x, y, z, i, j, k, heqname, heqargs, hxi, hyi, hzi,
           by simpa using hdc.symm⟩))))))))))))
       case h_2 => exact absurd hdc (by simp)
-    case h_2 => exact absurd hdc (by simp)
+    case h_2 a₀ a₁ a₂ hne heqargs =>
+      split at hdc
+      case h_1 o₀ o₁ o₂ ho₀ ho₁ ho₂ =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨a₀, a₁, a₂, o₀, o₁, o₂, heqname, heqargs, ho₀, ho₁, ho₂,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_3 => exact absurd hdc (by simp)
   case h_10 heqname =>
     split at hdc
     case h_1 x y z heqargs =>
@@ -1447,7 +2549,21 @@ theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
         exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨x, y, z, i, j, k, heqname, heqargs, hxi, hyi, hzi,
           by simpa using hdc.symm⟩)))))))))))))
       case h_2 => exact absurd hdc (by simp)
-    case h_2 => exact absurd hdc (by simp)
+    case h_2 a₀ a₁ a₂ hne heqargs =>
+      split at hdc
+      case h_1 o₀ o₁ o₂ ho₀ ho₁ ho₂ =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr
+        exact Or.inl ⟨a₀, a₁, a₂, o₀, o₁, o₂, heqname, heqargs, ho₀, ho₁, ho₂,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_3 => exact absurd hdc (by simp)
   case h_11 heqname =>
     split at hdc
     case h_1 x y heqargs =>
@@ -1509,11 +2625,284 @@ theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
     case h_1 x y z heqargs =>
       split at hdc
       case h_1 i j k hxi hyi hzi =>
-        exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (⟨x, y, z, i, j, k, heqname, heqargs, hxi, hyi, hzi,
+        exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨x, y, z, i, j, k, heqname, heqargs, hxi, hyi, hzi,
           by simpa using hdc.symm⟩))))))))))))))))))))
       case h_2 => exact absurd hdc (by simp)
     case h_2 => exact absurd hdc (by simp)
-  case h_16 => exact absurd hdc (by simp)
+  case h_16 heqname =>
+    split at hdc
+    case h_1 ks elems b heqargs =>
+      split at hdc
+      case h_1 hcoeffs his =>
+        split at hdc
+        case isTrue hlen =>
+          rename_i coeffs is
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inl
+          exact ⟨ks, elems, coeffs, is, b, heqname, heqargs, hcoeffs, his, hlen,
+            by simpa using hdc.symm⟩
+        case isFalse => exact absurd hdc (by simp)
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_17 heqname =>
+    split at hdc
+    case h_1 elems1 elems2 heqargs =>
+      split at hdc
+      case h_1 ps ns hps hns =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨elems1, elems2, ps, ns, heqname, heqargs, hps, hns,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_18 heqname =>
+    split at hdc
+    case h_1 elems r heqargs =>
+      split at hdc
+      case h_1 is k his hr =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨elems, r, is, k, heqname, heqargs, his, hr,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_19 heqname =>
+    split at hdc
+    case h_1 x y heqargs =>
+      split at hdc
+      case h_1 i k hxi hyi =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨x, y, i, k, heqname, heqargs, hxi, hyi,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_20 heqname =>
+    split at hdc
+    case h_1 x y heqargs =>
+      split at hdc
+      case h_1 i j hxi hyi =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨x, y, i, j, heqname, heqargs, hxi, hyi,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_21 heqname =>
+    split at hdc
+    case h_1 x elems y heqargs =>
+      split at hdc
+      case h_1 xs i k hxs hxi hyk =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr
+        exact Or.inl ⟨elems, xs, x, y, i, k, heqname, heqargs, hxs, hxi, hyk,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_22 heqname =>
+    split at hdc
+    case h_1 x elems y heqargs =>
+      split at hdc
+      case h_1 is i k his hxi hyk =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr
+        exact Or.inl ⟨elems, is, x, y, i, k, heqname, heqargs, his, hxi, hyk,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_23 heqname =>
+    split at hdc
+    case h_1 x elems y heqargs =>
+      split at hdc
+      case h_1 is i k his hxi hyk =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨elems, is, x, y, i, k, heqname, heqargs, his, hxi, hyk,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_24 heqname =>
+    split at hdc
+    case h_1 x y r heqargs =>
+      split at hdc
+      case h_1 i j k hxi hyi hrk =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨x, y, r, i, j, k, heqname, heqargs, hxi, hyi, hrk,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_25 heqname =>
+    split at hdc
+    case h_1 x y r heqargs =>
+      split at hdc
+      case h_1 i j k hxi hyi hrk =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨x, y, r, i, j, k, heqname, heqargs, hxi, hyi, hrk,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_26 heqname =>
+    split at hdc
+    case h_1 x y r heqargs =>
+      split at hdc
+      case h_1 i j k hxi hyi hrk =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr
+        exact Or.inl ⟨x, y, r, i, j, k, heqname, heqargs, hxi, hyi, hrk,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_27 heqname =>
+    split at hdc
+    case h_1 ks elems b r heqargs =>
+      split at hdc
+      case h_1 hcoeffs his hrk =>
+        split at hdc
+        case isTrue hlen =>
+          rename_i coeffs is k
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr
+          exact Or.inl ⟨ks, elems, coeffs, is, b, r, k, heqname, heqargs,
+            hcoeffs, his, hlen, hrk, by simpa using hdc.symm⟩
+        case isFalse => exact absurd hdc (by simp)
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_28 heqname =>
+    split at hdc
+    case h_1 ks elems b r heqargs =>
+      split at hdc
+      case h_1 hcoeffs his hrk =>
+        split at hdc
+        case isTrue hlen =>
+          rename_i coeffs is k
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr
+          exact Or.inl ⟨ks, elems, coeffs, is, b, r, k, heqname, heqargs,
+            hcoeffs, his, hlen, hrk, by simpa using hdc.symm⟩
+        case isFalse => exact absurd hdc (by simp)
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_29 heqname =>
+    split at hdc
+    case h_1 ks elems b r heqargs =>
+      split at hdc
+      case h_1 hcoeffs his hrk =>
+        split at hdc
+        case isTrue hlen =>
+          rename_i coeffs is k
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+          exact Or.inl ⟨ks, elems, coeffs, is, b, r, k, heqname, heqargs,
+            hcoeffs, his, hlen, hrk, by simpa using hdc.symm⟩
+        case isFalse => exact absurd hdc (by simp)
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_30 heqname =>
+    split at hdc
+    case h_1 a₀ a₁ a₂ heqargs =>
+      split at hdc
+      case h_1 o₀ o₁ o₂ ho₀ ho₁ ho₂ =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr
+        exact Or.inl ⟨a₀, a₁, a₂, o₀, o₁, o₂, heqname, heqargs, ho₀, ho₁, ho₂,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_31 heqname =>
+    split at hdc
+    case h_1 a₀ a₁ a₂ heqargs =>
+      split at hdc
+      case h_1 o₀ o₁ o₂ ho₀ ho₁ ho₂ =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨a₀, a₁, a₂, o₀, o₁, o₂, heqname, heqargs, ho₀, ho₁, ho₂,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_32 heqname =>
+    split at hdc
+    case h_1 x elems heqargs =>
+      split at hdc
+      case h_1 k is hk his =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact Or.inl ⟨x, elems, is, k, heqname, heqargs, hk, his,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_33 heqname =>
+    split at hdc
+    case h_1 x elems heqargs =>
+      split at hdc
+      case h_1 k is hk his =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        exact ⟨x, elems, is, k, heqname, heqargs, hk, his,
+          by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_34 => exact absurd hdc (by simp)
 
 /-- **Per-constraint extraction soundness**: if the model constraint
     `c` holds in `store` (under `fullInterp`, the interpretation the
@@ -1557,7 +2946,30 @@ theorem extractConstraint_holds {names : List String} {c : ConstraintItem}
     ⟨k, y, i, hname, hargs, hyi, hdc'⟩ |
     ⟨x, y, i, j, hname, hargs, hxi, hyi, hdc'⟩ |
     ⟨x, y, z, i, j, k, hname, hargs, hxi, hyi, hzi, hdc'⟩ |
-    ⟨x, y, z, i, j, k, hname, hargs, hxi, hyi, hzi, hdc'⟩
+    ⟨x, y, z, i, j, k, hname, hargs, hxi, hyi, hzi, hdc'⟩ |
+    ⟨ks, elems, coeffs, is, b, hname, hargs, hcoeffs, his, hlen, hdc'⟩ |
+    ⟨elems1, elems2, ps, ns, hname, hargs, hidx1, hidx2, hdc'⟩ |
+    ⟨elems, r, is, k, hname, hargs, his, hr, hdc'⟩ |
+    ⟨x, y, i, k, hname, hargs, hxi, hyi, hdc'⟩ |
+    ⟨x, y, i, j, hname, hargs, hxi, hyi, hdc'⟩ |
+    ⟨elems, xs, x, y, i, k, hname, hargs, hxs, hxi, hyk, hdc'⟩ |
+    ⟨elems, is, x, y, i, k, hname, hargs, his, hxi, hyk, hdc'⟩ |
+    ⟨elems, is, x, y, i, k, hname, hargs, his, hxi, hyk, hdc'⟩ |
+    ⟨x, y, r, i, j, k, hname, hargs, hxi, hyi, hrk, hdc'⟩ |
+    ⟨x, y, r, i, j, k, hname, hargs, hxi, hyi, hrk, hdc'⟩ |
+    ⟨x, y, r, i, j, k, hname, hargs, hxi, hyi, hrk, hdc'⟩ |
+    ⟨ks, elems, coeffs, is, b, r, k, hname, hargs, hcoeffs, his, hlen, hrk,
+      hdc'⟩ |
+    ⟨ks, elems, coeffs, is, b, r, k, hname, hargs, hcoeffs, his, hlen, hrk,
+      hdc'⟩ |
+    ⟨ks, elems, coeffs, is, b, r, k, hname, hargs, hcoeffs, his, hlen, hrk,
+      hdc'⟩ |
+    ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
+    ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
+    ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
+    ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
+    ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩ |
+    ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩
   · -- int_eq on two slots
     subst hdc'
     obtain ⟨vx, vy, hsx, hsy, heq⟩ := holds_int_eq_slot hname hargs hh
@@ -2058,5 +3470,601 @@ theorem extractConstraint_holds {names : List String} {c : ConstraintItem}
     rw [hvq] at haj
     rw [hvr] at haz
     exact ⟨p, q, r, hai, haj, haz, hpqr⟩
+  · -- int_lin_ne on slots
+    subst hdc'
+    obtain ⟨vs1, vs2, hvs1, hvs2, hdot⟩ := holds_int_lin_ne hname hargs hh
+    rw [linCoeffs_eval ks coeffs hcoeffs] at hvs1
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length :=
+        (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    rw [linIndices_eval hlook elems is his (by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      obtain ⟨v, hav, _⟩ := hvals i hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose)] at hvs2
+    show dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true
+    rw [← Option.some.inj hvs1.symm, ← Option.some.inj hvs2.symm]
+    exact hdot
+  · -- bool_clause on two slot arrays
+    subst hdc'
+    obtain ⟨vs1, vs2, hvs1, hvs2, hcl⟩ := holds_bool_clause hname hargs hh
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length :=
+        (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    have hin1 : ∀ i, i ∈ ps → i < a.length := by
+      intro i hi
+      have hilt := linIndices_lt elems1 ps hidx1 i hi
+      obtain ⟨v, hav, _⟩ := hvals i hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose
+    have hin2 : ∀ j, j ∈ ns → j < a.length := by
+      intro j hj
+      have hilt := linIndices_lt elems2 ns hidx2 j hj
+      obtain ⟨v, hav, _⟩ := hvals j hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose
+    rw [linIndices_eval hlook elems1 ps hidx1 hin1] at hvs1
+    rw [linIndices_eval hlook elems2 ns hidx2 hin2] at hvs2
+    have hv1 : ps.map (fun i => a[i]!) = vs1 := Option.some.inj hvs1
+    have hv2 : ns.map (fun j => a[j]!) = vs2 := Option.some.inj hvs2
+    rw [← hv1, ← hv2, Bool.or_eq_true] at hcl
+    rcases hcl with hcl | hcl
+    · exact Or.inl (bang_any_eqB_iff_slotIsBoolB hin1 |>.mp hcl)
+    · exact Or.inr (bang_any_eqB_iff_slotIsBoolB hin2 |>.mp hcl)
+  · -- array_bool_and on a slot array and a slot target
+    subst hdc'
+    obtain ⟨vs, vr, hvs, hsr, hvr⟩ := holds_array_bool_and hname hargs hh
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length :=
+        (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    have hin : ∀ i, i ∈ is → i < a.length := by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      obtain ⟨v, hav, _⟩ := hvals i hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose
+    rw [linIndices_eval hlook elems is his hin] at hvs
+    have hvm : is.map (fun i => a[i]!) = vs := Option.some.inj hvs
+    have hall : vs.all (fun x => x.eqB (.bool true))
+        = is.all (fun i => slotIsBoolB a i true) := by
+      rw [← hvm]
+      rw [show (is.map (fun i => a[i]!)).all (fun v => v.eqB (.bool true))
+          = is.all (fun i => (a[i]!).eqB (.bool true)) from List.all_map]
+      exact Bool.eq_iff_iff.mpr (bang_all_eqB_iff_slotIsBoolB (b := true) hin)
+    rw [hall] at hvr
+    obtain ⟨hklt, hkget⟩ := nameIndex_some names r.name k hr
+    obtain ⟨vk, hak, hsnk⟩ := hvals k hklt
+    have hnk : names[k]! = r.name := getElem_of_getElem? hklt hkget
+    rw [hnk] at hsnk
+    have hvrk : vk = vr := Option.some.inj (hsnk.symm.trans hsr)
+    show a[k]? = some (.bool (is.all (fun i => slotIsBoolB a i true)))
+    rw [hak, hvrk, hvr]
+  · -- bool2int on two slots
+    subst hdc'
+    obtain ⟨p, q, hsb, hsi, hkq⟩ := holds_bool2int hname hargs hh
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨hylt, hyget⟩ := nameIndex_some names y.name k hyi
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    obtain ⟨vyk, hak, hsnk⟩ := hvals k hylt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    have hnamek : names[k]! = y.name := getElem_of_getElem? hylt hyget
+    rw [hnamei] at hsni
+    rw [hnamek] at hsnk
+    have hvp : vxi = .bool p := Option.some.inj (hsni.symm.trans hsb)
+    have hvq : vyk = .int q := Option.some.inj (hsnk.symm.trans hsi)
+    rw [hvp] at hai
+    rw [hvq] at hak
+    exact ⟨p, hai, by rw [hak, hkq]⟩
+  · -- bool_eq on two slots
+    subst hdc'
+    obtain ⟨p, q, hsx, hsy, hpq⟩ := holds_bool_eq hname hargs hh
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨hylt, hyget⟩ := nameIndex_some names y.name j hyi
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    obtain ⟨vyj, haj, hsnj⟩ := hvals j hylt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    have hnamej : names[j]! = y.name := getElem_of_getElem? hylt hyget
+    rw [hnamei] at hsni
+    rw [hnamej] at hsnj
+    have hvp : vxi = .bool p := Option.some.inj (hsni.symm.trans hsx)
+    have hvq : vyj = .bool q := Option.some.inj (hsnj.symm.trans hsy)
+    rw [hvp] at hai
+    rw [hvq] at haj
+    exact ⟨p, q, hai, haj, hpq⟩
+  · -- array_int_element on a constant integer array
+    subst hdc'
+    obtain ⟨vs, vx, vy, hvs, hsx, hsy, hmatch⟩ :=
+      holds_array_int_element hname hargs hh
+    rw [intLits_eval elems xs hxs] at hvs
+    have hvm : xs.map Value.int = vs := Option.some.inj hvs
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    rw [hnamei] at hsni
+    have hvx : vxi = vx := Option.some.inj (hsni.symm.trans hsx)
+    obtain ⟨hklt, hkget⟩ := nameIndex_some names y.name k hyk
+    obtain ⟨vyk, hak, hsnk⟩ := hvals k hklt
+    have hnamek : names[k]! = y.name := getElem_of_getElem? hklt hkget
+    rw [hnamek] at hsnk
+    have hvy : vyk = vy := Option.some.inj (hsnk.symm.trans hsy)
+    cases vx with
+    | int idx =>
+        cases vy with
+        | int e =>
+            have hget : valuesGet1 vs idx = some (.int e) := by
+              simpa using hmatch
+            rw [← hvm] at hget
+            rw [hvx] at hai
+            rw [hvy] at hak
+            exact ⟨idx, e, hai, hak, hget⟩
+        | bool w => exact absurd hmatch (by simp)
+        | setOfInt w => exact absurd hmatch (by simp)
+        | array w => exact absurd hmatch (by simp)
+    | bool w => exact absurd hmatch (by simp)
+    | setOfInt w => exact absurd hmatch (by simp)
+    | array w => exact absurd hmatch (by simp)
+  · -- array_var_int_element on an explicit slot array
+    subst hdc'
+    obtain ⟨vs, vx, vy, hvs, hsx, hsy, hmatch⟩ :=
+      holds_array_var_int_element hname hargs hh
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length :=
+        (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    have hin : ∀ i, i ∈ is → i < a.length := by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      obtain ⟨v, hav, _⟩ := hvals i hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose
+    rw [linIndices_eval hlook elems is his hin] at hvs
+    have hvm : is.map (fun i => a[i]!) = vs := Option.some.inj hvs
+    have hin' : ∀ j ∈ is, ∃ v, a[j]? = some v := by
+      intro j hj
+      obtain ⟨v, hv, _⟩ := hvals j (linIndices_lt elems is his j hj)
+      exact ⟨v, hv⟩
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    rw [hnamei] at hsni
+    have hvx : vxi = vx := Option.some.inj (hsni.symm.trans hsx)
+    obtain ⟨hklt, hkget⟩ := nameIndex_some names y.name k hyk
+    obtain ⟨vyk, hak, hsnk⟩ := hvals k hklt
+    have hnamek : names[k]! = y.name := getElem_of_getElem? hklt hkget
+    rw [hnamek] at hsnk
+    have hvy : vyk = vy := Option.some.inj (hsnk.symm.trans hsy)
+    cases vx with
+    | int idx =>
+        cases vy with
+        | int e =>
+            have hget : valuesGet1 vs idx = some (.int e) := by
+              simpa using hmatch
+            rw [← hvm] at hget
+            rw [hvx] at hai
+            rw [hvy] at hak
+            exact ⟨idx, e, hai, hak, hin', hget⟩
+        | bool w => exact absurd hmatch (by simp)
+        | setOfInt w => exact absurd hmatch (by simp)
+        | array w => exact absurd hmatch (by simp)
+    | bool w => exact absurd hmatch (by simp)
+    | setOfInt w => exact absurd hmatch (by simp)
+    | array w => exact absurd hmatch (by simp)
+  · -- array_var_bool_element on an explicit slot array
+    subst hdc'
+    obtain ⟨vs, vx, vy, hvs, hsx, hsy, hmatch⟩ :=
+      holds_array_var_bool_element hname hargs hh
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length :=
+        (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    have hin : ∀ i, i ∈ is → i < a.length := by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      obtain ⟨v, hav, _⟩ := hvals i hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose
+    rw [linIndices_eval hlook elems is his hin] at hvs
+    have hvm : is.map (fun i => a[i]!) = vs := Option.some.inj hvs
+    have hin' : ∀ j ∈ is, ∃ v, a[j]? = some v := by
+      intro j hj
+      obtain ⟨v, hv, _⟩ := hvals j (linIndices_lt elems is his j hj)
+      exact ⟨v, hv⟩
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    rw [hnamei] at hsni
+    have hvx : vxi = vx := Option.some.inj (hsni.symm.trans hsx)
+    obtain ⟨hklt, hkget⟩ := nameIndex_some names y.name k hyk
+    obtain ⟨vyk, hak, hsnk⟩ := hvals k hklt
+    have hnamek : names[k]! = y.name := getElem_of_getElem? hklt hkget
+    rw [hnamek] at hsnk
+    have hvy : vyk = vy := Option.some.inj (hsnk.symm.trans hsy)
+    cases vx with
+    | int idx =>
+        cases vy with
+        | bool e =>
+            have hget : valuesGet1 vs idx = some (.bool e) := by
+              simpa using hmatch
+            rw [← hvm] at hget
+            rw [hvx] at hai
+            rw [hvy] at hak
+            exact ⟨idx, e, hai, hak, hin', hget⟩
+        | int w => exact absurd hmatch (by simp)
+        | setOfInt w => exact absurd hmatch (by simp)
+        | array w => exact absurd hmatch (by simp)
+    | bool w => exact absurd hmatch (by simp)
+    | setOfInt w => exact absurd hmatch (by simp)
+    | array w => exact absurd hmatch (by simp)
+  · -- int_eq_reif on two slots and a reification slot
+    subst hdc'
+    obtain ⟨p, q, rb, hsx, hsy, hsr, hiff⟩ :=
+      holds_int_eq_reif hname hargs hh
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨hylt, hyget⟩ := nameIndex_some names y.name j hyi
+    obtain ⟨hrlt, hrget⟩ := nameIndex_some names r.name k hrk
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    obtain ⟨vyj, haj, hsnj⟩ := hvals j hylt
+    obtain ⟨vrk, hak, hsnk⟩ := hvals k hrlt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    have hnamej : names[j]! = y.name := getElem_of_getElem? hylt hyget
+    have hnamek : names[k]! = r.name := getElem_of_getElem? hrlt hrget
+    rw [hnamei] at hsni
+    rw [hnamej] at hsnj
+    rw [hnamek] at hsnk
+    have hvp : vxi = .int p := Option.some.inj (hsni.symm.trans hsx)
+    have hvq : vyj = .int q := Option.some.inj (hsnj.symm.trans hsy)
+    have hvrb : vrk = .bool rb := Option.some.inj (hsnk.symm.trans hsr)
+    rw [hvp] at hai
+    rw [hvq] at haj
+    rw [hvrb] at hak
+    exact ⟨p, q, rb, hai, haj, hak, hiff⟩
+  · -- int_le_reif on two slots and a reification slot
+    subst hdc'
+    obtain ⟨p, q, rb, hsx, hsy, hsr, hiff⟩ :=
+      holds_int_le_reif hname hargs hh
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨hylt, hyget⟩ := nameIndex_some names y.name j hyi
+    obtain ⟨hrlt, hrget⟩ := nameIndex_some names r.name k hrk
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    obtain ⟨vyj, haj, hsnj⟩ := hvals j hylt
+    obtain ⟨vrk, hak, hsnk⟩ := hvals k hrlt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    have hnamej : names[j]! = y.name := getElem_of_getElem? hylt hyget
+    have hnamek : names[k]! = r.name := getElem_of_getElem? hrlt hrget
+    rw [hnamei] at hsni
+    rw [hnamej] at hsnj
+    rw [hnamek] at hsnk
+    have hvp : vxi = .int p := Option.some.inj (hsni.symm.trans hsx)
+    have hvq : vyj = .int q := Option.some.inj (hsnj.symm.trans hsy)
+    have hvrb : vrk = .bool rb := Option.some.inj (hsnk.symm.trans hsr)
+    rw [hvp] at hai
+    rw [hvq] at haj
+    rw [hvrb] at hak
+    exact ⟨p, q, rb, hai, haj, hak, hiff⟩
+  · -- int_ne_reif on two slots and a reification slot
+    subst hdc'
+    obtain ⟨p, q, rb, hsx, hsy, hsr, hiff⟩ :=
+      holds_int_ne_reif hname hargs hh
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨hylt, hyget⟩ := nameIndex_some names y.name j hyi
+    obtain ⟨hrlt, hrget⟩ := nameIndex_some names r.name k hrk
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    obtain ⟨vyj, haj, hsnj⟩ := hvals j hylt
+    obtain ⟨vrk, hak, hsnk⟩ := hvals k hrlt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    have hnamej : names[j]! = y.name := getElem_of_getElem? hylt hyget
+    have hnamek : names[k]! = r.name := getElem_of_getElem? hrlt hrget
+    rw [hnamei] at hsni
+    rw [hnamej] at hsnj
+    rw [hnamek] at hsnk
+    have hvp : vxi = .int p := Option.some.inj (hsni.symm.trans hsx)
+    have hvq : vyj = .int q := Option.some.inj (hsnj.symm.trans hsy)
+    have hvrb : vrk = .bool rb := Option.some.inj (hsnk.symm.trans hsr)
+    rw [hvp] at hai
+    rw [hvq] at haj
+    rw [hvrb] at hak
+    exact ⟨p, q, rb, hai, haj, hak, hiff⟩
+  · -- int_lin_eq_reif on slots and a reification slot
+    subst hdc'
+    obtain ⟨vs1, vs2, rb, hvs1, hvs2, hsr, hiff⟩ :=
+      holds_int_lin_eq_reif hname hargs hh
+    rw [linCoeffs_eval ks coeffs hcoeffs] at hvs1
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length :=
+        (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    rw [linIndices_eval hlook elems is his (by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      obtain ⟨v, hav, _⟩ := hvals i hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose)] at hvs2
+    obtain ⟨hrlt, hrget⟩ := nameIndex_some names r.name k hrk
+    obtain ⟨vrk, hak, hsnk⟩ := hvals k hrlt
+    have hnamek : names[k]! = r.name := getElem_of_getElem? hrlt hrget
+    rw [hnamek] at hsnk
+    have hvrb : vrk = .bool rb := Option.some.inj (hsnk.symm.trans hsr)
+    rw [hvrb] at hak
+    show ∃ (rb : Bool), a[k]? = some (.bool rb) ∧
+      (rb = true ↔
+        dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some b)
+    refine ⟨rb, hak, ?_⟩
+    rw [← Option.some.inj hvs1.symm, ← Option.some.inj hvs2.symm]
+    exact hiff
+  · -- int_lin_le_reif on slots and a reification slot
+    subst hdc'
+    obtain ⟨vs1, vs2, rb, hvs1, hvs2, hsr, hiff⟩ :=
+      holds_int_lin_le_reif hname hargs hh
+    rw [linCoeffs_eval ks coeffs hcoeffs] at hvs1
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length :=
+        (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    rw [linIndices_eval hlook elems is his (by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      obtain ⟨v, hav, _⟩ := hvals i hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose)] at hvs2
+    obtain ⟨hrlt, hrget⟩ := nameIndex_some names r.name k hrk
+    obtain ⟨vrk, hak, hsnk⟩ := hvals k hrlt
+    have hnamek : names[k]! = r.name := getElem_of_getElem? hrlt hrget
+    rw [hnamek] at hsnk
+    have hvrb : vrk = .bool rb := Option.some.inj (hsnk.symm.trans hsr)
+    rw [hvrb] at hak
+    show ∃ (rb : Bool), a[k]? = some (.bool rb) ∧
+      (rb = true ↔
+        dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true)
+    refine ⟨rb, hak, ?_⟩
+    rw [← Option.some.inj hvs1.symm, ← Option.some.inj hvs2.symm]
+    exact hiff
+  · -- int_lin_ne_reif on slots and a reification slot
+    subst hdc'
+    obtain ⟨vs1, vs2, rb, hvs1, hvs2, hsr, hiff⟩ :=
+      holds_int_lin_ne_reif hname hargs hh
+    rw [linCoeffs_eval ks coeffs hcoeffs] at hvs1
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length :=
+        (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    rw [linIndices_eval hlook elems is his (by
+      intro i hi
+      have hilt := linIndices_lt elems is his i hi
+      obtain ⟨v, hav, _⟩ := hvals i hilt
+      exact (List.getElem?_eq_some_iff.mp hav).choose)] at hvs2
+    obtain ⟨hrlt, hrget⟩ := nameIndex_some names r.name k hrk
+    obtain ⟨vrk, hak, hsnk⟩ := hvals k hrlt
+    have hnamek : names[k]! = r.name := getElem_of_getElem? hrlt hrget
+    rw [hnamek] at hsnk
+    have hvrb : vrk = .bool rb := Option.some.inj (hsnk.symm.trans hsr)
+    rw [hvrb] at hak
+    show ∃ (rb : Bool), a[k]? = some (.bool rb) ∧
+      (rb = true ↔
+        dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b = true)
+    refine ⟨rb, hak, ?_⟩
+    rw [← Option.some.inj hvs1.symm, ← Option.some.inj hvs2.symm]
+    exact hiff
+  · -- int_min in the general three-basic-argument shape
+    subst hdc'
+    obtain ⟨p, q, r, he₀, he₁, he₂, hmin⟩ :=
+      holds_int_arith_gen "int_min" (fun p q r => r = min p q)
+        (fullInterp_of_extracted'' "int_min" (Or.inr (Or.inl rfl)))
+        (fun args => by
+          cases args with
+          | nil => rfl
+          | cons v₀ rest =>
+              cases rest with
+              | nil => rfl
+              | cons v₁ rest2 =>
+                  cases rest2 with
+                  | nil => rfl
+                  | cons v₂ rest3 =>
+                      cases rest3 with
+                      | nil => cases v₀ <;> cases v₁ <;> cases v₂ <;> rfl
+                      | cons v₃ rest4 => rfl)
+        hname hargs hh
+    exact ⟨p, q, intArgOf_read hvals ho₀ he₀, intArgOf_read hvals ho₁ he₁,
+      by rw [intArgOf_read hvals ho₂ he₂, hmin]⟩
+  · -- int_max in the general three-basic-argument shape
+    subst hdc'
+    obtain ⟨p, q, r, he₀, he₁, he₂, hmax⟩ :=
+      holds_int_arith_gen "int_max" (fun p q r => r = max p q)
+        (fullInterp_of_extracted'' "int_max" (Or.inr (Or.inr (Or.inl rfl))))
+        (fun args => by
+          cases args with
+          | nil => rfl
+          | cons v₀ rest =>
+              cases rest with
+              | nil => rfl
+              | cons v₁ rest2 =>
+                  cases rest2 with
+                  | nil => rfl
+                  | cons v₂ rest3 =>
+                      cases rest3 with
+                      | nil => cases v₀ <;> cases v₁ <;> cases v₂ <;> rfl
+                      | cons v₃ rest4 => rfl)
+        hname hargs hh
+    exact ⟨p, q, intArgOf_read hvals ho₀ he₀, intArgOf_read hvals ho₁ he₁,
+      by rw [intArgOf_read hvals ho₂ he₂, hmax]⟩
+  · -- int_div in the general three-basic-argument shape
+    subst hdc'
+    obtain ⟨p, q, r, he₀, he₁, he₂, hq, hr⟩ :=
+      holds_int_arith_gen "int_div" (fun p q r => q ≠ 0 ∧ r = Int.tdiv p q)
+        (fullInterp_of_extracted_arith "int_div" (Or.inl rfl))
+        (fun args => by
+          cases args with
+          | nil => rfl
+          | cons v₀ rest =>
+              cases rest with
+              | nil => rfl
+              | cons v₁ rest2 =>
+                  cases rest2 with
+                  | nil => rfl
+                  | cons v₂ rest3 =>
+                      cases rest3 with
+                      | nil => cases v₀ <;> cases v₁ <;> cases v₂ <;> rfl
+                      | cons v₃ rest4 => rfl)
+        hname hargs hh
+    exact ⟨p, q, intArgOf_read hvals ho₀ he₀, intArgOf_read hvals ho₁ he₁, hq,
+      by rw [intArgOf_read hvals ho₂ he₂, hr]⟩
+  · -- int_mod in the general three-basic-argument shape
+    subst hdc'
+    obtain ⟨p, q, r, he₀, he₁, he₂, hq, hr⟩ :=
+      holds_int_arith_gen "int_mod" (fun p q r => q ≠ 0 ∧ r = Int.tmod p q)
+        (fullInterp_of_extracted_arith "int_mod" (Or.inr (Or.inl rfl)))
+        (fun args => by
+          cases args with
+          | nil => rfl
+          | cons v₀ rest =>
+              cases rest with
+              | nil => rfl
+              | cons v₁ rest2 =>
+                  cases rest2 with
+                  | nil => rfl
+                  | cons v₂ rest3 =>
+                      cases rest3 with
+                      | nil => cases v₀ <;> cases v₁ <;> cases v₂ <;> rfl
+                      | cons v₃ rest4 => rfl)
+        hname hargs hh
+    exact ⟨p, q, intArgOf_read hvals ho₀ he₀, intArgOf_read hvals ho₁ he₁, hq,
+      by rw [intArgOf_read hvals ho₂ he₂, hr]⟩
+  · -- array_int_maximum on a slot array and a slot target
+    subst hdc'
+    obtain ⟨m, vs, hsm, hvs, hmax⟩ :=
+      holds_array_int_extreme "array_int_maximum" maxValue
+        (fullInterp_of_extracted_arith "array_int_maximum"
+          (Or.inr (Or.inr (Or.inl rfl))))
+        (fun args => by
+          cases args with
+          | nil => rfl
+          | cons v₀ rest =>
+              cases rest with
+              | nil => rfl
+              | cons v₁ rest2 =>
+                  cases rest2 with
+                  | nil => cases v₀ <;> cases v₁ <;> rfl
+                  | cons v₂ rest3 => rfl)
+        hname hargs hh
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length := (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    have hvs_eq : vs = is.map (fun i => a[i]!) :=
+      Option.some.inj (hvs.symm.trans (linIndices_eval hlook elems is his (by
+        intro i hi
+        have hilt := linIndices_lt elems is his i hi
+        obtain ⟨v, hav, _⟩ := hvals i hilt
+        exact (List.getElem?_eq_some_iff.mp hav).choose)))
+    have ho_k : intArgOf names (.ident x) = some (.slot k) := by
+      show (nameIndex names x.name).map DomIntArg.slot = some (.slot k)
+      rw [hk]
+      rfl
+    refine ⟨m, intArgOf_read hvals ho_k hsm, ?_⟩
+    show maxValue ((is.map DomIntArg.slot).map (DomIntArg.read a)) = some m
+    rw [List.map_map]
+    show maxValue (is.map (fun i => a[i]!)) = some m
+    rw [← hvs_eq]
+    exact hmax
+  · -- array_int_minimum on a slot array and a slot target
+    subst hdc'
+    obtain ⟨m, vs, hsm, hvs, hmin⟩ :=
+      holds_array_int_extreme "array_int_minimum" minValue
+        (fullInterp_of_extracted_arith "array_int_minimum"
+          (Or.inr (Or.inr (Or.inr rfl))))
+        (fun args => by
+          cases args with
+          | nil => rfl
+          | cons v₀ rest =>
+              cases rest with
+              | nil => rfl
+              | cons v₁ rest2 =>
+                  cases rest2 with
+                  | nil => cases v₀ <;> cases v₁ <;> rfl
+                  | cons v₂ rest3 => rfl)
+        hname hargs hh
+    have hlook : ∀ (i : Nat), i < names.length → ∀ (v : Value), a[i]? = some v →
+        store (Ident.mk names[i]!) = some v := by
+      intro i hlt v hv
+      obtain ⟨v', hv', hst⟩ := hvals i hlt
+      have hlt' : i < a.length := (List.getElem?_eq_some_iff.mp hv).choose
+      rw [List.getElem?_eq_getElem hlt'] at hv
+      rw [List.getElem?_eq_getElem hlt'] at hv'
+      have hvv : v = v' := Option.some.inj (hv.symm.trans hv')
+      rw [← hvv] at hst
+      exact hst
+    have hvs_eq : vs = is.map (fun i => a[i]!) :=
+      Option.some.inj (hvs.symm.trans (linIndices_eval hlook elems is his (by
+        intro i hi
+        have hilt := linIndices_lt elems is his i hi
+        obtain ⟨v, hav, _⟩ := hvals i hilt
+        exact (List.getElem?_eq_some_iff.mp hav).choose)))
+    have ho_k : intArgOf names (.ident x) = some (.slot k) := by
+      show (nameIndex names x.name).map DomIntArg.slot = some (.slot k)
+      rw [hk]
+      rfl
+    refine ⟨m, intArgOf_read hvals ho_k hsm, ?_⟩
+    show minValue ((is.map DomIntArg.slot).map (DomIntArg.read a)) = some m
+    rw [List.map_map]
+    show minValue (is.map (fun i => a[i]!)) = some m
+    rw [← hvs_eq]
+    exact hmin
 
 end LeanFzn.Compiler
