@@ -24,7 +24,7 @@ it says so explicitly.  The MiniZinc 2.10.0 sources are pinned at commit
 `specification/minizinc-2.10.0/`), as in the assumption spec.
 
 Lean file:line references below point at the current corpus
-(lean 4.33.1, core-only — the project has **no mathlib dependency**).
+(lean 4.35.0, core-only — the project has **no mathlib dependency**).
 
 ---
 

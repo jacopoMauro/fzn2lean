@@ -176,7 +176,7 @@ and canonical reading paths.
 
 ## Building and running
 
-Requires Lean 4.33.1; `elan` uses the version specified in `lean-toolchain`.
+Requires Lean 4.35.0; `elan` uses the version specified in `lean-toolchain`.
 
 ```sh
 # Build the library and CLI.
