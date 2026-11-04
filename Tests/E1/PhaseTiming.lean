@@ -29,8 +29,8 @@ not modify `LeanFzn/**` runtime code. Run:
 
   lake env lean --run Tests/E1/PhaseTiming.lean FILE...
 -/
-import LeanFzn.Integration.CertifiedSolve
-import LeanFzn.Integration.LcgOptimize
+import LeanFzn.Legacy.Integration.CertifiedSolve
+import LeanFzn.Legacy.Integration.LcgOptimize
 import LeanFzn.Checker.Check
 open LeanFzn
 
@@ -66,6 +66,8 @@ def dcName : LeanFzn.Solver.Propagation.DomainFiltering.DomConstraint → String
   | .arrayIntElementSlot .. => "arrayIntElementSlot"
   | .arrayVarIntElementSlot .. => "arrayVarIntElementSlot"
   | .arrayVarBoolElementSlot .. => "arrayVarBoolElementSlot"
+  | .setInSlot .. => "setInSlot"
+  | .setInReifSlot .. => "setInReifSlot"
   -- Added by C5 (reified slot families); display names only.
   | .eqReifSlot .. => "eqReifSlot"
   | .leReifSlot .. => "leReifSlot"

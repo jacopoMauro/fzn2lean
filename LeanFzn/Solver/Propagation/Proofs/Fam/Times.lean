@@ -440,9 +440,9 @@ theorem times_sign_arm {st : State} {i j k : Nat}
     conflicts when a deduced bound is falsified by the domain
     (exactly `propPlus`'s shape). -/
 def propTimes (st : State) (i j k : Nat) : PropagationResult :=
-  match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []),
-        domMinI (st.domains.getD j []), domMaxI (st.domains.getD j []),
-        domMinI (st.domains.getD k []), domMaxI (st.domains.getD k []) with
+  match domMinI (st.domains.getD i Dom.empty), domMaxI (st.domains.getD i Dom.empty),
+        domMinI (st.domains.getD j Dom.empty), domMaxI (st.domains.getD j Dom.empty),
+        domMinI (st.domains.getD k Dom.empty), domMaxI (st.domains.getD k Dom.empty) with
   | some xi', some xi, some yj', some yj, some zk', some zk =>
       firstEvent
         ([ -- z ≥ cornerMin xi' xi yj' yj
@@ -830,12 +830,12 @@ theorem timesSlot_pack {st : State} {a : Assignment} {i j k : Nat}
     (hfit : Core.Assignment.Fits st.domains a)
     (hcons : (DomConstraint.timesSlot i j k).SatisfiedBy a)
     {xi' xi yj' yj zk' zk : Int}
-    (hxi' : domMinI (st.domains.getD i []) = some xi')
-    (hxi : domMaxI (st.domains.getD i []) = some xi)
-    (hyj' : domMinI (st.domains.getD j []) = some yj')
-    (hyj : domMaxI (st.domains.getD j []) = some yj)
-    (hzk' : domMinI (st.domains.getD k []) = some zk')
-    (hzk : domMaxI (st.domains.getD k []) = some zk) :
+    (hxi' : domMinI (st.domains.getD i Dom.empty) = some xi')
+    (hxi : domMaxI (st.domains.getD i Dom.empty) = some xi)
+    (hyj' : domMinI (st.domains.getD j Dom.empty) = some yj')
+    (hyj : domMaxI (st.domains.getD j Dom.empty) = some yj)
+    (hzk' : domMinI (st.domains.getD k Dom.empty) = some zk')
+    (hzk : domMaxI (st.domains.getD k Dom.empty) = some zk) :
     ∃ x y z,
       slotInt a i = some x ∧ slotInt a j = some y ∧
       slotInt a k = some z ∧ x * y = z ∧
@@ -1626,7 +1626,8 @@ two exercising the operand-side sign deductions. -/
     z-lower-bound narrowing to `4` (implied literal
     `negLe 2 3`). -/
 def times_smoke_implied : State where
-  domains := [[.int 2, .int 3], [.int 2, .int 3], [.int 0, .int 9]]
+  domains := [Dom.ofList [.int 2, .int 3], Dom.ofList [.int 2, .int 3],
+    Dom.ofList [.int 0, .int 9]]
   trail := []
   decisionLevel := 0
   clauses := []
@@ -1642,7 +1643,8 @@ example : propTimes times_smoke_implied 0 1 2 = .implied (negLe 2 3)
     `y ∈ [2,3]`, `z ∈ [4,9]` — `z`'s bounds `[4,9]` already sit
     inside the corner interval `[4,9]`, so both arms are `.stable`. -/
 def times_smoke_stable : State where
-  domains := [[.int 2, .int 3], [.int 2, .int 3], [.int 4, .int 9]]
+  domains := [Dom.ofList [.int 2, .int 3], Dom.ofList [.int 2, .int 3],
+    Dom.ofList [.int 4, .int 9]]
   trail := []
   decisionLevel := 0
   clauses := []
@@ -1660,7 +1662,8 @@ example : propTimes times_smoke_stable 0 1 2 = .stable := by rfl
     and `0 ≤ zk' = 1`), the implied literal `negLe 0 (−1)` with the
     sign nogood `[x < 0, y < 1, z < 1]`. -/
 def times_smoke_sign_pos : State where
-  domains := [[.int (-3), .int 3], [.int 1, .int 4], [.int 1, .int 12]]
+  domains := [Dom.ofList [.int (-3), .int 3], Dom.ofList [.int 1, .int 4],
+    Dom.ofList [.int 1, .int 12]]
   trail := []
   decisionLevel := 0
   clauses := []
@@ -1679,8 +1682,8 @@ example : propTimes times_smoke_sign_pos 0 1 2 = .implied (negLe 0 (-1))
     and `zk = −1 ≤ 0`), the implied literal `posLe 0 0` with the
     sign nogood `[x > 0, y < 1, z > −1]`. -/
 def times_smoke_sign_neg : State where
-  domains := [[.int (-3), .int 3], [.int 1, .int 4],
-    [.int (-12), .int (-1)]]
+  domains := [Dom.ofList [.int (-3), .int 3], Dom.ofList [.int 1, .int 4],
+    Dom.ofList [.int (-12), .int (-1)]]
   trail := []
   decisionLevel := 0
   clauses := []

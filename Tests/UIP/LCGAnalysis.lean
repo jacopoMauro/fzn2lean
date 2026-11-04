@@ -1,5 +1,15 @@
-import LeanFzn.Integration.Chronological
-import LeanFzn.Solver
+import LeanFzn.Legacy.Integration.Chronological
+import LeanFzn.Legacy.Solver.Propagation
+import LeanFzn.Legacy.Solver.Chronological
+import LeanFzn.Legacy.Solver.Reference
+import LeanFzn.Legacy.Solver.UIP.SchedulerState
+import LeanFzn.Legacy.Solver.UIP.SchedulerStep
+import LeanFzn.Legacy.Solver.UIP.AnalysisEvents
+import LeanFzn.Legacy.Solver.Propagation.ExplainedPropagation
+import LeanFzn.Legacy.Solver.Propagation.BackjumpFrontier
+import LeanFzn.Legacy.Solver.Propagation.AnalysisProgress
+import LeanFzn.Legacy.Solver.Propagation.ConflictResolution
+import LeanFzn.Solver.Core.Enumerate
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 
@@ -39,6 +49,16 @@ Checked here:
 -/
 
 open LeanFzn LeanFzn.Solver LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Integration LeanFzn.Solver.Core
+
+/-- Port helper for the pre-M2 `(remaining, chosen)` fixture frames. -/
+private def legacyFrame (slots : List Domain) (chosen : Assignment) : BranchFrame :=
+  SparseFrame.ofPrefixFrame (slots, chosen)
+
+/-- One plain value list as a compact domain. -/
+private def D (vs : List Value) : Domain := Dom.ofList vs
+
+/-- A plain box as compact domains. -/
+private def Ds (vss : List (List Value)) : List Domain := vss.map Dom.ofList
 
 private structure TestState where
   passed : Nat
@@ -109,7 +129,7 @@ private def multiConflict : Clause := [negLe 1 7, negLe 2 9]
 /-- The original box of the fixture (R1a: the LCG analyzer's root drop reads
 it): four integer slots with domain `0..12`. -/
 private def multiOrig : List Domain :=
-  List.replicate 4 ((List.range 13).map fun k => Value.int (Int.ofNat k))
+  List.replicate 4 (Dom.ofList ((List.range 13).map fun k => Value.int (Int.ofNat k)))
 
 /-- How many literals of `c` are falsified by a level-`lvl` trail entry. -/
 private def currentLevelLits (trail : List TrailEntry) (lvl : Nat)
@@ -157,7 +177,7 @@ def main : IO UInt32 := do
     (ConflictShape.ofConflict 3 [negLe 1 7] == .analyzable)
   -- 4. sparse-domain singleton collapse: {0,2,5} minus {0,2}
   let removals := [dec (posNe 0 0) 1, dec (posNe 0 2) 1]
-  let dom : Domain := [vi 0, vi 2, vi 5]
+  let dom : Domain := D [vi 0, vi 2, vi 5]
   st ← st.check "removal facts collect the removed values"
     (removedValues removals 0 == [0, 2])
   st ← st.check "no admitted value below 5 survives (singleton collapse)"
@@ -175,18 +195,18 @@ def main : IO UInt32 := do
     (valueLiteral 1 (.int 3) == some (negNe 1 3))
   st ← st.check "unsupported value shapes make no decision literal"
     (valueLiteral 0 (.array []) == none && valueLiteral 0 (.setOfInt (.enumeration [])) == none)
-  let bs0 : BranchState (fun _ => true) := BranchState.init ([[.bool true]], [])
+  let bs0 : BranchState (fun _ => true) := BranchState.init (legacyFrame (Ds [[.bool true, .bool false]]) [])
   st ← st.check "decideFirst records the chosen Boolean alternative"
-    (match decideFirst bs0 ([[.bool true]], []) with
+    (match decideFirst bs0 (legacyFrame (Ds [[.bool true, .bool false]]) []) with
      | some (bs', f') =>
-         bs'.level == 1 && f' == ([], [.bool true]) &&
+         bs'.level == 1 && f' == ({ doms := Ds [[.bool true]], order := [0] } : BranchFrame) &&
          trailEq bs'.trail [dec (posBool 0 true) 1]
      | none => false)
   -- 6. repeated deductions on a stable frame record nothing
   -- 6. per-step recording: stable adds nothing, conflict excludes the
   -- branch, a mass-decreasing deduction appends exactly one entry
-  let bsx : BranchState (fun _ => true) := BranchState.init ([[vi 0, vi 1, vi 2]], [])
-  let fx : BranchFrame := ([[vi 0, vi 1, vi 2]], [])
+  let bsx : BranchState (fun _ => true) := BranchState.init (legacyFrame (Ds [[vi 0, vi 1, vi 2]]) [])
+  let fx : BranchFrame := legacyFrame (Ds [[vi 0, vi 1, vi 2]]) []
   let evStable := applyEvent bsx fx .stable
   st ← st.check "stable step keeps the frame and records nothing"
     (evStable.frame == some fx && trailEq evStable.state.trail bsx.trail)
@@ -198,7 +218,7 @@ def main : IO UInt32 := do
     (.implied (posLe 0 1) [posLe 0 1] false false)
   st ← st.check "mass-decreasing deduction narrows the frame"
     (match evImplied.frame with
-     | some g => g.1 == ([[vi 0, vi 1]] : List Domain) && g.2 == ([] : Assignment)
+     | some g => g.doms == Ds [[vi 0, vi 1]] && g.order == ([] : List Nat)
      | none => false)
   st ← st.check "mass-decreasing deduction records exactly one entry"
     (evImplied.state.trail.length == bsx.trail.length + 1 &&
@@ -214,13 +234,13 @@ def main : IO UInt32 := do
     (evNoop.frame == some fx && trailEq evNoop.state.trail bsx.trail)
   -- 7. exact restoration: checkpoint trail plus one asserting entry
   let cp : BranchState (fun _ => true) :=
-    { frame := ([], [vi 1]), trail := [dec (posLe 0 5) 1], level := 1,
+    { frame := legacyFrame [] [vi 1], trail := [dec (posLe 0 5) 1], level := 1,
       learned := [] }
   let plan : BackjumpPlan (fun _ => true) :=
     { target := 1, checkpoint := cp, asserting := negLe 1 7,
       learned := [negLe 1 7, negLe 0 5] }
   let cur : BranchState (fun _ => true) :=
-    { frame := ([], [vi 1, vi 2]), trail := multiTrail, level := 3,
+    { frame := legacyFrame [] [vi 1, vi 2], trail := multiTrail, level := 3,
       learned := [[negLe 9 9]] }
   let out := plan.execute cur
   st ← st.check "restoration keeps the checkpoint trail exactly"
@@ -346,7 +366,7 @@ def main : IO UInt32 := do
      workCost [multiConflict] < workCost ([] :: [multiConflict]) &&
      workCost [] < workCost [(negLe 1 7, [negLe 1 7]).2])
   -- 10. verdict agreement with the exhaustive oracle on a small model
-  let doms : List (List Value) := [[vi 0, vi 1], [vi 0, vi 1]]
+  let doms : List Domain := Ds [[vi 0, vi 1], [vi 0, vi 1]]
   let cs : List DomConstraint := [.ltSlot 0 1]
   let verdict := solveDom { names := [], domains := doms, constraints := cs,
                             objective := (), clauses := [] } []
@@ -358,7 +378,7 @@ def main : IO UInt32 := do
      | .unsat => !oracle
      | .unknown => false)
   -- 11. the analysed driver: pruning reduces work, verdicts still agree
-  let doms2 : List (List Value) := List.replicate 3 [vi 0, vi 1]
+  let doms2 : List Domain := Ds (List.replicate 3 [vi 0, vi 1])
   let cs2 : List DomConstraint := [.leSlot 0 2]
   let prob2 : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
     { names := [], domains := doms2, constraints := cs2, objective := (),
@@ -376,7 +396,7 @@ def main : IO UInt32 := do
     (analysed.2.checkedLeaves <= plain.2.checkedLeaves + 1)
   -- 12. prefix refutation is conservative: undecided slots never refute
   st ← st.check "a clause over an undecided slot does not refute"
-    (!refutedBy [posLe 1 3] ([[vi 0, vi 1]], []))
+    (!refutedBy [posLe 1 3] (Ds [[vi 0, vi 1]], []))
   st ← st.check "a clause falsified at the chosen prefix refutes"
     (refutedBy [posLe 0 0] ([], [vi 5]))
   st ← st.check "an empty clause refutes every frame"
@@ -385,11 +405,11 @@ def main : IO UInt32 := do
     ((pruneFrames [[posLe 0 0]] [([], [vi 5]), ([], [vi 0])]).length == 1)
   -- 13. A1 acceptance: with a chosen prefix, literals still read the
   -- ORIGINAL slot. `fullDomains` = singleton prefix domains ++ remaining.
-  let f2 : BranchFrame := ([[vi 7]], [vi 5, .bool true])
+  let f2 : BranchFrame := legacyFrame (Ds [[vi 7]]) [vi 5, .bool true]
   st ← st.check "fullDomains reads the pinned prefix singletons"
-    ((fullDomains f2).getD 0 [] == [vi 5] &&
-     (fullDomains f2).getD 1 [] == [.bool true] &&
-     (fullDomains f2).getD 2 [] == [vi 7] &&
+    (Dom.enum ((fullDomains f2).getD 0 Dom.empty) == [vi 5] &&
+     Dom.enum ((fullDomains f2).getD 1 Dom.empty) == [.bool true] &&
+     Dom.enum ((fullDomains f2).getD 2 Dom.empty) == [vi 7] &&
      (fullDomains f2).length == 3)
   st ← st.check "a literal for original slot 2 reads the third variable"
     (literalImpossible f2 (posLe 2 4) == true &&
@@ -403,37 +423,39 @@ def main : IO UInt32 := do
      literalImpossible f2 (posLe 1 1) == false &&
      literalImpossible f2 (posLe 1 0) == true)
   st ← st.check "a decision narrows exactly the decided slot"
-    ((fullDomains ([], [vi 5, .bool true, vi 9])).getD 2 [] == [vi 9] &&
-     (fullDomains ([[vi 7, vi 9]], [vi 5, .bool true])).getD 2 [] ==
+    (Dom.enum ((fullDomains (legacyFrame [] [vi 5, .bool true, vi 9])).getD 2 Dom.empty)
+        == [vi 9] &&
+     Dom.enum ((fullDomains (legacyFrame (Ds [[vi 7, vi 9]]) [vi 5, .bool true])).getD 2 Dom.empty) ==
        [vi 7, vi 9] &&
-     (fullDomains ([[vi 7, vi 9]], [vi 5, .bool true])).getD 0 [] == [vi 5])
+     Dom.enum ((fullDomains (legacyFrame (Ds [[vi 7, vi 9]]) [vi 5, .bool true])).getD 0 Dom.empty)
+       == [vi 5])
   -- 14. A2 resident step: the effect follows from the state's own frame
   -- and database, and the four rows of the transition table are visible.
   let bsA : BranchState (fun _ => true) :=
-    { frame := ([[vi 0, vi 1, vi 2]], []), trail := [], level := 0,
+    { frame := legacyFrame (Ds [[vi 0, vi 1, vi 2]]) [], trail := [], level := 0,
       learned := [] }
   let bsUnit : BranchState (fun _ => true) :=
-    { frame := ([[vi 0, vi 1, vi 2]], []), trail := [], level := 0,
+    { frame := legacyFrame (Ds [[vi 0, vi 1, vi 2]]) [], trail := [], level := 0,
       learned := [[posLe 0 1]] }
   st ← st.check "a unit learned clause yields the productive narrow effect"
     (explainedStep [] [] bsUnit ==
       StepEffect.narrow (leaf := (fun _ : Assignment => true)) (posLe 0 1) [posLe 0 1] [])
   let bsDead : BranchState (fun _ => true) :=
-    { frame := ([[vi 5]], []), trail := [], level := 0,
+    { frame := legacyFrame (Ds [[vi 5]]) [], trail := [], level := 0,
       learned := [[posLe 0 0]] }
   st ← st.check "a refuted clause yields an EMPTY local exclusion"
     (explainedStep [] [] bsDead
       == StepEffect.excluded (leaf := (fun _ : Assignment => true)) [])
   st ← st.check "a propagator conflict with an explanation yields its clause"
     (explainedStep [] [{ watches := [], run := fun _ => .conflict [negLe 0 4] }]
-      { frame := ([[vi 5]], []), trail := [], level := 0, learned := [] }
+      { frame := legacyFrame (Ds [[vi 5]]) [], trail := [], level := 0, learned := [] }
       == StepEffect.excluded (leaf := (fun _ : Assignment => true)) [[negLe 0 4]])
   st ← st.check "a nonproductive deduction yields the stable effect"
     (explainedStep [[posLe 0 9]] [] bsA == StepEffect.stable (leaf := (fun _ : Assignment => true)))
   st ← st.check "a fixpoint yields the stable effect"
     (explainedStep [] [] bsA == StepEffect.stable (leaf := (fun _ : Assignment => true)))
   let bsP : BranchState (fun _ => true) :=
-    { frame := ([[vi 0, vi 1, vi 2]], []),
+    { frame := legacyFrame (Ds [[vi 0, vi 1, vi 2]]) [],
       trail := [dec (posLe 0 1) 0], level := 0,
       learned := [[negNe 0 0]] }
   st ← st.check "a learned unit clause narrows and learns nothing new"
@@ -444,7 +466,7 @@ def main : IO UInt32 := do
   -- a state whose deduction was not the one it recorded.
   let closureUnit := explainedClosure [] [] [] bsUnit
   st ← st.check "the closure narrows the frame, records one entry, keeps the DB"
-    (closureUnit.frame == ([[vi 0, vi 1]], []) &&
+    (closureUnit.frame == legacyFrame (Ds [[vi 0, vi 1]]) [] &&
      closureUnit.trail.length == 1 &&
      closureUnit.learned == [[posLe 0 1]] &&
      closureUnit.level == 0)
@@ -468,26 +490,26 @@ def main : IO UInt32 := do
         explainedStep [] [] bsUnit
           == StepEffect.narrow (leaf := (fun _ : Assignment => true))
                d.literal d.reason d.learned)
-  -- 16. A2 closure with a fresh propagator reason: unlike the frame, the
-  -- learned database only grows. `learnReason = true` is set only by
-  -- `scanPropagators`, so a genuine CP deduction whose explanation clause is
-  -- absent from the database is learned exactly once; the next dispatch is
-  -- nonproductive on the narrowed frame and the closure stops.
+  -- 16. A2 closure with a fresh propagator reason (P2b policy): a CP
+  -- deduction keeps its explanation clause on the trail but does NOT add it
+  -- to the global learned database (`scanPropagators` emits
+  -- `learnReason = false`). The reason is re-derivable from the propagator;
+  -- the next dispatch is nonproductive on the narrowed frame and the closure
+  -- stops.
   let freshClause : Clause := [posNe 0 0, posLe 1 0]
   let freshProp : Propagator :=
     { watches := [], run := fun _ => .implied (posNe 0 0) { clause := freshClause } }
   let bsFresh : BranchState (fun _ => true) :=
-    { frame := ([[vi 0, vi 1, vi 2]], []), trail := [], level := 0, learned := [] }
+    { frame := legacyFrame (Ds [[vi 0, vi 1, vi 2]]) [], trail := [], level := 0, learned := [] }
   let freshExpected : BranchState (fun _ => true) :=
-    { frame := ([[vi 1, vi 2]], []),
+    { frame := legacyFrame (Ds [[vi 1, vi 2]]) [],
       trail := [imp (posNe 0 0) 0 freshClause],
-      level := 0, learned := [freshClause] }
+      level := 0, learned := [] }
   let closureFresh := explainedClosure [] [] [freshProp] bsFresh
-  st ← st.check "a fresh CP reason narrows the frame and learns its clause once"
+  st ← st.check "a fresh CP reason narrows the frame but is not learned globally"
     (stateEq closureFresh freshExpected)
-  st ← st.check "the learned database gained exactly the fresh reason clause"
-    (closureFresh.learned.length == 1 &&
-     closureFresh.learned.any (fun c => litEqs c freshClause) &&
+  st ← st.check "the learned database is unchanged by the fresh CP reason"
+    (closureFresh.learned.length == 0 &&
      closureFresh.trail.length == 1 &&
      closureFresh.trail.all (fun e =>
        litEq e.literal (Literal.norm (posNe 0 0)) && e.level == 0 &&
@@ -496,14 +518,14 @@ def main : IO UInt32 := do
        | some r => litEqs r.clause freshClause))
   st ← st.check "the closure is again at a fixpoint after the fresh reason"
     (stateEq (explainedClosure [] [] [freshProp] closureFresh) closureFresh)
-  -- 16b. Contrast: a DATABASE-sourced unit deduction (`scanDatabase`) carries
-  -- `learnReason = false` — the clause is already globally known through the
-  -- learned database — so it never re-learns the clause, even when `original`
-  -- does not contain it (the `fromLearned` tag is then true; it only feeds the
-  -- statistics). Only the frame narrows and the trail grows, so the learned
-  -- database is returned unchanged.
+  -- 16b. Contrast: a DATABASE-sourced unit deduction (`scanDatabase`) also
+  -- carries `learnReason = false` — the clause is already globally known
+  -- through the learned database — so it never re-learns the clause, even
+  -- when `original` does not contain it (the `fromLearned` tag is then true;
+  -- it only feeds the statistics). Only the frame narrows and the trail
+  -- grows, so the learned database is returned unchanged.
   let dbExpected : BranchState (fun _ => true) :=
-    { frame := ([[vi 0]], []),
+    { frame := legacyFrame (Ds [[vi 0]]) [],
       trail := [dec (posLe 0 1) 0, imp (negNe 0 0) 0 [negNe 0 0]],
       level := 0, learned := [[negNe 0 0]] }
   let closureDb := explainedClosure [] [] [] bsP
@@ -545,7 +567,7 @@ example {bs : BranchState (fun _ => true)} {l : Literal} {c : Clause}
 satisfy the recorded-entry obligation for a non-pivot literal. -/
 example (l q : Literal) (hne : q ≠ l.norm) :
     ¬ DomReasonRecorded (leaf := fun _ => true)
-      { frame := ([[]], []), trail := [], level := 0, learned := [] } l [q] := by
+      { frame := legacyFrame (Ds [[]]) [], trail := [], level := 0, learned := [] } l [q] := by
   intro h
   obtain ⟨e, he, _⟩ := List.mem_map.mp (h q (by simp) hne)
   simp at he

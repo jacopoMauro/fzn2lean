@@ -40,26 +40,33 @@ def scanAll (st : State) : Option (Sum Clause (Literal × Reason)) :=
 
 /-! ## Enqueue and domain maintenance -/
 
-/-- Keep only domain values whose integer view passes `keep`. -/
-def domFilterInt (keep : Int → Bool) (d : List Value) : List Value :=
-  d.filter fun v =>
-    match v with
-    | .int i => keep i
-    | .bool b => keep (if b then 1 else 0)
-    | _ => true
+/-- The keep test of the integer filter on one value. -/
+def domFilterIntKeep (keep : Int → Bool) : Value → Bool
+  | .int i => keep i
+  | .bool b => keep (if b then 1 else 0)
+  | _ => true
+
+/-- Keep only domain values whose integer view passes `keep`.  When the
+    filter removes nothing the original domain is returned unchanged
+    (the denotation is the same, but the identity is definitional and
+    keeps the root-fact fold proofs free of canonicality premises). -/
+def domFilterInt (keep : Int → Bool) (d : Domain) : Domain :=
+  let vs := Dom.enum d
+  let kept := vs.filter (domFilterIntKeep keep)
+  if kept.length = vs.length then d else Dom.ofList kept
 
 /-- Replace slot `s`'s domain by `f` applied to its current value
     (identity past the end of the slot list). -/
-def updateSlot (doms : List (List Value)) (s : Nat)
-    (f : List Value → List Value) : List (List Value) :=
-  setSlot doms s (f (doms.getD s []))
+def updateSlot (doms : List Domain) (s : Nat)
+    (f : Domain → Domain) : List Domain :=
+  doms.set s (f (doms.getD s Dom.empty))
 
 /-- Apply the domain filter implied by literal `l`: Boolean atoms fix the
     slot to the forced value; positive order literals keep `≤ k`;
     negative ones keep `> k`; positive value-removal literals remove
     exactly `k` (keeping every other value, sets/arrays included);
     negative ones pin to the singleton `k`. -/
-def domOfLit (doms : List (List Value)) (l : Literal) : List (List Value) :=
+def domOfLit (doms : List Domain) (l : Literal) : List Domain :=
   match l.atom with
   | .intLe s k =>
       if l.positive then
@@ -67,7 +74,8 @@ def domOfLit (doms : List (List Value)) (l : Literal) : List (List Value) :=
       else
         updateSlot doms s (fun d => domFilterInt (fun p => p > k) d)
   | .boolEq s b =>
-      updateSlot doms s (fun d => d.filter (fun v => v.eqB (.bool (if l.positive then b else !b))))
+      updateSlot doms s (fun d => d.filter (fun v =>
+        v.eqB (.bool (if l.positive then b else !b))))
   | .intNe s k =>
       if l.positive then
         updateSlot doms s (fun d => domFilterInt (fun p => p ≠ k) d)
@@ -135,8 +143,37 @@ def fitsB (problem : Problem Constraint Objective)
   a.length == problem.domains.length &&
     (List.range a.length).all fun s =>
       match a[s]? with
-      | some v => valueMemB v (problem.domains.getD s [])
+      | some v => valueMemB v (Dom.enum (problem.domains.getD s Dom.empty))
       | none => true
+
+/-- Runtime twin of `fitsB` that tests membership on the compact domain
+    representation instead of materialising `Dom.enum` for every slot. -/
+def fitsBFast (problem : Problem Constraint Objective)
+    (a : Assignment) : Bool :=
+  a.length == problem.domains.length &&
+    (List.range a.length).all fun s =>
+      match a[s]? with
+      | some v => (problem.domains.getD s Dom.empty).memBool v
+      | none => true
+
+/-- The leaf membership twin agrees with `fitsB`. -/
+theorem fitsBFast_eq (problem : Problem Constraint Objective) (a : Assignment) :
+    fitsBFast problem a = fitsB problem a := by
+  unfold fitsBFast fitsB
+  congr 1
+  apply List.all_congr rfl
+  intro s
+  cases h : a[s]? with
+  | none => rfl
+  | some v =>
+      rw [Bool.eq_iff_iff, Dom.memBool_iff, valueMemB_iff]
+
+/-- Compile `fitsB` as the compact-membership twin; proofs keep the
+reference definition. -/
+@[csimp] theorem fitsB_eq_fast : @fitsB = @fitsBFast := by
+  funext Constraint Objective problem a
+  exact (fitsBFast_eq (Constraint := Constraint) (Objective := Objective)
+    problem a).symm
 
 /-- `fitsB` decides `Fits`. -/
 theorem fitsB_iff {problem : Problem Constraint Objective} {a : Assignment} :
@@ -159,7 +196,8 @@ theorem fitsB_iff {problem : Problem Constraint Objective} {a : Assignment} :
       rw [hget] at hval
       injection hval with hval
       subst hval
-      exact valueMemB_iff.mp hall'
+      exact (DomainLike.mem_iff _ _).mpr
+        (by simpa [domElems_eq_enum] using valueMemB_iff.mp hall')
   · intro h
     obtain ⟨hlen, hmem⟩ := h
     simp only [fitsB, beq_iff_eq, Bool.and_eq_true]
@@ -171,7 +209,10 @@ theorem fitsB_iff {problem : Problem Constraint Objective} {a : Assignment} :
     | none => simp only [hget]
     | some v =>
       simp only [hget]
-      exact valueMemB_iff.mpr (hmem slot v hget)
+      exact valueMemB_iff.mpr (by
+        have hv := (DomainLike.mem_iff
+          (problem.domains.getD slot DomainLike.empty) v).mp (hmem slot v hget)
+        simpa [domElems_eq_enum] using hv)
 
 /-! ## The search loop -/
 
@@ -182,8 +223,8 @@ theorem fitsB_iff {problem : Problem Constraint Objective} {a : Assignment} :
     extrema, so conflict analysis can resolve domain-derived causes, and
     `trailLo`/`trailHi` reproduce the initial bounds before any
     decision. -/
-def rootFacts (doms : List (List Value)) : List Literal :=
-  let rec go (s : Nat) (ds : List (List Value)) : List Literal :=
+def rootFacts (doms : List Domain) : List Literal :=
+  let rec go (s : Nat) (ds : List Domain) : List Literal :=
     match ds with
     | [] => []
     | d :: rest =>
@@ -202,7 +243,7 @@ def initialStateWithRoots (problem : Problem Constraint Objective) : State :=
 /-- Pick a branching literal: `¬(s ≤ mid)` bisection on the first slot
     whose domain still has at least two integer values. -/
 def decideLiteral (st : State) : Option Literal :=
-  let rec go (s : Nat) (doms : List (List Value)) : Option Literal :=
+  let rec go (s : Nat) (doms : List Domain) : Option Literal :=
     match doms with
     | [] => none
     | d :: rest =>
@@ -227,7 +268,7 @@ def trailBoolPinsOk (problem : Problem Constraint Objective)
   trail.all fun e =>
     match e.literal.atom with
     | .boolEq s _ =>
-        problem.domains.getD s [] |>.all fun v =>
+        Dom.enum (problem.domains.getD s Dom.empty) |>.all fun v =>
           match v with
           | .bool _ => true
           | _ => false
@@ -236,7 +277,7 @@ def trailBoolPinsOk (problem : Problem Constraint Objective)
 /-- The complete assignment under all-singleton domains. -/
 def singletonAssignment (st : State) : Option Assignment :=
   st.domains.mapM fun d =>
-    match d with
+    match Dom.enum d with
     | [v] => some v
     | _ => none
 

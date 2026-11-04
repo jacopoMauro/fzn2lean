@@ -1,5 +1,3 @@
-/- Component library root; imports only its owned modules. -/
+/- Shared historical reference semantics required by compiler/propagation proofs.
+Executable comparison strategies are isolated under Legacy/Solver/Reference. -/
 import LeanFzn.Solver.Reference.Engine
-import LeanFzn.Solver.Reference.Proofs.Search
-import LeanFzn.Solver.Reference.Search
-import LeanFzn.Solver.Reference.Enumerate

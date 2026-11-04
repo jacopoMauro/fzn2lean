@@ -24,9 +24,9 @@ open LeanFzn LeanFzn.Solver.Core
 
 /-- In-range read-back: updating slot `s` (with `s` in the doms range)
     and reading it back gives exactly the update's image. -/
-theorem updateSlot_getD_eq : ∀ (doms : List (List Value)) (s : Nat)
-    (f : List Value → List Value), s < doms.length →
-    (updateSlot doms s f).getD s [] = f (doms.getD s []) := by
+theorem updateSlot_getD_eq : ∀ (doms : List Domain) (s : Nat)
+    (f : Domain → Domain), s < doms.length →
+    (updateSlot doms s f).getD s Dom.empty = f (doms.getD s Dom.empty) := by
   intro doms
   induction doms with
   | nil => intro s f h; exact absurd h (Nat.not_lt_zero s)
@@ -38,28 +38,28 @@ theorem updateSlot_getD_eq : ∀ (doms : List (List Value)) (s : Nat)
           -- unfold updateSlot on the tail
           have hunfold : updateSlot (d :: ds) (s' + 1) f
               = d :: updateSlot ds s' f := by
-            show setSlot (d :: ds) (s' + 1)
-                (f ((d :: ds).getD (s' + 1) []))
-              = d :: setSlot ds s' (f (ds.getD s' []))
-            have hgetD : (d :: ds).getD (s' + 1) [] = ds.getD s' [] := rfl
+            show (d :: ds).set (s' + 1)
+                (f ((d :: ds).getD (s' + 1) Dom.empty))
+              = d :: ds.set s' (f (ds.getD s' Dom.empty))
+            have hgetD : (d :: ds).getD (s' + 1) Dom.empty = ds.getD s' Dom.empty := rfl
             rw [hgetD]
             rfl
           rw [hunfold]
           -- read back at the same index: List.getD_cons_succ fires
           rw [List.getD_cons_succ]
           -- the image side:
-          rw [show (d :: ds).getD (s' + 1) [] = ds.getD s' [] from rfl]
+          rw [show (d :: ds).getD (s' + 1) Dom.empty = ds.getD s' Dom.empty from rfl]
           exact ih s' f (by
             show s' < ds.length
             simpa using h)
 
 /-- Forward same-slot membership: a value in the update's image is in
     the updated slot domain (in-range read-back, membership form). -/
-theorem mem_updateSlot_of_mem : ∀ (doms : List (List Value)) (s : Nat)
-    (f : List Value → List Value) (v : Value),
+theorem mem_updateSlot_of_mem : ∀ (doms : List Domain) (s : Nat)
+    (f : Domain → Domain) (v : Value),
     s < doms.length →
-    v ∈ f (doms.getD s []) →
-    v ∈ (updateSlot doms s f).getD s [] := by
+    v ∈ f (doms.getD s Dom.empty) →
+    v ∈ (updateSlot doms s f).getD s Dom.empty := by
   intro doms
   induction doms with
   | nil => intro s f v h _; exact absurd h (Nat.not_lt_zero s)
@@ -71,11 +71,11 @@ theorem mem_updateSlot_of_mem : ∀ (doms : List (List Value)) (s : Nat)
           -- both sides reduce by List.getD_cons_succ to tail reads
           have hupd : updateSlot (d :: ds) (s' + 1) f
               = d :: updateSlot ds s' f := by
-            show setSlot (d :: ds) (s' + 1) (f ((d :: ds).getD (s' + 1) []))
-              = d :: setSlot ds s' (f (ds.getD s' []))
-            rw [show (d :: ds).getD (s' + 1) [] = ds.getD s' [] from rfl]
+            show (d :: ds).set (s' + 1) (f ((d :: ds).getD (s' + 1) Dom.empty))
+              = d :: ds.set s' (f (ds.getD s' Dom.empty))
+            rw [show (d :: ds).getD (s' + 1) Dom.empty = ds.getD s' Dom.empty from rfl]
             rfl
-          show v ∈ (updateSlot (d :: ds) (s' + 1) f).getD (s' + 1) []
+          show v ∈ (updateSlot (d :: ds) (s' + 1) f).getD (s' + 1) Dom.empty
           rw [hupd, List.getD_cons_succ]
           -- now the goal is the IH's conclusion modulo the reduction of
           -- the premise's getD to the tail's
@@ -86,9 +86,9 @@ theorem mem_updateSlot_of_mem : ∀ (doms : List (List Value)) (s : Nat)
 /-- At an untouched slot `s ≠ s0`, `updateSlot doms s0 f` leaves the
     slot domain alone. Proved by a plain structural induction (the
     past-the-end degenerate case included). -/
-theorem updateSlot_getD_ne : ∀ (doms : List (List Value)) (s0 : Nat)
-    (f : List Value → List Value) (s : Nat), s ≠ s0 →
-    (updateSlot doms s0 f).getD s [] = doms.getD s [] := by
+theorem updateSlot_getD_ne : ∀ (doms : List Domain) (s0 : Nat)
+    (f : Domain → Domain) (s : Nat), s ≠ s0 →
+    (updateSlot doms s0 f).getD s Dom.empty = doms.getD s Dom.empty := by
   intro doms
   induction doms with
   | nil =>
@@ -102,11 +102,11 @@ theorem updateSlot_getD_ne : ∀ (doms : List (List Value)) (s0 : Nat)
           | zero => exact absurd rfl hne
           | succ s' => rfl
       | succ s0' =>
-          show (d :: updateSlot ds s0' f).getD s [] = (d :: ds).getD s []
+          show (d :: updateSlot ds s0' f).getD s Dom.empty = (d :: ds).getD s Dom.empty
           cases s with
           | zero => rfl
           | succ s' =>
-              show (updateSlot ds s0' f).getD s' [] = ds.getD s' []
+              show (updateSlot ds s0' f).getD s' Dom.empty = ds.getD s' Dom.empty
               exact ih s0' f s' (fun hcon => hne (by rw [hcon]))
 
 end LeanFzn.Solver.Propagation

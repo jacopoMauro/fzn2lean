@@ -102,7 +102,7 @@ def ScanCost.add (a b : ScanCost) : ScanCost :=
 /-- Verbatim `literalImpossible` + value-check counter. Returns
 `(impossible, valueChecks)`. -/
 def litImpossibleC (f : BranchFrame) (l : Literal) : Bool × Nat :=
-  let vs := (Frame.domains f).getD l.atom.slot []
+  let vs := Dom.enum ((Frame.domains f).getD l.atom.slot Dom.empty)
   (vs.all (fun v => !l.valueHolds v), vs.length)
 
 /-- Verbatim `clauseRemaining` + counters. Returns
@@ -125,16 +125,16 @@ def productiveC (l : Literal) (f : BranchFrame) : Bool × ScanCost :=
     (decide (Frame.mass g < Frame.mass f),
      { productiveCalls := 1, productiveFilterFrameCalls := 1,
        productiveFilterFrameValueChecks := frameValueCount f,
-       productiveMassCalls := 2, productiveMassSlots := 2 * f.1.length })
+       productiveMassCalls := 2, productiveMassSlots := 2 * f.doms.length })
 
 /-- Verbatim `frameViewedB` + value counter. -/
 def frameViewedC (f : BranchFrame) : Bool × Nat :=
-  let vs := (Frame.domains f).flatten
+  let vs := (Frame.domains f).flatMap Dom.enum
   (vs.all (fun v => v.intView != none), vs.length)
 
 /-- Verbatim `frameLiveB` + slot counter. -/
 def frameLiveC (f : BranchFrame) : Bool × Nat :=
-  (f.1.all (fun d => !d.isEmpty), f.1.length)
+  (f.doms.all (fun d => !d.isEmpty), f.doms.length)
 
 /-- Verbatim `scanDatabase` + counters. Returns `(event, cost)`. -/
 def scanDatabaseC (original : List Clause) (f : BranchFrame) :
@@ -169,7 +169,7 @@ def scanPropagatorsC (f : BranchFrame) : List Propagator → PruningEvent × Sca
         (.conflict (if c.isEmpty then [] else [c]), base)
     | .implied l r =>
         let (pr, pc) := productiveC l f
-        if pr then (.implied l r.clause true false, base.add pc)
+        if pr then (.implied l r.clause false false, base.add pc)
         else
           let (e, c) := scanPropagatorsC f rest
           (e, (base.add c).add pc)
@@ -272,7 +272,7 @@ structure RunCounts where
 /-- Consume a transition result so the compiler cannot eliminate the timed
 call as dead code; returns a cheap digest of the real result. -/
 def transDigest {leaf : Assignment → Bool} : SchedulerTransition leaf → Nat
-  | .propagate next => next.branch.trail.length + next.branch.frame.1.length
+  | .propagate next => next.branch.trail.length + next.branch.frame.doms.length
   | .decide next _ => next.branch.trail.length + next.checkpoints.length
   | .analyzeConflict next _ => next.stats.conflicts
   | .learnBackjumpAssert next _ _ => next.branch.trail.length + next.branch.learned.length
@@ -302,7 +302,7 @@ def sampleStep {leaf : Assignment → Bool} (cfg : SchedulerConfig leaf)
     let d := explainedDeduction cfg.original cfg.props cfg.branch
     let ta1 ← IO.monoNanosNow
     let da := match d with
-      | some dd => dd.literal.atom.slot + dd.frame.1.length + 1
+      | some dd => dd.literal.atom.slot + dd.frame.doms.length + 1
       | none => 0
     samples := samples ++ [("deductionScan(explainedDeduction)", ta1 - ta0)]
     sink := sink + da
@@ -327,7 +327,7 @@ def sampleStep {leaf : Assignment → Bool} (cfg : SchedulerConfig leaf)
           let bs'' := syncSlot cfg.orig bs' d.literal.atom.slot
           let t1 ← IO.monoNanosNow
           samples := samples ++ [("propagateArm(narrowState+syncSlot)", t1 - t0)]
-          sink := sink + bs''.trail.length + bs''.frame.1.length
+          sink := sink + bs''.trail.length + bs''.frame.doms.length
       | none => pure ()
   | .decide _ _ =>
       let t0 ← IO.monoNanosNow
@@ -437,7 +437,8 @@ restoreSync={c.restoreSyncCalls}"
 
 /-- Synthetic realistic frame: `nSlots` slots of `nVals` int values, empty prefix. -/
 def synFrame (nSlots nVals : Nat) : BranchFrame :=
-  (List.replicate nSlots ((List.range nVals).map (fun k => Value.int (Int.ofNat k))), [])
+  { doms := List.replicate nSlots
+      (Dom.ofList ((List.range nVals).map (fun k => Value.int (Int.ofNat k)))), order := [] }
 
 /-- Synthetic clause database: `nClauses` clauses over the first slots. -/
 def synDB (nSlots _nVals nClauses : Nat) : List Clause :=
@@ -447,7 +448,7 @@ def synDB (nSlots _nVals nClauses : Nat) : List Clause :=
 /-- Synthetic registered propagators: `leConstHi` bounds borrowed from the real
 `propagatorOfProved`, so the `run` cost is the real one. -/
 def synProps (nSlots nVals nProps : Nat) : List Propagator :=
-  let doms := (synFrame nSlots nVals).1
+  let doms := (synFrame nSlots nVals).doms
   let dcs : List DomConstraint :=
     (List.range nProps).map fun k => .leConstHi (k % nSlots) ((Int.ofNat nVals) + (Int.ofNat k))
   clampProps doms (dcs.filterMap propagatorOfProved)

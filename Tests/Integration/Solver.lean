@@ -1,10 +1,10 @@
 import LeanFzn.Checker.Check
 import LeanFzn.Integration.Emit
-import LeanFzn.Integration.Chronological
-import LeanFzn.Integration.ReferenceCorrectness
-import LeanFzn.Integration.CertifiedSolve
-import LeanFzn.Integration.Certified
-import LeanFzn.Integration.Lcg
+import LeanFzn.Legacy.Integration.Chronological
+import LeanFzn.Legacy.Integration.ReferenceCorrectness
+import LeanFzn.Legacy.Integration.CertifiedSolve
+import LeanFzn.Legacy.Integration.Certified
+import LeanFzn.Legacy.Integration.Lcg
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 
@@ -41,6 +41,38 @@ private def parseOrPanic (src : String) : Model :=
   | .ok m => m
   | .error e => panic! s!"unexpected parse error: {e}"
 
+/-- Exhaustive enumeration of plain value-list domains.  The solver-side
+`allAssigns` now runs on either the `List Value` source carrier or the
+compact `Dom` carrier; these unit oracles stay on plain lists so their
+`Int`/`Bool` arithmetic is untouched. -/
+private def allAssignsList {α : Type} : List (List α) → List (List α)
+  | [] => [[]]
+  | [] :: _ => []
+  | (v :: vs) :: rest =>
+      (allAssignsList rest).flatMap (fun a => (v :: vs).map (fun w => w :: a))
+
+/-- A plain integer list as a solver value list. -/
+private def Vs (is : List Int) : List Value := is.map Value.int
+
+/-- A plain integer box as solver value-list slots. -/
+private def Vss (iss : List (List Int)) : List (List Value) := iss.map Vs
+
+/-- The integer domains of a compiled problem (for the set_in restriction
+    checks below). -/
+private def domIntsOf (p : CompiledProblem DomConstraint) : List (List Int) :=
+  p.domains.map fun d =>
+    (Dom.enum d).filterMap fun v => match v with
+      | .int x => some x
+      | _ => none
+
+/-- How many set-in leaf constraints the compiled problem still carries. -/
+private def setInLeafCount (p : CompiledProblem DomConstraint) : Nat :=
+  p.constraints.foldl (fun n dc =>
+    match dc with
+    | .setInSlot .. => n + 1
+    | .setInReifSlot .. => n + 1
+    | _ => n) 0
+
 /-- A mutable failure flag with a counted check helper. -/
 structure TestState where
   passed : Nat
@@ -70,38 +102,38 @@ def main : IO UInt32 := do
 
   -- all assignments of two two-value slots, in the search's order
   st ← st.check "allAssigns: two 2-value slots"
-    (allAssigns ([[1, 2], [10, 20]] : List (List Int)) ==
+    (allAssignsList ([[1, 2], [10, 20]] : List (List Int)) ==
       [[1, 10], [2, 10], [1, 20], [2, 20]])
   -- an empty slot admits no assignment
   st ← st.check "allAssigns: empty domain slot"
-    (allAssigns ([[], [1]] : List (List Int)) == [])
+    (allAssignsList ([[], [1]] : List (List Int)) == [])
   -- no slots: the single empty assignment
   st ← st.check "allAssigns: no slots"
-    (allAssigns ([] : List (List Int)) == [[]])
+    (allAssignsList ([] : List (List Int)) == [[]])
 
   -- ## Unit tests: search (the executable)
 
   -- finds the first assignment passing the leaf, in order
   st ← st.check "search: first hit in order"
-    (search (fun l => l == [1, 20]) ([[1, 2], [10, 20]] : List (List Int)) []
-      == some [1, 20])
+    (search (fun l => l == Vs [1, 20]) (Vss [[1, 2], [10, 20]] : List (List Value)) []
+      == some (Vs [1, 20]))
   -- no assignment passes: none
   st ← st.check "search: none when leaf always fails"
-    (search (fun _ => false) ([[1, 2], [10, 20]] : List (List Int)) [] == none)
+    (search (fun _ => false) (Vss [[1, 2], [10, 20]] : List (List Value)) [] == none)
   -- an empty domain slot makes the subtree unsatisfiable
   st ← st.check "search: empty domain gives none"
-    (search (fun _ => true) ([[], [1]] : List (List Int)) [] == none)
+    (search (fun _ => true) (Vss [[], [1]] : List (List Value)) [] == none)
   -- no slots: the leaf decides on the empty assignment
   st ← st.check "search: no slots, leaf true"
-    (search (fun l => l == []) ([] : List (List Int)) [] == some [])
+    (search (fun l => l == []) ([] : List (List Value)) [] == some [])
   st ← st.check "search: no slots, leaf false"
-    (search (fun _ => false) ([] : List (List Int)) [] == none)
+    (search (fun _ => false) ([] : List (List Value)) [] == none)
   -- completeness on a tiny instance: search finds an assignment iff
   -- some assignment in allAssigns passes the leaf
-  let leaf : List Int → Bool := fun l => match l with
-    | [a, b] => a + b == 5
+  let leaf : List Value → Bool := fun l => match l with
+    | [.int a, .int b] => a + b == 5
     | _ => false
-  let slots : List (List Int) := [[1, 2, 3], [3, 4]]
+  let slots : List (List Value) := Vss [[1, 2, 3], [3, 4]]
   let searchHit := (search leaf slots []).isSome
   let specHit := (allAssigns slots).any leaf
   st ← st.check "search vs allAssigns agreement"
@@ -186,6 +218,144 @@ def main : IO UInt32 := do
     | .ok _ => false
   st ← st.check "direct: fzn_ globals rejected" ok6
 
+  -- C0 set membership: set_in/set_in_reif over constant sets compile
+  -- and solve through the certified route
+  let s1 := parseOrPanic
+    "var 1..9: x;\nconstraint set_in(x, {2, 3, 5});\nconstraint int_gt(x, 2);\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModel s1 with
+  | .error _ => st ← st.check "set_in: enum model compiles" false
+  | .ok problem =>
+      st ← st.check "set_in: enum model compiles" true
+      match LeanFzn.Solver.Reference.solveCompiled problem with
+      | some a =>
+          match a[0]! with
+          | .int p => st ← st.check "set_in: solution in the set" (p == 3 || p == 5)
+          | _ => st ← st.check "set_in: solution in the set" false
+      | none => st ← st.check "set_in: solution in the set" false
+  let s2 := parseOrPanic
+    "var 1..9: x;\nconstraint set_in(x, 4..6);\nconstraint int_gt(x, 100);\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModel s2 with
+  | .error _ => st ← st.check "set_in: interval UNSAT compiles" false
+  | .ok problem =>
+      st ← st.check "set_in: interval UNSAT compiles" true
+      st ← st.check "set_in: interval UNSAT yields no assignment"
+        (LeanFzn.Solver.Reference.solveCompiled problem == none)
+  let s3 := parseOrPanic
+    "var 1..9: x;\nvar bool: r;\nconstraint set_in_reif(x, 4..6, r);\nconstraint set_in(x, {7});\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModel s3 with
+  | .error _ => st ← st.check "set_in_reif: reif model compiles" false
+  | .ok problem =>
+      st ← st.check "set_in_reif: reif model compiles" true
+      match LeanFzn.Solver.Reference.solveCompiled problem with
+      | some a =>
+          match a[0]!, a[1]! with
+          | .int p, .bool rb =>
+              st ← st.check "set_in_reif: r agrees with membership"
+                (p == 7 && rb == false)
+          | _, _ => st ← st.check "set_in_reif: r agrees with membership" false
+      | none => st ← st.check "set_in_reif: r agrees with membership" false
+  -- the false-literal reif is precisely reported
+  let s4 := parseOrPanic
+    "var 1..9: x;\nconstraint set_in_reif(x, {0, 2}, false);\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModel s4 with
+  | .error e =>
+      st ← st.check "set_in_reif: false literal precisely reported"
+        (e.contains "complement of a finite set")
+  | .ok _ => st ← st.check "set_in_reif: false literal precisely reported" false
+
+  -- PLAN §3.0 item 2: the full front end turns a constant-set membership
+  -- over a plain finite scalar into a domain restriction and drops the
+  -- leaf constraint.  SAT: the compiled domain is exactly dom(x) ∩ S.
+  let r1 := parseOrPanic
+    "var 1..9: x;\nconstraint set_in(x, {2, 3, 5});\nconstraint int_gt(x, 2);\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModelFull r1 with
+  | .error _ => st ← st.check "set_in restriction: SAT model compiles" false
+  | .ok p =>
+      st ← st.check "set_in restriction: SAT model compiles" true
+      st ← st.check "set_in restriction: compiled domain is dom(x) ∩ S"
+        (domIntsOf p == [[2, 3, 5]])
+      st ← st.check "set_in restriction: the leaf constraint is dropped"
+        (setInLeafCount p == 0)
+  match LeanFzn.Integration.solveCertified r1 with
+  | .sat store =>
+      st ← st.check "set_in restriction: SAT end-to-end witness is in S"
+        (match store (Ident.mk "x") with
+         | some (.int v) => v == 3 || v == 5
+         | _ => false)
+  | _ => st ← st.check "set_in restriction: SAT end-to-end witness is in S" false
+
+  -- UNSAT: the restricted range stays nonempty, so the certified route
+  -- still proves unsatisfiability from the remaining constraints.
+  let r2 := parseOrPanic
+    "var 1..9: x;\nconstraint set_in(x, 4..6);\nconstraint int_gt(x, 100);\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModelFull r2 with
+  | .error _ => st ← st.check "set_in restriction: UNSAT model compiles" false
+  | .ok p =>
+      st ← st.check "set_in restriction: UNSAT model compiles" true
+      st ← st.check "set_in restriction: interval domain is dom(x) ∩ S"
+        (domIntsOf p == [[4, 5, 6]])
+      st ← st.check "set_in restriction: UNSAT leaf constraint is dropped"
+        (setInLeafCount p == 0)
+  st ← st.check "set_in restriction: UNSAT end-to-end"
+    (match LeanFzn.Integration.solveCertified r2 with
+     | .unsat => true
+     | _ => false)
+
+  -- set_in_reif(.., true): the literal pin restricts the domain too.
+  let r3 := parseOrPanic
+    "var 1..9: x;\nconstraint set_in_reif(x, {2, 3, 5}, true);\nconstraint int_eq(x, 4);\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModelFull r3 with
+  | .error _ => st ← st.check "set_in_reif true: model compiles" false
+  | .ok p =>
+      st ← st.check "set_in_reif true: model compiles" true
+      st ← st.check "set_in_reif true: domain is dom(x) ∩ S"
+        (domIntsOf p == [[2, 3, 5]])
+      st ← st.check "set_in_reif true: the leaf constraint is dropped"
+        (setInLeafCount p == 0)
+  st ← st.check "set_in_reif true: UNSAT end-to-end"
+    (match LeanFzn.Integration.solveCertified r3 with
+     | .unsat => true
+     | _ => false)
+
+  -- set_in_reif(.., false): the domain restriction is the finite complement
+  -- dom(x) \ S (the shape §11.5 recorded as blocked), so it now compiles
+  -- and solves instead of being rejected.
+  let r4 := parseOrPanic
+    "var 1..9: x;\nconstraint set_in_reif(x, {0, 2}, false);\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModelFull r4 with
+  | .error _ => st ← st.check "set_in_reif false: model compiles" false
+  | .ok p =>
+      st ← st.check "set_in_reif false: model compiles" true
+      st ← st.check "set_in_reif false: domain is dom(x) \\ S"
+        (domIntsOf p == [[1, 3, 4, 5, 6, 7, 8, 9]])
+      st ← st.check "set_in_reif false: the leaf constraint is dropped"
+        (setInLeafCount p == 0)
+  match LeanFzn.Integration.solveCertified r4 with
+  | .sat store =>
+      st ← st.check "set_in_reif false: SAT end-to-end witness avoids S"
+        (match store (Ident.mk "x") with
+         | some (.int v) => v != 0 && v != 2
+         | _ => false)
+  | _ => st ← st.check "set_in_reif false: SAT end-to-end witness avoids S" false
+  let r5 := parseOrPanic
+    "var 1..9: x;\nconstraint set_in_reif(x, {0, 2}, false);\nconstraint int_eq(x, 2);\nsolve satisfy;"
+  st ← st.check "set_in_reif false: UNSAT end-to-end when x ∈ S"
+    (match LeanFzn.Integration.solveCertified r5 with
+     | .unsat => true
+     | _ => false)
+
+  -- Non-plain shape: a variable reification slot is not a literal, so the
+  -- leaf constraint must be kept and the domain must stay unrestricted.
+  let r6 := parseOrPanic
+    "var 1..9: x;\nvar bool: r;\nconstraint set_in_reif(x, {0, 2}, r);\nsolve satisfy;"
+  match LeanFzn.Compiler.compileModelFull r6 with
+  | .error _ => st ← st.check "set_in_reif variable: leaf kept" false
+  | .ok p =>
+      st ← st.check "set_in_reif variable: domain stays unrestricted"
+        (domIntsOf p == [[1, 2, 3, 4, 5, 6, 7, 8, 9], []])
+      st ← st.check "set_in_reif variable: exactly one leaf constraint kept"
+        (setInLeafCount p == 1)
+
   -- Public LCG acceptance on large finite domains: equality propagation
   -- should select a late witness before enumerating complete assignments.
   let d7 := parseOrPanic
@@ -206,7 +376,7 @@ def main : IO UInt32 := do
         IO.eprintln s!"unexpected rejection: {e}"
     | .ok problem =>
         st ← st.check s!"lcg public: {label} retains the declared domains"
-          (leavesProduct problem.domains == expectedLeaves)
+          (leavesProduct (problem.domains.map Dom.enum) == expectedLeaves)
         let measured := LeanFzn.Integration.solveDomWithStats
           (LeanFzn.Integration.toLCG problem)
         st ← st.check s!"lcg public: {label} propagates to one checked leaf"
@@ -798,7 +968,7 @@ def main : IO UInt32 := do
       st ← st.check "linNe: extracted as .linNe"
         (cp.constraints.any fun dc =>
           match dc with | .linNe .. => true | _ => false)
-  let linne1Spec : Bool := (allAssigns [[1, 2, 3]]).any fun l =>
+  let linne1Spec : Bool := (allAssignsList [[1, 2, 3]]).any fun l =>
     match l with | [a] => a != 2 | _ => false
   st ← st.check "linNe: enumeration finds x ≠ 2 over 1..3" linne1Spec
   match LeanFzn.Integration.solveCertified clinne1 with
@@ -814,7 +984,7 @@ def main : IO UInt32 := do
   let clinne2 := parseOrPanic
     "var -3..3: x;\nvar 4..6: y;\nconstraint int_lin_ne([3,-2],[x,y],5);\nsolve satisfy;"
   let linne2Spec : Bool :=
-    (allAssigns [[-3, -2, -1, 0, 1, 2, 3], [4, 5, 6]]).any fun l =>
+    (allAssignsList [[-3, -2, -1, 0, 1, 2, 3], [4, 5, 6]]).any fun l =>
       match l with | [a, b] => 3 * a - 2 * b != 5 | _ => false
   st ← st.check "linNe: enumeration finds 3x − 2y ≠ 5" linne2Spec
   match LeanFzn.Integration.solveCertified clinne2 with
@@ -829,7 +999,7 @@ def main : IO UInt32 := do
   -- is violated at every enumerated point
   let clinne3 := parseOrPanic
     "var 2..2: x;\nconstraint int_lin_ne([1],[x],2);\nsolve satisfy;"
-  let linne3Spec : Bool := (allAssigns [[2]]).any fun l =>
+  let linne3Spec : Bool := (allAssignsList [[2]]).any fun l =>
     match l with | [a] => a != 2 | _ => false
   st ← st.check "linNe: enumeration finds no x ≠ 2 in {2}" (!linne3Spec)
   st ← st.check "certified: int_lin_ne([1],[x],2) over {2} UNSAT"
@@ -841,7 +1011,7 @@ def main : IO UInt32 := do
   -- over 1..3 × 1..3, where x + y = 2 violates x + y ≠ 2
   let clinne4 := parseOrPanic
     "var 1..3: x;\nvar 1..3: y;\nconstraint int_lin_le([1,1],[x,y],2);\nconstraint int_lin_ne([1,1],[x,y],2);\nsolve satisfy;"
-  let linne4Spec : Bool := (allAssigns [[1, 2, 3], [1, 2, 3]]).any fun l =>
+  let linne4Spec : Bool := (allAssignsList [[1, 2, 3], [1, 2, 3]]).any fun l =>
     match l with | [a, b] => a + b <= 2 && a + b != 2 | _ => false
   st ← st.check "linNe: enumeration finds no x+y≤2 ∧ x+y≠2" (!linne4Spec)
   st ← st.check "certified: linLe+linNe multi-var coupled UNSAT"
@@ -1018,7 +1188,7 @@ def main : IO UInt32 := do
         (cp.constraints.any fun dc =>
           match dc with | .boolEqSlot .. => true | _ => false)
   let booleqSpec : Bool :=
-    (allAssigns ([[false, true], [false, true]] : List (List Bool))).any fun l =>
+    (allAssignsList ([[false, true], [false, true]] : List (List Bool))).any fun l =>
       match l with | [a, b] => a == b | _ => false
   st ← st.check "bool_eq: enumeration finds a = b" booleqSpec
   match LeanFzn.Integration.solveCertified cbooleq with
@@ -1033,7 +1203,7 @@ def main : IO UInt32 := do
   let cboolequ := parseOrPanic
     "var bool: a;\nvar bool: b;\nconstraint bool_eq(a, b);\nconstraint bool_not(a, b);\nsolve satisfy;"
   let boolequSpec : Bool :=
-    (allAssigns ([[false, true], [false, true]] : List (List Bool))).any fun l =>
+    (allAssignsList ([[false, true], [false, true]] : List (List Bool))).any fun l =>
       match l with | [a, b] => a == b && b == !a | _ => false
   st ← st.check "bool_eq: enumeration finds no a = b = ¬a" (!boolequSpec)
   st ← st.check "certified: bool_eq + bool_not UNSAT"
@@ -1051,7 +1221,7 @@ def main : IO UInt32 := do
         (cp.constraints.any fun dc =>
           match dc with | .bool2intSlot .. => true | _ => false)
   let bool2intSpec : Bool :=
-    (allAssigns ([[0, 1], [0, 1]] : List (List Int))).any fun l =>
+    (allAssignsList ([[0, 1], [0, 1]] : List (List Int))).any fun l =>
       match l with
       | [b, i] => i == (if b == 1 then 1 else 0)
       | _ => false
@@ -1068,7 +1238,7 @@ def main : IO UInt32 := do
   let cbool2intu := parseOrPanic
     "var bool: b;\nvar 0..1: i;\nconstraint bool2int(b, i);\nconstraint bool_not(b, true);\nconstraint int_ne(i, 0);\nsolve satisfy;"
   let bool2intuSpec : Bool :=
-    (allAssigns ([[0, 1], [0, 1]] : List (List Int))).any fun l =>
+    (allAssignsList ([[0, 1], [0, 1]] : List (List Int))).any fun l =>
       match l with
       | [b, i] => (i == (if b == 1 then 1 else 0)) && b == 0 && i != 0
       | _ => false
@@ -1082,7 +1252,7 @@ def main : IO UInt32 := do
   let cbool2int2 := parseOrPanic
     "var bool: b;\nvar 0..1: i;\nvar 0..1: j;\nconstraint bool2int(b, i);\nconstraint bool2int(b, j);\nconstraint int_ne(i, j);\nsolve satisfy;"
   let bool2int2Spec : Bool :=
-    (allAssigns ([[0, 1], [0, 1], [0, 1]] : List (List Int))).any fun l =>
+    (allAssignsList ([[0, 1], [0, 1], [0, 1]] : List (List Int))).any fun l =>
       match l with
       | [b, i, j] =>
           i == (if b == 1 then 1 else 0) ∧ j == (if b == 1 then 1 else 0) ∧
@@ -1104,7 +1274,7 @@ def main : IO UInt32 := do
         (cp.constraints.any fun dc =>
           match dc with | .arrayBoolAndSlot .. => true | _ => false)
   let abaSpec : Bool :=
-    (allAssigns ([[false, true], [false, true], [false, true]] :
+    (allAssignsList ([[false, true], [false, true], [false, true]] :
       List (List Bool))).any fun l =>
       match l with | [a, b, r] => r == (a && b) | _ => false
   st ← st.check "array_bool_and: enumeration finds r = b1 ∧ b2" abaSpec
@@ -1121,7 +1291,7 @@ def main : IO UInt32 := do
   let cabau := parseOrPanic
     "var bool: b1;\nvar bool: b2;\nvar bool: r;\narray [1..2] of var bool: bs = [b1, b2];\nconstraint array_bool_and(bs, r);\nconstraint bool_not(r, true);\nconstraint bool_not(b1, false);\nconstraint bool_not(b2, false);\nsolve satisfy;"
   let abauSpec : Bool :=
-    (allAssigns ([[false, true], [false, true], [false, true]] :
+    (allAssignsList ([[false, true], [false, true], [false, true]] :
       List (List Bool))).any fun l =>
       match l with
       | [a, b, r] => r == (a && b) && r == false && a == true && b == true
@@ -1144,7 +1314,7 @@ def main : IO UInt32 := do
         (cp.constraints.any fun dc =>
           match dc with | .arrayBoolAndSlot [] _ => true | _ => false)
   let abaNilSpec : Bool :=
-    (allAssigns ([[false, true]] : List (List Bool))).any fun l =>
+    (allAssignsList ([[false, true]] : List (List Bool))).any fun l =>
       match l with | [r] => r == true | _ => false
   st ← st.check "array_bool_and empty: enumeration finds r = true" abaNilSpec
   match LeanFzn.Integration.solveCertified cabaNil with
@@ -1159,7 +1329,7 @@ def main : IO UInt32 := do
   let cabaNilu := parseOrPanic
     "var bool: r;\nconstraint array_bool_and([], r);\nconstraint bool_not(r, true);\nsolve satisfy;"
   let abaNiluSpec : Bool :=
-    (allAssigns ([[false, true]] : List (List Bool))).any fun l =>
+    (allAssignsList ([[false, true]] : List (List Bool))).any fun l =>
       match l with | [r] => r == true && r == false | _ => false
   st ← st.check "array_bool_and empty: enumeration finds no r = true ∧ r = false"
     (!abaNiluSpec)
@@ -1172,7 +1342,7 @@ def main : IO UInt32 := do
   let caba3 := parseOrPanic
     "var bool: b1;\nvar bool: b2;\nvar bool: b3;\nvar bool: r;\narray [1..3] of var bool: bs = [b1, b2, b3];\nconstraint array_bool_and(bs, r);\nsolve satisfy;"
   let aba3Spec : Bool :=
-    (allAssigns ([[false, true], [false, true], [false, true], [false, true]] :
+    (allAssignsList ([[false, true], [false, true], [false, true], [false, true]] :
       List (List Bool))).any fun l =>
       match l with | [a, b, c, r] => r == (a && b && c) | _ => false
   st ← st.check "array_bool_and 3: enumeration finds r = b1 ∧ b2 ∧ b3" aba3Spec
@@ -1210,7 +1380,7 @@ def main : IO UInt32 := do
   let aieGet (i : Int) : Int :=
     match i with | 1 => 10 | 2 => 20 | 3 => 30 | _ => 0
   let aieSpec : Bool :=
-    (allAssigns ([[1, 2, 3], [0, 10, 20, 30, 40]] : List (List Int))).any
+    (allAssignsList ([[1, 2, 3], [0, 10, 20, 30, 40]] : List (List Int))).any
       fun l => match l with | [i, e] => e == aieGet i | _ => false
   st ← st.check "array_int_element: enumeration finds e = xs[i]" aieSpec
   match LeanFzn.Integration.solveCertified caie with
@@ -1226,7 +1396,7 @@ def main : IO UInt32 := do
   let caie3 := parseOrPanic
     "array [1..3] of int: xs = [10, 20, 30];\nvar 3..3: i;\nvar 0..40: e;\nconstraint array_int_element(i, xs, e);\nsolve satisfy;"
   let aie3Spec : Bool :=
-    (allAssigns ([[3], [0, 10, 20, 30, 40]] : List (List Int))).any
+    (allAssignsList ([[3], [0, 10, 20, 30, 40]] : List (List Int))).any
       fun l => match l with | [i, e] => e == aieGet i | _ => false
   st ← st.check "array_int_element: boundary index i = 3 (last) SAT" aie3Spec
   match LeanFzn.Integration.solveCertified caie3 with
@@ -1242,7 +1412,7 @@ def main : IO UInt32 := do
   let caie0 := parseOrPanic
     "array [1..3] of int: xs = [10, 20, 30];\nvar 0..0: i;\nvar 0..40: e;\nconstraint array_int_element(i, xs, e);\nsolve satisfy;"
   let aie0Spec : Bool :=
-    (allAssigns ([[0], [0, 10, 20, 30, 40]] : List (List Int))).any
+    (allAssignsList ([[0], [0, 10, 20, 30, 40]] : List (List Int))).any
       fun l => match l with
         | [i, e] => (i == 1 && e == 10) || (i == 2 && e == 20) ||
             (i == 3 && e == 30)
@@ -1255,7 +1425,7 @@ def main : IO UInt32 := do
   let caie4 := parseOrPanic
     "array [1..3] of int: xs = [10, 20, 30];\nvar 4..4: i;\nvar 0..40: e;\nconstraint array_int_element(i, xs, e);\nsolve satisfy;"
   let aie4Spec : Bool :=
-    (allAssigns ([[4], [0, 10, 20, 30, 40]] : List (List Int))).any
+    (allAssignsList ([[4], [0, 10, 20, 30, 40]] : List (List Int))).any
       fun l => match l with
         | [i, e] => (i == 1 && e == 10) || (i == 2 && e == 20) ||
             (i == 3 && e == 30)
@@ -1271,7 +1441,7 @@ def main : IO UInt32 := do
   let caiec := parseOrPanic
     "array [1..3] of int: xs = [10, 20, 30];\nvar 1..3: i;\nvar 0..40: e;\nconstraint array_int_element(i, xs, e);\nconstraint int_le(e, 15);\nsolve satisfy;"
   let caiecSpec : Bool :=
-    (allAssigns ([[1, 2, 3], [0, 10, 20, 30, 40]] : List (List Int))).any
+    (allAssignsList ([[1, 2, 3], [0, 10, 20, 30, 40]] : List (List Int))).any
       fun l => match l with | [i, e] => e == aieGet i && e <= 15 | _ => false
   st ← st.check "array_int_element: chained e ≤ 15 SAT (read 10 only)" caiecSpec
   match LeanFzn.Integration.solveCertified caiec with
@@ -1284,7 +1454,7 @@ def main : IO UInt32 := do
   let caiecu := parseOrPanic
     "array [1..3] of int: xs = [10, 20, 30];\nvar 1..3: i;\nvar 0..40: e;\nconstraint array_int_element(i, xs, e);\nconstraint int_le(e, 5);\nsolve satisfy;"
   let caiecuSpec : Bool :=
-    (allAssigns ([[1, 2, 3], [0, 10, 20, 30, 40]] : List (List Int))).any
+    (allAssignsList ([[1, 2, 3], [0, 10, 20, 30, 40]] : List (List Int))).any
       fun l => match l with | [i, e] => e == aieGet i && e <= 5 | _ => false
   st ← st.check "array_int_element: chained e ≤ 5 has no read" (!caiecuSpec)
   st ← st.check "certified: array_int_element chained e ≤ 5 UNSAT"
@@ -1304,7 +1474,7 @@ def main : IO UInt32 := do
   let avieGet (a b c i : Int) : Int :=
     match i with | 1 => a | 2 => b | 3 => c | _ => -1
   let avieSpec : Bool :=
-    (allAssigns ([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3], [1, 2, 3],
+    (allAssignsList ([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3], [1, 2, 3],
       [0, 1, 2, 3]] : List (List Int))).any fun l =>
       match l with | [a, b, c, i, e] => e == avieGet a b c i | _ => false
   st ← st.check "array_var_int_element: enumeration finds e = ys[i]" avieSpec
@@ -1323,7 +1493,7 @@ def main : IO UInt32 := do
   let cavie3 := parseOrPanic
     "var 0..3: a;\nvar 0..3: b;\nvar 0..3: c;\narray [1..3] of var int: ys = [a, b, c];\nvar 3..3: i;\nvar 0..3: e;\nconstraint array_var_int_element(i, ys, e);\nsolve satisfy;"
   let avie3Spec : Bool :=
-    (allAssigns ([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3], [3],
+    (allAssignsList ([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3], [3],
       [0, 1, 2, 3]] : List (List Int))).any fun l =>
       match l with | [a, b, c, i, e] => e == avieGet a b c i | _ => false
   st ← st.check "array_var_int_element: boundary index i = 3 SAT" avie3Spec
@@ -1339,7 +1509,7 @@ def main : IO UInt32 := do
   let cavie0 := parseOrPanic
     "var 0..3: a;\nvar 0..3: b;\nvar 0..3: c;\narray [1..3] of var int: ys = [a, b, c];\nvar 0..0: i;\nvar 0..3: e;\nconstraint array_var_int_element(i, ys, e);\nsolve satisfy;"
   let avie0Spec : Bool :=
-    (allAssigns ([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3], [0],
+    (allAssignsList ([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3], [0],
       [0, 1, 2, 3]] : List (List Int))).any fun l =>
       match l with | [a, b, c, i, e] => e == avieGet a b c i | _ => false
   st ← st.check "array_var_int_element: enumeration finds no index-0 read"
@@ -1354,7 +1524,7 @@ def main : IO UInt32 := do
   let caviec := parseOrPanic
     "var 0..3: a;\nvar 0..3: b;\nvar 0..3: c;\narray [1..3] of var int: ys = [a, b, c];\nvar 1..3: i;\nvar 0..3: e;\nconstraint array_var_int_element(i, ys, e);\nconstraint int_le(e, 1);\nsolve satisfy;"
   let caviecSpec : Bool :=
-    (allAssigns ([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3], [1, 2, 3],
+    (allAssignsList ([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3], [1, 2, 3],
       [0, 1, 2, 3]] : List (List Int))).any fun l =>
       match l with | [a, b, c, i, e] => e == avieGet a b c i && e <= 1 | _ => false
   st ← st.check "array_var_int_element: chained e ≤ 1 SAT" caviecSpec
@@ -1371,7 +1541,7 @@ def main : IO UInt32 := do
   let caviecu := parseOrPanic
     "var 2..3: a;\nvar 2..3: b;\nvar 2..3: c;\narray [1..3] of var int: ys = [a, b, c];\nvar 1..3: i;\nvar 0..3: e;\nconstraint array_var_int_element(i, ys, e);\nconstraint int_le(e, 1);\nsolve satisfy;"
   let caviecuSpec : Bool :=
-    (allAssigns ([[2, 3], [2, 3], [2, 3], [1, 2, 3],
+    (allAssignsList ([[2, 3], [2, 3], [2, 3], [1, 2, 3],
       [0, 1, 2, 3]] : List (List Int))).any fun l =>
       match l with
       | [a, b, c, i, e] => e == avieGet a b c i && e <= 1
@@ -1396,7 +1566,7 @@ def main : IO UInt32 := do
   let avbeGet (a b : Bool) (i : Int) : Bool :=
     match i with | 1 => a | 2 => b | _ => false
   let avbeSpec : Bool :=
-    (allAssigns ([[.bool false, .bool true], [.bool false, .bool true],
+    (allAssignsList ([[.bool false, .bool true], [.bool false, .bool true],
       [.int 1, .int 2], [.bool false, .bool true]] : List (List Value))).any
       fun l => match l with
         | [.bool a, .bool b, .int i, .bool e] => e == avbeGet a b i
@@ -1416,7 +1586,7 @@ def main : IO UInt32 := do
   let cavbe2 := parseOrPanic
     "var bool: a;\nvar bool: b;\narray [1..2] of var bool: bs = [a, b];\nvar 2..2: i;\nvar bool: e;\nconstraint array_var_bool_element(i, bs, e);\nsolve satisfy;"
   let avbe2Spec : Bool :=
-    (allAssigns ([[.bool false, .bool true], [.bool false, .bool true],
+    (allAssignsList ([[.bool false, .bool true], [.bool false, .bool true],
       [.int 2], [.bool false, .bool true]] : List (List Value))).any
       fun l => match l with
         | [.bool a, .bool b, .int i, .bool e] => e == avbeGet a b i
@@ -1434,7 +1604,7 @@ def main : IO UInt32 := do
   let cavbe0 := parseOrPanic
     "var bool: a;\nvar bool: b;\narray [1..2] of var bool: bs = [a, b];\nvar 0..0: i;\nvar bool: e;\nconstraint array_var_bool_element(i, bs, e);\nsolve satisfy;"
   let avbe0Spec : Bool :=
-    (allAssigns ([[.bool false, .bool true], [.bool false, .bool true],
+    (allAssignsList ([[.bool false, .bool true], [.bool false, .bool true],
       [.int 0], [.bool false, .bool true]] : List (List Value))).any
       fun l => match l with
         | [.bool a, .bool b, .int i, .bool e] =>
@@ -1453,7 +1623,7 @@ def main : IO UInt32 := do
   let cavbeu := parseOrPanic
     "var bool: a;\nvar bool: b;\narray [1..2] of var bool: bs = [a, b];\nvar 1..2: i;\nvar bool: e;\nconstraint array_var_bool_element(i, bs, e);\nconstraint bool_not(a, false);\nconstraint bool_not(b, false);\nconstraint bool_not(e, true);\nsolve satisfy;"
   let avbeuSpec : Bool :=
-    (allAssigns ([[.bool false, .bool true], [.bool false, .bool true],
+    (allAssignsList ([[.bool false, .bool true], [.bool false, .bool true],
       [.int 1, .int 2], [.bool false, .bool true]] : List (List Value))).any
       fun l => match l with
         | [.bool a, .bool b, .int i, .bool e] =>
@@ -1468,7 +1638,7 @@ def main : IO UInt32 := do
   let cavbec := parseOrPanic
     "var bool: a;\nvar bool: b;\narray [1..2] of var bool: bs = [a, b];\nvar 1..2: i;\nvar bool: e;\nconstraint array_var_bool_element(i, bs, e);\nconstraint bool_not(a, false);\nconstraint bool_not(e, true);\nsolve satisfy;"
   let cavbecSpec : Bool :=
-    (allAssigns ([[.bool false, .bool true], [.bool false, .bool true],
+    (allAssignsList ([[.bool false, .bool true], [.bool false, .bool true],
       [.int 1, .int 2], [.bool false, .bool true]] : List (List Value))).any
       fun l => match l with
         | [.bool a, .bool b, .int i, .bool e] =>
@@ -1840,7 +2010,7 @@ def main : IO UInt32 := do
       st ← st.check "aux: int_times uses one aux slot (3 slots total)"
         (p.domains.length == 3)
       st ← st.check "aux: the aux slot's domain is the singleton {6}"
-        (p.domains[2]! == [.int 6])
+        (Dom.enum p.domains[2]! == [.int 6])
   | .error _ =>
       st ← st.check "aux: int_times uses one aux slot (3 slots total)" (false)
       st ← st.check "aux: the aux slot's domain is the singleton {6}" (false)
@@ -1869,7 +2039,7 @@ def main : IO UInt32 := do
   let reifWitness : (Int → Int → Bool) → List Int → List Int →
       Option Bool → Bool :=
     fun rel dx dy rPin =>
-      (allAssigns ([dx.map .int, dy.map .int, [.bool false, .bool true]] :
+      (allAssignsList ([dx.map .int, dy.map .int, [.bool false, .bool true]] :
         List (List Value))).any fun l =>
         match l with
         | [.int p, .int q, .bool rb] =>
@@ -2195,7 +2365,7 @@ def main : IO UInt32 := do
   let arithWitness : (Int → Int → Int → Bool) → List Int → List Int →
       List Int → Bool :=
     fun rel da db dc =>
-      (allAssigns [da, db, dc]).any fun l =>
+      (allAssignsList [da, db, dc]).any fun l =>
         match l with
         | [p, q, s] => rel p q s
         | _ => false
@@ -2349,9 +2519,9 @@ def main : IO UInt32 := do
         (cp.constraints.any fun dc =>
           match dc with | .minSlot _ _ _ => true | _ => false)
       st ← st.check "int_min literal result: the aux slot is pinned to 0"
-        (cp.domains.any fun d => match d with | [.int 0] => true | _ => false)
+        (cp.domains.any fun d => Dom.enum d == [.int 0])
   st ← st.check "int_min literal: enumeration finds min = 0 (a = 0)"
-    ((allAssigns [[0, 1, 2, 3, 4, 5], [1, 2, 3, 4]] : List (List Int)).any
+    ((allAssignsList [[0, 1, 2, 3, 4, 5], [1, 2, 3, 4]] : List (List Int)).any
       fun l => match l with | [p, q] => min p q == 0 | _ => false)
   st ← st.check "certified: int_min(a, b, 0) store has min a b = 0"
     (match LeanFzn.Integration.solveCertified gminLit with
@@ -2363,7 +2533,7 @@ def main : IO UInt32 := do
   let gminLitU := parseOrPanic
     "var 4..5: a;\nvar 4..5: b;\nconstraint int_min(a, b, 3);\nsolve satisfy;"
   st ← st.check "int_min literal: enumeration finds no min = 3 over {4,5}"
-    (!((allAssigns [[4, 5], [4, 5]] : List (List Int)).any
+    (!((allAssignsList [[4, 5], [4, 5]] : List (List Int)).any
       fun l => match l with | [p, q] => min p q == 3 | _ => false))
   st ← st.check "certified: int_min(a, b, 3) over {4,5} UNSAT"
     (match LeanFzn.Integration.solveCertified gminLitU with
@@ -2426,7 +2596,7 @@ def main : IO UInt32 := do
       st ← st.check "int_min literal-result: PLAN C9 expands to .minSlot over a pinned aux"
         (cp.constraints.any (fun dc =>
           match dc with | .minSlot _ _ _ => true | _ => false) ∧
-         cp.domains.any (fun d => match d with | [.int 2] => true | _ => false))
+         cp.domains.any (fun d => Dom.enum d == [.int 2]))
   st ← st.check "certified: int_min(a, b, 2) store has min a b = 2 (a = 2)"
     (match LeanFzn.Integration.solveCertified gminRRK with
      | .sat store =>
@@ -2448,7 +2618,7 @@ def main : IO UInt32 := do
       st ← st.check "int_max literal-result: PLAN C9 expands to .maxSlot over a pinned aux"
         (cp.constraints.any (fun dc =>
           match dc with | .maxSlot _ _ _ => true | _ => false) ∧
-         cp.domains.any (fun d => match d with | [.int 6] => true | _ => false))
+         cp.domains.any (fun d => Dom.enum d == [.int 6]))
   st ← st.check "certified: int_max(a, b, 6) store has max a b = 6 (a = 6)"
     (match LeanFzn.Integration.solveCertified gmaxRRK with
      | .sat store =>
@@ -2503,7 +2673,7 @@ def main : IO UInt32 := do
         (cp.constraints.any fun dc =>
           match dc with | .maxSlot .. => true | _ => false)
   st ← st.check "array_int_maximum: enumeration finds m = max x y"
-    ((allAssigns [[-2, -1, 0, 1, 2], [-2, -1, 0, 1, 2],
+    ((allAssignsList [[-2, -1, 0, 1, 2], [-2, -1, 0, 1, 2],
         [-2, -1, 0, 1, 2]] : List (List Int)).any fun l =>
       match l with | [xv, yv, mv] => mv == max xv yv | _ => false)
   st ← st.check "certified: array_int_maximum(m, [x, y]) store has m = max x y"
@@ -2590,7 +2760,7 @@ def main : IO UInt32 := do
          | _ => false
      | _ => false)
   st ← st.check "array_int_minimum: enumeration finds m = min x y"
-    ((allAssigns [[-2, -1, 0, 1, 2], [-2, -1, 0, 1, 2],
+    ((allAssignsList [[-2, -1, 0, 1, 2], [-2, -1, 0, 1, 2],
         [-2, -1, 0, 1, 2]] : List (List Int)).any fun l =>
       match l with | [xv, yv, mv] => mv == min xv yv | _ => false)
   st ← st.check "certified: array_int_minimum(m, [x, y]) store has m = min x y"
@@ -3173,7 +3343,7 @@ def main : IO UInt32 := do
       let st1 := propagateLoop 100 (LeanFzn.Integration.lcgProps cp)
         (initialStateWithRoots (LeanFzn.Integration.lcgProblem cp))
       st ← st.check "prop: all_different elimination narrows y to [4, 6]"
-        (match st1.domains.getD 1 [] with
+        (match Dom.enum (st1.domains.getD 1 Dom.empty) with
          | [.int 4, .int 6] => true
          | _ => false)
 
@@ -3187,7 +3357,7 @@ def main : IO UInt32 := do
       let st1 := propagateLoop 100 (LeanFzn.Integration.lcgProps cp)
         (initialStateWithRoots (LeanFzn.Integration.lcgProblem cp))
       st ← st.check "prop: all_different multi-valued source does NOT narrow y"
-        (match st1.domains.getD 1 [] with
+        (match Dom.enum (st1.domains.getD 1 Dom.empty) with
          | [.int 4, .int 5, .int 6] => true
          | _ => false)
 
@@ -3336,7 +3506,7 @@ def main : IO UInt32 := do
       let st1 := propagateLoop 100 (LeanFzn.Integration.lcgProps cp)
         (initialStateWithRoots (LeanFzn.Integration.lcgProblem cp))
       st ← st.check "prop: n-ary array_int_minimum narrows r to [1, 3]"
-        (match st1.domains.getD 3 [] with
+        (match Dom.enum (st1.domains.getD 3 Dom.empty) with
          | [.int 1, .int 2, .int 3] => true
          | _ => false)
 
@@ -3350,7 +3520,7 @@ def main : IO UInt32 := do
       let st1 := propagateLoop 100 (LeanFzn.Integration.lcgProps cp)
         (initialStateWithRoots (LeanFzn.Integration.lcgProblem cp))
       st ← st.check "prop: n-ary array_int_maximum narrows r to [1, 3]"
-        (match st1.domains.getD 3 [] with
+        (match Dom.enum (st1.domains.getD 3 Dom.empty) with
          | [.int 1, .int 2, .int 3] => true
          | _ => false)
 

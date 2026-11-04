@@ -39,7 +39,7 @@ LeanFzn.Solver.UIP.AnalysisEvents (O1's exact event counts).
 -/
 
 import Tests.UIP.OracleFixtures
-import LeanFzn.Solver.UIP.AnalysisEvents
+import LeanFzn.Legacy.Solver.UIP.AnalysisEvents
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 
@@ -60,7 +60,7 @@ learning or backjumping is involved). -/
 `{0,1} × {0}` — only `(0,0)` is a solution, so the branch `x0 = 1` is dead
 while the problem is satisfiable. -/
 def famLocalExclude : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.int 0, .int 1], [.int 0]],
+  { names := [], domains := Ds [[.int 0, .int 1], [.int 0]],
     constraints := [.leSlot 0 1], objective := (), clauses := [] }
 
 /-- The T2a verdict battery: name, model, expected oracle solution count. -/
@@ -122,7 +122,7 @@ stays LOCAL (`ConflictShape.ofConflict`). -/
 
 /-- The T2a root scheduler configuration over the local-exclusion box. -/
 def t2RootCfg : SchedulerConfig (fun _ : Assignment => true) :=
-  SchedulerConfig.init (leaf := fun _ => true) [[.int 0, .int 1], [.int 0]] [] []
+  SchedulerConfig.init (leaf := fun _ => true) (Ds [[.int 0, .int 1], [.int 0]]) [] []
 
 def t2RootUnsatTag : Bool :=
   match conflictStep t2RootCfg [[negLe 0 5]] [] with
@@ -153,7 +153,7 @@ problem itself is SAT with oracle witness `(0,0)`. -/
 /-- The dead branch: frame `x0 ∈ {1}`, the decision recorded, the learned
 unit `x0 ≤ 0` falsified by the frame. -/
 def localDeadState : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 1]], []), trail := [mkDec (negNe 0 1) 1], level := 1,
+  { frame := legacyFrame [[.int 1]] [], trail := [mkDec (negNe 0 1) 1], level := 1,
     learned := [[posLe 0 0]] }
 
 def checkT2LocalExplanation : Bool :=
@@ -213,18 +213,18 @@ literal is `TrailRedundant`. -/
 /-- A database unit `x0 ≠ 0` on the box `{0,1}` (T2's own state; the
 oracle-independent half of the duplicate-decision fixture). -/
 def t2DupState : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 0, .int 1]], []), trail := [], level := 0,
+  { frame := legacyFrame [[.int 0, .int 1]] [], trail := [], level := 0,
     learned := [[posNe 0 0]] }
 
 /-- The successor after the unit was consumed: `0` removed, one entry
 recorded. -/
 def t2DupState2 : BranchState (fun _ : Assignment => true) :=
-  narrowState t2DupState ([[.int 1]], []) (posNe 0 0) [posNe 0 0] []
+  narrowState t2DupState (legacyFrame [[.int 1]] []) (posNe 0 0) [posNe 0 0] []
 
 def checkT2Decisions : Bool :=
-  (stepDecide t2RootCfg (.int 1) [.int 0] [] (negNe 0 1)).stats.decisions == 1 &&
-  (stepDecide t2RootCfg (.int 0) [] [] (negNe 0 0)).stats.decisions == 0 &&
-  (stepDecide t2RootCfg (.int 1) [.int 0] [] (negNe 0 1)).branch.level == 1 &&
+  (stepDecide t2RootCfg 0 (.int 1) (Dom.ofList [.int 0]) (negNe 0 1)).stats.decisions == 1 &&
+  (stepDecide t2RootCfg 0 (.int 0) Dom.empty (negNe 0 0)).stats.decisions == 0 &&
+  (stepDecide t2RootCfg 0 (.int 1) (Dom.ofList [.int 0]) (negNe 0 1)).branch.level == 1 &&
   (explainedDeduction [] [] t2DupState).isSome &&
   decide ((explainedDeduction [] [] t2DupState).map (fun d => d.literal)
     = some (posNe 0 0)) &&
@@ -242,8 +242,8 @@ excludes the dead branch but NOT the surviving SAT witness `(0,0)`. -/
 
 /-- The configuration whose permanent log holds the dead-branch region. -/
 def t2ExCfg : SchedulerConfig (fun _ : Assignment => true) :=
-  { orig := [[.int 0, .int 1], [.int 0]], original := [], props := [],
-    branch := { frame := ([[.int 0, .int 1], [.int 0]], []), trail := [],
+  { orig := Ds [[.int 0, .int 1], [.int 0]], original := [], props := [],
+    branch := { frame := legacyFrame [[.int 0, .int 1], [.int 0]] [], trail := [],
                 level := 0, learned := [] },
     checkpoints := [], pending := [],
     log := ({} : ExhaustionLog).register
@@ -251,7 +251,7 @@ def t2ExCfg : SchedulerConfig (fun _ : Assignment => true) :=
 
 /-- The level-0 plan state of the T2a restored-exhaustion fixture. -/
 def t2ExCpState : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 0, .int 1], [.int 0]], []), trail := [], level := 0,
+  { frame := legacyFrame [[.int 0, .int 1], [.int 0]] [], trail := [], level := 0,
     learned := [] }
 
 /-- A level-0 plan asserting `x0 = 0` (the sibling of the dead branch). -/
@@ -265,7 +265,7 @@ def t2ExEv : ConflictEvidence :=
 
 /-- The restored/narrowed state of the jump. -/
 def t2ExRestored : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 0]], [.int 0, .int 1]), trail := [], level := 0,
+  { frame := legacyFrame [[.int 0]] [.int 0, .int 1], trail := [], level := 0,
     learned := [] }
 
 /-- The T2a learn/backjump/assert successor. -/

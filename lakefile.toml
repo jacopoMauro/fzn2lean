@@ -24,7 +24,7 @@ moreLeanArgs = ["-j2", "-s131072"]
 [[lean_lib]]
 name = "LeanFzn.Compiler"
 globs = ["LeanFzn.Compiler", "LeanFzn.Compiler.+"]
-moreLeanArgs = ["-j2", "-s131072"]
+moreLeanArgs = ["-j1", "-s131072"]
 
 [[lean_lib]]
 name = "LeanFzn.Solver.Core"
@@ -38,12 +38,12 @@ moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_lib]]
 name = "LeanFzn.Solver.Chronological"
-globs = ["LeanFzn.Solver.Chronological", "LeanFzn.Solver.Chronological.+"]
+globs = ["LeanFzn.Legacy.Solver.Chronological", "LeanFzn.Legacy.Solver.Chronological.+"]
 moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_lib]]
 name = "LeanFzn.Solver.UIP"
-globs = ["LeanFzn.Solver.UIP", "LeanFzn.Solver.UIP.+"]
+globs = ["LeanFzn.Legacy.Solver.UIP", "LeanFzn.Legacy.Solver.UIP.+"]
 moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_lib]]
@@ -52,8 +52,18 @@ globs = ["LeanFzn.Solver.Reference", "LeanFzn.Solver.Reference.+"]
 moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_lib]]
+name = "LeanFzn.Engine"
+globs = ["LeanFzn.Engine", "LeanFzn.Engine.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
 name = "LeanFzn.Integration"
 globs = ["LeanFzn.Integration", "LeanFzn.Integration.+"]
+moreLeanArgs = ["-j2", "-s131072"]
+
+[[lean_lib]]
+name = "LeanFzn.Legacy"
+globs = ["LeanFzn.Legacy", "LeanFzn.Legacy.+"]
 moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_lib]]
@@ -192,17 +202,113 @@ name = "tests_lcg_optimize"
 root = "Tests.Integration.LcgOptimize"
 
 [[lean_exe]]
+name = "tests_seed_runner"
+root = "Tests.Integration.SeedRunner"
+
+[[lean_exe]]
 name = "tests_public_lcg"
 root = "Tests.Integration.PublicLcgRunner"
+
+[[lean_exe]]
+name = "tests_search_config"
+root = "Tests.Integration.SearchConfigRunner"
+
+[[lean_exe]]
+name = "tests_annot"
+root = "Tests.Integration.Annot"
 
 [[lean_exe]]
 name = "tests_dbscan"
 root = "Tests.E1.DbScanCounts"
 
 [[lean_exe]]
+name = "tests_heur_timing"
+root = "Tests.E1.HeurTiming"
+
+[[lean_exe]]
 name = "tests_p3b_gate"
 root = "Tests.E1.P3bGateTiming"
 
 [[lean_exe]]
+name = "tests_wide_micro"
+root = "Tests.E1.WideMicro"
+
+[[lean_exe]]
 name = "tests_lcg_heur"
 root = "Tests.Integration.HeurLcgRunner"
+
+[[lean_exe]]
+name = "tests_budget_runner"
+root = "Tests.Integration.BudgetRunner"
+
+[[lean_exe]]
+name = "tests_bisect_runner"
+root = "Tests.Integration.BisectRunner"
+
+[[lean_exe]]
+name = "tests_core_spike"
+root = "Tests.Engine.CoreSpike"
+
+[[lean_exe]]
+name = "tests_engine_prop"
+root = "Tests.Engine.PropTest"
+
+[[lean_exe]]
+name = "tests_engine_queue"
+root = "Tests.Engine.QueueTest"
+
+[[lean_exe]]
+name = "tests_engine_linear"
+root = "Tests.Engine.LinearTest"
+
+[[lean_exe]]
+name = "tests_engine_analyze"
+root = "Tests.Engine.AnalyzeTest"
+
+[[lean_exe]]
+name = "tests_engine_search"
+root = "Tests.Engine.SearchTest"
+
+[[lean_exe]]
+name = "tests_engine_dynamic"
+root = "Tests.Engine.DynamicTest"
+
+[[lean_exe]]
+name = "tests_engine_incumbent"
+root = "Tests.Engine.IncumbentTest"
+
+[[lean_exe]]
+name = "tests_engine_arith"
+root = "Tests.Engine.ArithTest"
+
+[[lean_exe]]
+name = "tests_engine_order"
+root = "Tests.Engine.OrderTest"
+
+[[lean_exe]]
+name = "tests_engine_linear_ext"
+root = "Tests.Engine.LinearExtTest"
+
+[[lean_exe]]
+name = "tests_engine_bool_ext"
+root = "Tests.Engine.BoolExtTest"
+
+[[lean_exe]]
+name = "tests_engine_element"
+root = "Tests.Engine.ElementTest"
+
+[[lean_exe]]
+name = "tests_engine_reduce"
+root = "Tests.Engine.ReduceTest"
+
+[[lean_exe]]
+name = "tests_integration_core_optimize"
+root = "Tests.Integration.CoreOptimizeTest"
+
+[[lean_exe]]
+name = "tests_integration_core_seed"
+root = "Tests.Integration.CoreSeedTest"
+
+[[lean_exe]]
+name = "tests_core_only"
+root = "Tests.CoreOnly.Runtime"

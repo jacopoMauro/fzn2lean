@@ -13,7 +13,19 @@ open LeanFzn LeanFzn.Solver.Core
 
 /-- Every original value of the slot is Boolean. -/
 def booleanSlotB (orig : List Domain) (s : Nat) : Bool :=
-  (orig.getD s []).all fun v => match v with | .bool _ => true | _ => false
+  (orig.getD s Dom.empty).enum.all fun v => match v with | .bool _ => true | _ => false
+
+/-- Structural twin of `booleanSlotB`. -/
+def booleanSlotBFast (orig : List Domain) (s : Nat) : Bool :=
+  (orig.getD s Dom.empty).allBoolBStruct
+
+theorem booleanSlotBFast_eq (orig : List Domain) (s : Nat) :
+    booleanSlotBFast orig s = booleanSlotB orig s := by
+  unfold booleanSlotBFast booleanSlotB
+  rw [Dom.allBoolBStruct_eq]
+  rfl
+
+attribute [implemented_by booleanSlotBFast] booleanSlotB
 
 /-- The truth value of a literal at the Boolean value `c` of its slot (every atom is
 defined at a Boolean, read as 0/1). -/
@@ -26,7 +38,19 @@ def Literal.truthAtBool (l : Literal) (c : Bool) : Bool :=
 
 /-- The Boolean `c` is an original value of slot `s`. -/
 def slotHasBool (orig : List Domain) (s : Nat) (c : Bool) : Bool :=
-  (orig.getD s []).any fun v => match v with | .bool x => x == c | _ => false
+  (orig.getD s Dom.empty).enum.any fun v => match v with | .bool x => x == c | _ => false
+
+/-- Structural twin of `slotHasBool`. -/
+def slotHasBoolFast (orig : List Domain) (s : Nat) (c : Bool) : Bool :=
+  (orig.getD s Dom.empty).hasBoolBStruct c
+
+theorem slotHasBoolFast_eq (orig : List Domain) (s : Nat) (c : Bool) :
+    slotHasBoolFast orig s c = slotHasBool orig s c := by
+  unfold slotHasBoolFast slotHasBool
+  rw [Dom.hasBoolBStruct_eq]
+  rfl
+
+attribute [implemented_by slotHasBoolFast] slotHasBool
 
 /-- On a slot whose original values are all Boolean, implication is the truth table over
 the original values `{false, true}` of the slot (R3b: complete, including root-false `t`). -/
@@ -94,11 +118,14 @@ theorem boolSlotImp_sound {orig : List Domain} {t g : Literal} (h : boolSlotImp 
     have hnone : a[g.atom.slot]? = none := List.getElem?_eq_none (by omega)
     obtain ⟨atom, pos⟩ := g
     cases atom <;> simp_all [Literal.eval, Atom.eval, Atom.slot, slotInt]
-  have hmem : a[g.atom.slot] ∈ orig.getD g.atom.slot [] :=
+  have hmem : a[g.atom.slot] ∈ orig.getD g.atom.slot Dom.empty :=
     hfit.2 _ _ (List.getElem?_eq_getElem hlt)
-  have hmem' : a[g.atom.slot] ∈ orig.getD t.atom.slot [] := by rw [hsl]; exact hmem
+  have hmem' : a[g.atom.slot] ∈ orig.getD t.atom.slot Dom.empty := by rw [hsl]; exact hmem
+  have hmem'' : a[g.atom.slot] ∈ (orig.getD t.atom.slot Dom.empty).enum := by
+    rw [← domElems_eq_enum, ← DomainLike.mem_iff]
+    exact hmem'
   unfold booleanSlotB at hb
-  have hbv := List.all_eq_true.mp hb _ hmem'
+  have hbv := List.all_eq_true.mp hb _ hmem''
   obtain ⟨c, hc⟩ : ∃ c, a[g.atom.slot] = Value.bool c := by
     cases hv : a[g.atom.slot] with
     | bool c => exact ⟨c, rfl⟩
@@ -112,7 +139,7 @@ theorem boolSlotImp_sound {orig : List Domain} {t g : Literal} (h : boolSlotImp 
   have hhas : slotHasBool orig t.atom.slot c = true := by
     unfold slotHasBool
     rw [List.any_eq_true]
-    exact ⟨_, hmem', by rw [hc]; simp⟩
+    exact ⟨_, hmem'', by rw [hc]; simp⟩
   have := List.all_eq_true.mp hall c (by cases c <;> simp)
   rw [hgf, hhas] at this
   cases ht : t.truthAtBool c <;> simp_all
@@ -120,12 +147,12 @@ theorem boolSlotImp_sound {orig : List Domain} {t g : Literal} (h : boolSlotImp 
 
 /-- Integer-view removal of false explains the corresponding Boolean absence. -/
 theorem boolTable_removal_false :
-    boolSlotImp [[Value.bool false, Value.bool true]] (posNe 0 0)
+    boolSlotImp [Dom.ofList [Value.bool false, Value.bool true]] (posNe 0 0)
       (posBool 0 false).negate.norm = true := by decide
 
 /-- Integer-view removal of true explains the corresponding Boolean absence. -/
 theorem boolTable_removal_true :
-    boolSlotImp [[Value.bool false, Value.bool true]] (posNe 0 1)
+    boolSlotImp [Dom.ofList [Value.bool false, Value.bool true]] (posNe 0 1)
       (posBool 0 true).negate.norm = true := by decide
 
 /-- The extension contributes nothing on an integer slot. -/

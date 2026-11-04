@@ -77,24 +77,26 @@ def dcSlotsFull : DomConstraint → List Nat
   | .modGen o₁ o₂ r => o₁.slots ++ o₂.slots ++ r.slots
   | .minPair o₀ o₁ r => o₀.slots ++ o₁.slots ++ r.slots
   | .maxPair o₀ o₁ r => o₀.slots ++ o₁.slots ++ r.slots
+  | .setInSlot i _ => [i]
+  | .setInReifSlot i _ r => [i, r]
 
 /-! ## 2. The forced frame assignment -/
 
 /-- The singleton value at slot `s` of a domain list, if any. -/
-def frameSingleton (doms : List (List Value)) (s : Nat) : Option Value :=
-  match doms.getD s [] with
+def frameSingleton (doms : List Domain) (s : Nat) : Option Value :=
+  match Dom.enum (doms.getD s Dom.empty) with
   | [v] => some v
   | _ => none
 
 /-- Every slot of `dcSlotsFull dc` has a singleton frame domain. -/
-def propCheckReady (dc : DomConstraint) (doms : List (List Value)) : Bool :=
+def propCheckReady (dc : DomConstraint) (doms : List Domain) : Bool :=
   (dcSlotsFull dc).all (fun s => (frameSingleton doms s).isSome)
 
 /-- The forced assignment: the singleton value at every slot where one
 exists, an arbitrary placeholder otherwise (irrelevant off `dcSlotsFull dc`
 under `propCheckReady`, see `satisfiedB_dcSlotsFull_congr`). -/
-def propCheckAssign (doms : List (List Value)) : List Value :=
-  doms.map (fun d => match d with | [v] => v | _ => Value.int 0)
+def propCheckAssign (doms : List Domain) : List Value :=
+  doms.map (fun d => match Dom.enum d with | [v] => v | _ => Value.int 0)
 
 /-- The conflict literal contributed by a singleton slot: `posNe s c` for
 an integer singleton, `posBool s (!b)` for a Boolean singleton — the only
@@ -107,7 +109,7 @@ def singletonLit (s : Nat) (v : Value) : Option Literal :=
 
 /-- `propCheck`'s conflict clause: the disjunction of the singleton
 falsified literals over every slot the constraint reads. -/
-def propCheckConflict (dc : DomConstraint) (doms : List (List Value)) : Clause :=
+def propCheckConflict (dc : DomConstraint) (doms : List Domain) : Clause :=
   (dcSlotsFull dc).filterMap (fun s => (frameSingleton doms s).bind (singletonLit s))
 
 /-! ## 3. The propagator -/
@@ -155,35 +157,34 @@ theorem propCheck_conflict_inv {dc : DomConstraint} {st : State} {c : Clause}
 
 /-! ## 4. The singleton-value agreement lemma -/
 
-theorem frameSingleton_iff {doms : List (List Value)} {s : Nat} {v : Value} :
-    frameSingleton doms s = some v ↔ doms.getD s [] = [v] := by
+theorem frameSingleton_iff {doms : List Domain} {s : Nat} {v : Value} :
+    frameSingleton doms s = some v ↔
+      (doms.getD s Dom.empty).enum = [v] := by
   unfold frameSingleton
-  rcases hd : doms.getD s [] with _ | ⟨x, xs⟩
+  rcases hd : (doms.getD s Dom.empty).enum with _ | ⟨x, xs⟩
   · simp
   · rcases xs with _ | ⟨y, ys⟩
     · simp
     · simp
 
-theorem getElem?_of_getD_eq_singleton {doms : List (List Value)} {s : Nat} {v : Value}
-    (h : doms.getD s [] = [v]) : doms[s]? = some [v] := by
-  rw [List.getD_eq_getElem?_getD] at h
-  cases hget : doms[s]? with
-  | none => rw [hget] at h; simp at h
-  | some d =>
-      rw [hget] at h
-      simp only [Option.getD_some] at h
-      rw [h]
-
 /-- The forced assignment reads exactly the singleton value at every
 slot with one: `propCheckAssign doms` agrees with `frameSingleton doms`
 wherever the latter is defined. -/
-theorem propCheckAssign_getElem? {doms : List (List Value)} {s : Nat} {v : Value}
+theorem propCheckAssign_getElem? {doms : List Domain} {s : Nat} {v : Value}
     (h : frameSingleton doms s = some v) : (propCheckAssign doms)[s]? = some v := by
   have hd := frameSingleton_iff.mp h
-  have hget := getElem?_of_getD_eq_singleton hd
   unfold propCheckAssign
-  rw [List.getElem?_map, hget]
-  rfl
+  rw [List.getElem?_map]
+  cases hget : doms[s]? with
+  | none =>
+      rw [List.getD_eq_getElem?_getD, hget] at hd
+      simp only [Option.getD_none, Dom.enum_empty] at hd
+      simp at hd ⊢
+  | some d =>
+      have hd' : d.enum = [v] := by
+        rw [List.getD_eq_getElem?_getD, hget] at hd
+        simpa using hd
+      simp [hd']
 
 /-! ## 5. The `satisfiedB` congruence lemma -/
 
@@ -310,10 +311,16 @@ theorem satisfiedB_dcSlotsFull_congr (dc : DomConstraint) {a1 a2 : List Value}
       have h3 : ∀ i ∈ r.slots, a1[i]? = a2[i]? :=
         fun i hi => h i (List.mem_append_right _ hi)
       rw [read_congr h1, read_congr h2, read_congr h3]
+  | setInSlot i s =>
+      simp only [DomConstraint.satisfiedB]
+      rw [h i (by simp [dcSlotsFull])]
+  | setInReifSlot i s r =>
+      simp only [DomConstraint.satisfiedB]
+      rw [h i (by simp [dcSlotsFull]), h r (by simp [dcSlotsFull])]
 
 /-! ## 6. Conflict-clause entailment -/
 
-theorem mem_propCheckConflict_iff {dc : DomConstraint} {doms : List (List Value)} {q : Literal} :
+theorem mem_propCheckConflict_iff {dc : DomConstraint} {doms : List Domain} {q : Literal} :
     q ∈ propCheckConflict dc doms ↔
       ∃ s ∈ dcSlotsFull dc, (frameSingleton doms s).bind (singletonLit s) = some q := by
   unfold propCheckConflict
@@ -321,7 +328,7 @@ theorem mem_propCheckConflict_iff {dc : DomConstraint} {doms : List (List Value)
 
 /-- Every literal `propCheckConflict` reports sits on a slot the
 constraint reads. -/
-theorem propCheckConflict_atomSlot_mem {dc : DomConstraint} {doms : List (List Value)}
+theorem propCheckConflict_atomSlot_mem {dc : DomConstraint} {doms : List Domain}
     {q : Literal} (hq : q ∈ propCheckConflict dc doms) :
     q.atom.slot ∈ dcSlotsFull dc := by
   obtain ⟨s, hs, hbind⟩ := mem_propCheckConflict_iff.mp hq
@@ -340,7 +347,7 @@ theorem propCheckConflict_atomSlot_mem {dc : DomConstraint} {doms : List (List V
 
 /-- Every literal `propCheckConflict` reports is already in canonical
 (normalized) form. -/
-theorem propCheckConflict_literal_norm {dc : DomConstraint} {doms : List (List Value)}
+theorem propCheckConflict_literal_norm {dc : DomConstraint} {doms : List Domain}
     {q : Literal} (hq : q ∈ propCheckConflict dc doms) : q.norm = q := by
   obtain ⟨s, -, hbind⟩ := mem_propCheckConflict_iff.mp hq
   obtain ⟨v, -, hv2⟩ := Option.bind_eq_some_iff.mp hbind
@@ -368,19 +375,21 @@ theorem propCheck_conflict_false {dc : DomConstraint} {st : State} {c : Clause}
     intro s hs
     have hsome : (frameSingleton st.domains s).isSome = true := List.all_eq_true.mp hready s hs
     obtain ⟨v, hv⟩ := Option.isSome_iff_exists.mp hsome
-    have hd : st.domains.getD s [] = [v] := frameSingleton_iff.mp hv
+    have hd : (st.domains.getD s Dom.empty).enum = [v] := frameSingleton_iff.mp hv
     have hslt : s < st.domains.length := by
       rcases Nat.lt_or_ge s st.domains.length with hlt | hge
       · exact hlt
       · exfalso
-        have h0 : st.domains.getD s [] = [] := by
+        have h0 : (st.domains.getD s Dom.empty).enum = [] := by
           rw [List.getD_eq_getElem?_getD, List.getElem?_eq_none_iff.mpr hge]
           rfl
         rw [hd] at h0
         simp at h0
     have hsa : s < a.length := by rw [hfits.1]; exact hslt
     have haget : a[s]? = some a[s] := List.getElem?_eq_getElem hsa
-    have hmemw : a[s] ∈ st.domains.getD s [] := hfits.2 s a[s] haget
+    have hmemw : a[s] ∈ Dom.enum (st.domains.getD s Dom.empty) := by
+      have h := hfits.2 s a[s] haget
+      rwa [DomainLike.mem_iff, domElems_eq_enum] at h
     rw [hd] at hmemw
     have hav : a[s]? = some v := by rw [haget]; congr 1; exact List.mem_singleton.mp hmemw
     rw [hav, propCheckAssign_getElem? hv]
@@ -413,18 +422,20 @@ theorem propCheck_conflict_faithful {dc : DomConstraint} {st : State} {c : Claus
     intro s hs
     have hsome : (frameSingleton st.domains s).isSome = true := List.all_eq_true.mp hready s hs
     obtain ⟨v, hv⟩ := Option.isSome_iff_exists.mp hsome
-    have hd : st.domains.getD s [] = [v] := frameSingleton_iff.mp hv
+    have hd : (st.domains.getD s Dom.empty).enum = [v] := frameSingleton_iff.mp hv
     have hslt : s < st.domains.length := by
       rcases Nat.lt_or_ge s st.domains.length with hlt | hge
       · exact hlt
       · exfalso
-        have h0 : st.domains.getD s [] = [] := by
+        have h0 : (st.domains.getD s Dom.empty).enum = [] := by
           rw [List.getD_eq_getElem?_getD, List.getElem?_eq_none_iff.mpr hge]
           rfl
         rw [hd] at h0
         simp at h0
     obtain ⟨y, hay, -, hsort⟩ := hfaith s hslt
-    have hsv : SortAgree v y := hsort v (by rw [hd]; exact List.mem_singleton_self v)
+    have hsv : SortAgree v y := hsort v (by
+      rw [DomainLike.mem_iff, domElems_eq_enum, hd]
+      exact List.mem_singleton_self v)
     rw [propCheckAssign_getElem? hv, hay]
     have hmem : ∀ q, (frameSingleton st.domains s).bind (singletonLit s) = some q →
         q ∈ c := fun q hq => by

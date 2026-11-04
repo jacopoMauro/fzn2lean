@@ -74,26 +74,43 @@ open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation L
 
 /-! ## The Boolean pin of a slot domain -/
 
+/-- The enumeration of a slot's domain (out of range: the empty default). -/
+def slotEnum (doms : List Domain) (s : Nat) : List Value :=
+  Dom.enum (doms.getD s Dom.empty)
+
+/-- Same-slot domain equality gives the same enumeration. -/
+theorem slotEnum_congr {doms1 doms2 : List Domain} {s : Nat}
+    (h : doms1.getD s Dom.empty = doms2.getD s Dom.empty) :
+    slotEnum doms1 s = slotEnum doms2 s := by
+  rw [slotEnum, slotEnum, h]
+
 /-- `true` when slot `s`'s domain is exactly the singleton `[.bool b]`
     (one candidate value, and it is the Boolean `b`). -/
 def domBoolPin (doms : List Domain) (s : Nat) (b : Bool) : Bool :=
-  (doms.getD s []).length == 1 && valueMemB (.bool b) (doms.getD s [])
+  (slotEnum doms s).length == 1 && valueMemB (.bool b) (slotEnum doms s)
 
 /-- Out of range, `getD` returns the empty default. -/
 theorem getD_nil_of_length_le {l : List Domain} {s : Nat}
-    (h : ¬ s < l.length) : l.getD s [] = [] := by
+    (h : ¬ s < l.length) : l.getD s Dom.empty = Dom.empty := by
   simp only [List.getD_eq_getElem?_getD]
   rw [List.getElem?_eq_none_iff.mpr (by omega)]
+  rfl
+
+/-- An out-of-range slot enumerates empty. -/
+theorem slotEnum_nil_of_length_le {domains : List Domain} {s : Nat}
+    (h : ¬ s < domains.length) : slotEnum domains s = [] := by
+  show Dom.enum (domains.getD s Dom.empty) = []
+  rw [getD_nil_of_length_le h]
   rfl
 
 /-- The pin test decides the exact singleton domain. -/
 theorem domBoolPin_eq {doms : List Domain} {s : Nat} {b : Bool}
     (h : domBoolPin doms s b = true) :
-    doms.getD s [] = [.bool b] := by
+    slotEnum doms s = [.bool b] := by
   obtain ⟨h1, h2⟩ := by simpa [domBoolPin, Bool.and_eq_true] using h
-  have hlen : (doms.getD s []).length = 1 := by simpa using h1
-  have hmem : (.bool b : Value) ∈ doms.getD s [] := valueMemB_iff.mp h2
-  match hl : doms.getD s [] with
+  have hlen : (slotEnum doms s).length = 1 := by simpa using h1
+  have hmem : (.bool b : Value) ∈ slotEnum doms s := valueMemB_iff.mp h2
+  match hl : slotEnum doms s with
   | [] => rw [hl] at hlen; simp at hlen
   | [v] =>
       rw [hl] at hmem
@@ -113,13 +130,16 @@ theorem fits_of_domBoolPin {st : State} {a : Assignment} {s : Nat} {b : Bool}
     by_cases hns : s < st.domains.length
     · exact hns
     · exfalso
-      rw [getD_nil_of_length_le hns] at hd
-      exact absurd hd (by simp)
+      have hnil := slotEnum_nil_of_length_le hns
+      rw [hnil] at hd
+      simp at hd
   have hs2 : s < a.length := by rw [hfit.1]; exact hrange
   have hread : a[s]? = some a[s] := (List.getElem?_eq_some_iff).mpr ⟨hs2, rfl⟩
-  have hmem : a[s] ∈ st.domains.getD s [] := hfit.2 s a[s] hread
-  rw [hd] at hmem
-  have hval : a[s] = .bool b := List.mem_singleton.mp hmem
+  have hmem : a[s] ∈ st.domains.getD s Dom.empty := hfit.2 s a[s] hread
+  have hmemE : a[s] ∈ slotEnum st.domains s := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+  rw [hd] at hmemE
+  have hval : a[s] = .bool b := List.mem_singleton.mp hmemE
   rw [hval] at hread
   exact hread
 
@@ -138,8 +158,8 @@ The `propConstEq` Boolean arm (Propagate.lean:393-404), generalized
     target is already pinned to exactly `[.bool b]`. -/
 def implyBool (st : State) (s : Nat) (b : Bool) (ng : Clause) :
     PropagationResult :=
-  if valueMemB (.bool b) (st.domains.getD s []) then
-    if valuesEqB (st.domains.getD s []) [.bool b] then .stable
+  if valueMemB (.bool b) (slotEnum st.domains s) then
+    if valuesEqB (slotEnum st.domains s) [.bool b] then .stable
     else .implied (posBool s b) { clause := ng }
   else .conflict ng
 
@@ -161,7 +181,7 @@ theorem implyBool_implied_inv {st : State} {s : Nat} {b : Bool} {ng : Clause}
     fires only when the target domain contains no head Boolean. -/
 theorem implyBool_conflict_inv {st : State} {s : Nat} {b : Bool} {ng cc : Clause}
     (h : implyBool st s b ng = .conflict cc) :
-    cc = ng ∧ ¬ (valueMemB (.bool b) (st.domains.getD s []) = true) := by
+    cc = ng ∧ ¬ (valueMemB (.bool b) (slotEnum st.domains s) = true) := by
   simp only [implyBool] at h
   split at h
   · split at h
@@ -203,7 +223,10 @@ theorem implyBool_safe {st : State} {s : Nat} {b : Bool} {ng : Clause}
     exact (eval_posBool_iff a s b).mpr (hhead a hfit hsat)
   · intro cc hrun a hfit hsat
     obtain ⟨_, hnm⟩ := implyBool_conflict_inv hrun
-    exact hnm (valueMemB_iff.mpr (hfit.2 s (.bool b) (hhead a hfit hsat)))
+    have hmem : (.bool b : Value) ∈ slotEnum st.domains s := by
+      simpa [slotEnum] using
+        (DomainLike.mem_iff _ _).mp (hfit.2 s (.bool b) (hhead a hfit hsat))
+    exact hnm (valueMemB_iff.mpr hmem)
   · intro cc hrun a _hfit hsat
     obtain ⟨hcc, _⟩ := implyBool_conflict_inv hrun
     rw [hcc]
@@ -1695,7 +1718,7 @@ Concrete small states exercising every emission shape (kernel
 
 /-- The one-slot-per-column test state: empty trail and databases. -/
 private def boolTestState (doms : List (List Value)) : State where
-  domains := doms
+  domains := doms.map Dom.ofList
   trail := []
   decisionLevel := 0
   clauses := []
@@ -1769,5 +1792,1025 @@ theorem propBool_smoke_stable :
         (boolTestState [[.bool true, .bool false], [.bool true, .bool false],
           [.bool true, .bool false]]) 0 1 2 = .stable :=
   ⟨rfl, rfl, rfl⟩
+
+/-! ## PLAN G1-B: the `bool2int` channel (`bool2intSlot i k`) -/
+
+/-- The first integer view of `d` that fails `keep`. Values without an
+    integer view (sets, arrays) are skipped. -/
+def firstBadView (d : List Value) (keep : Int → Bool) : Option Int :=
+  d.findSome? fun v => (Value.intView v).bind fun w => if keep w then none else some w
+
+/-- `valuesEqB` only accepts equal lists (the family-local copy: the
+    canonical `valuesEqB_sound` lives downstream in the scheduling layer). -/
+theorem b2iValuesEqB_sound {xs ys : List Value} (h : valuesEqB xs ys = true) :
+    xs = ys := by
+  induction xs generalizing ys with
+  | nil => cases ys with
+    | nil => rfl
+    | cons y ys => simp [valuesEqB] at h
+  | cons x xs ih =>
+      cases ys with
+      | nil => simp [valuesEqB] at h
+      | cons y ys =>
+          simp only [valuesEqB, Bool.and_eq_true] at h
+          rw [value_eqB_iff.mp h.1, ih h.2]
+
+/-- The pinned rounds' removal emission: `posNe k w` with the negated pin
+    as the falsified cause. -/
+def b2iResPinned (i k : Nat) (b : Bool) (w : Int) : PropagationResult :=
+  .implied (posNe k w) { clause := [posNe k w, posBool i (!b)] }
+
+/-- The unpinned rounds' unit removal emission. -/
+def b2iResUnit (k : Nat) (w : Int) : PropagationResult :=
+  .implied (posNe k w) { clause := [posNe k w] }
+
+/-- The unpinned rounds' impossible-view response: a bound conflict when the
+    extrema separate the whole domain from `{0,1}`, else the unit removal. -/
+def b2iBadRes (k : Nat) (w : Int) (mx mn : Option Int) : PropagationResult :=
+  match mx, mn with
+  | some mx, some mn =>
+      if mx < 0 then .conflict [negLe k (-1)]
+      else if 1 < mn then .conflict [posLe k 1]
+      else b2iResUnit k w
+  | _, _ => b2iResUnit k w
+
+/-- PLAN G1-B: the explained channeling propagator of `bool2int(b, i)` —
+    `bool2intSlot i k` in the `DomConstraint` naming (`i` the Boolean
+    source, `k` the 0/1 integer target). Guarded rounds, in order:
+
+    * aliasing (`i = k`), empty or out-of-range slots ⇒ `.stable`;
+    * `i` pinned `true` (resp. `false`) ⇒ remove every `k`-value whose
+      integer view is not `1` (resp. `0`), the negated pin as cause;
+    * `i` with no Boolean value ⇒ conflict `[i = true, i = false]`;
+    * `k` pinned to the raw singleton `[.int 0]` (resp. `[.int 1]`) ⇒
+      imply `i = false` (resp. `i = true`) through `implyBool`, the
+      falsified cause being `k ≠ 0` (resp. `k ≠ 1`);
+    * otherwise remove one `k`-value with a view outside `{0,1}`; when
+      the whole domain lies below `0` (resp. above `1`) report the
+      bound conflict `[k > -1]` (resp. `[k ≤ 1]`).
+
+    Every emission's clause is over the existing vocabulary: `posBool`
+    pins and `posNe`/`posLe`/`negLe` integer literals. -/
+def propBool2intSlot (st : State) (i k : Nat) : PropagationResult :=
+  if i = k then .stable
+  else if (slotEnum st.domains i).isEmpty || (slotEnum st.domains k).isEmpty then .stable
+  else if domBoolPin st.domains i true then
+    match firstBadView (slotEnum st.domains k) (fun w => decide (w = 1)) with
+    | some w => b2iResPinned i k true w
+    | none => .stable
+  else if domBoolPin st.domains i false then
+    match firstBadView (slotEnum st.domains k) (fun w => decide (w = 0)) with
+    | some w => b2iResPinned i k false w
+    | none => .stable
+  else if (valueMemB (.bool true) (slotEnum st.domains i)
+      || valueMemB (.bool false) (slotEnum st.domains i)) = false then
+    .conflict [posBool i true, posBool i false]
+  else if valuesEqB (slotEnum st.domains k) [.int 0] then
+    implyBool st i false [posBool i false, posNe k 0]
+  else if valuesEqB (slotEnum st.domains k) [.int 1] then
+    implyBool st i true [posBool i true, posNe k 1]
+  else
+    match firstBadView (slotEnum st.domains k) (fun w => decide (w = 0 ∨ w = 1)) with
+    | some w => b2iBadRes k w (domMaxI (st.domains.getD k Dom.empty)) (domMinI (st.domains.getD k Dom.empty))
+    | none => .stable
+
+/-! ### `firstBadView` views -/
+
+/-- A found bad view comes from a domain value, and fails `keep`. -/
+theorem firstBadView_some {d : List Value} {keep : Int → Bool} {w : Int}
+    (h : firstBadView d keep = some w) :
+    ∃ v ∈ d, Value.intView v = some w ∧ keep w = false := by
+  unfold firstBadView at h
+  obtain ⟨v, hv, hfv⟩ := List.exists_of_findSome?_eq_some h
+  obtain ⟨u, hvu, hfu⟩ := Option.bind_eq_some_iff.mp hfv
+  by_cases hk : keep u = true
+  · rw [hk] at hfu; cases hfu
+  · have hk' : keep u = false := Bool.eq_false_iff.mpr hk
+    rw [hk'] at hfu
+    simp only [Bool.false_eq_true, if_false] at hfu
+    injection hfu with h1
+    exact ⟨v, hv, by rw [h1] at hvu; exact hvu, by subst h1; exact hk'⟩
+
+/-- When no bad view is found, every integer view of the domain passes
+    `keep`. -/
+theorem firstBadView_none {d : List Value} {keep : Int → Bool}
+    (h : firstBadView d keep = none) :
+    ∀ v ∈ d, ∀ w, Value.intView v = some w → keep w = true := by
+  intro v hv w hvw
+  by_cases hk : keep w = true
+  · exact hk
+  · exfalso
+    have hfn : ((fun x => (Value.intView x).bind
+        fun u => if keep u then none else some u) v) = none :=
+      List.findSome?_eq_none_iff.mp h v hv
+    have hfn' : (Value.intView v).bind
+        (fun u => if keep u then none else some u) = none := hfn
+    rw [hvw] at hfn'
+    simp only [Option.bind_some] at hfn'
+    have hk' : keep w = false := Bool.eq_false_iff.mpr hk
+    rw [hk'] at hfn'
+    simp only [Bool.false_eq_true, if_false] at hfn'
+    cases hfn'
+
+/-- The `keep = (· = 1)` arm's found view is not `1`. -/
+theorem firstBadView_one_some {d : List Value} {w : Int}
+    (h : firstBadView d (fun w => decide (w = 1)) = some w) : w ≠ 1 := by
+  obtain ⟨-, -, -, hkw⟩ := firstBadView_some h
+  exact of_decide_eq_false hkw
+
+/-- The `keep = (· = 0)` arm's found view is not `0`. -/
+theorem firstBadView_zero_some {d : List Value} {w : Int}
+    (h : firstBadView d (fun w => decide (w = 0)) = some w) : w ≠ 0 := by
+  obtain ⟨-, -, -, hkw⟩ := firstBadView_some h
+  exact of_decide_eq_false hkw
+
+/-- The unpinned arm's found view lies outside `{0,1}`. -/
+theorem firstBadView_digit_some {d : List Value} {w : Int}
+    (h : firstBadView d (fun w => decide (w = 0 ∨ w = 1)) = some w) :
+    w ≠ 0 ∧ w ≠ 1 := by
+  obtain ⟨-, -, -, hkw⟩ := firstBadView_some h
+  have h : ¬ (w = 0 ∨ w = 1) := of_decide_eq_false hkw
+  exact ⟨fun h0 => h (Or.inl h0), fun h1 => h (Or.inr h1)⟩
+
+/-! ### The complete case split -/
+
+/-- The unpinned rounds' response: unit removal, or a `negLe` conflict when
+    the domain maximum is below zero, or a `posLe` conflict when the domain
+    minimum is above one. -/
+theorem b2iBadRes_cases {k : Nat} {w : Int} {mx mn : Option Int} :
+    b2iBadRes k w mx mn = b2iResUnit k w ∨
+    (∃ mx' mn', mx = some mx' ∧ mn = some mn' ∧ mx' < 0 ∧
+      b2iBadRes k w mx mn = .conflict [negLe k (-1)]) ∨
+    (∃ mx' mn', mx = some mx' ∧ mn = some mn' ∧ 1 < mn' ∧
+      b2iBadRes k w mx mn = .conflict [posLe k 1]) := by
+  unfold b2iBadRes
+  split
+  · next mx' mn' =>
+      by_cases h : mx' < 0
+      · rw [if_pos h]; exact Or.inr (Or.inl ⟨mx', mn', rfl, rfl, h, rfl⟩)
+      · rw [if_neg h]
+        by_cases h2 : 1 < mn'
+        · rw [if_pos h2]; exact Or.inr (Or.inr ⟨mx', mn', rfl, rfl, h2, rfl⟩)
+        · rw [if_neg h2]; exact Or.inl rfl
+  · exact Or.inl rfl
+
+/-- Complete case split of `propBool2intSlot`: `.stable`, a `posNe` removal
+    through a Boolean pin, the no-Boolean conflict, a pin through the raw
+    `[.int 0]`/`[.int 1]` singleton, an unpinned unit removal, or one of the
+    two bound conflicts. -/
+theorem propBool2intSlot_cases (st : State) (i k : Nat) :
+    propBool2intSlot st i k = .stable ∨
+    (domBoolPin st.domains i true = true ∧
+      ∃ w, firstBadView (slotEnum st.domains k) (fun w => decide (w = 1)) = some w ∧
+        propBool2intSlot st i k = b2iResPinned i k true w) ∨
+    (domBoolPin st.domains i false = true ∧
+      ∃ w, firstBadView (slotEnum st.domains k) (fun w => decide (w = 0)) = some w ∧
+        propBool2intSlot st i k = b2iResPinned i k false w) ∨
+    ((valueMemB (.bool true) (slotEnum st.domains i)
+        || valueMemB (.bool false) (slotEnum st.domains i)) = false ∧
+      propBool2intSlot st i k = .conflict [posBool i true, posBool i false]) ∨
+    (slotEnum st.domains k = [.int 0] ∧
+      propBool2intSlot st i k = implyBool st i false [posBool i false, posNe k 0]) ∨
+    (slotEnum st.domains k = [.int 1] ∧
+      propBool2intSlot st i k = implyBool st i true [posBool i true, posNe k 1]) ∨
+    (∃ w, firstBadView (slotEnum st.domains k) (fun w => decide (w = 0 ∨ w = 1)) = some w ∧
+      propBool2intSlot st i k = b2iResUnit k w) ∨
+    (∃ mx mn, domMaxI (st.domains.getD k Dom.empty) = some mx ∧
+      domMinI (st.domains.getD k Dom.empty) = some mn ∧ mx < 0 ∧
+      propBool2intSlot st i k = .conflict [negLe k (-1)]) ∨
+    (∃ mx mn, domMaxI (st.domains.getD k Dom.empty) = some mx ∧
+      domMinI (st.domains.getD k Dom.empty) = some mn ∧ 1 < mn ∧
+      propBool2intSlot st i k = .conflict [posLe k 1]) := by
+  unfold propBool2intSlot
+  by_cases halias : i = k
+  · rw [if_pos halias]; exact Or.inl rfl
+  · rw [if_neg halias]
+    by_cases hemp : ((slotEnum st.domains i).isEmpty || (slotEnum st.domains k).isEmpty) = true
+    · rw [if_pos hemp]; exact Or.inl rfl
+    · rw [if_neg hemp]
+      by_cases hpt : domBoolPin st.domains i true = true
+      · rw [if_pos hpt]
+        split
+        · next w hfb => exact Or.inr (Or.inl ⟨hpt, w, hfb, rfl⟩)
+        · next => exact Or.inl rfl
+      · rw [if_neg hpt]
+        by_cases hpf : domBoolPin st.domains i false = true
+        · rw [if_pos hpf]
+          split
+          · next w hfb => exact Or.inr (Or.inr (Or.inl ⟨hpf, w, hfb, rfl⟩))
+          · next => exact Or.inl rfl
+        · rw [if_neg hpf]
+          by_cases hnb : (valueMemB (.bool true) (slotEnum st.domains i)
+              || valueMemB (.bool false) (slotEnum st.domains i)) = false
+          · rw [if_pos hnb]
+            exact Or.inr (Or.inr (Or.inr (Or.inl ⟨hnb, rfl⟩)))
+          · rw [if_neg hnb]
+            by_cases hz : valuesEqB (slotEnum st.domains k) [.int 0] = true
+            · rw [if_pos hz]
+              exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl
+                ⟨b2iValuesEqB_sound hz, rfl⟩))))
+            · rw [if_neg hz]
+              by_cases ho : valuesEqB (slotEnum st.domains k) [.int 1] = true
+              · rw [if_pos ho]
+                exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl
+                  ⟨b2iValuesEqB_sound ho, rfl⟩)))))
+              · rw [if_neg ho]
+                split
+                · next w hfb =>
+                    rcases b2iBadRes_cases (k := k) (w := w)
+                      (mx := domMaxI (st.domains.getD k Dom.empty))
+                      (mn := domMinI (st.domains.getD k Dom.empty)) with
+                      hU | ⟨mx, mn, hmx, hmn, hlt, hres⟩ | ⟨mx, mn, hmx, hmn, hlt, hres⟩
+                    · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr
+                        (Or.inl ⟨w, hfb, hU⟩))))))
+                    · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr
+                        (Or.inl ⟨mx, mn, hmx, hmn, hlt, hres⟩)))))))
+                    · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr
+                        ⟨mx, mn, hmx, hmn, hlt, hres⟩)))))))
+                · next => exact Or.inl rfl
+
+/-! ### The channel's satisfaction views and emission heads -/
+
+/-- A positive Boolean literal is true at a reading of its value. -/
+theorem b2i_posBool_eval_true {a : Assignment} {s : Nat} {b : Bool}
+    (h : a[s]? = some (.bool b)) : (posBool s b).eval a = some true :=
+  (eval_posBool_iff a s b).mpr h
+
+/-- The `bool2intSlot` semantics at the reads: a Boolean source read and
+    the matching 0/1 integer target read. -/
+theorem bool2int_views {a : Assignment} {i k : Nat}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) :
+    ∃ b : Bool, a[i]? = some (.bool b) ∧
+      a[k]? = some (.int (if b then 1 else 0)) := h
+
+/-- The target's integer view at a solution, given the source read. -/
+theorem bool2int_slotInt {a : Assignment} {i k : Nat} {b : Bool}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a)
+    (hi : a[i]? = some (.bool b)) :
+    slotInt a k = some (if b then 1 else 0) := by
+  obtain ⟨b0, hi0, hk0⟩ := bool2int_views h
+  have hb : b0 = b := bool_read_eq hi0 hi
+  rw [hb] at hk0
+  exact slotInt_of_int_read hk0
+
+/-- A `posNe` head is true at a solution through the source read. -/
+theorem b2i_posNe_eval_true {a : Assignment} {i k : Nat} {b : Bool} {w : Int}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a)
+    (hi : a[i]? = some (.bool b)) (hw : w ≠ (if b then 1 else 0)) :
+    (posNe k w).eval a = some true := by
+  rw [eval_posNe_iff]
+  exact ⟨_, bool2int_slotInt h hi, Ne.symm hw⟩
+
+/-- A fitting read of a raw singleton domain. -/
+theorem b2i_read_of_dom_singleton {st : State} {a : Assignment} {s : Nat}
+    {v : Value} (hfit : Core.Assignment.Fits st.domains a)
+    (hd : slotEnum st.domains s = [v]) : a[s]? = some v := by
+  by_cases hs : s < st.domains.length
+  · have hs2 : s < a.length := by rw [hfit.1]; exact hs
+    have hread : a[s]? = some a[s] := List.getElem?_eq_getElem hs2
+    have hmem : a[s] ∈ st.domains.getD s Dom.empty := hfit.2 s a[s] hread
+    have hmemE : a[s] ∈ slotEnum st.domains s := by
+      simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+    rw [hd] at hmemE
+    rw [List.mem_singleton.mp hmemE] at hread
+    exact hread
+  · exfalso
+    have hnil := slotEnum_nil_of_length_le hs
+    rw [hnil] at hd
+    simp at hd
+
+/-- At a fitting solution of a raw `[.int 0]` target the source reads
+    `false`. -/
+theorem b2i_pinFalse_head {st : State} {a : Assignment} {i k : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hd0 : slotEnum st.domains k = [.int 0])
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) :
+    a[i]? = some (.bool false) := by
+  obtain ⟨b, hi, hk⟩ := bool2int_views h
+  have hk0 : a[k]? = some (.int 0) := b2i_read_of_dom_singleton hfit hd0
+  have hb : (if b then (1 : Int) else 0) = 0 :=
+    Value.int.inj (Option.some.inj (hk.symm.trans hk0))
+  cases b with
+  | false => exact hi
+  | true => simp at hb
+
+/-- At a fitting solution of a raw `[.int 1]` target the source reads
+    `true`. -/
+theorem b2i_pinTrue_head {st : State} {a : Assignment} {i k : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hd1 : slotEnum st.domains k = [.int 1])
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) :
+    a[i]? = some (.bool true) := by
+  obtain ⟨b, hi, hk⟩ := bool2int_views h
+  have hk1 : a[k]? = some (.int 1) := b2i_read_of_dom_singleton hfit hd1
+  have hb : (if b then (1 : Int) else 0) = 1 :=
+    Value.int.inj (Option.some.inj (hk.symm.trans hk1))
+  cases b with
+  | true => exact hi
+  | false => simp at hb
+
+/-! ### Clause entailment at solutions (the reason side) -/
+
+/-- The pinned rounds' clause has a true literal at every solution. -/
+theorem b2iResPinned_entailed {a : Assignment} {i k : Nat} {b : Bool} {w : Int}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a)
+    (hw : w ≠ (if b then 1 else 0)) :
+    ∃ l ∈ [posNe k w, posBool i (!b)], l.eval a = some true := by
+  obtain ⟨b0, hi0, hk0⟩ := bool2int_views h
+  by_cases hb : b0 = b
+  · refine ⟨posNe k w, List.mem_cons_self, ?_⟩
+    rw [eval_posNe_iff]
+    exact ⟨_, bool2int_slotInt h hi0, by rw [hb]; exact Ne.symm hw⟩
+  · have hb' : b0 = !b := by cases b <;> cases b0 <;> simp_all
+    refine ⟨posBool i (!b), List.mem_cons_of_mem _ (List.mem_singleton_self _), ?_⟩
+    rw [hb'] at hi0
+    exact b2i_posBool_eval_true hi0
+
+/-- The unpinned unit removal's clause has a true literal at every
+    solution. -/
+theorem b2iResUnit_entailed {a : Assignment} {i k : Nat} {w : Int}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a)
+    (hw0 : w ≠ 0) (hw1 : w ≠ 1) :
+    ∃ l ∈ [posNe k w], l.eval a = some true := by
+  obtain ⟨b, hi, hk⟩ := bool2int_views h
+  refine ⟨posNe k w, List.mem_singleton_self _, ?_⟩
+  rw [eval_posNe_iff]
+  refine ⟨_, slotInt_of_int_read hk, ?_⟩
+  cases b with
+  | true => exact Ne.symm hw1
+  | false => exact Ne.symm hw0
+
+/-- The no-Boolean clause is entitled at every solution. -/
+theorem b2iNoBool_entitled {a : Assignment} {i k : Nat}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) :
+    ∃ l ∈ [posBool i true, posBool i false], l.eval a = some true := by
+  obtain ⟨b, hi, -⟩ := bool2int_views h
+  cases b with
+  | true => exact ⟨posBool i true, List.mem_cons_self, b2i_posBool_eval_true hi⟩
+  | false =>
+      exact ⟨posBool i false, List.mem_cons_of_mem _ (List.mem_singleton_self _),
+        b2i_posBool_eval_true hi⟩
+
+/-- The no-Boolean conflict is excluded at fitting solutions. -/
+theorem b2iNoBool_excluded {st : State} {a : Assignment} {i k : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hnb : (valueMemB (.bool true) (slotEnum st.domains i)
+        || valueMemB (.bool false) (slotEnum st.domains i)) = false)
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) : False := by
+  obtain ⟨b, hi, -⟩ := bool2int_views h
+  rw [Bool.or_eq_false_iff] at hnb
+  have hmem : (.bool b : Value) ∈ st.domains.getD i Dom.empty := hfit.2 i (.bool b) hi
+  have hmemE : (.bool b : Value) ∈ slotEnum st.domains i := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+  cases b with
+  | true => exact absurd (valueMemB_iff.mpr hmemE) (by rw [hnb.1]; decide)
+  | false => exact absurd (valueMemB_iff.mpr hmemE) (by rw [hnb.2]; decide)
+
+/-- The `negLe k (-1)` conflict is excluded at fitting solutions. -/
+theorem b2i_neg_excluded {st : State} {a : Assignment} {i k : Nat} {mx : Int}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hmx : domMaxI (st.domains.getD k Dom.empty) = some mx) (hlt : mx < 0)
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) : False := by
+  obtain ⟨b, -, hk⟩ := bool2int_views h
+  have hb := fits_max_bound hfit hmx (slotInt_of_int_read hk)
+  cases b with
+  | true => omega
+  | false => omega
+
+/-- The `posLe k 1` conflict is excluded at fitting solutions. -/
+theorem b2i_pos_excluded {st : State} {a : Assignment} {i k : Nat} {mn : Int}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hmn : domMinI (st.domains.getD k Dom.empty) = some mn) (hgt : 1 < mn)
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) : False := by
+  obtain ⟨b, -, hk⟩ := bool2int_views h
+  have hb := fits_min_bound hfit hmn (slotInt_of_int_read hk)
+  cases b with
+  | true => omega
+  | false => omega
+
+/-- The `negLe k (-1)` clause is entitled at every solution. -/
+theorem b2i_negLe_entailed {a : Assignment} {i k : Nat}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) :
+    ∃ l ∈ [negLe k (-1)], l.eval a = some true := by
+  obtain ⟨b, -, hk⟩ := bool2int_views h
+  refine ⟨negLe k (-1), List.mem_singleton_self _, ?_⟩
+  rw [eval_negLe_iff]
+  refine ⟨_, slotInt_of_int_read hk, ?_⟩
+  cases b <;> simp
+
+/-- The `posLe k 1` clause is entitled at every solution. -/
+theorem b2i_posLe_entailed {a : Assignment} {i k : Nat}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) :
+    ∃ l ∈ [posLe k 1], l.eval a = some true := by
+  obtain ⟨b, -, hk⟩ := bool2int_views h
+  refine ⟨posLe k 1, List.mem_singleton_self _, ?_⟩
+  rw [eval_posLe_iff]
+  refine ⟨_, slotInt_of_int_read hk, ?_⟩
+  cases b <;> simp
+
+/-- The `[posBool i false, posNe k 0]` clause has a true literal at every
+    solution. -/
+theorem b2i_pinFalse_entailed {a : Assignment} {i k : Nat}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) :
+    ∃ l ∈ [posBool i false, posNe k 0], l.eval a = some true := by
+  obtain ⟨b, hi, hk⟩ := bool2int_views h
+  cases b with
+  | false => exact ⟨posBool i false, List.mem_cons_self, b2i_posBool_eval_true hi⟩
+  | true =>
+      refine ⟨posNe k 0, List.mem_cons_of_mem _ (List.mem_singleton_self _), ?_⟩
+      rw [eval_posNe_iff]
+      exact ⟨_, slotInt_of_int_read hk, by simp⟩
+
+/-- The `[posBool i true, posNe k 1]` clause has a true literal at every
+    solution. -/
+theorem b2i_pinTrue_entailed {a : Assignment} {i k : Nat}
+    (h : (DomConstraint.bool2intSlot i k).SatisfiedBy a) :
+    ∃ l ∈ [posBool i true, posNe k 1], l.eval a = some true := by
+  obtain ⟨b, hi, hk⟩ := bool2int_views h
+  cases b with
+  | true => exact ⟨posBool i true, List.mem_cons_self, b2i_posBool_eval_true hi⟩
+  | false =>
+      refine ⟨posNe k 1, List.mem_cons_of_mem _ (List.mem_singleton_self _), ?_⟩
+      rw [eval_posNe_iff]
+      exact ⟨_, slotInt_of_int_read hk, by simp⟩
+
+/-! ## PLAN G1e: the array-Boolean conjunction (`arrayBoolAndSlot is k`)
+
+The family semantics: slot `k`'s read is the conjunction of the listed
+slots' `= true` reads (`a[k]? = some (.bool (is.all (fun i =>
+slotIsBoolB a i true)))`), so the EMPTY list forces `k = true`. The
+explained propagator narrows in four guarded rounds:
+
+* every input pinned `true` ⇒ imply `k = true` (causes: the inputs' `false`
+  readings; the empty list included as the unit pin);
+* some input pinned `false` ⇒ imply `k = false` through that input;
+* `k` pinned `true` ⇒ imply the first input that is not already pinned
+  `true`;
+* `k` pinned `false` with the singleton input list `[i]` and a Boolean-only
+  input domain ⇒ imply `i = false` (the Boolean-only guard is required:
+  the family semantics lets a non-Boolean input satisfy `all = false`).
+
+Guards: aliasing (`k ∈ is`) is `.stable`. Only `k` is typed by the family
+semantics; the input-pruning pivots are typed by the state domain shape
+under `DomsShapeTyped` + `DomSub` (`propArrayBoolAnd_implied_decided`), and
+the state-free reason of the all-`true` round consumes the problem-level
+`BoolDomsAt` gate (every input's problem domain Boolean-only). -/
+
+/-- The compiled `array_bool_and` shape: every input slot is in range of
+    the problem's box and its problem domain holds only Booleans (the
+    all-`true` round's state-free reason consumes exactly this fact). -/
+def BoolDomsAt (problem : Problem DomConstraint Unit) (is : List Nat) : Prop :=
+  ∀ i ∈ is, i < problem.domains.length ∧
+    ∀ v ∈ problem.domains.getD i Dom.empty, ∃ b : Bool, v = .bool b
+
+/-- `implyBool`'s implied emission carries the head literal, the nogood
+    and the presence of the head Boolean in the target domain. -/
+theorem implyBool_implied_inv_mem {st : State} {s : Nat} {b : Bool}
+    {ng : Clause} {l : Literal} {r : Reason}
+    (h : implyBool st s b ng = .implied l r) :
+    valueMemB (.bool b) (slotEnum st.domains s) = true ∧
+      l = posBool s b ∧ r = { clause := ng } := by
+  obtain ⟨hl, hr⟩ := implyBool_implied_inv h
+  subst hl
+  subst hr
+  simp only [implyBool] at h
+  split at h
+  · split at h
+    · exact absurd h (by intro hc; cases hc)
+    · exact ⟨by assumption, rfl, rfl⟩
+  · exact absurd h (by intro hc; cases hc)
+
+/-- The `slotIsBoolB` positive read conversion. -/
+theorem aba_slotIsBoolB_true_iff {a : List Value} {i : Nat} {b : Bool} :
+    slotIsBoolB a i b = true ↔ a[i]? = some (.bool b) := by
+  unfold slotIsBoolB
+  cases h : a[i]? with
+  | none => simp
+  | some v => cases v <;> cases b <;> simp [value_eqB_iff]
+
+/-- The positive `slotIsBoolB` read of a Boolean-valued slot is the read's
+    Boolean. -/
+theorem aba_slotIsBoolB_true_eq {a : List Value} {i : Nat} {p : Bool}
+    (hi : a[i]? = some (.bool p)) : slotIsBoolB a i true = p := by
+  cases p <;> simp [slotIsBoolB, hi, Value.eqB]
+
+/-- A positive Boolean literal is decided whenever the slot reads any
+    Boolean. -/
+theorem aba_posBool_decided {a : Assignment} {s : Nat} {b : Bool}
+    (h : ∃ b', a[s]? = some (.bool b')) :
+    ∃ t, (posBool s b).eval a = some t := by
+  obtain ⟨b', hb⟩ := h
+  exact ⟨b' == b, by simp [posBool, Literal.eval, Atom.eval, hb]⟩
+
+/-- The family-local Boolean-only domain guard (the `domBoolOnlyB` copy:
+    `Fam/Lin.lean` owns the shared one downstream of this module). -/
+def aba_domBoolOnlyB (d : List Value) : Bool :=
+  decide (0 < d.length) &&
+    d.all (fun v => match v with | .bool _ => true | _ => false)
+
+/-- The family-local guard's semantics. -/
+theorem aba_domBoolOnlyB_eq {d : List Value} (h : aba_domBoolOnlyB d = true) :
+    0 < d.length ∧ ∀ v ∈ d, ∃ b : Bool, v = .bool b := by
+  rw [aba_domBoolOnlyB, Bool.and_eq_true] at h
+  exact ⟨of_decide_eq_true h.1, by
+    intro v hv
+    have hv' := List.all_eq_true.mp h.2 v hv
+    cases v with
+    | bool b => exact ⟨b, rfl⟩
+    | int k => exact absurd hv' (by simp)
+    | setOfInt s => exact absurd hv' (by simp)
+    | array a => exact absurd hv' (by simp)⟩
+
+/-- PLAN G1e: the explained propagator of `array_bool_and`. Round order:
+    alias guard; all inputs pinned `true`; some input pinned `false`;
+    `k` pinned `true`; `k` pinned `false` with a Boolean-only singleton
+    input. Every emission's clause is over the existing vocabulary:
+    positive Boolean literals on the input slots and `k`. -/
+def propArrayBoolAnd (st : State) (is : List Nat) (k : Nat) :
+    PropagationResult :=
+  if k ∈ is then .stable
+  else if is.all (fun i => domBoolPin st.domains i true) then
+    implyBool st k true ([posBool k true] ++ is.map (fun i => posBool i false))
+  else
+    match is.find? (fun i => domBoolPin st.domains i false) with
+    | some i => implyBool st k false [posBool k false, posBool i true]
+    | none =>
+        if domBoolPin st.domains k true then
+          match is.find? (fun i => !domBoolPin st.domains i true) with
+          | some i => implyBool st i true [posBool i true, posBool k false]
+          | none => .stable
+        else if domBoolPin st.domains k false then
+          match is with
+          | [i] =>
+              if aba_domBoolOnlyB (slotEnum st.domains i) then
+                implyBool st i false [posBool i false, posBool k true]
+              else .stable
+          | _ => .stable
+        else .stable
+
+/-- Complete case split of `propArrayBoolAnd`: `.stable`, the all-pinned
+    target pin, the pinned-`false` input arm, the pinned-`true` target's
+    input arm, or the Boolean-only singleton arm. -/
+theorem propArrayBoolAnd_cases (st : State) (is : List Nat) (k : Nat) :
+    propArrayBoolAnd st is k = .stable ∨
+    (is.all (fun i => domBoolPin st.domains i true) = true ∧
+      propArrayBoolAnd st is k = implyBool st k true
+        ([posBool k true] ++ is.map (fun i => posBool i false))) ∨
+    (∃ i, is.find? (fun i => domBoolPin st.domains i false) = some i ∧
+      propArrayBoolAnd st is k =
+        implyBool st k false [posBool k false, posBool i true]) ∨
+    (domBoolPin st.domains k true = true ∧
+      ∃ i, is.find? (fun i => !domBoolPin st.domains i true) = some i ∧
+        propArrayBoolAnd st is k =
+          implyBool st i true [posBool i true, posBool k false]) ∨
+    (domBoolPin st.domains k false = true ∧
+      ∃ i, is = [i] ∧ aba_domBoolOnlyB (slotEnum st.domains i) = true ∧
+        propArrayBoolAnd st is k =
+          implyBool st i false [posBool i false, posBool k true]) := by
+  generalize hres : propArrayBoolAnd st is k = res
+  unfold propArrayBoolAnd at hres
+  by_cases halias : k ∈ is
+  · rw [if_pos halias] at hres; exact Or.inl hres.symm
+  · rw [if_neg halias] at hres
+    by_cases hall : is.all (fun i => domBoolPin st.domains i true) = true
+    · rw [if_pos hall] at hres
+      exact Or.inr (Or.inl ⟨hall, hres.symm⟩)
+    · rw [if_neg hall] at hres
+      cases hfind : is.find? (fun i => domBoolPin st.domains i false) with
+      | some i =>
+          simp only [hfind] at hres
+          exact Or.inr (Or.inr (Or.inl ⟨i, rfl, hres.symm⟩))
+      | none =>
+          simp only [hfind] at hres
+          by_cases hk : domBoolPin st.domains k true = true
+          · rw [if_pos hk] at hres
+            cases hfind2 : is.find? (fun i => !domBoolPin st.domains i true) with
+            | some i =>
+                simp only [hfind2] at hres
+                exact Or.inr (Or.inr (Or.inr (Or.inl ⟨hk, i, rfl, hres.symm⟩)))
+            | none =>
+                simp only [hfind2] at hres
+                exact Or.inl hres.symm
+          · rw [if_neg hk] at hres
+            by_cases hkf : domBoolPin st.domains k false = true
+            · rw [if_pos hkf] at hres
+              cases his : is with
+              | nil => simp only [his] at hres; exact Or.inl hres.symm
+              | cons i rest =>
+                  cases rest with
+                  | nil =>
+                      simp only [his] at hres
+                      by_cases hb : aba_domBoolOnlyB (slotEnum st.domains i) = true
+                      · rw [if_pos hb] at hres
+                        exact Or.inr (Or.inr (Or.inr (Or.inr
+                          ⟨hkf, i, rfl, hb, hres.symm⟩)))
+                      · rw [if_neg hb] at hres; exact Or.inl hres.symm
+                  | cons j rest' => simp only [his] at hres; exact Or.inl hres.symm
+            · rw [if_neg hkf] at hres; exact Or.inl hres.symm
+
+/-- The family semantics at the read: `k` reads the conjunction of the
+    listed slots' `= true` reads. -/
+theorem aba_satisfied {a : Assignment} {is : List Nat} {k : Nat}
+    (h : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a) :
+    a[k]? = some (.bool (is.all (fun i => slotIsBoolB a i true))) := h
+
+/-- A successful `find?` returns a member satisfying the predicate. -/
+theorem aba_find?_some_eq {α : Type} (f : α → Bool) {is : List α} {i : α}
+    (h : is.find? f = some i) : f i = true :=
+  List.find?_some (p := f) h
+
+/-! ### The fitting pivot truths -/
+
+/-- The all-`true` round's pin is true at every fitting solution. -/
+theorem aba_allTrue_pivot {st : State} {a : Assignment} {is : List Nat} {k : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (hall : is.all (fun i => domBoolPin st.domains i true) = true) :
+    (posBool k true).eval a = some true := by
+  have hallT : is.all (fun i => slotIsBoolB a i true) = true := by
+    apply List.all_eq_true.mpr
+    intro i hi
+    rw [aba_slotIsBoolB_true_eq
+      (fits_of_domBoolPin hfit (List.all_eq_true.mp hall i hi))]
+  have h := aba_satisfied hcons
+  rw [hallT] at h
+  exact b2i_posBool_eval_true h
+
+/-- The pinned-`false` input round's pin is true at every fitting solution. -/
+theorem aba_pinFalse_pivot {st : State} {a : Assignment} {is : List Nat} {k i : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (hi : i ∈ is) (hpin : domBoolPin st.domains i false = true) :
+    (posBool k false).eval a = some true := by
+  have hread := fits_of_domBoolPin hfit hpin
+  have hallF : is.all (fun i => slotIsBoolB a i true) = false := by
+    cases h : is.all (fun i => slotIsBoolB a i true) with
+    | true =>
+        have := List.all_eq_true.mp h i hi
+        rw [aba_slotIsBoolB_true_eq hread] at this
+        cases this
+    | false => rfl
+  have h := aba_satisfied hcons
+  rw [hallF] at h
+  exact b2i_posBool_eval_true h
+
+/-- The pinned-`true` target round's input pin is true at every fitting
+    solution. -/
+theorem aba_kTrue_pivot {st : State} {a : Assignment} {is : List Nat} {k i : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (hi : i ∈ is) (hk : domBoolPin st.domains k true = true) :
+    (posBool i true).eval a = some true := by
+  have hkread := fits_of_domBoolPin hfit hk
+  have hallT : is.all (fun i => slotIsBoolB a i true) = true := by
+    have h := aba_satisfied hcons
+    rw [hkread] at h
+    injection h with h
+    exact (Value.bool.inj h).symm
+  exact b2i_posBool_eval_true
+    (aba_slotIsBoolB_true_iff.mp (List.all_eq_true.mp hallT i hi))
+
+/-- The Boolean-only singleton round's input pin is true at every fitting
+    solution. -/
+theorem aba_single_pivot {st : State} {a : Assignment} {is : List Nat} {k i : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (his : is = [i]) (hk : domBoolPin st.domains k false = true)
+    (hb : aba_domBoolOnlyB (slotEnum st.domains i) = true) :
+    (posBool i false).eval a = some true := by
+  obtain ⟨hlen0, hallb⟩ := aba_domBoolOnlyB_eq hb
+  have hne : slotEnum st.domains i ≠ [] := by
+    intro h0
+    rw [h0] at hlen0
+    simp at hlen0
+  have hlt : i < st.domains.length := by
+    by_cases hlt' : i < st.domains.length
+    · exact hlt'
+    · exact absurd (slotEnum_nil_of_length_le hlt') hne
+  have hs2 : i < a.length := by rw [hfit.1]; exact hlt
+  have hread : a[i]? = some a[i] := List.getElem?_eq_getElem hs2
+  have hmem : a[i] ∈ st.domains.getD i Dom.empty := hfit.2 i a[i] hread
+  have hmemE : a[i] ∈ slotEnum st.domains i := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+  obtain ⟨p, hp⟩ := hallb a[i] hmemE
+  have hreadp : a[i]? = some (.bool p) := by rw [hread, hp]
+  have hkread := fits_of_domBoolPin hfit hk
+  have hallp : p = false := by
+    have h := aba_satisfied hcons
+    rw [his, hkread] at h
+    injection h with h
+    have h' : ([i].all (fun i => slotIsBoolB a i true)) = false :=
+      (Value.bool.inj h).symm
+    have hallf : slotIsBoolB a i true = false := by simpa using h'
+    rw [aba_slotIsBoolB_true_eq hreadp] at hallf
+    exact hallf
+  rw [hallp] at hreadp
+  exact b2i_posBool_eval_true hreadp
+
+/-- A fitting read of a Boolean-only slot is a Boolean. -/
+theorem aba_read_bool_of_guard {st : State} {a : Assignment} {i : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hb : aba_domBoolOnlyB (slotEnum st.domains i) = true) :
+    ∃ p : Bool, a[i]? = some (.bool p) := by
+  obtain ⟨hlen0, hallb⟩ := aba_domBoolOnlyB_eq hb
+  have hne : slotEnum st.domains i ≠ [] := by
+    intro h0
+    rw [h0] at hlen0
+    simp at hlen0
+  have hlt : i < st.domains.length := by
+    by_cases hlt' : i < st.domains.length
+    · exact hlt'
+    · exact absurd (slotEnum_nil_of_length_le hlt') hne
+  have hs2 : i < a.length := by rw [hfit.1]; exact hlt
+  have hread : a[i]? = some a[i] := List.getElem?_eq_getElem hs2
+  have hmem : a[i] ∈ st.domains.getD i Dom.empty := hfit.2 i a[i] hread
+  have hmemE : a[i] ∈ slotEnum st.domains i := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+  obtain ⟨p, hp⟩ := hallb a[i] hmemE
+  exact ⟨p, by rw [hread, hp]⟩
+
+/-- A faithful read of a pinned-`true` slot is the Boolean `true`. -/
+theorem aba_read_bool_of_faithful_pin {st : State} {a : Assignment} {i : Nat}
+    (hfaith : FrameFaithful st.domains a)
+    (hpin : domBoolPin st.domains i true = true) :
+    ∃ p : Bool, a[i]? = some (.bool p) := by
+  have hd := domBoolPin_eq hpin
+  have hne : slotEnum st.domains i ≠ [] := by
+    intro h0
+    rw [h0] at hd
+    simp at hd
+  have hlt : i < st.domains.length := by
+    by_cases hlt' : i < st.domains.length
+    · exact hlt'
+    · exact absurd (slotEnum_nil_of_length_le hlt') hne
+  obtain ⟨y, hread, -, hsort⟩ := hfaith i hlt
+  have hs := hsort (.bool true) ((DomainLike.mem_iff _ _).mpr (by
+    show (.bool true : Value) ∈ slotEnum st.domains i
+    rw [hd]; simp))
+  rcases hs with ⟨⟨k, hk⟩, -⟩ | ⟨-, ⟨p, hp⟩⟩
+  · exact absurd hk (by simp)
+  · exact ⟨p, by rw [hread, hp]⟩
+
+/-- A faithful read of a Boolean-only slot is a Boolean. -/
+theorem aba_read_bool_of_faithful_guard {st : State} {a : Assignment} {i : Nat}
+    (hfaith : FrameFaithful st.domains a)
+    (hb : aba_domBoolOnlyB (slotEnum st.domains i) = true) :
+    ∃ p : Bool, a[i]? = some (.bool p) := by
+  obtain ⟨hlen0, hallb⟩ := aba_domBoolOnlyB_eq hb
+  have hne : slotEnum st.domains i ≠ [] := by
+    intro h0
+    rw [h0] at hlen0
+    simp at hlen0
+  have hlt : i < st.domains.length := by
+    by_cases hlt' : i < st.domains.length
+    · exact hlt'
+    · exact absurd (slotEnum_nil_of_length_le hlt') hne
+  obtain ⟨x, hxmem⟩ := List.exists_mem_of_ne_nil _ hne
+  obtain ⟨p, hp⟩ := hallb x hxmem
+  obtain ⟨y, hread, -, hsort⟩ := hfaith i hlt
+  have hxmemD : x ∈ st.domains.getD i Dom.empty := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mpr hxmem
+  have hs := hsort x hxmemD
+  rw [hp] at hs
+  rcases hs with ⟨⟨k, hk⟩, -⟩ | ⟨-, ⟨q, hq⟩⟩
+  · exact absurd hk (by simp)
+  · exact ⟨q, by rw [hread, hq]⟩
+
+/-! ### The fitting exclusions -/
+
+/-- A slot cannot read both `true` and `false`. -/
+theorem aba_posBool_contra {a : Assignment} {s : Nat}
+    (h1 : (posBool s true).eval a = some true)
+    (h2 : (posBool s false).eval a = some true) : False := by
+  have hb1 : a[s]? = some (.bool true) := (eval_posBool_iff a s true).mp h1
+  have hb2 : a[s]? = some (.bool false) := (eval_posBool_iff a s false).mp h2
+  have h : true = false := Value.bool.inj (Option.some.inj (hb1.symm.trans hb2))
+  cases h
+
+/-- The all-`true` round's conflict excludes every fitting solution. -/
+theorem aba_allTrue_excluded {st : State} {a : Assignment} {is : List Nat} {k : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (hall : is.all (fun i => domBoolPin st.domains i true) = true)
+    (hnot : ¬ (valueMemB (.bool true) (slotEnum st.domains k) = true)) : False := by
+  have htrue := aba_allTrue_pivot hfit hcons hall
+  have hread : a[k]? = some (.bool true) := (eval_posBool_iff a k true).mp htrue
+  have hs2 : k < a.length := by
+    by_cases h : k < a.length
+    · exact h
+    · exfalso
+      rw [List.getElem?_eq_none_iff.mpr (by omega)] at hread
+      cases hread
+  have hmem : a[k] ∈ st.domains.getD k Dom.empty :=
+    hfit.2 k a[k] (List.getElem?_eq_getElem hs2)
+  have hmemE : a[k] ∈ slotEnum st.domains k := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+  have hai : a[k] = .bool true :=
+    Option.some.inj ((List.getElem?_eq_getElem hs2).symm.trans hread)
+  exact hnot (valueMemB_iff.mpr (by rw [← hai]; exact hmemE))
+
+/-- The pinned-`false` input round's conflict excludes every fitting
+    solution. -/
+theorem aba_pinFalse_excluded {st : State} {a : Assignment} {is : List Nat}
+    {k i : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (hi : i ∈ is) (hpin : domBoolPin st.domains i false = true)
+    (hnot : ¬ (valueMemB (.bool false) (slotEnum st.domains k) = true)) : False := by
+  have hfalse := aba_pinFalse_pivot hfit hcons hi hpin
+  have hread : a[k]? = some (.bool false) := (eval_posBool_iff a k false).mp hfalse
+  have hs2 : k < a.length := by
+    by_cases h : k < a.length
+    · exact h
+    · exfalso
+      rw [List.getElem?_eq_none_iff.mpr (by omega)] at hread
+      cases hread
+  have hmem : a[k] ∈ st.domains.getD k Dom.empty :=
+    hfit.2 k a[k] (List.getElem?_eq_getElem hs2)
+  have hmemE : a[k] ∈ slotEnum st.domains k := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+  have hai : a[k] = .bool false :=
+    Option.some.inj ((List.getElem?_eq_getElem hs2).symm.trans hread)
+  exact hnot (valueMemB_iff.mpr (by rw [← hai]; exact hmemE))
+
+/-- The pinned-`true` target round's conflict excludes every fitting
+    solution. -/
+theorem aba_kTrue_excluded {st : State} {a : Assignment} {is : List Nat} {k i : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (hi : i ∈ is) (hk : domBoolPin st.domains k true = true)
+    (hnot : ¬ (valueMemB (.bool true) (slotEnum st.domains i) = true)) : False := by
+  have htrue := aba_kTrue_pivot hfit hcons hi hk
+  have hreadtrue : a[i]? = some (.bool true) := (eval_posBool_iff a i true).mp htrue
+  have hs2 : i < a.length := by
+    by_cases h : i < a.length
+    · exact h
+    · exfalso
+      rw [List.getElem?_eq_none_iff.mpr (by omega)] at hreadtrue
+      cases hreadtrue
+  have hlt : i < st.domains.length := by rw [← hfit.1]; exact hs2
+  have hmem : a[i] ∈ st.domains.getD i Dom.empty :=
+    hfit.2 i a[i] (List.getElem?_eq_getElem hs2)
+  have hmemE : a[i] ∈ slotEnum st.domains i := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+  have hai : a[i] = .bool true :=
+    Option.some.inj ((List.getElem?_eq_getElem hs2).symm.trans hreadtrue)
+  exact hnot (valueMemB_iff.mpr (by rw [← hai]; exact hmemE))
+
+/-- The Boolean-only singleton round's conflict excludes every fitting
+    solution. -/
+theorem aba_single_excluded {st : State} {a : Assignment} {is : List Nat}
+    {k i : Nat}
+    (hfit : Core.Assignment.Fits st.domains a)
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (his : is = [i]) (hk : domBoolPin st.domains k false = true)
+    (hb : aba_domBoolOnlyB (slotEnum st.domains i) = true)
+    (hnot : ¬ (valueMemB (.bool false) (slotEnum st.domains i) = true)) : False := by
+  have hfalse := aba_single_pivot hfit hcons his hk hb
+  have hreadfalse : a[i]? = some (.bool false) :=
+    (eval_posBool_iff a i false).mp hfalse
+  have hs2 : i < a.length := by
+    by_cases h : i < a.length
+    · exact h
+    · exfalso
+      rw [List.getElem?_eq_none_iff.mpr (by omega)] at hreadfalse
+      cases hreadfalse
+  have hlt : i < st.domains.length := by rw [← hfit.1]; exact hs2
+  have hmem : a[i] ∈ st.domains.getD i Dom.empty :=
+    hfit.2 i a[i] (List.getElem?_eq_getElem hs2)
+  have hmemE : a[i] ∈ slotEnum st.domains i := by
+    simpa [slotEnum] using (DomainLike.mem_iff _ _).mp hmem
+  have hai : a[i] = .bool false :=
+    Option.some.inj ((List.getElem?_eq_getElem hs2).symm.trans hreadfalse)
+  exact hnot (valueMemB_iff.mpr (by rw [← hai]; exact hmemE))
+
+/-! ### Clause entailment at solutions -/
+
+/-- The all-`true` round's clause carries a true literal at every solution
+    once every input reads a Boolean. -/
+theorem aba_allTrue_entailed {a : Assignment} {is : List Nat} {k : Nat}
+    (hreads : ∀ i ∈ is, ∃ p : Bool, a[i]? = some (.bool p))
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a) :
+    ∃ l ∈ [posBool k true] ++ is.map (fun i => posBool i false),
+      l.eval a = some true := by
+  cases h : is.all (fun i => slotIsBoolB a i true) with
+  | true =>
+      have hc := aba_satisfied hcons
+      rw [h] at hc
+      exact ⟨posBool k true, List.mem_append_left _ (List.mem_singleton_self _),
+        b2i_posBool_eval_true hc⟩
+  | false =>
+      obtain ⟨j, hj, hnot⟩ := List.all_eq_false.mp h
+      have hfalse : slotIsBoolB a j true = false := by
+        cases hv : slotIsBoolB a j true with
+        | false => rfl
+        | true => exact absurd (by simp [hv]) hnot
+      obtain ⟨p, hp⟩ := hreads j hj
+      have hp' : p = false := by
+        rw [aba_slotIsBoolB_true_eq hp] at hfalse
+        exact hfalse
+      refine ⟨posBool j false,
+        List.mem_append_right _ (List.mem_map.mpr ⟨j, hj, rfl⟩), ?_⟩
+      rw [hp'] at hp
+      exact b2i_posBool_eval_true hp
+
+/-- The two-literal pair clause `[k = false, i = true]` carries a true
+    literal at every solution for every listed input. -/
+theorem aba_pair_entailed {a : Assignment} {is : List Nat} {k i : Nat}
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (hi : i ∈ is) :
+    ∃ l ∈ [posBool k false, posBool i true], l.eval a = some true := by
+  cases h : is.all (fun i => slotIsBoolB a i true) with
+  | false =>
+      have hc := aba_satisfied hcons
+      rw [h] at hc
+      exact ⟨posBool k false, List.mem_cons_self, b2i_posBool_eval_true hc⟩
+  | true =>
+      have htrue := List.all_eq_true.mp h i hi
+      rw [aba_slotIsBoolB_true_iff] at htrue
+      exact ⟨posBool i true, List.mem_cons_of_mem _ (List.mem_singleton_self _),
+        b2i_posBool_eval_true htrue⟩
+
+/-- The pinned-`true` target round's clause `[i = true, k = false]`
+    carries a true literal at every solution for every listed input. -/
+theorem aba_pairTrue_entailed {a : Assignment} {is : List Nat} {k i : Nat}
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (hi : i ∈ is) :
+    ∃ l ∈ [posBool i true, posBool k false], l.eval a = some true := by
+  cases h : is.all (fun i => slotIsBoolB a i true) with
+  | false =>
+      have hc := aba_satisfied hcons
+      rw [h] at hc
+      exact ⟨posBool k false, List.mem_cons_of_mem _ (List.mem_singleton_self _),
+        b2i_posBool_eval_true hc⟩
+  | true =>
+      have htrue := List.all_eq_true.mp h i hi
+      rw [aba_slotIsBoolB_true_iff] at htrue
+      exact ⟨posBool i true, List.mem_cons_self, b2i_posBool_eval_true htrue⟩
+
+/-- The singleton round's clause `[i = false, k = true]` carries a true
+    literal at every solution once the input reads a Boolean. -/
+theorem aba_single_entailed {a : Assignment} {is : List Nat} {k i : Nat}
+    (hreads : ∃ p : Bool, a[i]? = some (.bool p))
+    (hcons : (DomConstraint.arrayBoolAndSlot is k).SatisfiedBy a)
+    (his : is = [i]) :
+    ∃ l ∈ [posBool i false, posBool k true], l.eval a = some true := by
+  cases h : is.all (fun i => slotIsBoolB a i true) with
+  | true =>
+      have hc := aba_satisfied hcons
+      rw [h] at hc
+      exact ⟨posBool k true, List.mem_cons_of_mem _ (List.mem_singleton_self _),
+        b2i_posBool_eval_true hc⟩
+  | false =>
+      obtain ⟨p, hp⟩ := hreads
+      have hp' : p = false := by
+        rw [his] at h
+        have h1 : slotIsBoolB a i true = false := by
+          simpa using h
+        rw [aba_slotIsBoolB_true_eq hp] at h1
+        exact h1
+      refine ⟨posBool i false, List.mem_cons_self, ?_⟩
+      rw [hp'] at hp
+      exact b2i_posBool_eval_true hp
+
+/-! ### Clause normalization -/
+
+/-- The all-`true` round's emitted clause is normalized. -/
+theorem aba_allTrue_norm (k : Nat) (is : List Nat) :
+    ∀ q ∈ [posBool k true] ++ is.map (fun i => posBool i false),
+      q = q.norm := by
+  intro q hq
+  rcases List.mem_append.mp hq with hq | hq
+  · rw [List.mem_singleton.mp hq]
+    exact (posBool_norm k true).symm
+  · obtain ⟨i, -, rfl⟩ := List.mem_map.mp hq
+    exact (posBool_norm i false).symm
+
+/-- The pinned-`false` input round's emitted clause is normalized. -/
+theorem aba_pair_norm (k i : Nat) :
+    ∀ q ∈ [posBool k false, posBool i true], q = q.norm := by
+  intro q hq
+  rcases List.mem_cons.mp hq with rfl | hq
+  · exact (posBool_norm k false).symm
+  · rw [List.mem_singleton.mp hq]
+    exact (posBool_norm i true).symm
+
+/-- The pinned-`true` target round's emitted clause is normalized. -/
+theorem aba_pairTrue_norm (i k : Nat) :
+    ∀ q ∈ [posBool i true, posBool k false], q = q.norm := by
+  intro q hq
+  rcases List.mem_cons.mp hq with rfl | hq
+  · exact (posBool_norm i true).symm
+  · rw [List.mem_singleton.mp hq]
+    exact (posBool_norm k false).symm
+
+/-- The singleton round's emitted clause is normalized. -/
+theorem aba_single_norm (i k : Nat) :
+    ∀ q ∈ [posBool i false, posBool k true], q = q.norm := by
+  intro q hq
+  rcases List.mem_cons.mp hq with rfl | hq
+  · exact (posBool_norm i false).symm
+  · rw [List.mem_singleton.mp hq]
+    exact (posBool_norm k true).symm
 
 end LeanFzn.Solver.Propagation

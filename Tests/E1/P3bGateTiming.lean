@@ -1,4 +1,4 @@
-import LeanFzn.Integration.CertifiedSolve
+import LeanFzn.Legacy.Integration.CertifiedSolve
 import Tests.UIP.LcgHarnessBattery
 
 /-!
@@ -61,13 +61,13 @@ def profileFile (path : String) : IO Unit := do
       let t0 ← IO.monoNanosNow
       let fastOk ← IO.lazyPure fun _ =>
         doms.all (fun d => LeanFzn.Solver.UIP.LcgMixedCompiledKit.viewsNodupFastB
-          (d.map LeanFzn.Semantics.Value.intView))
+          ((LeanFzn.Solver.Propagation.Dom.enum d).map LeanFzn.Semantics.Value.intView))
       let t1 ← IO.monoNanosNow
       -- the OLD quadratic decider on the largest domain only (bounded)
-      let big := doms.foldl (fun a d => if a.length < d.length then d else a) []
+      let big := doms.foldl (fun a d => if a.length < d.length then d else a) LeanFzn.Solver.Propagation.Dom.empty
       let t2 ← IO.monoNanosNow
       let oldBigOk ← IO.lazyPure fun _ =>
-        decide ((big.map LeanFzn.Semantics.Value.intView).Nodup)
+        decide (((LeanFzn.Solver.Propagation.Dom.enum big).map LeanFzn.Semantics.Value.intView).Nodup)
       let t3 ← IO.monoNanosNow
       -- the full route gate (the gate the CLI evaluates)
       let t4 ← IO.monoNanosNow
@@ -102,7 +102,7 @@ def crosscheckFile (path : String) : IO Unit := do
         fastGate={fastOk} fastMs={(t2 - t1) / 1000000} equal={slowOk == fastOk}"
 
 /-- `--battery-crosscheck`: evaluate BOTH gates on every instance of the
-`LcgHarness` battery (43 instances, all small) and report mismatches. Kernel
+`LcgHarness` battery (all small) and report mismatches. Kernel
 statement of the same fact: `mixedKitGateFastB_eq`. -/
 def batteryCrosscheck : IO Unit := do
   let mut n := 0

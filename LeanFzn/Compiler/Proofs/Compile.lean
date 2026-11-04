@@ -38,7 +38,7 @@ Why:
 DAG:
   LeanFzn.Compiler.Compile -> Proofs.CompileCore -> Proofs.CompileAux1
     -> Proofs.CompileAux2a -> Proofs.CompileAux2b -> Proofs.CompileAux2c
-    -> Proofs.Compile (this shell)
+    -> Proofs.CompileAux2d -> Proofs.Compile (this shell)
     -> Proofs.Exact / LeanFzn.Solver.UIP.Proofs.Fam.AllDiff
 -/
 
@@ -47,5 +47,7 @@ import LeanFzn.Compiler.Proofs.CompileAux1
 import LeanFzn.Compiler.Proofs.CompileAux2a
 import LeanFzn.Compiler.Proofs.CompileAux2b
 import LeanFzn.Compiler.Proofs.CompileAux2c
+import LeanFzn.Compiler.Proofs.CompileAux2d
+import LeanFzn.Compiler.Proofs.CompileAux2e
 open LeanFzn.Compiler.Domains
 

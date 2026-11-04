@@ -30,6 +30,17 @@ Purpose (PLAN task E0; TEST-ONLY, UNCERTIFIED):
   `FalsifiedByTrailNorm`) and a SEMANTIC variant (an earlier trail literal
   IMPLIES the falsification, e.g. `x <= 2` falsifies `x > 5`).
 
+  B1 two-track split of (c): the (c) checks above are TRAIL-ONLY; the
+  dispatcher classifies unit clauses by DOMAIN falsification
+  (`clauseRemaining` = `filter (fun l => !literalImpossible f l)`, i.e. every
+  value of the slot in the current box falsifies the literal). `domainFalsified`
+  recomputes that criterion independently, and each `c-sem` observation is
+  classified against the event `explainedDeduction`/`schedulerNext` actually
+  selects (`CSemClass`: `coverless` frames are liveness-gated to `.stable` by
+  `nextPruningEvent`, so no reason is recorded there). `negativeControlResults`
+  contains intentionally invalid synthetic reasons that both checks must reject,
+  so neither track can be vacuous.
+
 Dependencies: Tests.UIP.OracleFixtures (oracle; imported and REUSED),
 LeanFzn.Integration.CertifiedSolve (parser/compiler plumbing, emitter),
 LeanFzn.Checker.Check (verified checker), `Proofs.Scheduler` (`phaseNext`).
@@ -45,11 +56,12 @@ Run: `lake build tests_lcg_harness && .lake/build/bin/tests_lcg_harness [opts] [
 -/
 
 import Tests.UIP.OracleFixtures
-import LeanFzn.Integration.CertifiedSolve
+import LeanFzn.Legacy.Integration.CertifiedSolve
 import LeanFzn.Checker.Check
-import LeanFzn.Solver.Propagation.LiteralClamp
-import LeanFzn.Solver.UIP.Proofs.Scheduler
-import LeanFzn.Solver.UIP.AnalysisEvents
+import LeanFzn.Legacy.Solver.Propagation.LiteralClamp
+import LeanFzn.Legacy.Solver.UIP.Proofs.Scheduler
+import LeanFzn.Legacy.Solver.UIP.AnalysisEvents
+import LeanFzn.Legacy.Solver.UIP.Proofs.FrameLive
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 open LeanFzn LeanFzn.Solver LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Integration LeanFzn.Solver.Core
@@ -59,6 +71,20 @@ open T1Oracle
 namespace LcgHarness
 
 abbrev LProblem := LeanFzn.Solver.Propagation.Problem DomConstraint Unit
+
+/-- The mixed route gate's `gateOk` conjunct supplies the sparse frame gate
+for any original clause base and propagator list over the same box. -/
+theorem frameGate_of_routeGate {p : CompiledProblem DomConstraint}
+    (h : lcgRouteGateMixed p = true) :
+    ∀ {original : List Clause} {props : List Propagator}
+      {cfg : SchedulerConfig (lcgLeaf p)},
+      SupportedReach p.domains original props cfg → FrameNonempty cfg := by
+  intro original props cfg hreach
+  apply LeanFzn.Solver.UIP.FrameLive.frameNonempty_of_gateOk (problem := lcgProblem p)
+  · simp only [lcgRouteGateMixed, Bool.and_eq_true] at h
+    exact h.1.1
+  · rfl
+  · exact hreach
 
 
 /-! ### Compact printing -/
@@ -89,7 +115,7 @@ wrong sort, e.g. a `boolEq` literal on an int slot, which the propagators put
 into reason clauses) is NOT `some true`, so it counts as falsified (the earlier
 conservative reading, which flagged these as violations, was a harness artefact). -/
 def litFalseAtRoot (orig : List Domain) (q : Literal) : Bool :=
-  (orig.getD q.atom.slot []).all fun v =>
+  (Dom.enum (orig.getD q.atom.slot Dom.empty)).all fun v =>
     match q.atom.evalAtValue v with
     | some b => (if q.positive then b else !b) == false
     | none => true
@@ -179,6 +205,58 @@ def unitViolations (mode : Bool) {leaf : Assignment → Bool}
             || litFalseAtRoot cfg.orig q)
         if bad.isEmpty then none else some (c, l, bad)
     | _ => none
+
+/-! ### B1 two-track tracker: domain-based falsification and dispatch class -/
+
+/-- DOMAIN-BASED falsification of a literal: every value of the literal's slot
+in the frame's full box (`Frame.domains`, chosen prefix included) falsifies it.
+This is the criterion `literalImpossible`/`clauseRemaining` use; it is
+recomputed here independently of `clauseRemaining`, so the check cannot pass by
+definition. It is state-relative: it reads the current domains, not the trail. -/
+def domainFalsified (f : BranchFrame) (q : Literal) : Bool :=
+  (Dom.enum ((Frame.domains f).getD q.atom.slot Dom.empty)).all fun v => !q.valueHolds v
+
+/-- B1 dispatch class of one unit-clause observation at one configuration. -/
+inductive CSemClass where
+  /-- the frame is not live (`frameLiveB = false`): `nextPruningEvent` gates
+  every `.implied` event to `.stable` (P1 S1′), so no reason is recorded here -/
+  | coverless
+  /-- the frame is live, but the dispatcher selects no deduction whose reason
+  is the flagged clause at this configuration -/
+  | notSelected
+  /-- the frame is live and the flagged clause is exactly the reason of the
+  deduction the dispatcher selects here: the only class that escalates -/
+  | selected
+  deriving DecidableEq, Repr
+
+/-- Classify a flagged clause against the event the dispatcher actually takes:
+`explainedDeduction` is the selection `schedulerNext` uses on active branches
+(no productive deduction = `none`). -/
+def cSemClass {leaf : Assignment → Bool} (cfg : SchedulerConfig leaf) (c : Clause) :
+    CSemClass :=
+  if !frameLiveB cfg.branch.frame then .coverless else
+    match explainedDeduction cfg.original cfg.props cfg.branch with
+    | some d => if d.reason = c then .selected else .notSelected
+    | none => .notSelected
+
+/-- B1 NEGATIVE CONTROLS: intentionally invalid synthetic reasons that the
+trackers must reject, plus valid ones they must accept. Each entry is
+`(name, behaved-as-required)`. -/
+def negativeControlResults : List (String × Bool) :=
+  let f : BranchFrame := legacyFrame [[.int 0, .int 1, .int 2]] []
+  let tImp : TrailEntry := { literal := posLe 0 (-2), level := 0, reason := none }
+  let tNo : TrailEntry := { literal := posLe 0 0, level := 0, reason := none }
+  [ ("domain rejects x0<=2 (satisfiable in 0..2)", !domainFalsified f (posLe 0 2)),
+    ("domain rejects x0!=1 (satisfiable in 0..2)", !domainFalsified f (posNe 0 1)),
+    ("domain accepts x0<=-1 (excluded in 0..2)", domainFalsified f (posLe 0 (-1))),
+    ("trail rejects x0>-1 without an implying entry", !semFalsified [tNo] (negLe 0 (-1))),
+    ("trail accepts x0>-1 from x0<=-2", semFalsified [tImp] (negLe 0 (-1))),
+    ("trail rejects x1<=-2 for a slot-0 literal",
+      !semFalsified [{ literal := posLe 1 (-2), level := 0, reason := none }]
+        (negLe 0 (-1))) ]
+
+/-- All negative controls behaved as required (the runner fails fast otherwise). -/
+def negativeControlsPass : Bool := negativeControlResults.all (·.2)
 
 /-! ### (d) conflict clause -/
 
@@ -283,6 +361,14 @@ structure Obs where
   checkedE : Nat := 0
   nRoot : Nat := 0
   checkedRoot : Nat := 0
+  /-- B1 split of the `c-sem` observations (one per config, first flagged
+  clause): dispatch class and domain-based falsification failure. Every
+  `nC.2` increment lands in exactly one of the three classes; `nCDom` must
+  stay 0 (a fired reason whose non-pivot is not domain-falsified). -/
+  nCDead : Nat := 0
+  nCNotSel : Nat := 0
+  nCSel : Nat := 0
+  nCDom : Nat := 0
 
 def Obs.addViol (o : Obs) (kind : String) (step : Nat) (detail : String) : Obs :=
   if (o.viols.filter (·.kind == kind)).size < 3 then
@@ -329,7 +415,7 @@ def observe {leaf : Assignment → Bool} (inv raw : Bool) (sols : Option (List A
         -- H2c probe: the asserting enqueue duplicates a literal of the checkpoint trail
         if p.checkpoint.trail.any (fun e => litEqB e.literal an.asserting.norm) then
           o1.addViol "freshJump" i
-            s!"asserting {fmtLit an.asserting} already in checkpoint trail; frame uncovered? {cfg.branch.frame.1.any (·.isEmpty)}"
+            s!"asserting {fmtLit an.asserting} already in checkpoint trail; frame uncovered? {cfg.branch.frame.doms.any (·.isEmpty)}"
         else o1
     | _ => o
   -- raw `.analyzeConflict` sites (the phase step collapses them into the jump)
@@ -407,7 +493,7 @@ def observe {leaf : Assignment → Bool} (inv raw : Bool) (sols : Option (List A
           e.level == 0 && ss.any fun a => e.literal.eval a != some true
         if bad.isEmpty then { o with checkedRoot := o.checkedRoot + 1 }
         else ({ o with nRoot := o.nRoot + 1 }).addViol "consumeRoot" i
-          s!"falsifier {bad.map (fun (e : TrailEntry) => fmtLit e.literal)} fails at a solution; pending frame prefix length {f.2.length}"
+          s!"falsifier {bad.map (fun (e : TrailEntry) => fmtLit e.literal)} fails at a solution; pending frame level {f.level}"
     | _, _, _ => o
   let o :=
     match alignViolations cfg.orig cfg.branch.learned with
@@ -438,7 +524,9 @@ def observe {leaf : Assignment → Bool} (inv raw : Bool) (sols : Option (List A
           s!"learned clause {fmtClause c} semantically falsified at closure"
     else o
   -- (c) unit learned clauses, evaluated where the dispatcher looks at the
-  -- frame (active, no pending conflict evidence)
+  -- frame (active, no pending conflict evidence). The `c-sem` count is kept
+  -- EXACTLY as before (it is the trail-only diagnostic); the B1 split below
+  -- additionally records the dispatcher-domain check and the dispatch class.
   let o :=
     if cfg.conflict.isNone && cfg.status == .active then
       let o := { o with checkedC := o.checkedC + 1 }
@@ -449,8 +537,16 @@ def observe {leaf : Assignment → Bool} (inv raw : Bool) (sols : Option (List A
             s!"unit learned {fmtClause c} (pivot {fmtLit l}): non-pivot {fmtClause bad} not falsified"
       match unitViolations true cfg with
       | [] => o
-      | (c, l, bad) :: _ => ({ o with nC := (o.nC.1, o.nC.2 + 1) }).addViol "c-sem" i
-          s!"unit learned {fmtClause c} (pivot {fmtLit l}): non-pivot {fmtClause bad} not semantically falsified"
+      | (c, l, bad) :: _ =>
+          let o := ({ o with nC := (o.nC.1, o.nC.2 + 1) }).addViol "c-sem" i
+            s!"unit learned {fmtClause c} (pivot {fmtLit l}): non-pivot {fmtClause bad} not semantically falsified"
+          -- B1 track (b): the criterion the dispatcher uses is DOMAIN-based
+          let o := if bad.all (domainFalsified cfg.branch.frame) then o
+                   else { o with nCDom := o.nCDom + 1 }
+          match cSemClass cfg c with
+          | .coverless => { o with nCDead := o.nCDead + 1 }
+          | .notSelected => { o with nCNotSel := o.nCNotSel + 1 }
+          | .selected => { o with nCSel := o.nCSel + 1 }
     else o
   -- (d) conflict clause
   match schedulerNext cfg with
@@ -634,6 +730,8 @@ def printRow (r : Row) : IO Unit := do
   IO.println s!"   analyzerEvents: expansions={o.expansions} scans={o.scans} marks={o.marks} postAssertPropagations={o.postAssertProps}"
   IO.println s!"   time: scheduler(bare)={r.bareMs}ms instrumented={r.ms}ms chrono={r.chronoMs}ms"
   IO.println s!"   invariants (exact,sem) e={o.nE}(@{o.checkedE}) f={o.nF} a={o.nA} b={o.nB}(@{o.checkedB}) c={o.nC}(@{o.checkedC}) d={o.nD} consumeRoot={o.nRoot}(@{o.checkedRoot})"
+  if o.nC.2 > 0 then
+    IO.println s!"   B1 c-sem two-track: coverless(no implied dispatch)={o.nCDead} notSelected(live, other event)={o.nCNotSel} selected(live, clause is the recorded reason)={o.nCSel}; domain-based falsification failures={o.nCDom}"
   if !o.causes.isEmpty then
     IO.println s!"   analysis=none causes: {o.causes.toList}"
   for n in o.notes do

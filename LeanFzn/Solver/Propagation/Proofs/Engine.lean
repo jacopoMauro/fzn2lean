@@ -172,23 +172,23 @@ lemmas make them bounds of every integer value in the domain. -/
 
 /-- `domMinI d = some mn` makes `mn` a lower bound of every integer
     view in `d`. -/
-theorem domMinI_le {d : List Value} {mn : Int} (v : Value) (i : Int)
+theorem domMinI_le {α : Type} [DomainLike α] {d : α} {mn : Int} (v : Value) (i : Int)
     (hv : Value.intView v = some i) (hmem : v ∈ d)
     (hmin : domMinI d = some mn) : mn ≤ i := by
-  have hmemi : i ∈ d.filterMap Value.intView :=
-    List.mem_filterMap.mpr ⟨v, hmem, hv⟩
+  have hmemi : i ∈ (DomainElems.elems d).filterMap Value.intView :=
+    List.mem_filterMap.mpr ⟨v, (DomainLike.mem_iff d v).mp hmem, hv⟩
   unfold domMinI at hmin
-  exact (foldmin_le_mem (d.filterMap Value.intView) none mn hmin).1 i hmemi
+  exact (foldmin_le_mem ((DomainElems.elems d).filterMap Value.intView) none mn hmin).1 i hmemi
 
 /-- `domMaxI d = some mx` makes `mx` an upper bound of every integer
     view in `d`. -/
-theorem domMaxI_ge {d : List Value} {mx : Int} (v : Value) (i : Int)
+theorem domMaxI_ge {α : Type} [DomainLike α] {d : α} {mx : Int} (v : Value) (i : Int)
     (hv : Value.intView v = some i) (hmem : v ∈ d)
     (hmax : domMaxI d = some mx) : i ≤ mx := by
-  have hmemi : i ∈ d.filterMap Value.intView :=
-    List.mem_filterMap.mpr ⟨v, hmem, hv⟩
+  have hmemi : i ∈ (DomainElems.elems d).filterMap Value.intView :=
+    List.mem_filterMap.mpr ⟨v, (DomainLike.mem_iff d v).mp hmem, hv⟩
   unfold domMaxI at hmax
-  exact (foldmax_ge_mem (d.filterMap Value.intView) none mx hmax).1 i hmemi
+  exact (foldmax_ge_mem ((DomainElems.elems d).filterMap Value.intView) none mx hmax).1 i hmemi
 
 /-! ## Trail bounds correspond to satisfied entries
 
@@ -230,49 +230,36 @@ the out-of-range `getD` degeneracy. -/
 
 /-- Membership in the updated slot at the SAME index is membership in
     the image of the old slot. -/
-theorem mem_getD_updateSlot_eq : ∀ (doms : List (List Value)) (s : Nat)
-    (f : List Value → List Value) (v : Value),
-    v ∈ (updateSlot doms s f).getD s [] → v ∈ f (doms.getD s []) := by
-  intro doms
-  induction doms with
-  | nil =>
-      intro s f v hmem
-      cases s <;> simp [updateSlot, setSlot] at hmem
-  | cons d ds ih =>
-      intro s f v hmem
-      cases s with
-      | zero => exact hmem
-      | succ s' =>
-          simp only [updateSlot, setSlot, List.getD_cons_succ] at hmem ⊢
-          exact ih s' f v hmem
+theorem mem_getD_updateSlot_eq : ∀ (doms : List Domain) (s : Nat)
+    (f : Domain → Domain) (v : Value),
+    v ∈ (updateSlot doms s f).getD s Dom.empty → v ∈ f (doms.getD s Dom.empty) := by
+  intro doms s f v hmem
+  by_cases hk : s < doms.length
+  · rw [updateSlot, List.getD_eq_getElem?_getD, List.getElem?_set_self hk,
+      Option.getD_some] at hmem
+    exact hmem
+  · exfalso
+    rw [updateSlot, List.getD_eq_getElem?_getD, List.getElem?_set] at hmem
+    simp only [if_true, if_neg hk] at hmem
+    simpa using hmem
 
 /-- Membership at a DIFFERENT index is unchanged. -/
-theorem mem_getD_updateSlot_ne : ∀ (doms : List (List Value))
-    (s s0 : Nat) (f : List Value → List Value) (v : Value),
-    s0 ≠ s → v ∈ (updateSlot doms s f).getD s0 [] →
-    v ∈ doms.getD s0 [] := by
-  intro doms
-  induction doms with
-  | nil =>
-      intro s s0 f v hne hmem
-      cases s <;> cases s0 <;> simp [updateSlot, setSlot] at hmem
-  | cons d ds ih =>
-      intro s s0 f v hne hmem
-      cases s with
-      | zero =>
-          cases s0 with
-          | zero => exact absurd rfl hne
-          | succ s0' => exact hmem
-      | succ s' =>
-          cases s0 with
-          | zero => exact hmem
-          | succ s0' =>
-              simp only [updateSlot, setSlot, List.getD_cons_succ] at hmem ⊢
-              exact ih s' s0' f v (by omega) hmem
+theorem mem_getD_updateSlot_ne : ∀ (doms : List Domain)
+    (s s0 : Nat) (f : Domain → Domain) (v : Value),
+    s0 ≠ s → v ∈ (updateSlot doms s f).getD s0 Dom.empty →
+    v ∈ doms.getD s0 Dom.empty := by
+  intro doms s s0 f v hne hmem
+  rw [updateSlot, List.getD_eq_getElem?_getD] at hmem
+  rw [List.getElem?_set] at hmem
+  split at hmem
+  · rename_i heq
+    exact absurd heq.symm hne
+  · rw [List.getD_eq_getElem?_getD]
+    exact hmem
 
 /-- Out-of-range `getD` yields the default (empty). -/
-theorem getD_nil_of_ge : ∀ (doms : List (List Value)) (s : Nat),
-    doms.length ≤ s → doms.getD s [] = [] := by
+theorem getD_nil_of_ge : ∀ (doms : List Domain) (s : Nat),
+    doms.length ≤ s → doms.getD s Dom.empty = Dom.empty := by
   intro doms
   induction doms with
   | nil => intro s _; rfl
@@ -288,10 +275,51 @@ theorem getD_nil_of_ge : ∀ (doms : List (List Value)) (s : Nat),
           have : (d :: ds).length = ds.length + 1 := rfl
           omega
 
+/-- The integer filter only removes values. -/
+theorem mem_domFilterInt {keep : Int → Bool} {d : Domain} {v : Value}
+    (h : v ∈ domFilterInt keep d) : v ∈ d := by
+  unfold domFilterInt at h
+  dsimp only at h
+  split at h
+  · exact h
+  · rw [mem_ofList_iff, List.mem_filter] at h
+    rw [DomainLike.mem_iff, domElems_eq_enum]
+    exact h.1
+
+/-- A value of the domain passing the keep test survives the integer
+    filter. -/
+theorem mem_domFilterInt_of_mem_of_keep {keep : Int → Bool} {d : Domain} {v : Value}
+    (hv : v ∈ d) (hk : domFilterIntKeep keep v = true) :
+    v ∈ domFilterInt keep d := by
+  unfold domFilterInt
+  dsimp only
+  split
+  · exact hv
+  · rename_i hne
+    rw [mem_ofList_iff, List.mem_filter]
+    refine ⟨?_, hk⟩
+    rw [← domElems_eq_enum, ← DomainLike.mem_iff]
+    exact hv
+
+/-- Every value surviving the integer filter passes the keep test. -/
+theorem domFilterInt_keep {keep : Int → Bool} {d : Domain} {v : Value}
+    (h : v ∈ domFilterInt keep d) : domFilterIntKeep keep v = true := by
+  unfold domFilterInt at h
+  dsimp only at h
+  split at h
+  · rename_i hlen
+    have hfil : (Dom.enum d).filter (domFilterIntKeep keep) = Dom.enum d :=
+      List.Sublist.eq_of_length List.filter_sublist hlen
+    exact List.filter_eq_self.mp hfil v (by
+      rw [← domElems_eq_enum, ← DomainLike.mem_iff]
+      exact h)
+  · rw [mem_ofList_iff, List.mem_filter] at h
+    exact h.2
+
 /-- Values of a slot untouched by `domOfLit` are unchanged. -/
-theorem domOfLit_getD_ne : ∀ (doms : List (List Value)) (l : Literal)
+theorem domOfLit_getD_ne : ∀ (doms : List Domain) (l : Literal)
     (s0 : Nat) (v : Value), s0 ≠ l.atom.slot →
-    v ∈ (domOfLit doms l).getD s0 [] → v ∈ doms.getD s0 [] := by
+    v ∈ (domOfLit doms l).getD s0 Dom.empty → v ∈ doms.getD s0 Dom.empty := by
   intro doms l s0 v hne hmem
   cases l with
   | mk atom positive =>
@@ -308,22 +336,14 @@ theorem domOfLit_getD_ne : ∀ (doms : List (List Value)) (l : Literal)
             exact mem_getD_updateSlot_ne doms s' s0 _ v hne hmem
 
 /-- `updateSlot` preserves the slot count. -/
-theorem updateSlot_length : ∀ (doms : List (List Value)) (s : Nat)
-    (f : List Value → List Value),
+theorem updateSlot_length : ∀ (doms : List Domain) (s : Nat)
+    (f : Domain → Domain),
     (updateSlot doms s f).length = doms.length := by
-  intro doms
-  induction doms with
-  | nil => intro s f; cases s <;> rfl
-  | cons d ds ih =>
-      intro s f
-      cases s with
-      | zero => rfl
-      | succ s' =>
-          show (d :: updateSlot ds s' f).length = (d :: ds).length
-          rw [List.length_cons, List.length_cons, ih s' f]
+  intro doms s f
+  exact List.length_set
 
 /-- `domOfLit` preserves the slot count. -/
-theorem domOfLit_length {doms : List (List Value)} (l : Literal) :
+theorem domOfLit_length {doms : List Domain} (l : Literal) :
     (domOfLit doms l).length = doms.length := by
   cases l with
   | mk atom positive =>
@@ -347,9 +367,9 @@ theorem domOfLit_length {doms : List (List Value)} (l : Literal) :
 /-- Values in the trail-folded domains are original values or Boolean
     pins introduced by Boolean literals. -/
 theorem fits_fold_original : ∀ (trail : List TrailEntry)
-    (doms : List (List Value)) (s0 : Nat) (v : Value),
-    v ∈ (trail.foldl (fun acc e => domOfLit acc e.literal) doms).getD s0 [] →
-    (∃ b : Bool, v = .bool b) ∨ v ∈ doms.getD s0 [] := by
+    (doms : List Domain) (s0 : Nat) (v : Value),
+    v ∈ (trail.foldl (fun acc e => domOfLit acc e.literal) doms).getD s0 Dom.empty →
+    (∃ b : Bool, v = .bool b) ∨ v ∈ doms.getD s0 Dom.empty := by
   intro trail
   induction trail with
   | nil =>
@@ -371,51 +391,51 @@ theorem fits_fold_original : ∀ (trail : List TrailEntry)
                   · -- negative: keep p > k
                     have hstep2 : v ∈ (updateSlot doms s'
                         (fun d => domFilterInt
-                          (fun p => decide (p > k)) d)).getD s' [] := horig
+                          (fun p => decide (p > k)) d)).getD s' Dom.empty := horig
                     have himg := mem_getD_updateSlot_eq doms s'
                       (fun d => domFilterInt (fun p => decide (p > k)) d) v
                       hstep2
-                    rw [domFilterInt, List.mem_filter] at himg
-                    exact Or.inr himg.1
+                    exact Or.inr (mem_domFilterInt himg)
                   · -- positive: keep p ≤ k
                     have hstep2 : v ∈ (updateSlot doms s'
                         (fun d => domFilterInt
-                          (fun p => decide (p ≤ k)) d)).getD s' [] := horig
+                          (fun p => decide (p ≤ k)) d)).getD s' Dom.empty := horig
                     have himg := mem_getD_updateSlot_eq doms s'
                       (fun d => domFilterInt (fun p => decide (p ≤ k)) d) v
                       hstep2
-                    rw [domFilterInt, List.mem_filter] at himg
-                    exact Or.inr himg.1
+                    exact Or.inr (mem_domFilterInt himg)
               | boolEq s' b =>
                   have himg := mem_getD_updateSlot_eq doms s'
                     (fun d => d.filter (fun v => v.eqB
                       (.bool (if positive then b else !b)))) v horig
-                  exact Or.inr (List.mem_filter.mp himg).1
+                  rw [DomainLike.mem_iff, domElems_eq_enum, Dom.enum_filter] at himg
+                  refine Or.inr ?_
+                  show v ∈ doms.getD s' Dom.empty
+                  rw [DomainLike.mem_iff, domElems_eq_enum]
+                  exact (List.mem_filter.mp himg).1
               | intNe s' k =>
                   cases positive
                   · -- negative: keep p = k
                     have hstep2 : v ∈ (updateSlot doms s'
                         (fun d => domFilterInt
-                          (fun p => decide (p = k)) d)).getD s' [] := horig
+                          (fun p => decide (p = k)) d)).getD s' Dom.empty := horig
                     have himg := mem_getD_updateSlot_eq doms s'
                       (fun d => domFilterInt (fun p => decide (p = k)) d) v
                       hstep2
-                    rw [domFilterInt, List.mem_filter] at himg
-                    exact Or.inr himg.1
+                    exact Or.inr (mem_domFilterInt himg)
                   · -- positive: keep p ≠ k
                     have hstep2 : v ∈ (updateSlot doms s'
                         (fun d => domFilterInt
-                          (fun p => decide (p ≠ k)) d)).getD s' [] := horig
+                          (fun p => decide (p ≠ k)) d)).getD s' Dom.empty := horig
                     have himg := mem_getD_updateSlot_eq doms s'
                       (fun d => domFilterInt (fun p => decide (p ≠ k)) d) v
                       hstep2
-                    rw [domFilterInt, List.mem_filter] at himg
-                    exact Or.inr himg.1
+                    exact Or.inr (mem_domFilterInt himg)
         · exact Or.inr (domOfLit_getD_ne doms e.literal s0 v
             (fun h => heq h) horig)
 
 /-- `domOfLit` only ever removes values. -/
-theorem domOfLit_domSub (doms : List (List Value)) (l : Literal) :
+theorem domOfLit_domSub (doms : List Domain) (l : Literal) :
     DomSub (domOfLit doms l) doms := by
   refine ⟨domOfLit_length l, ?_⟩
   intro s0 v hv
@@ -429,15 +449,17 @@ theorem domOfLit_domSub (doms : List (List Value)) (l : Literal) :
               first
               | (have himg := mem_getD_updateSlot_eq doms s' _ v
                    (by rw [show s0 = s' from heq] at hv; exact hv)
-                 rw [domFilterInt, List.mem_filter] at himg
-                 rw [show s0 = s' from heq]; exact himg.1)
+                 rw [show s0 = s' from heq]
+                 exact mem_domFilterInt himg)
         | boolEq s' b =>
             have hv' : v ∈ (updateSlot doms s'
                 (fun d => d.filter (fun v => v.eqB
-                  (.bool (if positive then b else !b))))).getD s' [] := by
+                  (.bool (if positive then b else !b))))).getD s' Dom.empty := by
               rw [show s0 = s' from heq] at hv; exact hv
             have himg := mem_getD_updateSlot_eq doms s' _ v hv'
             rw [show s0 = s' from heq]
+            rw [DomainLike.mem_iff, domElems_eq_enum, Dom.enum_filter] at himg
+            rw [DomainLike.mem_iff, domElems_eq_enum]
             exact (List.mem_filter.mp himg).1
         | intNe s' k =>
             cases positive
@@ -445,13 +467,13 @@ theorem domOfLit_domSub (doms : List (List Value)) (l : Literal) :
               first
               | (have himg := mem_getD_updateSlot_eq doms s' _ v
                    (by rw [show s0 = s' from heq] at hv; exact hv)
-                 rw [domFilterInt, List.mem_filter] at himg
-                 rw [show s0 = s' from heq]; exact himg.1)
+                 rw [show s0 = s' from heq]
+                 exact mem_domFilterInt himg)
   · exact domOfLit_getD_ne doms l s0 v heq hv
 
 /-- A fold of `domOfLit` over any trail only removes values. -/
 theorem foldl_domOfLit_domSub : ∀ (trail : List TrailEntry)
-    (doms : List (List Value)),
+    (doms : List Domain),
     DomSub (trail.foldl (fun acc e => domOfLit acc e.literal) doms) doms := by
   intro trail
   induction trail with
@@ -495,7 +517,7 @@ theorem runPropagators_domSub (props : List Propagator) (s : State) :
 
 /-- Slot-value extraction: an int-viewed slot of a fitting assignment
     carries the viewed value at an in-range slot. -/
-theorem slotInt_mem {doms : List (List Value)} {a : Assignment}
+theorem slotInt_mem {doms : List Domain} {a : Assignment}
     (hfit : a.Fits doms) {s : Nat} {i : Int}
     (hslot : slotInt a s = some i) :
     ∃ v, a[s]? = some v ∧ Value.intView v = some i ∧ s < doms.length := by
@@ -508,8 +530,8 @@ theorem slotInt_mem {doms : List (List Value)} {a : Assignment}
   | inl h => exact h
   | inr hge =>
       exfalso
-      have hnil : doms.getD s [] = [] := getD_nil_of_ge doms s hge
-      have hvnil : v ∈ doms.getD s [] := hmem s v hv
+      have hnil : doms.getD s Dom.empty = Dom.empty := getD_nil_of_ge doms s hge
+      have hvnil : v ∈ doms.getD s Dom.empty := hmem s v hv
       rw [hnil] at hvnil
       exact absurd hvnil (by simp)
 
@@ -529,7 +551,7 @@ narrowing literal. Two restrictions make this exact:
 
 /-- THE SINGLE-STEP COHERENCE (positive order): an assignment fitting
     the narrowed domain satisfies the positive order literal. -/
-theorem fits_domOfLit_sat_pos {doms : List (List Value)} {s : Nat}
+theorem fits_domOfLit_sat_pos {doms : List Domain} {s : Nat}
     {k : Int} {a : Assignment} {i : Int}
     (hfit : a.Fits (domOfLit doms (posLe s k)))
     (hin : s < a.length)
@@ -538,25 +560,20 @@ theorem fits_domOfLit_sat_pos {doms : List (List Value)} {s : Nat}
   have hget : a[s]? = some a[s] :=
     (List.getElem?_eq_some_iff).mpr ⟨hin, rfl⟩
   obtain ⟨_, hmem⟩ := hfit
-  have hslotmem : a[s] ∈ (domOfLit doms (posLe s k)).getD s [] :=
+  have hslotmem : a[s] ∈ (domOfLit doms (posLe s k)).getD s Dom.empty :=
     hmem s a[s] hget
   have himg : a[s] ∈ domFilterInt (fun p => decide (p ≤ k))
-      (doms.getD s []) := by
+      (doms.getD s Dom.empty) := by
     have hstep : a[s] ∈ (updateSlot doms s
-        (fun d => domFilterInt (fun p => decide (p ≤ k)) d)).getD s [] :=
+        (fun d => domFilterInt (fun p => decide (p ≤ k)) d)).getD s Dom.empty :=
       hslotmem
     exact mem_getD_updateSlot_eq doms s _ a[s] hstep
-  have hkeep : (match a[s] with
-      | Value.int p => decide (p ≤ k)
-      | Value.bool b => decide ((if b then 1 else 0) ≤ k)
-      | x => true) = true := by
-    have := himg
-    rw [domFilterInt, List.mem_filter] at this
-    exact this.2
+  have hkeep := domFilterInt_keep himg
   -- the int-view premise pins the value shape:
   cases hva : a[s] with
   | int p =>
       rw [hva] at hkeep
+      simp only [domFilterIntKeep] at hkeep
       -- hkeep : decide (p ≤ k) = true
       have hpk : p ≤ k := of_decide_eq_true hkeep
       -- slotInt some p
@@ -587,7 +604,7 @@ theorem fits_domOfLit_sat_pos {doms : List (List Value)} {s : Nat}
 
 /-- THE SINGLE-STEP COHERENCE (negative order): an assignment fitting
     the narrowed domain satisfies the negative order literal. -/
-theorem fits_domOfLit_sat_neg {doms : List (List Value)} {s : Nat}
+theorem fits_domOfLit_sat_neg {doms : List Domain} {s : Nat}
     {k : Int} {a : Assignment} {i : Int}
     (hfit : a.Fits (domOfLit doms (negLe s k)))
     (hin : s < a.length)
@@ -596,24 +613,20 @@ theorem fits_domOfLit_sat_neg {doms : List (List Value)} {s : Nat}
   have hget : a[s]? = some a[s] :=
     (List.getElem?_eq_some_iff).mpr ⟨hin, rfl⟩
   obtain ⟨_, hmem⟩ := hfit
-  have hslotmem : a[s] ∈ (domOfLit doms (negLe s k)).getD s [] :=
+  have hslotmem : a[s] ∈ (domOfLit doms (negLe s k)).getD s Dom.empty :=
     hmem s a[s] hget
   have himg : a[s] ∈ domFilterInt (fun p => decide (p > k))
-      (doms.getD s []) := by
+      (doms.getD s Dom.empty) := by
     have hstep : a[s] ∈ (updateSlot doms s
-        (fun d => domFilterInt (fun p => decide (p > k)) d)).getD s [] :=
+        (fun d => domFilterInt (fun p => decide (p > k)) d)).getD s Dom.empty :=
       hslotmem
     exact mem_getD_updateSlot_eq doms s _ a[s] hstep
-  have hkeep : (match a[s] with
-      | Value.int p => decide (p > k)
-      | Value.bool b => decide ((if b then 1 else 0) > k)
-      | x => true) = true := by
-    have := himg
-    rw [domFilterInt, List.mem_filter] at this
-    exact this.2
+  have hkeep : domFilterIntKeep (fun p => decide (p > k)) a[s] = true :=
+    domFilterInt_keep himg
   cases hva : a[s] with
   | int p =>
       rw [hva] at hkeep
+      simp only [domFilterIntKeep] at hkeep
       have hpk : p > k := of_decide_eq_true hkeep
       show (negLe s k).eval a = some true
       rw [eval_negLe_iff]
@@ -645,7 +658,7 @@ theorem eqB_bool_true {v : Value} {b : Bool} (h : v.eqB (.bool b) = true) :
 
 /-- THE SINGLE-STEP COHERENCE (Boolean pin): an assignment fitting
     the Boolean-pinned domain satisfies the Boolean literal. -/
-theorem fits_domOfLit_sat_bool {doms : List (List Value)} {s : Nat}
+theorem fits_domOfLit_sat_bool {doms : List Domain} {s : Nat}
     {b : Bool} {a : Assignment}
     (hfit : a.Fits (domOfLit doms (posBool s b)))
     (hin : s < a.length) :
@@ -653,25 +666,31 @@ theorem fits_domOfLit_sat_bool {doms : List (List Value)} {s : Nat}
   have hget : a[s]? = some a[s] :=
     (List.getElem?_eq_some_iff).mpr ⟨hin, rfl⟩
   obtain ⟨_, hmem⟩ := hfit
-  have hslotmem : a[s] ∈ (domOfLit doms (posBool s b)).getD s [] :=
+  have hslotmem : a[s] ∈ (domOfLit doms (posBool s b)).getD s Dom.empty :=
     hmem s a[s] hget
-  have himg : a[s] ∈ [Value.bool b] := by
+  have himg : a[s] ∈ (doms.getD s Dom.empty).filter
+      (fun v => v.eqB (.bool b)) := by
     have hstep : a[s] ∈ (updateSlot doms s
-        (fun d => d.filter (fun v => v.eqB (.bool b)))).getD s [] := hslotmem
-    have hf := (List.mem_filter.mp
-      (mem_getD_updateSlot_eq doms s _ a[s] hstep)).2
-    exact List.mem_singleton.mpr (eqB_bool_true hf)
-  simp only [List.mem_singleton] at himg
+        (fun d => d.filter (fun v => v.eqB (.bool b)))).getD s Dom.empty := hslotmem
+    exact mem_getD_updateSlot_eq doms s _ a[s] hstep
+  have hf : a[s].eqB (.bool b) = true := by
+    have hmem' : a[s] ∈ Dom.enum ((doms.getD s Dom.empty).filter
+        (fun v => v.eqB (.bool b))) := by
+      rw [← domElems_eq_enum, ← DomainLike.mem_iff]
+      exact himg
+    rw [Dom.enum_filter, List.mem_filter] at hmem'
+    exact hmem'.2
+  have hval : a[s] = Value.bool b := eqB_bool_true hf
   show (posBool s b).eval a = some true
   simp only [posBool, Literal.eval, Atom.eval]
-  rw [hget, himg]
+  rw [hget, hval]
   cases b <;> rfl
 
 
 /-- THE SINGLE-STEP COHERENCE (positive value removal): an assignment
     fitting the value-removal-narrowed domain satisfies the positive
     value-removal literal. -/
-theorem fits_domOfLit_sat_posNe {doms : List (List Value)} {s : Nat}
+theorem fits_domOfLit_sat_posNe {doms : List Domain} {s : Nat}
     {k : Int} {a : Assignment} {i : Int}
     (hfit : a.Fits (domOfLit doms (posNe s k)))
     (hin : s < a.length)
@@ -680,24 +699,20 @@ theorem fits_domOfLit_sat_posNe {doms : List (List Value)} {s : Nat}
   have hget : a[s]? = some a[s] :=
     (List.getElem?_eq_some_iff).mpr ⟨hin, rfl⟩
   obtain ⟨_, hmem⟩ := hfit
-  have hslotmem : a[s] ∈ (domOfLit doms (posNe s k)).getD s [] :=
+  have hslotmem : a[s] ∈ (domOfLit doms (posNe s k)).getD s Dom.empty :=
     hmem s a[s] hget
   have himg : a[s] ∈ domFilterInt (fun p => decide (p ≠ k))
-      (doms.getD s []) := by
+      (doms.getD s Dom.empty) := by
     have hstep : a[s] ∈ (updateSlot doms s
-        (fun d => domFilterInt (fun p => decide (p ≠ k)) d)).getD s [] :=
+        (fun d => domFilterInt (fun p => decide (p ≠ k)) d)).getD s Dom.empty :=
       hslotmem
     exact mem_getD_updateSlot_eq doms s _ a[s] hstep
-  have hkeep : (match a[s] with
-      | Value.int p => decide (p ≠ k)
-      | Value.bool b => decide ((if b then 1 else 0) ≠ k)
-      | x => true) = true := by
-    have := himg
-    rw [domFilterInt, List.mem_filter] at this
-    exact this.2
+  have hkeep : domFilterIntKeep (fun p => decide (p ≠ k)) a[s] = true :=
+    domFilterInt_keep himg
   cases hva : a[s] with
   | int p =>
       rw [hva] at hkeep
+      simp only [domFilterIntKeep] at hkeep
       have hpk : p ≠ k := of_decide_eq_true hkeep
       show (posNe s k).eval a = some true
       rw [eval_posNe_iff]
@@ -726,7 +741,7 @@ theorem fits_domOfLit_sat_posNe {doms : List (List Value)} {s : Nat}
 /-- THE SINGLE-STEP COHERENCE (negative value removal): an assignment
     fitting the value-pinned domain satisfies the negative
     value-removal literal. -/
-theorem fits_domOfLit_sat_negNe {doms : List (List Value)} {s : Nat}
+theorem fits_domOfLit_sat_negNe {doms : List Domain} {s : Nat}
     {k : Int} {a : Assignment} {i : Int}
     (hfit : a.Fits (domOfLit doms (negNe s k)))
     (hin : s < a.length)
@@ -735,24 +750,20 @@ theorem fits_domOfLit_sat_negNe {doms : List (List Value)} {s : Nat}
   have hget : a[s]? = some a[s] :=
     (List.getElem?_eq_some_iff).mpr ⟨hin, rfl⟩
   obtain ⟨_, hmem⟩ := hfit
-  have hslotmem : a[s] ∈ (domOfLit doms (negNe s k)).getD s [] :=
+  have hslotmem : a[s] ∈ (domOfLit doms (negNe s k)).getD s Dom.empty :=
     hmem s a[s] hget
   have himg : a[s] ∈ domFilterInt (fun p => decide (p = k))
-      (doms.getD s []) := by
+      (doms.getD s Dom.empty) := by
     have hstep : a[s] ∈ (updateSlot doms s
-        (fun d => domFilterInt (fun p => decide (p = k)) d)).getD s [] :=
+        (fun d => domFilterInt (fun p => decide (p = k)) d)).getD s Dom.empty :=
       hslotmem
     exact mem_getD_updateSlot_eq doms s _ a[s] hstep
-  have hkeep : (match a[s] with
-      | Value.int p => decide (p = k)
-      | Value.bool b => decide ((if b then 1 else 0) = k)
-      | x => true) = true := by
-    have := himg
-    rw [domFilterInt, List.mem_filter] at this
-    exact this.2
+  have hkeep : domFilterIntKeep (fun p => decide (p = k)) a[s] = true :=
+    domFilterInt_keep himg
   cases hva : a[s] with
   | int p =>
       rw [hva] at hkeep
+      simp only [domFilterIntKeep] at hkeep
       have hpk : p = k := of_decide_eq_true hkeep
       show (negNe s k).eval a = some true
       rw [eval_negNe_iff]
@@ -1070,13 +1081,13 @@ views (the fragment invariant). -/
     extrema of `d` (which equals `doms`'s slot `s` by the suffix
     correspondence), and the tail recurses. The correspondence is an
     equality of slot domains plus a length bound. -/
-theorem rootFacts_go_valid : ∀ (ds : List (List Value)) (s : Nat)
-    (l : Literal) (doms : List (List Value)) (a : Assignment),
+theorem rootFacts_go_valid : ∀ (ds : List Domain) (s : Nat)
+    (l : Literal) (doms : List Domain) (a : Assignment),
     s + ds.length ≤ doms.length →
-    (∀ i, ds.getD i [] = doms.getD (s + i) []) →
+    (∀ i, ds.getD i Dom.empty = doms.getD (s + i) Dom.empty) →
     l ∈ rootFacts.go s ds →
     a.Fits doms →
-    (∀ v, v ∈ doms.getD l.atom.slot [] → Value.intView v ≠ none) →
+    (∀ v, v ∈ doms.getD l.atom.slot Dom.empty → Value.intView v ≠ none) →
     l.eval a = some true := by
   intro ds
   induction ds with
@@ -1091,7 +1102,7 @@ theorem rootFacts_go_valid : ∀ (ds : List (List Value)) (s : Nat)
           | some mn, some mx =>
               negLe s (mn - 1) :: posLe s mx :: rootFacts.go (s + 1) rest
           | _, _ => rootFacts.go (s + 1) rest) from rfl] at hmem
-      have hd0 : doms.getD s [] = d := by
+      have hd0 : doms.getD s Dom.empty = d := by
         have h1 := hcorr 0
         simp only [List.getD_cons_zero, Nat.add_zero] at h1
         exact h1.symm
@@ -1116,7 +1127,7 @@ theorem rootFacts_go_valid : ∀ (ds : List (List Value)) (s : Nat)
             (fun i => by
               have h1 := hcorr (i + 1)
               simp only [List.getD_cons_succ] at h1
-              show rest.getD i [] = doms.getD (s + 1 + i) []
+              show rest.getD i Dom.empty = doms.getD (s + 1 + i) Dom.empty
               rw [show s + 1 + i = s + (i + 1) from by omega]
               exact h1)
             hmem hfit hview
@@ -1133,7 +1144,7 @@ theorem rootFacts_go_valid : ∀ (ds : List (List Value)) (s : Nat)
                 (fun i => by
                   have h1 := hcorr (i + 1)
                   simp only [List.getD_cons_succ] at h1
-                  show rest.getD i [] = doms.getD (s + 1 + i) []
+                  show rest.getD i Dom.empty = doms.getD (s + 1 + i) Dom.empty
                   rw [show s + 1 + i = s + (i + 1) from by omega]
                   exact h1)
                 hmem hfit hview
@@ -1145,7 +1156,7 @@ theorem rootFacts_go_valid : ∀ (ds : List (List Value)) (s : Nat)
               -- scrutinees are constructors)
               rcases hmem with rfl | hmem
               · -- l = negLe s (mn − 1): value at slot s ≥ mn
-                have hmemV0 : a[s] ∈ doms.getD s [] := hfit.2 s a[s] hget
+                have hmemV0 : a[s] ∈ doms.getD s Dom.empty := hfit.2 s a[s] hget
                 have hmemV : a[s] ∈ d := by rw [← hd0]; exact hmemV0
                 have hslotEq : (negLe s (mn - 1)).atom.slot = s := rfl
                 have hv : Value.intView a[s] ≠ none := by
@@ -1168,7 +1179,7 @@ theorem rootFacts_go_valid : ∀ (ds : List (List Value)) (s : Nat)
               · rw [List.mem_cons] at hmem
                 rcases hmem with rfl | hmem
                 · -- l = posLe s mx : value at slot s ≤ mx
-                  have hmemV0 : a[s] ∈ doms.getD s [] := hfit.2 s a[s] hget
+                  have hmemV0 : a[s] ∈ doms.getD s Dom.empty := hfit.2 s a[s] hget
                   have hmemV : a[s] ∈ d := by rw [← hd0]; exact hmemV0
                   have hslotEq : (posLe s mx).atom.slot = s := rfl
                   have hv : Value.intView a[s] ≠ none := by
@@ -1196,27 +1207,27 @@ theorem rootFacts_go_valid : ∀ (ds : List (List Value)) (s : Nat)
                     (fun i => by
                       have h1 := hcorr (i + 1)
                       simp only [List.getD_cons_succ] at h1
-                      show rest.getD i [] = doms.getD (s + 1 + i) []
+                      show rest.getD i Dom.empty = doms.getD (s + 1 + i) Dom.empty
                       rw [show s + 1 + i = s + (i + 1) from by omega]
                       exact h1)
                     hmem hfit hview
 
 /-- The suffix correspondence for the base call: `doms`'s own suffixes
     and identity correspondence. -/
-theorem rootFacts_valid {doms : List (List Value)} {a : Assignment}
+theorem rootFacts_valid {doms : List Domain} {a : Assignment}
     (hfit : a.Fits doms)
     (hview : ∀ l ∈ rootFacts doms,
-      ∀ v, v ∈ doms.getD l.atom.slot [] → Value.intView v ≠ none) :
+      ∀ v, v ∈ doms.getD l.atom.slot Dom.empty → Value.intView v ≠ none) :
     ∀ l ∈ rootFacts doms, l.eval a = some true := by
   intro l hl
   have hgo : rootFacts doms = rootFacts.go 0 doms := rfl
   have hlgo : l ∈ rootFacts.go 0 doms := by rw [← hgo]; exact hl
-  have hvw : ∀ v, v ∈ doms.getD l.atom.slot [] → Value.intView v ≠ none :=
+  have hvw : ∀ v, v ∈ doms.getD l.atom.slot Dom.empty → Value.intView v ≠ none :=
     hview l hl
   exact rootFacts_go_valid doms 0 l doms a
     (by omega)
     (fun i => by
-      show doms.getD i [] = doms.getD (0 + i) []
+      show doms.getD i Dom.empty = doms.getD (0 + i) Dom.empty
       rw [Nat.zero_add])
     hlgo hfit hvw
 
@@ -1332,51 +1343,50 @@ theorem filter_all_true_id {α : Type} {p : α → Bool} {ls : List α}
       simp only [reduceIte]
       rw [ih hrest]
 
+/-- `domFilterInt` is the identity when every enumerated value passes. -/
+theorem domFilterInt_self {d : Domain} {keep : Int → Bool}
+    (h : ∀ v ∈ Dom.enum d, domFilterIntKeep keep v = true) :
+    domFilterInt keep d = d := by
+  unfold domFilterInt
+  dsimp only
+  have hfil : (Dom.enum d).filter (domFilterIntKeep keep) = Dom.enum d :=
+    filter_all_true_id h
+  split
+  · rfl
+  · rename_i hne
+    exfalso
+    apply hne
+    rw [hfil]
+
 /-- `updateSlot` with an identity-on-target-slot function is the
     identity. -/
-theorem updateSlot_id : ∀ (doms : List (List Value)) (s : Nat)
-    (f : List Value → List Value),
-    f (doms.getD s []) = doms.getD s [] →
+theorem updateSlot_id : ∀ (doms : List Domain) (s : Nat)
+    (f : Domain → Domain),
+    f (doms.getD s Dom.empty) = doms.getD s Dom.empty →
     updateSlot doms s f = doms := by
-  intro doms
-  induction doms with
-  | nil =>
-      intro s f h
-      cases s <;> rfl
+  intro doms s f h
+  unfold updateSlot
+  rw [h]
+  induction doms generalizing s with
+  | nil => cases s <;> rfl
   | cons d ds ih =>
-      intro s f h
       cases s with
-      | zero =>
-          -- getD 0 = d: h : f d = d
-          have h' : f d = d := by
-            have : (d :: ds).getD 0 [] = d := rfl
-            rw [show (d :: ds).getD (0 : Nat) [] = d from rfl] at h
-            exact h
-          show updateSlot (d :: ds) 0 f = d :: ds
-          simp only [updateSlot, setSlot]
-          show f ((d :: ds).getD 0 []) :: ds = d :: ds
-          rw [show (d :: ds).getD (0 : Nat) [] = d from rfl]
-          rw [h']
+      | zero => rfl
       | succ s' =>
-          -- getD (s'+1) = ds.getD s': recurse
-          have h' : f (ds.getD s' []) = ds.getD s' [] := by
-            simpa only [List.getD_cons_succ] using h
-          show updateSlot (d :: ds) (s' + 1) f = d :: ds
-          simp only [updateSlot, setSlot]
-          show d :: updateSlot ds s' f = d :: ds
-          rw [ih s' f h']
+          simp only [List.set_cons_succ, List.getD_cons_succ]
+          rw [ih s' (by simpa only [List.getD_cons_succ] using h)]
 
 /-- Values within their own domain's maximum pass the `≤ mx` filter. -/
-theorem domOfLit_rootFact_pos {doms : List (List Value)} {s : Nat}
+theorem domOfLit_rootFact_pos {doms : List Domain} {s : Nat}
     {mx : Int}
-    (hmax : domMaxI (doms.getD s []) = some mx) :
+    (hmax : domMaxI (doms.getD s Dom.empty) = some mx) :
     domOfLit doms (posLe s mx) = doms := by
   unfold domOfLit updateSlot
   show (updateSlot doms s
       (fun d => domFilterInt (fun p => decide (p ≤ mx)) d)) = doms
   refine updateSlot_id doms s _ ?_
   -- every value of the slot passes:
-  refine filter_all_true_id ?_
+  refine domFilterInt_self ?_
   intro v hv
   cases hva : Value.intView v with
   | none =>
@@ -1386,7 +1396,7 @@ theorem domOfLit_rootFact_pos {doms : List (List Value)} {s : Nat}
       | setOfInt x => rfl
       | array x => rfl
   | some i =>
-      have hbnd := domMaxI_ge v i hva hv hmax
+      have hbnd := domMaxI_ge v i hva ((DomainLike.mem_iff _ v).mpr hv) hmax
       cases v with
       | int p =>
           rw [Value.intView] at hva
@@ -1406,15 +1416,15 @@ theorem domOfLit_rootFact_pos {doms : List (List Value)} {s : Nat}
 
 /-- Values within their own domain's minimum pass the `> mn-1`
     filter. -/
-theorem domOfLit_rootFact_neg {doms : List (List Value)} {s : Nat}
+theorem domOfLit_rootFact_neg {doms : List Domain} {s : Nat}
     {mn : Int}
-    (hmin : domMinI (doms.getD s []) = some mn) :
+    (hmin : domMinI (doms.getD s Dom.empty) = some mn) :
     domOfLit doms (negLe s (mn - 1)) = doms := by
   unfold domOfLit updateSlot
   show (updateSlot doms s
       (fun d => domFilterInt (fun p => decide (p > mn - 1)) d)) = doms
   refine updateSlot_id doms s _ ?_
-  refine filter_all_true_id ?_
+  refine domFilterInt_self ?_
   intro v hv
   cases hva : Value.intView v with
   | none =>
@@ -1424,7 +1434,7 @@ theorem domOfLit_rootFact_neg {doms : List (List Value)} {s : Nat}
       | setOfInt x => rfl
       | array x => rfl
   | some i =>
-      have hbnd := domMinI_le v i hva hv hmin
+      have hbnd := domMinI_le v i hva ((DomainLike.mem_iff _ v).mpr hv) hmin
       cases v with
       | int p =>
           rw [Value.intView] at hva
@@ -1495,10 +1505,10 @@ theorem repairAfterBackjump_coherent (problem : Problem Constraint Objective)
 
 /-- The root-fact list's fold of `domOfLit` is the identity, given the
     suffix correspondence and accumulator agreement. -/
-theorem rootFacts_go_fold_id : ∀ (ds : List (List Value)) (s : Nat)
-    (doms acc : List (List Value)),
-    (∀ i, ds.getD i [] = doms.getD (s + i) []) →
-    (∀ j, acc.getD j [] = doms.getD j []) →
+theorem rootFacts_go_fold_id : ∀ (ds : List Domain) (s : Nat)
+    (doms acc : List Domain),
+    (∀ i, ds.getD i Dom.empty = doms.getD (s + i) Dom.empty) →
+    (∀ j, acc.getD j Dom.empty = doms.getD j Dom.empty) →
     (rootFacts.go s ds).foldl (fun acc l => domOfLit acc l) acc = acc := by
   intro ds
   induction ds with
@@ -1506,13 +1516,13 @@ theorem rootFacts_go_fold_id : ∀ (ds : List (List Value)) (s : Nat)
   | cons d rest ih =>
       intro s doms acc hcorr haccinv
       -- the accumulator's slot s is exactly d:
-      have hd0 : acc.getD s [] = d := by
+      have hd0 : acc.getD s Dom.empty = d := by
         have h1 := hcorr 0
         simp only [List.getD_cons_zero, Nat.add_zero] at h1
         rw [haccinv s, h1]
       -- accumulator agreement for the recursive call: unchanged by
       -- the two identity steps, so we only need the tail's ih
-      have hreccorr : ∀ i, rest.getD i [] = doms.getD (s + 1 + i) [] := by
+      have hreccorr : ∀ i, rest.getD i Dom.empty = doms.getD (s + 1 + i) Dom.empty := by
         intro i
         have h1 := hcorr (i + 1)
         simp only [List.getD_cons_succ] at h1
@@ -1564,13 +1574,13 @@ theorem rootFacts_go_fold_id : ∀ (ds : List (List Value)) (s : Nat)
     base slot `s` is `negLe s' (k−1)` with `domMinI` of `doms`'s slot
     `s'` equal to `some k`, or `posLe s' k` with the matching max, for
     some slot `s' ≥ s`. -/
-theorem rootFacts_go_mem : ∀ (ds doms : List (List Value)) (s : Nat)
+theorem rootFacts_go_mem : ∀ (ds doms : List Domain) (s : Nat)
     (l : Literal), l ∈ rootFacts.go s ds →
-    (∀ i, ds.getD i [] = doms.getD (s + i) []) →
+    (∀ i, ds.getD i Dom.empty = doms.getD (s + i) Dom.empty) →
     (∃ s' k, s ≤ s' ∧ l = negLe s' (k - 1) ∧
-        domMinI (doms.getD s' []) = some k) ∨
+        domMinI (doms.getD s' Dom.empty) = some k) ∨
     (∃ s' k, s ≤ s' ∧ l = posLe s' k ∧
-        domMaxI (doms.getD s' []) = some k) := by
+        domMaxI (doms.getD s' Dom.empty) = some k) := by
   intro ds
   induction ds with
   | nil =>
@@ -1579,11 +1589,11 @@ theorem rootFacts_go_mem : ∀ (ds doms : List (List Value)) (s : Nat)
       exact absurd hmem (by simp)
   | cons d rest ih =>
       intro doms s l hmem hcorr
-      have hd0 : doms.getD s [] = d := by
+      have hd0 : doms.getD s Dom.empty = d := by
         have h1 := hcorr 0
         simp only [List.getD_cons_zero, Nat.add_zero] at h1
         exact h1.symm
-      have hreccorr : ∀ i, rest.getD i [] = doms.getD (s + 1 + i) [] := by
+      have hreccorr : ∀ i, rest.getD i Dom.empty = doms.getD (s + 1 + i) Dom.empty := by
         intro i
         have h1 := hcorr (i + 1)
         simp only [List.getD_cons_succ] at h1
@@ -1649,8 +1659,8 @@ theorem rootFacts_go_mem : ∀ (ds doms : List (List Value)) (s : Nat)
     `domOfLit` is the identity on the current fold accumulator (which
     agrees with `doms` on every slot). -/
 theorem initialFold_trail_fold : ∀ (rs : List Literal)
-    (doms : List (List Value)) (st : State),
-    (∀ l ∈ rs, ∀ acc, (∀ j, acc.getD j [] = doms.getD j []) →
+    (doms : List Domain) (st : State),
+    (∀ l ∈ rs, ∀ acc, (∀ j, acc.getD j Dom.empty = doms.getD j Dom.empty) →
       domOfLit acc l = acc) →
     (st.domains = doms) →
     (st.trail.foldl (fun acc e => domOfLit acc e.literal) st.domains
@@ -1690,7 +1700,7 @@ theorem initialFold_trail_fold : ∀ (rs : List Literal)
             rw [show domOfLit st.domains l = st.domains from
               hid l (List.mem_cons_self) st.domains
                 (fun j => by
-                  have : st.domains.getD j [] = doms.getD j [] := by
+                  have : st.domains.getD j Dom.empty = doms.getD j Dom.empty := by
                     rw [hdom]
                   rw [this])]
           exact ih doms (enqueue st l none)
@@ -1708,7 +1718,7 @@ theorem initialStateWithRoots_coherent (problem : Problem Constraint Objective) 
       (fun acc e => domOfLit acc e.literal) problem.domains := by
   -- the per-literal identity premise over root facts:
   have hid : ∀ l ∈ rootFacts problem.domains,
-      ∀ acc, (∀ j, acc.getD j [] = problem.domains.getD j []) →
+      ∀ acc, (∀ j, acc.getD j Dom.empty = problem.domains.getD j Dom.empty) →
         domOfLit acc l = acc := by
     intro l hl acc hagree
     have hgo : rootFacts problem.domains
@@ -1716,7 +1726,7 @@ theorem initialStateWithRoots_coherent (problem : Problem Constraint Objective) 
     rcases rootFacts_go_mem problem.domains problem.domains 0 l
       (by rw [← hgo]; exact hl)
       (fun i => by
-        show problem.domains.getD i [] = problem.domains.getD (0 + i) []
+        show problem.domains.getD i Dom.empty = problem.domains.getD (0 + i) Dom.empty
         rw [Nat.zero_add]) with
       ⟨s, k, _, hlit, hext⟩ | ⟨s, k, _, hlit, hext⟩
     · rw [hlit]

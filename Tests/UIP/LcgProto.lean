@@ -118,9 +118,9 @@ def impliesP (t g : Literal) : Bool :=
 
 /-! ## 2. Domain explanations (fixes 3 and 6) -/
 
-/-- The remaining domain of slot `s` (none for a prefix slot). -/
+/-- The remaining domain of slot `s` (none for a decided slot). -/
 def remDom (f : BranchFrame) (s : Nat) : Option Domain :=
-  if s < f.2.length then none else some (f.1.getD (s - f.2.length) [])
+  if s ∈ f.order then none else some (f.doms.getD s Dom.empty)
 
 def maxOpt (acc : Option Int) (k : Int) : Option Int :=
   match acc with | none => some k | some a => some (if a < k then k else a)
@@ -165,14 +165,14 @@ def syncSlot (orig : List Domain) (trail : List TrailEntry) (lvl : Nat)
   match remDom f s with
   | none => []
   | some d =>
-    let ints := d.filterMap Value.intView
+    let ints := (Dom.enum d).filterMap Value.intView
     match ints with
     | [] => []
     | i0 :: is =>
       if ints.length != d.length then [] else
       let lo := is.foldl (fun a i => if i < a then i else a) i0
       let hi := is.foldl (fun a i => if a < i then i else a) i0
-      let od := orig.getD s []
+      let od := orig.getD s Dom.empty
       let push (tr : List TrailEntry) (lit : Literal) (W : List Value) : List TrailEntry :=
         if W.isEmpty then [] else
         if tr.any (fun e => impliesP e.literal lit) then [] else
@@ -180,16 +180,16 @@ def syncSlot (orig : List Domain) (trail : List TrailEntry) (lvl : Nat)
         | none => []
         | some ex => [{ literal := lit, level := lvl, reason := some { clause := lit :: ex } }]
       let t1 := push trail (negLe s (lo - 1))
-        (od.filter fun w => match w.intView with | some i => decide (i < lo) | none => false)
+        ((Dom.enum od).filter fun w => match w.intView with | some i => decide (i < lo) | none => false)
       let tr1 := trail ++ t1
       let t2 := push tr1 (posLe s hi)
-        (od.filter fun w => match w.intView with | some i => decide (hi < i) | none => false)
+        ((Dom.enum od).filter fun w => match w.intView with | some i => decide (hi < i) | none => false)
       let tr2 := tr1 ++ t2
       let t3 : List TrailEntry :=
-        match d with
+        match Dom.enum d with
         | [v] =>
             match valueLiteral s v with
-            | some pin => push tr2 pin.norm (od.filter fun w => w != v)
+            | some pin => push tr2 pin.norm ((Dom.enum od).filter fun w => w != v)
             | none => []
         | _ => []
       t1 ++ t2 ++ t3
@@ -197,22 +197,22 @@ def syncSlot (orig : List Domain) (trail : List TrailEntry) (lvl : Nat)
 /-- `syncSlot` over every remaining slot (used after a resume). -/
 def syncAll (orig : List Domain) (trail : List TrailEntry) (lvl : Nat)
     (f : BranchFrame) : List TrailEntry :=
-  (List.range f.1.length).foldl (fun acc i =>
-    acc ++ syncSlot orig (trail ++ acc) lvl f (f.2.length + i)) []
+  (List.range f.doms.length).foldl (fun acc i =>
+    acc ++ syncSlot orig (trail ++ acc) lvl f i) []
 
 /-- The wipe-out clause of the first remaining slot whose domain is empty: the
 negations of the removers of every original value (a VALID clause given the
 original domain; falsified literal-for-literal by the trail). -/
 def wipeoutClause (orig : List Domain) (trail : List TrailEntry) (f : BranchFrame) :
     Option Clause :=
-  f.1.zipIdx.findSome? fun p =>
-    if p.1.isEmpty then explainRemoved trail (f.2.length + p.2) (orig.getD (f.2.length + p.2) [])
+  f.doms.zipIdx.findSome? fun p =>
+    if p.1.isEmpty then explainRemoved trail p.2 (Dom.enum (orig.getD p.2 Dom.empty))
     else none
 
 /-! ## 2b. Explained propagator conflicts (fix 9) -/
 
 def neConflict (st : State) (i j : Nat) : Clause :=
-  match st.domains.getD i [], st.domains.getD j [] with
+  match Dom.enum (st.domains.getD i Dom.empty), Dom.enum (st.domains.getD j Dom.empty) with
   | [x], [_] =>
       match x with
       | .int c => [posNe i c, posNe j c]
@@ -223,11 +223,11 @@ def neConflict (st : State) (i j : Nat) : Clause :=
 /-- Hall clause of an `all_different` pigeonhole over the current domains. -/
 def hallClause (orig : List Domain) (st : State) (is : List Nat) : Clause :=
   let ins := (is.filter (· < st.domains.length)).eraseDups
-  let U : List Value := (ins.flatMap fun s => st.domains.getD s []).foldl
+  let U : List Value := (ins.flatMap fun s => Dom.enum (st.domains.getD s Dom.empty)).foldl
     (fun acc v => if acc.any (·.eqB v) then acc else acc ++ [v]) []
   if ins.length ≤ U.length then [] else
   (ins.flatMap fun s =>
-    ((orig.getD s []).filter fun v => !U.any (·.eqB v)).filterMap fun v =>
+    ((Dom.enum (orig.getD s Dom.empty)).filter fun v => !U.any (·.eqB v)).filterMap fun v =>
       (valueLiteral s v).map (·.norm)).eraseDups
 
 def explainedProps (orig : List Domain) (cs : List DomConstraint) : List Propagator :=
@@ -418,14 +418,14 @@ inductive PStep (leaf : Assignment → Bool) where
 falsifier reasons (fix 4) and synchronised bounds (fix 3). -/
 def resumeP (fx : Fixes) (orig : List Domain) (bs : BranchState leaf) (f : BranchFrame) :
     BranchState leaf × List Clause :=
-  let pins := canonicalPins f.2
+  let pins := canonicalPins f
   let fals := canonicalFalsifiers orig f
   let pinNegs := pins.map fun e => e.literal.negate.norm
   let fals' := if fx.resume then
       fals.map fun e => { e with reason := some { clause := e.literal :: pinNegs } }
     else fals
   let tr := pins ++ fals'
-  let lvl := f.2.length
+  let lvl := f.level
   let extra := if fx.sync then syncAll orig tr lvl f else []
   let newR := (fals' ++ extra).filterMap fun e => e.reason.map (·.clause)
   ({ frame := f, trail := tr ++ extra, level := lvl, learned := bs.learned }, newR)
@@ -472,7 +472,7 @@ def conflictP (fx : Fixes) (cfg : SchedulerConfig leaf) (c : Clause)
               let tr0 := cp.trail ++ [{ literal := an.asserting.norm, level := tgt,
                                         reason := some { clause := an.learned } }]
               let ex := if fx.sync then syncSlot cfg.orig tr0 tgt g an.asserting.atom.slot else []
-              let pend := if fx.drop then cfg.pending.dropWhile (fun f => f.2.length ≥ cp.frame.2.length)
+              let pend := if fx.drop then cfg.pending.dropWhile (fun f => f.level ≥ cp.frame.level)
                           else cfg.pending
               let n : SchedulerConfig leaf :=
                 { cfg with
@@ -528,10 +528,10 @@ where
     match leafWitness leaf cfg with
     | some w => .sat w
     | none =>
-        match splitData cfg.branch.frame with
-        | some (l, v, vs, doms) =>
-            if TrailRedundant cfg.branch.trail l then .skipDecide (stepDecideSkip cfg v doms)
-            else .decide (stepDecide cfg v vs doms l)
+        match splitData cfg.branch.frame cfg.prio with
+        | some (l, k, v, vs) =>
+            if TrailRedundant cfg.branch.trail l then .skipDecide (stepDecideSkip cfg k v)
+            else .decide (stepDecide cfg k v vs l)
         | none => consumeP fx (stepLocalExclude cfg [] (branchRegion cfg)) "exclude:split" none
 
 end LcgProto

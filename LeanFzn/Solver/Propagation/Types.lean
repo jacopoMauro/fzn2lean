@@ -27,14 +27,14 @@ inductive Atom where
   | boolEq (slot : Slot) (value : Bool)
   | intLe (slot : Slot) (upper : Int)
   | intNe (slot : Slot) (value : Int)
-  deriving Repr, DecidableEq
+  deriving Repr, DecidableEq, BEq, ReflBEq, LawfulBEq, Hashable
 
 /-- A signed atom. Positive literals assert the atom; negative literals assert
     its negation. -/
 structure Literal where
   atom : Atom
   positive : Bool
-  deriving Repr, DecidableEq
+  deriving Repr, DecidableEq, BEq, ReflBEq, LawfulBEq, Hashable
 
 /-- SAT-style disjunction of literals. -/
 abbrev Clause := List Literal

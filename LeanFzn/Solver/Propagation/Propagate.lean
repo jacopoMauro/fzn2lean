@@ -50,23 +50,119 @@ Propagators operate on the integer view of slot domains. Booleans count
 as 0/1 so one bound recipe serves both sorts. -/
 
 /-- The integer values of a slot domain (Booleans count as 0/1). -/
-def domInts (d : List Value) : List Int :=
-  d.filterMap fun v => match v with
+def domInts {α : Type} [DomainElems α] (d : α) : List Int :=
+  (DomainElems.elems d).filterMap fun v => match v with
     | .int i => some i
     | .bool b => some (if b then 1 else 0)
     | _ => none
 
 /-- Minimum integer of a domain, if any. -/
-def domMinI (d : List Value) : Option Int :=
+def domMinI {α : Type} [DomainElems α] (d : α) : Option Int :=
   domInts d |>.foldl (fun acc i => match acc with
     | none => some i
     | some c => some (minI c i)) none
 
 /-- Maximum integer of a domain, if any. -/
-def domMaxI (d : List Value) : Option Int :=
+def domMaxI {α : Type} [DomainElems α] (d : α) : Option Int :=
   domInts d |>.foldl (fun acc i => match acc with
     | none => some i
     | some c => some (maxI c i)) none
+
+/-! ### Structural bounds for the compact `Dom` carrier
+
+`domMinI`/`domMaxI` scan the element enumeration.  On `.holes` domains that
+materializes the whole interval; the S1 hot linear family reads the extrema of
+every other term on every sweep step, so the scan becomes quadratic in the
+interval width.  The compact queries `Dom.minInt?`/`Dom.maxInt?` read the
+endpoints structurally.  The bridges below identify the two interfaces; the
+hot definitions opt into the structural twin with `@[implemented_by]`. -/
+
+private theorem foldl_minI_some (xs : List Int) (x : Int) :
+    xs.foldl (fun acc i => match acc with
+      | none => some i
+      | some c => some (minI c i)) (some x) =
+    some (xs.foldl min x) := by
+  induction xs generalizing x with
+  | nil => rfl
+  | cons y ys ih =>
+      simp only [List.foldl_cons]
+      rw [ih]
+      rfl
+
+private theorem foldl_maxI_some (xs : List Int) (x : Int) :
+    xs.foldl (fun acc i => match acc with
+      | none => some i
+      | some c => some (maxI c i)) (some x) =
+    some (xs.foldl max x) := by
+  induction xs generalizing x with
+  | nil => rfl
+  | cons y ys ih =>
+      simp only [List.foldl_cons]
+      rw [ih]
+      rfl
+
+private theorem foldl_minI_eq_min? (l : List Int) :
+    l.foldl (fun acc i => match acc with
+      | none => some i
+      | some c => some (minI c i)) none = l.min? := by
+  cases l with
+  | nil => rfl
+  | cons x xs =>
+      simp only [List.foldl_cons, List.min?]
+      exact foldl_minI_some xs x
+
+private theorem foldl_maxI_eq_max? (l : List Int) :
+    l.foldl (fun acc i => match acc with
+      | none => some i
+      | some c => some (maxI c i)) none = l.max? := by
+  cases l with
+  | nil => rfl
+  | cons x xs =>
+      simp only [List.foldl_cons, List.max?]
+      exact foldl_maxI_some xs x
+
+private theorem domInts_core_eq_generic (d : Dom) :
+    d.domInts = domInts d := by
+  unfold Dom.domInts domInts
+  rw [LeanFzn.Solver.Propagation.domElems_eq_enum]
+  apply filterMap_congr
+  intro v hv
+  rfl
+
+/-- The compact structural minimum equals the generic enumeration scan. -/
+theorem minInt?_eq_domMinI (d : Dom) : d.minInt? = domMinI d := by
+  calc
+    d.minInt? = d.domInts.min? := Dom.minInt?_eq_domInts_min d
+    _ = (domInts d).min? := by rw [domInts_core_eq_generic]
+    _ = (domInts d).foldl (fun acc i => match acc with
+          | none => some i
+          | some c => some (minI c i)) none :=
+        (foldl_minI_eq_min? (domInts d)).symm
+    _ = domMinI d := rfl
+
+/-- The compact structural maximum equals the generic enumeration scan. -/
+theorem maxInt?_eq_domMaxI (d : Dom) : d.maxInt? = domMaxI d := by
+  calc
+    d.maxInt? = d.domInts.max? := Dom.maxInt?_eq_domInts_max d
+    _ = (domInts d).max? := by rw [domInts_core_eq_generic]
+    _ = (domInts d).foldl (fun acc i => match acc with
+          | none => some i
+          | some c => some (maxI c i)) none :=
+        (foldl_maxI_eq_max? (domInts d)).symm
+    _ = domMaxI d := rfl
+
+/-- D0 obligation 4 (bounds): the parsed restatement of the structural
+    minimum against the legacy list scan on the domain's enumeration. -/
+theorem minInt?_eq_domMinI_enum (d : Dom) :
+    d.minInt? = domMinI (Dom.enum d) := by
+  rw [minInt?_eq_domMinI]
+  simp [domMinI, domInts]
+
+/-- D0 obligation 4 (bounds): the parsed restatement for the maximum. -/
+theorem maxInt?_eq_domMaxI_enum (d : Dom) :
+    d.maxInt? = domMaxI (Dom.enum d) := by
+  rw [maxInt?_eq_domMaxI]
+  simp [domMaxI, domInts]
 
 /-! ## Bound narrowing with explanations -/
 
@@ -77,7 +173,7 @@ def domMaxI (d : List Value) : Option Int :=
     the bound actually tightens, and `.stable` otherwise. -/
 def narrowLo (st : State) (s : Nat) (lo : Int) (ng : Clause) :
     PropagationResult :=
-  match domMinI (st.domains.getD s []), domMaxI (st.domains.getD s []) with
+  match domMinI (st.domains.getD s Dom.empty), domMaxI (st.domains.getD s Dom.empty) with
   | some mn, some mx =>
       if mx < lo then .conflict ng
       else if decide (mn < lo) then
@@ -89,13 +185,60 @@ def narrowLo (st : State) (s : Nat) (lo : Int) (ng : Clause) :
     constraint-valid nogood `ng` whose head literal is `s ≤ hi`. -/
 def narrowHi (st : State) (s : Nat) (hi : Int) (ng : Clause) :
     PropagationResult :=
-  match domMinI (st.domains.getD s []), domMaxI (st.domains.getD s []) with
+  match domMinI (st.domains.getD s Dom.empty), domMaxI (st.domains.getD s Dom.empty) with
   | some mn, some mx =>
       if mn > hi then .conflict ng
       else if decide (hi < mx) then
         .implied (posLe s hi) { clause := ng }
       else .stable
   | _, _ => .stable
+
+/-! ### Structural bound narrowing
+
+`narrowLo`/`narrowHi` are the generic bound producers of the reference
+engine.  Their two endpoint queries are the only domain reads; the
+structural twins read `Dom.minInt?`/`Dom.maxInt?` directly instead of
+materialising the enumeration, and are installed with `implemented_by`
+after the kernel equality below. -/
+
+/-- Structural twin of `narrowLo`. -/
+def narrowLoFast (st : State) (s : Nat) (lo : Int) (ng : Clause) :
+    PropagationResult :=
+  match (st.domains.getD s Dom.empty).minInt?,
+      (st.domains.getD s Dom.empty).maxInt? with
+  | some mn, some mx =>
+      if mx < lo then .conflict ng
+      else if decide (mn < lo) then
+        .implied (negLe s (lo - 1)) { clause := ng }
+      else .stable
+  | _, _ => .stable
+
+/-- Structural twin of `narrowHi`. -/
+def narrowHiFast (st : State) (s : Nat) (hi : Int) (ng : Clause) :
+    PropagationResult :=
+  match (st.domains.getD s Dom.empty).minInt?,
+      (st.domains.getD s Dom.empty).maxInt? with
+  | some mn, some mx =>
+      if mn > hi then .conflict ng
+      else if decide (hi < mx) then
+        .implied (posLe s hi) { clause := ng }
+      else .stable
+  | _, _ => .stable
+
+/-- The structural lower-bound narrowing is the reference operation. -/
+theorem narrowLoFast_eq : narrowLoFast = narrowLo := by
+  funext st s lo ng
+  unfold narrowLoFast narrowLo
+  rw [minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+/-- The structural upper-bound narrowing is the reference operation. -/
+theorem narrowHiFast_eq : narrowHiFast = narrowHi := by
+  funext st s hi ng
+  unfold narrowHiFast narrowHi
+  rw [minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+attribute [implemented_by narrowLoFast] narrowLo
+attribute [implemented_by narrowHiFast] narrowHi
 
 /-- First non-`stable` result of a list (left-biased). -/
 def firstEvent : List PropagationResult → PropagationResult
@@ -121,9 +264,9 @@ with each definition. -/
     * `z ≥ xi'+yj'` (causes `x ≥ xi'`, `y ≥ yj'`);
     * `z ≤ xi+yj` (causes `x ≤ xi`, `y ≤ yj`). -/
 def propPlus (st : State) (i j k : Nat) : PropagationResult :=
-  match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []),
-        domMinI (st.domains.getD j []), domMaxI (st.domains.getD j []),
-        domMinI (st.domains.getD k []), domMaxI (st.domains.getD k []) with
+  match domMinI (st.domains.getD i Dom.empty), domMaxI (st.domains.getD i Dom.empty),
+        domMinI (st.domains.getD j Dom.empty), domMaxI (st.domains.getD j Dom.empty),
+        domMinI (st.domains.getD k Dom.empty), domMaxI (st.domains.getD k Dom.empty) with
   | some xi', some xi, some yj', some yj, some zk', some zk =>
       firstEvent
         [ -- x ≥ zk' − yj  (causes: z ≥ zk', y ≤ yj)
@@ -151,7 +294,7 @@ def propPlus (st : State) (i j k : Nat) : PropagationResult :=
 
     Nogoods: `x ≤ yj` (cause `y ≤ yj`); `y ≥ xi'` (cause `x ≥ xi'`). -/
 def propLe (st : State) (i j : Nat) : PropagationResult :=
-  match domMaxI (st.domains.getD j []), domMinI (st.domains.getD i []) with
+  match domMaxI (st.domains.getD j Dom.empty), domMinI (st.domains.getD i Dom.empty) with
   | some yj, some xi' =>
       firstEvent
         [ narrowHi st i yj [posLe i yj, negLe j yj]
@@ -164,7 +307,7 @@ def propLe (st : State) (i j : Nat) : PropagationResult :=
 
     Nogoods: `x ≤ yj−1` (cause `y ≤ yj`); `y ≥ xi'+1` (cause `x ≥ xi'`). -/
 def propLt (st : State) (i j : Nat) : PropagationResult :=
-  match domMaxI (st.domains.getD j []), domMinI (st.domains.getD i []) with
+  match domMaxI (st.domains.getD j Dom.empty), domMinI (st.domains.getD i Dom.empty) with
   | some yj, some xi' =>
       firstEvent
         [ narrowHi st i (yj - 1) [posLe i (yj - 1), negLe j yj]
@@ -178,8 +321,8 @@ def propLt (st : State) (i j : Nat) : PropagationResult :=
     Nogoods: `x ≥ mj` (cause `y ≥ mj`); `x ≤ Mj` (cause `y ≤ Mj`); and
     the two symmetric deductions on `y` (causes `x ≥ mi`, `x ≤ Mi`). -/
 def propEq (st : State) (i j : Nat) : PropagationResult :=
-  match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []),
-        domMinI (st.domains.getD j []), domMaxI (st.domains.getD j []) with
+  match domMinI (st.domains.getD i Dom.empty), domMaxI (st.domains.getD i Dom.empty),
+        domMinI (st.domains.getD j Dom.empty), domMaxI (st.domains.getD j Dom.empty) with
   | some mi, some Mi, some mj, some Mj =>
       firstEvent
         [ narrowLo st i mj [negLe i (mj - 1), posLe j (mj - 1)]
@@ -257,31 +400,32 @@ def SortAgree (x y : Value) : Prop :=
     disequality can hold while both view-literals of the clause are false). -/
 def FrameFaithful (doms : List Domain) (a : Assignment) : Prop :=
   ∀ i, i < doms.length → ∃ y, a[i]? = some y ∧ y.intView ≠ none ∧
-    ∀ x ∈ doms.getD i [], SortAgree x y
+    ∀ x ∈ doms.getD i Dom.empty, SortAgree x y
 
 /-- Pointwise sub-domains: same slot count, every value of a slot of `d'` is a
 value of the same slot of `d`. -/
-def DomSub (d' d : List (List Value)) : Prop :=
-  d'.length = d.length ∧ ∀ i v, v ∈ d'.getD i [] → v ∈ d.getD i []
+def DomSub (d' d : List Domain) : Prop :=
+  d'.length = d.length ∧
+    ∀ i v, v ∈ d'.getD i Dom.empty → v ∈ d.getD i Dom.empty
 
-theorem DomSub.trans {d₁ d₂ d₃ : List (List Value)}
+theorem DomSub.trans {d₁ d₂ d₃ : List Domain}
     (h12 : DomSub d₁ d₂) (h23 : DomSub d₂ d₃) : DomSub d₁ d₃ :=
   ⟨h12.1.trans h23.1, fun i v hv => h23.2 i v (h12.2 i v hv)⟩
 
-theorem DomSub.refl (d : List (List Value)) : DomSub d d := ⟨rfl, fun _ _ h => h⟩
+theorem DomSub.refl (d : List Domain) : DomSub d d := ⟨rfl, fun _ _ h => h⟩
 
 /-- Every domain of the box is int-shaped or bool-shaped throughout. -/
-def DomsShapeTyped (pd : List (List Value)) : Prop :=
+def DomsShapeTyped (pd : List Domain) : Prop :=
   ∀ d ∈ pd, (∀ v ∈ d, ∃ k : Int, v = .int k) ∨ (∀ v ∈ d, ∃ b : Bool, v = .bool b)
 
-theorem getD_mem_of_lt {l : List (List Value)} {i : Nat} (h : i < l.length) :
-    l.getD i [] ∈ l := by
+theorem getD_mem_of_lt {l : List Domain} {i : Nat} (h : i < l.length) :
+    l.getD i Dom.empty ∈ l := by
   rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem h]
   exact List.getElem_mem h
 
 /-- **Faithfulness from the problem's shape**: a solution of an int-viewed,
 shape-typed box is faithful to every pointwise sub-domain list. -/
-theorem frameFaithful_of_domSub {pd doms : List (List Value)} {a : Assignment}
+theorem frameFaithful_of_domSub {pd doms : List Domain} {a : Assignment}
     (hview : ∀ d ∈ pd, ∀ v ∈ d, Value.intView v ≠ none)
     (hshape : DomsShapeTyped pd) (hfit : a.Fits pd) (hsub : DomSub doms pd) :
     FrameFaithful doms a := by
@@ -289,7 +433,7 @@ theorem frameFaithful_of_domSub {pd doms : List (List Value)} {a : Assignment}
   have hipd : i < pd.length := by rw [← hsub.1]; exact hi
   have hia : i < a.length := by rw [hfit.1]; exact hipd
   have hread : a[i]? = some a[i] := List.getElem?_eq_getElem hia
-  have hymem : a[i] ∈ pd.getD i [] := hfit.2 i _ hread
+  have hymem : a[i] ∈ pd.getD i DomainLike.empty := hfit.2 i _ hread
   refine ⟨a[i], hread, hview _ (getD_mem_of_lt hipd) _ hymem, ?_⟩
   intro x hx
   have hxpd := hsub.2 i x hx
@@ -343,7 +487,7 @@ def isIntValue : Value → Bool
     view-based but gated on the raw correspondence (`domNeGate`), so
     it never fires across a raw/view shape mismatch. -/
 def propNe (st : State) (i j : Nat) : PropagationResult :=
-  match st.domains.getD i [], st.domains.getD j [] with
+  match Dom.enum (st.domains.getD i Dom.empty), Dom.enum (st.domains.getD j Dom.empty) with
   | [x], [y] => if x.eqB y then .conflict (neConflictClause i j x) else .stable
   | [x], dy =>
       match domSingletonI [x] with
@@ -389,7 +533,7 @@ def propLinLe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
     let terms : List (Nat × Int × Int) := rest.filterMap fun p =>
       match p with
       | (ct, t) =>
-          match domMinI (st.domains.getD t []), domMaxI (st.domains.getD t []) with
+          match domMinI (st.domains.getD t Dom.empty), domMaxI (st.domains.getD t Dom.empty) with
           | some mn, some mx =>
               if ct ≥ 0 then some (t, ct, ct * mn) else some (t, ct, ct * mx)
           | _, _ => none
@@ -397,7 +541,7 @@ def propLinLe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
     let termsH : List (Nat × Int × Int) := rest.filterMap fun p =>
       match p with
       | (ct, t) =>
-          match domMinI (st.domains.getD t []), domMaxI (st.domains.getD t []) with
+          match domMinI (st.domains.getD t Dom.empty), domMaxI (st.domains.getD t Dom.empty) with
           | some mn, some mx =>
               if ct ≥ 0 then some (t, ct, ct * mx) else some (t, ct, ct * mn)
           | _, _ => none
@@ -526,8 +670,8 @@ def propConstEq (st : State) (i : Nat) (v : Value) : PropagationResult :=
         [ narrowHi st i k [posLe i k]
         , narrowLo st i k [negLe i (k - 1)] ]
   | .bool b =>
-      if valueMemB (.bool b) (st.domains.getD i []) then
-        if valuesEqB (st.domains.getD i []) [.bool b] then .stable
+      if valueMemB (.bool b) (Dom.enum (st.domains.getD i Dom.empty)) then
+        if valuesEqB (Dom.enum (st.domains.getD i Dom.empty)) [.bool b] then .stable
         else .implied (posBool i b) { clause := [posBool i b] }
       else .conflict [posBool i b]
   | _ => .stable

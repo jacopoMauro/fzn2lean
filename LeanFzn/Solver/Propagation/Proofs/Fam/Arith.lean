@@ -169,9 +169,9 @@ theorem arith_absCornerMin_le {lo hi x : Int}
     conflicts when the deduced bound is falsified by the domain
     (exactly `propPlus`'s shape). -/
 def propMin (st : State) (i j k : Nat) : PropagationResult :=
-  match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []),
-        domMinI (st.domains.getD j []), domMaxI (st.domains.getD j []),
-        domMinI (st.domains.getD k []) with
+  match domMinI (st.domains.getD i Dom.empty), domMaxI (st.domains.getD i Dom.empty),
+        domMinI (st.domains.getD j Dom.empty), domMaxI (st.domains.getD j Dom.empty),
+        domMinI (st.domains.getD k Dom.empty) with
   | some xi', some xi, some yj', some yj, some zk' =>
       firstEvent
         [ -- z ≥ min(xi', yj')  (causes: x ≥ xi', y ≥ yj')
@@ -197,9 +197,9 @@ def propMin (st : State) (i j k : Nat) : PropagationResult :=
       `z ≤ zk` give `z = max x y ≥ x > zk ≥ z`;
     * `y ≤ zk` (cause `z ≤ zk`): the dual on `y`. -/
 def propMax (st : State) (i j k : Nat) : PropagationResult :=
-  match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []),
-        domMinI (st.domains.getD j []), domMaxI (st.domains.getD j []),
-        domMaxI (st.domains.getD k []) with
+  match domMinI (st.domains.getD i Dom.empty), domMaxI (st.domains.getD i Dom.empty),
+        domMinI (st.domains.getD j Dom.empty), domMaxI (st.domains.getD j Dom.empty),
+        domMaxI (st.domains.getD k Dom.empty) with
   | some xi', some xi, some yj', some yj, some zk =>
       firstEvent
         [ -- z ≥ max(xi', yj')  (causes: x ≥ xi', y ≥ yj')
@@ -230,8 +230,8 @@ def propMax (st : State) (i j k : Nat) : PropagationResult :=
     * `x ≥ −rk` (cause `r ≤ rk`): `[x > −rk−1, r > rk]` —
       `−|x| ≤ x` and `|x| = r ≤ rk`. -/
 def propAbs (st : State) (i k : Nat) : PropagationResult :=
-  match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []),
-        domMaxI (st.domains.getD k []) with
+  match domMinI (st.domains.getD i Dom.empty), domMaxI (st.domains.getD i Dom.empty),
+        domMaxI (st.domains.getD k Dom.empty) with
   | some xi', some xi, some rk =>
       firstEvent
         [ -- r ≥ 0  (r = |x| ≥ 0)
@@ -574,11 +574,11 @@ theorem minSlot_pack {st : State} {a : Assignment} {i j k : Nat}
     (hfit : Core.Assignment.Fits st.domains a)
     (hcons : (DomConstraint.minSlot i j k).SatisfiedBy a)
     {xi' xi yj' yj zk' : Int}
-    (hxi' : domMinI (st.domains.getD i []) = some xi')
-    (hxi : domMaxI (st.domains.getD i []) = some xi)
-    (hyj' : domMinI (st.domains.getD j []) = some yj')
-    (hyj : domMaxI (st.domains.getD j []) = some yj)
-    (hzk' : domMinI (st.domains.getD k []) = some zk') :
+    (hxi' : domMinI (st.domains.getD i Dom.empty) = some xi')
+    (hxi : domMaxI (st.domains.getD i Dom.empty) = some xi)
+    (hyj' : domMinI (st.domains.getD j Dom.empty) = some yj')
+    (hyj : domMaxI (st.domains.getD j Dom.empty) = some yj)
+    (hzk' : domMinI (st.domains.getD k Dom.empty) = some zk') :
     ∃ x y z,
       slotInt a i = some x ∧ slotInt a j = some y ∧
       slotInt a k = some z ∧ min x y = z ∧
@@ -594,11 +594,11 @@ theorem maxSlot_pack {st : State} {a : Assignment} {i j k : Nat}
     (hfit : Core.Assignment.Fits st.domains a)
     (hcons : (DomConstraint.maxSlot i j k).SatisfiedBy a)
     {xi' xi yj' yj zk : Int}
-    (hxi' : domMinI (st.domains.getD i []) = some xi')
-    (hxi : domMaxI (st.domains.getD i []) = some xi)
-    (hyj' : domMinI (st.domains.getD j []) = some yj')
-    (hyj : domMaxI (st.domains.getD j []) = some yj)
-    (hzk : domMaxI (st.domains.getD k []) = some zk) :
+    (hxi' : domMinI (st.domains.getD i Dom.empty) = some xi')
+    (hxi : domMaxI (st.domains.getD i Dom.empty) = some xi)
+    (hyj' : domMinI (st.domains.getD j Dom.empty) = some yj')
+    (hyj : domMaxI (st.domains.getD j Dom.empty) = some yj)
+    (hzk : domMaxI (st.domains.getD k Dom.empty) = some zk) :
     ∃ x y z,
       slotInt a i = some x ∧ slotInt a j = some y ∧
       slotInt a k = some z ∧ max x y = z ∧
@@ -614,9 +614,9 @@ theorem absSlot_pack {st : State} {a : Assignment} {i k : Nat}
     (hfit : Core.Assignment.Fits st.domains a)
     (hcons : (DomConstraint.absSlot i k).SatisfiedBy a)
     {xi' xi rk : Int}
-    (hxi' : domMinI (st.domains.getD i []) = some xi')
-    (hxi : domMaxI (st.domains.getD i []) = some xi)
-    (hrk : domMaxI (st.domains.getD k []) = some rk) :
+    (hxi' : domMinI (st.domains.getD i Dom.empty) = some xi')
+    (hxi : domMaxI (st.domains.getD i Dom.empty) = some xi)
+    (hrk : domMaxI (st.domains.getD k Dom.empty) = some rk) :
     ∃ x r,
       slotInt a i = some x ∧ slotInt a k = some r ∧ absValue x = r ∧
       xi' ≤ x ∧ x ≤ xi ∧ r ≤ rk := by
@@ -1511,7 +1511,7 @@ theorem maxPair_imp_maxSlot (i j k : Nat) (a : Assignment)
 def divPin (st : State) : DomIntArg → Option Int
   | .lit d => some d
   | .slot j =>
-      match st.domains.getD j [] with
+      match Dom.enum (st.domains.getD j Dom.empty) with
       | [.int d] => some d
       | _ => none
 
@@ -1578,7 +1578,7 @@ def propDiv (st : State) (o₁ o₂ r : DomIntArg) : PropagationResult :=
       else
         match o₁, r with
         | .slot i, .slot k =>
-            match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []) with
+            match domMinI (st.domains.getD i Dom.empty), domMaxI (st.domains.getD i Dom.empty) with
             | some pl, some ph =>
                 firstEvent
                   [narrowLo st k (divResLo d pl ph) (divReasonLo o₂ i k d pl ph),
@@ -1597,7 +1597,7 @@ def propMod (st : State) (o₁ o₂ r : DomIntArg) : PropagationResult :=
       else
         match o₁, r with
         | .slot i, .slot k =>
-            match domMinI (st.domains.getD i []), domMaxI (st.domains.getD i []) with
+            match domMinI (st.domains.getD i Dom.empty), domMaxI (st.domains.getD i Dom.empty) with
             | some pl, some ph =>
                 firstEvent
                   [narrowLo st k (modHullLo d pl ph) (modReasonLo o₂ i k d pl ph),
@@ -1612,7 +1612,7 @@ def propMod (st : State) (o₁ o₂ r : DomIntArg) : PropagationResult :=
     (the `FixExpl` shape the zero-divisor conflict consumes). -/
 theorem divPin_slot_dom {st : State} {j : Nat} {d : Int}
     (h : divPin st (.slot j) = some d) :
-    st.domains.getD j [] = [.int d] := by
+    Dom.enum (st.domains.getD j Dom.empty) = [.int d] := by
   simp only [divPin] at h
   split at h
   · rename_i d' hdom
@@ -1624,10 +1624,26 @@ theorem divPin_slot_dom {st : State} {j : Nat} {d : Int}
 /-- A pinned slot domain's integer extrema are both `d`. -/
 theorem divPin_slot {st : State} {j : Nat} {d : Int}
     (h : divPin st (.slot j) = some d) :
-    domMinI (st.domains.getD j []) = some d ∧
-      domMaxI (st.domains.getD j []) = some d := by
+    domMinI (st.domains.getD j Dom.empty) = some d ∧
+      domMaxI (st.domains.getD j Dom.empty) = some d := by
   have hdom := divPin_slot_dom h
-  constructor <;> (rw [hdom]; rfl)
+  have hdi : domInts (st.domains.getD j Dom.empty) = [d] := by
+    unfold domInts
+    rw [domElems_eq_enum]
+    change (Dom.enum (st.domains.getD j Dom.empty)).filterMap (fun v =>
+      match v with
+      | .int i => some i
+      | .bool b => some (if b then 1 else 0)
+      | _ => none) = [d]
+    rw [hdom]
+    rfl
+  constructor
+  · unfold domMinI
+    rw [hdi]
+    rfl
+  · unfold domMaxI
+    rw [hdi]
+    rfl
 
 /-- A slot int read from a `DomIntArg` bang read. -/
 theorem slotInt_of_read_slot {a : Assignment} {i : Nat} {p : Int}
@@ -2521,7 +2537,8 @@ with the expected literal and reason clause. -/
     `z ∈ [2,9]` — the first firing arm is the z-upper-bound
     narrowing to `min 5 4 = 4`. -/
 def arith_smoke_min : State where
-  domains := [[.int 3, .int 5], [.int 1, .int 4], [.int 2, .int 9]]
+  domains := [Dom.ofList [.int 3, .int 5], Dom.ofList [.int 1, .int 4],
+    Dom.ofList [.int 2, .int 9]]
   trail := []
   decisionLevel := 0
   clauses := []
@@ -2536,7 +2553,8 @@ example : propMin arith_smoke_min 0 1 2 = .implied (posLe 2 4)
     `z ∈ [1,3]` — the first firing arm is the z-lower-bound
     narrowing to `max 3 1 = 3`. -/
 def arith_smoke_max : State where
-  domains := [[.int 3, .int 5], [.int 1, .int 4], [.int 1, .int 3]]
+  domains := [Dom.ofList [.int 3, .int 5], Dom.ofList [.int 1, .int 4],
+    Dom.ofList [.int 1, .int 3]]
   trail := []
   decisionLevel := 0
   clauses := []
@@ -2551,7 +2569,7 @@ example : propMax arith_smoke_max 0 1 2 = .implied (negLe 2 2)
     `r ∈ [2,9]` — the first firing arm narrows `r`'s lower bound to
     `absCornerMin 3 7 = 3`. -/
 def arith_smoke_abs : State where
-  domains := [[.int 3, .int 7], [.int 2, .int 9]]
+  domains := [Dom.ofList [.int 3, .int 7], Dom.ofList [.int 2, .int 9]]
   trail := []
   decisionLevel := 0
   clauses := []
@@ -2567,7 +2585,7 @@ example : propAbs arith_smoke_abs 0 1 = .implied (negLe 1 2)
     interval straddles 0, corners 0 and 5 vs r-bounds 0/9... the
     first firing arm is the x-upper-bound narrowing to `r ≤ 2`). -/
 def arith_smoke_abs2 : State where
-  domains := [[.int (-5), .int 3], [.int 0, .int 2]]
+  domains := [Dom.ofList [.int (-5), .int 3], Dom.ofList [.int 0, .int 2]]
   trail := []
   decisionLevel := 0
   clauses := []

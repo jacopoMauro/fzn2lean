@@ -314,6 +314,70 @@ def compileConstraint (env : Store) (names : List String)
         | _, .error e, _ => .error e
         | _, _, .error e => .error e
         | _, _, _ => .error "unsupported bool_or argument shapes"
+      else if c.name.name = "set_in" ∧ c.args.length = 2 then
+        -- C0 set membership over a constant set: a slot identifier
+        -- against a set literal (or a parameter resolved to one)
+        do
+        let a0 ← argOf c 0
+        let a1 ← argOf c 1
+        match a0, a1 with
+        | .ident xa, .lit (.set sa) =>
+            match nameIndex names xa.name with
+            | some i => .ok (.setInSlot i sa.denote)
+            | none => .error s!"unresolved name '{xa.name}' in set_in"
+        | .ident xa, .ident pa =>
+            match nameIndex names xa.name with
+            | some i =>
+                match nameIndex names pa.name with
+                | none =>
+                    match env pa with
+                    | some (.setOfInt sv) => .ok (.setInSlot i sv)
+                    | _ => .error "set_in over a non-set parameter"
+                | some _ =>
+                    .error "set_in over a slot-typed set argument"
+            | none => .error s!"unresolved name '{xa.name}' in set_in"
+        | _, _ => .error "unsupported set_in argument shapes"
+      else if c.name.name = "set_in_reif" ∧ c.args.length = 3 then
+        -- C0 reified set membership over a constant set: the reif
+        -- operand may be a slot identifier or a Boolean literal (a
+        -- literal false forces non-membership, a literal true
+        -- membership, expressed as the unreified constraint)
+        do
+        let a0 ← argOf c 0
+        let a1 ← argOf c 1
+        let a2 ← argOf c 2
+        match a0, a1, a2 with
+        | .ident xa, .lit (.set sa), .ident ra =>
+            match nameIndex names xa.name, nameIndex names ra.name with
+            | some i, some k => .ok (.setInReifSlot i sa.denote k)
+            | some _, none => .error s!"unresolved name '{ra.name}' in set_in_reif"
+            | none, _ => .error s!"unresolved name '{xa.name}' in set_in_reif"
+        | .ident xa, .lit (.set sa), .lit (.bool true) =>
+            match nameIndex names xa.name with
+            | some i => .ok (.setInSlot i sa.denote)
+            | none => .error s!"unresolved name '{xa.name}' in set_in_reif"
+        | .ident xa, .lit (.set sa), .lit (.bool false) =>
+            -- x ∉ S: the COMPLEMENT of a finite set is infinite, so
+            -- no constant payload can express it; the certified route
+            -- would need one disequality piece per element (the aux
+            -- expansion's pinning machinery), reported precisely for
+            -- now.
+            .error "set_in_reif with a false literal is outside the certified fragment (complement of a finite set)"
+        | .ident xa, .ident pa, .ident ra =>
+            match nameIndex names xa.name with
+            | some i =>
+                match nameIndex names ra.name with
+                | some k =>
+                    match nameIndex names pa.name, env pa with
+                    | none, some (.setOfInt sv) =>
+                        .ok (.setInReifSlot i sv k)
+                    | some _, _ =>
+                        .error "set_in_reif over a slot-typed set argument"
+                    | none, _ =>
+                        .error "set_in_reif over a non-set parameter"
+                | none => .error s!"unresolved name '{ra.name}' in set_in_reif"
+            | none => .error s!"unresolved name '{xa.name}' in set_in_reif"
+        | _, _, _ => .error "unsupported set_in_reif argument shapes"
       else
         .error s!"unsupported predicate '{c.name.name}'"
 
@@ -433,6 +497,237 @@ inductive AuxShape where
       two-element array maximum, rewritten into the chain
       `int_max(e₁, e₂, r)` (`maxSlot`). -/
   | maxGen2 (e1 e2 r : Ident)
+  /-- `bool_xor(x, y, z)` (PLAN C0): the Boolean XOR channel
+      `z = (x ^^ y)`, rewritten into the FOUR certified `bool_clause`
+      shapes (whose positive/negative literal lists select the
+      equivalence clauses `x ∨ y ∨ ¬z`, `¬x ∨ ¬y ∨ ¬z`,
+      `¬x ∨ y ∨ z`, `x ∨ ¬y ∨ z`) — no aux slot at all.  Each clause
+      compiles to `boolClauseSlot`, is seeded into the clause
+      database, and is proved equivalent by the truth-table bridges
+      (`bool_xor_of_clauses` / `bool_xor_to_clauses`). -/
+  | xorSlots (x y z : Ident)
+  /-- `array_int_element(x, [k₁..kₙ], k)` (PLAN C0 element values):
+      the table is all integer literals and the VALUE operand is a
+      literal. An aux slot carries `k` (domain `[.int k]`), and the
+      constraint is rewritten to the certified all-slot-table shape
+      `array_int_element(x, [k₁..kₙ], AUX)`. -/
+  | constElemValL (x : Ident) (xs : List Int) (k : Int)
+  /-- `array_var_int_element(x, pre ++ [k] ++ post, y)` (PLAN C0
+      element values): the table has EXACTLY ONE integer-literal
+      element. An aux slot carries `k` (domain `[.int k]`), and the
+      table is rewritten to the all-slot shape
+      `array_var_int_element(x, pre ++ [AUX] ++ post, y)` — the
+      already-certified `arrayVarIntElementSlot` route. -/
+  | varElemTabLit (x y : Ident) (pre : List Ident) (k : Int)
+      (post : List Ident)
+  /-- `array_var_int_element(x, pre ++ [k] ++ post, k')` (PLAN C0
+      element values): the table has exactly one literal element AND
+      the VALUE operand is a literal. The FIRST aux slot carries `k`,
+      the SECOND carries `k'` (its successor aux name); the rewrite is
+      `array_var_int_element(x, pre ++ [AUX] ++ post, AUX₂)`. -/
+  | varElemTabValLit (x : Ident) (pre : List Ident) (k : Int)
+      (post : List Ident) (k' : Int)
+  /-- `array_var_int_element(x, tab, y)` (PLAN C0 element values,
+      k-LITERAL generalization): `tab` is slot identifiers mixed with
+      k ≥ 2 integer literals and the value operand is a slot. One aux
+      slot per literal (in table order, named by position) is pinned
+      to it, and the table is rewritten to the all-slot shape
+      `array_var_int_element(x, tab', y)` — the already-certified
+      `arrayVarIntElementSlot` route. -/
+  | varElemTabKs (x y : Ident) (tab : ArrayLiteral)
+  /-- `array_var_int_element(x, tab, k')` (PLAN C0 element values,
+      k-literal generalization): as `varElemTabKs` with the VALUE
+      operand a literal, which the LAST pinned aux (the k-th
+      successor slot) carries. -/
+  | varElemTabValKs (x : Ident) (tab : ArrayLiteral) (k' : Int)
+  /-- `array_var_bool_element(x, tab, y)` (PLAN C0 element values, bool
+      tables): `tab` is slot identifiers mixed with k ≥ 1 Boolean
+      literals and the value operand is a slot. One aux slot per
+      literal (in table order, named by position) is pinned to it, and
+      the table is rewritten to the all-slot shape
+      `array_var_bool_element(x, tab', y)` — the already-certified
+      `arrayVarBoolElementSlot` route. -/
+  | varBoolTabLits (x y : Ident) (tab : ArrayLiteral)
+  /-- `array_var_bool_element(x, tab, b')` (PLAN C0 element values,
+      bool tables): `tab` is slot identifiers and Boolean literals
+      (k ≥ 0) and the VALUE operand is the Boolean literal `b'`, which
+      the LAST pinned aux (the k-th successor slot) carries. -/
+  | varBoolTabValLit (x : Ident) (tab : ArrayLiteral) (b' : Bool)
+
+/-- Every element of an array literal is a slot identifier, in order
+    (PLAN C0 element values). -/
+def allIdents : ArrayLiteral → Option (List Ident)
+  | [] => some []
+  | .ident x :: rest => (allIdents rest).map (fun is => x :: is)
+  | _ => none
+
+/-- Split an element table at its unique integer-literal element
+    (PLAN C0 element values): the slot identifiers before it, the
+    literal, and the slot identifiers after it. Returns `none` unless
+    the table is slot identifiers with EXACTLY ONE integer literal in
+    one position. -/
+def splitOneLit : ArrayLiteral → Option (List Ident × Int × List Ident)
+  | [] => none
+  | .lit (.int k) :: rest => (allIdents rest).map (fun is => ([], k, is))
+  | .ident x :: rest =>
+      (splitOneLit rest).map (fun t => (x :: t.1, t.2.1, t.2.2))
+  | _ => none
+
+/-- The integer literals of a mixed element table, in order (PLAN C0
+    element values, k-literal generalization): the entries that are
+    integer literals; the other entries contribute nothing. -/
+def tabLitVals : ArrayLiteral → List Int
+  | [] => []
+  | .lit (.int k) :: rest => k :: tabLitVals rest
+  | _ :: rest => tabLitVals rest
+
+/-- The k-literal mixed-table classifier (PLAN C0 element values,
+    k-literal generalization): every entry is a slot identifier or an
+    integer literal, and there are AT LEAST TWO integer literals. -/
+def mixTabOkB (elems : ArrayLiteral) : Bool :=
+  elems.all (fun b => match b with
+    | .ident _ => true
+    | .lit (.int _) => true
+    | _ => false) &&
+  decide (2 ≤ (tabLitVals elems).length)
+
+/-- The mixed table with each integer-literal entry replaced, in
+    order, by the corresponding aux identifier (PLAN C0 element
+    values, k-literal generalization). -/
+def mixSubst : ArrayLiteral → List Ident → ArrayLiteral
+  | [], _ => []
+  | .lit (.int _) :: rest, a :: as => .ident a :: mixSubst rest as
+  | .lit (.int k) :: rest, [] => .lit (.int k) :: mixSubst rest []
+  | .ident x :: rest, as => .ident x :: mixSubst rest as
+  | .lit l :: rest, as => .lit l :: mixSubst rest as
+
+/-- The identifier list underlying `mixSubst`: the same table with each
+    integer-literal entry replaced by the corresponding aux NAME. -/
+def mixIdents : ArrayLiteral → List Ident → List Ident
+  | [], _ => []
+  | .lit (.int _) :: rest, a :: as => a :: mixIdents rest as
+  | .lit (.int _) :: rest, [] => mixIdents rest []
+  | .ident x :: rest, as => x :: mixIdents rest as
+  | .lit _ :: rest, as => mixIdents rest as
+
+/-- The Boolean literals of a mixed element table, in order (the bool
+    twin of `tabLitVals`). -/
+def tabBoolVals : ArrayLiteral → List Bool
+  | [] => []
+  | .lit (.bool b) :: rest => b :: tabBoolVals rest
+  | _ :: rest => tabBoolVals rest
+
+/-- The bool-literal mixed-table classifier with a SLOT value: every
+    entry is a slot identifier or a Boolean literal, with AT LEAST ONE
+    Boolean literal. -/
+def boolLitTabOkB (elems : ArrayLiteral) : Bool :=
+  elems.all (fun b => match b with
+    | .ident _ => true
+    | .lit (.bool _) => true
+    | _ => false) &&
+  decide (1 ≤ (tabBoolVals elems).length)
+
+/-- The bool-literal mixed-table classifier with a LITERAL value: every
+    entry is a slot identifier or a Boolean literal (ANY number of
+    literals, including none). -/
+def boolTabOkB (elems : ArrayLiteral) : Bool :=
+  elems.all (fun b => match b with
+    | .ident _ => true
+    | .lit (.bool _) => true
+    | _ => false)
+
+/-- The mixed bool table with each Boolean-literal entry replaced, in
+    order, by the corresponding aux identifier. -/
+def mixSubstB : ArrayLiteral → List Ident → ArrayLiteral
+  | [], _ => []
+  | .lit (.bool _) :: rest, a :: as => .ident a :: mixSubstB rest as
+  | .lit (.bool b) :: rest, [] => .lit (.bool b) :: mixSubstB rest []
+  | .ident x :: rest, as => .ident x :: mixSubstB rest as
+  | .lit l :: rest, as => .lit l :: mixSubstB rest as
+
+/-- The identifier list underlying `mixSubstB`. -/
+def mixIdentsB : ArrayLiteral → List Ident → List Ident
+  | [], _ => []
+  | .lit (.bool _) :: rest, a :: as => a :: mixIdentsB rest as
+  | .lit (.bool _) :: rest, [] => mixIdentsB rest []
+  | .ident x :: rest, as => x :: mixIdentsB rest as
+  | .lit _ :: rest, as => mixIdentsB rest as
+
+/-- The all-literal integer table of the `constElemValL` shape. -/
+def litTab (xs : List Int) : ArrayLiteral :=
+  xs.map (fun k => .lit (.int k))
+
+/-- The mixed table with the literal at the split position replaced by
+    a slot name (PLAN C0 element values). -/
+def auxTab (pre : List Ident) (aux : Ident) (post : List Ident) : ArrayLiteral :=
+  pre.map (fun x => .ident x) ++ [.ident aux] ++ post.map (fun x => .ident x)
+
+/-- The mixed table with the literal at the split position (PLAN C0
+    element values). -/
+def litSplitTab (pre : List Ident) (k : Int) (post : List Ident) : ArrayLiteral :=
+  pre.map (fun x => .ident x) ++ [.lit (.int k)] ++ post.map (fun x => .ident x)
+
+/-- The int literal-value element tables with ANY number of literal
+    table entries: two or more literals, or an all-slot table (the
+    value rides its own pinned slot in either case). -/
+def intValTabOkB (elems : ArrayLiteral) : Bool :=
+  mixTabOkB elems || (allIdents elems).isSome
+
+/-- The PLAN C0 element-value shapes: the value-literal
+    `array_int_element` over an all-literal table, and the one-literal
+    mixed `array_var_int_element` tables (slot or literal value
+    operand; both classified, with their exactness cases in
+    `Proofs/Exact`). Kept as a separate classifier so the `auxShapeOf`
+    inversions of the older shapes stay shallow; the new arms of
+    `auxShapeOf` hand the element names over to this function. -/
+def elemAuxShapeOf (c : ConstraintItem) : Option AuxShape :=
+  match c.name.name with
+  | "array_int_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.lit (.int k))] =>
+          match intLits elems with
+          | some xs => some (.constElemValL x xs k)
+          | none => none
+      | _ => none
+  -- PLAN C0 element values: the `array_var_int_element` mixed tables
+  -- with a slot value (`varElemTabLit`/`varElemTabKs`) or a literal
+  -- value (`varElemTabValLit`/`varElemTabValKs`). The pinned aux slots
+  -- fill the table's literal positions, so the rewritten table is the
+  -- all-slot shape the unchanged extraction path already compiles.
+  -- EXACTLY ONE literal uses the one-slot shapes (the k = 1
+  -- instance); TWO OR MORE literals use the k-literal list-of-pins
+  -- shapes.
+  | "array_var_int_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.ident y)] =>
+          match splitOneLit elems with
+          | some (pre, k, post) => some (.varElemTabLit x y pre k post)
+          | none =>
+              if mixTabOkB elems then some (.varElemTabKs x y elems)
+              else none
+      | [.basic (.ident x), .array elems, .basic (.lit (.int k'))] =>
+          match splitOneLit elems with
+          | some (pre, k, post) => some (.varElemTabValLit x pre k post k')
+          | none =>
+              if intValTabOkB elems then some (.varElemTabValKs x elems k')
+              else none
+      | _ => none
+  -- PLAN C0 element values, bool tables: the `array_var_bool_element`
+  -- mixed tables with a slot value (`varBoolTabLits`, at least one
+  -- Boolean literal) or a literal value (`varBoolTabValLit`, any
+  -- number of literals including none). The pinned aux slots fill the
+  -- table's literal positions, so the rewritten table is the all-slot
+  -- shape the unchanged extraction path already compiles.
+  | "array_var_bool_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.ident y)] =>
+          if boolLitTabOkB elems then some (.varBoolTabLits x y elems)
+          else none
+      | [.basic (.ident x), .array elems, .basic (.lit (.bool b'))] =>
+          if boolTabOkB elems then some (.varBoolTabValLit x elems b')
+          else none
+      | _ => none
+  | _ => none
 
 /-- The syntactic classification of the nine pinning shapes. -/
 def auxShapeOf (c : ConstraintItem) : Option AuxShape :=
@@ -527,7 +822,16 @@ def auxShapeOf (c : ConstraintItem) : Option AuxShape :=
       | [.basic (.ident r), .array [.ident e1, .ident e2]] =>
           some (.minGen2 e1 e2 r)
       | _ => none
-  | _ => none
+  -- PLAN C0: the Boolean XOR channel over three slot identifiers.
+  | "bool_xor" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident z)] =>
+          some (.xorSlots x y z)
+      | _ => none
+  -- PLAN C0 element values: the value-literal `array_int_element` over
+  -- an all-literal table, and the one-literal mixed tables of
+  -- `array_var_int_element` (with a slot or a literal value operand).
+  | _ => elemAuxShapeOf c
 
 /-- The aux slot's pinned value: `some v` means the shape consumes an
     aux slot whose domain is the singleton `[v]`; `none` means no aux
@@ -562,6 +866,14 @@ def AuxShape.pin : AuxShape → Option Value
   | .orFalse _ _ => none
   | .minGen2 _ _ _ => none
   | .maxGen2 _ _ _ => none
+  | .xorSlots _ _ _ => none
+  | .constElemValL _ _ k => some (.int k)
+  | .varElemTabLit _ _ _ k _ => some (.int k)
+  | .varElemTabValLit _ _ k _ _ => some (.int k)
+  | .varElemTabKs _ _ _ => none
+  | .varElemTabValKs _ _ _ => none
+  | .varBoolTabLits _ _ _ => none
+  | .varBoolTabValLit _ _ _ => none
 
 /-- The SECOND aux slot's pinned value (`some v` only for the
     two-literal times shapes, whose second literal `k'` needs its own
@@ -570,13 +882,39 @@ def AuxShape.pin2 : AuxShape → Option Value
   | .timesRKK _ _ k' => some (.int k')
   | .timesKRR _ _ k' => some (.int k')
   | .timesKKR _ _ k' => some (.int k')
+  | .varElemTabValLit _ _ _ _ k' => some (.int k')
   | _ => none
+
+/-- The pinned values of a shape whose expansion consumes ONE aux slot
+    PER PIN (PLAN C0 element values, k-literal generalization): the
+    table's integer literals in order, plus the value literal where
+    the value operand is a literal. Empty for every other shape (whose
+    pins are consumed through `pin`/`pin2`). -/
+def AuxShape.pinsK : AuxShape → List Value
+  | .varElemTabKs _ _ tab => (tabLitVals tab).map Value.int
+  | .varElemTabValKs _ tab k' => (tabLitVals tab).map Value.int ++ [.int k']
+  | .varBoolTabLits _ _ tab => (tabBoolVals tab).map Value.bool
+  | .varBoolTabValLit _ tab b' => (tabBoolVals tab).map Value.bool ++ [.bool b']
+  | _ => []
 
 /-- The successor aux identifier: the second aux slot's name is the
     first's name with one more `$` (its dollar-run is one longer, so
     it encodes the next position). -/
 def nextAuxIdent (aux : Ident) : Ident :=
   Ident.mk (aux.name.push '$')
+
+/-- The first `k` aux identifiers of the successor chain from `aux`:
+    `[aux, aux⁺, aux⁺⁺, …]` (the k-literal element tables' pinned
+    slots, in table order). -/
+def auxChain (aux : Ident) : Nat → List Ident
+  | 0 => []
+  | k + 1 => aux :: auxChain (nextAuxIdent aux) k
+
+/-- The `k`-th aux identifier of the successor chain from `aux`
+    (0-based: `auxChainLast aux 0 = aux`). -/
+def auxChainLast (aux : Ident) : Nat → Ident
+  | 0 => aux
+  | k + 1 => auxChainLast (nextAuxIdent aux) k
 
 /-- The rewritten constraints of a pinning shape, as a function of
     the aux slot's identifier (ignored by the two no-slot shapes).
@@ -705,6 +1043,57 @@ def AuxShape.expand : AuxShape → Ident → List ConstraintItem
       [{ name := Ident.mk "int_max"
        , args := [.basic (.ident e1), .basic (.ident e2), .basic (.ident r)]
        , anns := [] }]
+  | .xorSlots x y z, _ =>
+      [{ name := Ident.mk "bool_clause"
+       , args := [.array [.ident x, .ident y], .array [.ident z]]
+       , anns := [] }
+      ,{ name := Ident.mk "bool_clause"
+       , args := [.array [], .array [.ident x, .ident y, .ident z]]
+       , anns := [] }
+      ,{ name := Ident.mk "bool_clause"
+       , args := [.array [.ident y, .ident z], .array [.ident x]]
+       , anns := [] }
+      ,{ name := Ident.mk "bool_clause"
+       , args := [.array [.ident x, .ident z], .array [.ident y]]
+       , anns := [] }]
+  | .constElemValL x xs _, aux =>
+      [{ name := Ident.mk "array_int_element"
+       , args := [.basic (.ident x), .array (litTab xs), .basic (.ident aux)]
+       , anns := [] }]
+  | .varElemTabLit x y pre _ post, aux =>
+      [{ name := Ident.mk "array_var_int_element"
+       , args := [.basic (.ident x), .array (auxTab pre aux post),
+           .basic (.ident y)]
+       , anns := [] }]
+  | .varElemTabValLit x pre _ post _, aux =>
+      [{ name := Ident.mk "array_var_int_element"
+       , args := [.basic (.ident x), .array (auxTab pre aux post),
+           .basic (.ident (nextAuxIdent aux))]
+       , anns := [] }]
+  | .varElemTabKs x y tab, aux =>
+      [{ name := Ident.mk "array_var_int_element"
+       , args := [.basic (.ident x),
+           .array (mixSubst tab (auxChain aux (tabLitVals tab).length)),
+           .basic (.ident y)]
+       , anns := [] }]
+  | .varElemTabValKs x tab _, aux =>
+      [{ name := Ident.mk "array_var_int_element"
+       , args := [.basic (.ident x),
+           .array (mixSubst tab (auxChain aux (tabLitVals tab).length)),
+           .basic (.ident (auxChainLast aux (tabLitVals tab).length))]
+       , anns := [] }]
+  | .varBoolTabLits x y tab, aux =>
+      [{ name := Ident.mk "array_var_bool_element"
+       , args := [.basic (.ident x),
+           .array (mixSubstB tab (auxChain aux (tabBoolVals tab).length)),
+           .basic (.ident y)]
+       , anns := [] }]
+  | .varBoolTabValLit x tab _, aux =>
+      [{ name := Ident.mk "array_var_bool_element"
+       , args := [.basic (.ident x),
+           .array (mixSubstB tab (auxChain aux (tabBoolVals tab).length)),
+           .basic (.ident (auxChainLast aux (tabBoolVals tab).length))]
+       , anns := [] }]
 
 /-- The longest string length of a list (the aux-name freshness
     fuel: an aux name is made strictly longer than every taken
@@ -726,6 +1115,16 @@ def dollarRun : Nat → String
 def auxName (taken : List String) (n : Nat) : String :=
   "_aux_" ++ dollarRun (maxStrLength taken + 1 + n)
 
+/-- The fresh aux slots for a LIST of pinned values (PLAN C0 element
+    values, k-literal generalization): one slot per value, named by
+    its position (the same naming the one- and two-pin machinery
+    uses). -/
+def auxSlotsK (taken : List String) : Nat → List Value →
+    List (String × List Value)
+  | _, [] => []
+  | base, v :: ps =>
+      (auxName taken base, [v]) :: auxSlotsK taken (base + 1) ps
+
 /-- The expansion pre-pass: walks the constraint list with an
     accumulator of already-emitted aux slots, classifying each
     constraint. Non-pinning constraints pass through unchanged; a
@@ -734,8 +1133,9 @@ def auxName (taken : List String) (n : Nat) : String :=
     is its final position in the aux slot list) and contributes its
     rewritten constraints; a TWO-literal times shape consumes TWO
     (the second's name is the first's with one more `$`, so it
-    occupies the next counter position). The result is (aux slots,
-    expanded constraints). -/
+    occupies the next counter position); a k-literal element table
+    consumes ONE aux slot per pin (`pinsK`, again named by position).
+    The result is (aux slots, expanded constraints). -/
 def expandPlan (taken : List String) :
     List (String × List Value) → List ConstraintItem →
     List (String × List Value) × List ConstraintItem
@@ -759,8 +1159,14 @@ def expandPlan (taken : List String) :
                 (auxs ++ [(auxName taken auxs.length, [v])]) rest
               (auxs', sh.expand aux ++ cs')
           | _, _ =>
-              let (auxs', cs') := expandPlan taken auxs rest
-              (auxs', sh.expand aux ++ cs')
+              match sh.pinsK with
+              | [] =>
+                  let (auxs', cs') := expandPlan taken auxs rest
+                  (auxs', sh.expand aux ++ cs')
+              | v :: vs =>
+                  let (auxs', cs') := expandPlan taken
+                    (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest
+                  (auxs', sh.expand aux ++ cs')
 
 /-- The model's search slots as a plain list (the empty list when
     slot extraction fails; the certified compile then rejects the
@@ -784,11 +1190,119 @@ def modelAuxSlots (m : Model) : List (String × List Value) :=
 def modelExpand (m : Model) : List ConstraintItem :=
   (expandPlan (auxTaken m (modelSlots m)) [] m.constraints).2
 
+/-! ## Direct-`Dom` compiler path (S6)
+
+`compileModel` materializes every slot as a `List Value` and then
+canonicalizes it; on wide intervals the same value list is rebuilt
+again for the aux-name table and for `modelExpand`.  The twins below
+mirror the same control flow but compute the aux-name table from the
+slot *names* only and build every large interval with
+`Dom.ofIntRange`. -/
+
+/-- The model's search slots as compact domains (empty when extraction
+    fails; the compiler rejects before consulting it). -/
+def modelSlotsDom (m : Model) : List (String × Dom) :=
+  (slotsCheckedDom m).toOption.getD []
+
+/-- The taken-name list for aux-name freshness, from compact slots. -/
+def auxTakenDom (m : Model) (slots0 : List (String × Dom)) : List String :=
+  slots0.map Prod.fst ++ m.parameters.map (fun d => d.name.name)
+
+/-- One expansion pre-pass on compact slots: the aux value slots are
+    mapped to `Dom` once and the two projections are shared, so the
+    caller never recomputes the plan. -/
+def expandDomOf (m : Model) (slots0 : List (String × Dom)) :
+    List (String × Dom) × List ConstraintItem :=
+  let ep := expandPlan (auxTakenDom m slots0) [] m.constraints
+  (ep.1.map ofListSlot, ep.2)
+
+/-- The expansion pre-pass's first component, from explicit slots. -/
+def modelAuxSlotsDomOf (m : Model) (slots0 : List (String × Dom)) :
+    List (String × Dom) :=
+  (expandDomOf m slots0).1
+
+/-- The expansion pre-pass's second component, from explicit slots. -/
+def modelExpandDomOf (m : Model) (slots0 : List (String × Dom)) :
+    List ConstraintItem :=
+  (expandDomOf m slots0).2
+
+/-- The expansion pre-pass's first component on the compact path. -/
+def modelAuxSlotsDom (m : Model) : List (String × Dom) :=
+  modelAuxSlotsDomOf m (modelSlotsDom m)
+
+/-- The expansion pre-pass's second component on the compact path. -/
+def modelExpandDom (m : Model) : List ConstraintItem :=
+  modelExpandDomOf m (modelSlotsDom m)
+
+/-- The compact slot list enumerates like the legacy one. -/
+theorem modelSlotsDom_eq (m : Model) :
+    (modelSlotsDom m).map enumSlot = modelSlots m := by
+  unfold modelSlotsDom modelSlots
+  have h := slotsCheckedDom_eq m
+  cases hs : slotsChecked m with
+  | error e =>
+      cases hd : slotsCheckedDom m with
+      | error e' => simp [Except.toOption, Option.getD, Except.map, hd, hs] at h ⊢
+      | ok slots => simp [Except.toOption, Option.getD, Except.map, hd, hs] at h
+  | ok slots =>
+      cases hd : slotsCheckedDom m with
+      | error e => simp [Except.toOption, Option.getD, Except.map, hd, hs] at h
+      | ok slotsDom => simpa [Except.toOption, Option.getD, Except.map, hd, hs] using h
+
+/-- The compact slot list has the legacy slot names. -/
+theorem modelSlotsDom_names (m : Model) :
+    (modelSlotsDom m).map Prod.fst = (modelSlots m).map Prod.fst := by
+  have h := modelSlotsDom_eq m
+  rw [← h]
+  simp only [List.map_map, Function.comp_def, enumSlot]
+
+/-- The two expansion pre-passes agree (they read the same names). -/
+theorem expandPlanDom_eq (m : Model) :
+    expandPlan (auxTakenDom m (modelSlotsDom m)) [] m.constraints =
+      expandPlan (auxTaken m (modelSlots m)) [] m.constraints := by
+  have hn := modelSlotsDom_names m
+  simp only [auxTaken, auxTakenDom, hn]
+
+/-- The compact aux slots enumerate like the legacy aux slots. -/
+theorem modelAuxSlotsDom_eq (m : Model) :
+    (modelAuxSlotsDom m).map enumSlot = modelAuxSlots m := by
+  unfold modelAuxSlotsDom modelAuxSlotsDomOf expandDomOf modelAuxSlots
+  rw [expandPlanDom_eq, List.map_map]
+  simp only [Function.comp_def, enumSlot_ofListSlot]
+  rw [show (fun x => x) = id from rfl]
+  rw [List.map_id]
+
+/-- The compact aux slots are canonical. -/
+theorem modelAuxSlotsDom_canonical (m : Model) :
+    (modelAuxSlotsDom m).map canonSlot = modelAuxSlotsDom m := by
+  unfold modelAuxSlotsDom modelAuxSlotsDomOf expandDomOf
+  rw [List.map_map]
+  simp only [Function.comp_def, canonSlot_ofListSlot, List.map_id]
+
+/-- The compact expansion produces the legacy constraints. -/
+theorem modelExpandDom_eq (m : Model) : modelExpandDom m = modelExpand m := by
+  unfold modelExpandDom modelExpandDomOf expandDomOf modelExpand
+  rw [expandPlanDom_eq]
+
 /-! ## The compiler -/
 
 /-- The final assembly of a successful compile: the slot names,
     domains, and the compiled constraints. -/
 def assemble (model : Model) (slots : List (String × List Value))
+    (dcs : List DomConstraint) : CompiledProblem DomConstraint :=
+  { names := slots.map Prod.fst
+    domains := slots.map (fun p => Dom.ofList p.2)
+    constraints := dcs
+    objective := ()
+    source := model
+    toStore := fun a x =>
+      match nameIndex (slots.map Prod.fst) x.name with
+      | some i => a[i]?
+      | none => parEnv model x }
+
+/-- Fast twin of `assemble`: the same problem shape, with the slot
+    domains already in compact form. -/
+def assembleDom (model : Model) (slots : List (String × Dom))
     (dcs : List DomConstraint) : CompiledProblem DomConstraint :=
   { names := slots.map Prod.fst
     domains := slots.map Prod.snd
@@ -799,6 +1313,24 @@ def assemble (model : Model) (slots : List (String × List Value))
       match nameIndex (slots.map Prod.fst) x.name with
       | some i => a[i]?
       | none => parEnv model x }
+
+/-- `assembleDom` and `assemble` build the same problem whenever the
+    compact slots enumerate to the legacy slots and are canonical. -/
+theorem assembleDom_eq (model : Model) (slots : List (String × Dom))
+    (slotValues : List (String × List Value)) (dcs : List DomConstraint)
+    (henum : slots.map enumSlot = slotValues)
+    (hcanon : slots.map canonSlot = slots) :
+    assembleDom model slots dcs = assemble model slotValues dcs := by
+  unfold assembleDom assemble
+  have hnames : slots.map Prod.fst = slotValues.map Prod.fst := by
+    rw [← henum]
+    simp only [List.map_map, Function.comp_def, enumSlot]
+  have hdom : slots.map Prod.snd =
+      slotValues.map (fun p => Dom.ofList p.2) := by
+    rw [← henum, List.map_map]
+    have hc := congrArg (List.map Prod.snd) hcanon
+    simpa [List.map_map, Function.comp_def, enumSlot, canonSlot] using hc.symm
+  rw [hnames, hdom]
 
 /-- Compile the explicitly supported FlatZinc fragment to the shared
     `Core.Problem` with `DomConstraint` payloads. Every rejection
@@ -831,6 +1363,121 @@ def compileModel (model : Model) : Except String (CompiledProblem DomConstraint)
               | .error e => .error e
               | .ok dcs => .ok (assemble model allSlots dcs)
       | _ => .error "optimize items are outside the certified fragment"
+
+/-- Fast twin of `compileModel`: identical guards, rejection reasons
+    and expansion, but slot domains are built directly as compact
+    `Dom`s and the aux-name table is read from their names only. -/
+def compileModelFast (model : Model) :
+    Except String (CompiledProblem DomConstraint) :=
+  if model.predicates ≠ [] then
+    .error "predicate items are outside the certified fragment"
+  else match model.parameters.filter (fun d => parDeclValue d = none) with
+  | (_ :: _) => .error "non-scalar parameter in the certified fragment"
+  | [] =>
+    match model.variables.filter (fun d => match d with
+      | .basic _ _ _ none => false
+      | _ => true) with
+    | (_ :: _) => .error "non-basic variable in the certified fragment"
+    | [] =>
+      match model.solve with
+      | .satisfy _ =>
+          match slotsCheckedDom model with
+          | .error e => .error e
+          | .ok slots =>
+              let ep := expandDomOf model slots
+              let allSlots := slots ++ ep.1
+              match compileConstraints (parEnv model)
+                  (allSlots.map Prod.fst) ep.2 with
+              | .error e => .error e
+              | .ok dcs => .ok (assembleDom model allSlots dcs)
+      | _ => .error "optimize items are outside the certified fragment"
+
+/-- **Compiler fast-path equality (S6)**: the direct-`Dom` compiler is
+    the logical `compileModel` on every model, including every
+    rejection.  This is the kernel equality behind the
+    `@[implemented_by]` seam below. -/
+theorem compileModelFast_eq (model : Model) :
+    compileModelFast model = compileModel model := by
+  unfold compileModelFast compileModel
+  by_cases hp : model.predicates ≠ []
+  · simp [hp]
+  · simp only [if_neg hp]
+    cases hpar : model.parameters.filter (fun d => parDeclValue d = none) with
+    | cons d ds => simp
+    | nil =>
+        simp only
+        cases hvar : model.variables.filter (fun d => match d with
+          | .basic _ _ _ none => false
+          | _ => true) with
+        | cons d ds => simp
+        | nil =>
+            simp only
+            cases hsol : model.solve with
+            | satisfy anns =>
+                simp only
+                cases hs : slotsChecked model with
+                | error e =>
+                    have hd := slotsCheckedDom_eq model
+                    rw [hs] at hd
+                    cases hsd : slotsCheckedDom model with
+                    | error e' =>
+                        simp only [Except.map, hsd] at hd
+                        have he : e' = e := by simpa using hd
+                        subst he
+                        simp [hsd]
+                    | ok slotsDom => exact absurd hd (by simp [Except.map, hsd])
+                | ok slots =>
+                    have hd := slotsCheckedDom_eq model
+                    rw [hs] at hd
+                    cases hsd : slotsCheckedDom model with
+                    | error e => exact absurd hd (by simp [Except.map, hsd])
+                    | ok slotsDom =>
+                        dsimp only
+                        have hms : modelSlotsDom model = slotsDom := by
+                          simp [modelSlotsDom, hsd, Except.toOption, Option.getD]
+                        have hep1 : (expandDomOf model slotsDom).1 = modelAuxSlotsDom model := by
+                          rw [← hms]
+                          rfl
+                        have hep2 : (expandDomOf model slotsDom).2 = modelExpandDom model := by
+                          rw [← hms]
+                          rfl
+                        simp only [hep1, hep2]
+                        have hdenum : slotsDom.map enumSlot = slots := by
+                          simpa [Except.map, hsd, enumSlot] using hd
+                        have hnames1 : slotsDom.map Prod.fst = slots.map Prod.fst := by
+                          rw [← hdenum]
+                          simp only [List.map_map, Function.comp_def, enumSlot]
+                        have hnames2 : (modelAuxSlotsDom model).map Prod.fst =
+                            (modelAuxSlots model).map Prod.fst := by
+                          rw [← modelAuxSlotsDom_eq model]
+                          simp only [List.map_map, Function.comp_def, enumSlot]
+                        have hallnames :
+                            (slotsDom ++ modelAuxSlotsDom model).map Prod.fst =
+                              (slots ++ modelAuxSlots model).map Prod.fst := by
+                          simp only [List.map_append, hnames1, hnames2]
+                        simp only [hallnames, modelExpandDom_eq]
+                        cases hc : compileConstraints (parEnv model)
+                            ((slots ++ modelAuxSlots model).map Prod.fst)
+                            (modelExpand model) with
+                        | error e => simp [hc]
+                        | ok dcs =>
+                            simp only [hc]
+                            have hen : (slotsDom ++ modelAuxSlotsDom model).map enumSlot =
+                                slots ++ modelAuxSlots model := by
+                              rw [List.map_append, hdenum, modelAuxSlotsDom_eq]
+                            have hcan : (slotsDom ++ modelAuxSlotsDom model).map canonSlot =
+                                slotsDom ++ modelAuxSlotsDom model := by
+                              rw [List.map_append, slotsCheckedDom_canonical model hsd,
+                                modelAuxSlotsDom_canonical model]
+                            rw [assembleDom_eq model (slotsDom ++ modelAuxSlotsDom model)
+                              (slots ++ modelAuxSlots model) dcs hen hcan]
+            | minimize anns obj => simp
+            | maximize anns obj => simp
+
+/- The compiled `compileModel` runs the direct-`Dom` twin.  The kernel
+   (and every theorem above) still sees the logical `List Value` body;
+   only code generation is swapped. -/
+attribute [implemented_by compileModelFast] compileModel
 
 /-- A model belongs to the direct LeanFzn.Solver fragment exactly when compilation
     succeeds. -/

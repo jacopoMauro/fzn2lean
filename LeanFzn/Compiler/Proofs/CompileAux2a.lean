@@ -105,17 +105,31 @@ theorem expandPlan_keep {taken : List String} :
                 exact List.mem_append.mpr (Or.inr
                   (ih (auxs ++ [(auxName taken auxs.length, [v])]) auxs2 cs2
                     hrec2 c htl hshape))
-          · -- no aux slot
-            rename_i hpin
-            cases hrec2 : expandPlan taken auxs rest with
-            | mk auxs2 cs2 =>
-                rw [hrec2] at h
-                simp only at h
-                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧ _ = cs' :=
-                  Prod.mk.injEq _ _ _ _ ▸ h
-                subst h1 h2
-                exact List.mem_append.mpr (Or.inr
-                  (ih auxs auxs2 cs2 hrec2 c htl hshape))
+          · -- no pin/pin2: split on the head's pinsK
+            split at h
+            · -- pinsK = []
+              cases hrec2 : expandPlan taken auxs rest with
+              | mk auxs2 cs2 =>
+                  rw [hrec2] at h
+                  simp only at h
+                  obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧ _ = cs' :=
+                    Prod.mk.injEq _ _ _ _ ▸ h
+                  subst h1 h2
+                  exact List.mem_append.mpr (Or.inr
+                    (ih auxs auxs2 cs2 hrec2 c htl hshape))
+            · -- pinsK = v :: vs
+              rename_i ph v vs hpinscons
+              cases hrec2 : expandPlan taken
+                  (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest with
+              | mk auxs2 cs2 =>
+                  rw [hrec2] at h
+                  simp only at h
+                  obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧ _ = cs' :=
+                    Prod.mk.injEq _ _ _ _ ▸ h
+                  subst h1 h2
+                  exact List.mem_append.mpr (Or.inr
+                    (ih (auxs ++ auxSlotsK taken auxs.length (v :: vs)) auxs2 cs2
+                      hrec2 c htl hshape))
 
 
 /-- The extended candidate space's domain at a model position is the
@@ -389,6 +403,12 @@ theorem auxShapeOf_timesRK_args {c : ConstraintItem} {x y : Ident} {k : Int}
              | exact absurd h (by simp)
              | (exfalso; injection h with h1; cases h1)
              | (exfalso; cases h))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 
 
@@ -446,6 +466,12 @@ theorem auxShapeOf_timesKR_args {c : ConstraintItem} {x y : Ident} {k : Int}
              | exact absurd h (by simp)
              | (exfalso; injection h with h1; cases h1)
              | (exfalso; cases h))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The timesKR' shape's argument inversion. -/
 theorem auxShapeOf_timesKR'_args {c : ConstraintItem} {x y : Ident} {k : Int}
@@ -501,4 +527,10 @@ theorem auxShapeOf_timesKR'_args {c : ConstraintItem} {x y : Ident} {k : Int}
              | exact absurd h (by simp)
              | (exfalso; injection h with h1; cases h1)
              | (exfalso; cases h))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 end LeanFzn.Compiler

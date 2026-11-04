@@ -60,6 +60,278 @@ theorem nextAuxIdent_name (taken : List String) (n : Nat) :
   unfold nextAuxIdent
   rw [auxName_succ]
 
+/-- The successor chain from the n-th aux name: its j-th entry is the
+    (n+j)-th aux name (PLAN C0 element values, k-literal
+    generalization). -/
+theorem auxChain_getElem? {taken : List String} :
+    ∀ {n : Nat} {k j : Nat}, j < k →
+      (auxChain (Ident.mk (auxName taken n)) k)[j]?
+        = some (Ident.mk (auxName taken (n + j))) := by
+  intro n k
+  induction k generalizing n with
+  | zero => intro j hj; omega
+  | succ k ih =>
+      intro j hj
+      cases j with
+      | zero => rfl
+      | succ j2 =>
+          show (auxChain (nextAuxIdent (Ident.mk (auxName taken n))) k)[j2]?
+            = some (Ident.mk (auxName taken (n + (j2 + 1))))
+          have hnext : nextAuxIdent (Ident.mk (auxName taken n))
+              = Ident.mk (auxName taken (n + 1)) := by
+            unfold nextAuxIdent
+            rw [auxName_succ]
+          rw [hnext]
+          rw [ih (n := n + 1) (j := j2) (by omega)]
+          rw [show n + 1 + j2 = n + (j2 + 1) from by omega]
+
+/-- The successor chain from `aux` has one entry per position. -/
+theorem auxChain_length (aux : Ident) : ∀ k, (auxChain aux k).length = k := by
+  intro k
+  induction k generalizing aux with
+  | zero => rfl
+  | succ k ih => simp only [auxChain, List.length_cons, ih]
+
+/-- The k-th entry of the successor chain from the n-th aux name is the
+    (n+k)-th aux name (PLAN C0 element values, k-literal
+    generalization). -/
+theorem auxChainLast_eq {taken : List String} :
+    ∀ {n : Nat} {k : Nat},
+      auxChainLast (Ident.mk (auxName taken n)) k
+        = Ident.mk (auxName taken (n + k)) := by
+  intro n k
+  induction k generalizing n with
+  | zero => rfl
+  | succ k ih =>
+      show auxChainLast (nextAuxIdent (Ident.mk (auxName taken n))) k
+        = Ident.mk (auxName taken (n + (k + 1)))
+      have hnext : nextAuxIdent (Ident.mk (auxName taken n))
+          = Ident.mk (auxName taken (n + 1)) := by
+        unfold nextAuxIdent
+        rw [auxName_succ]
+      rw [hnext, ih (n := n + 1)]
+      rw [show n + 1 + k = n + (k + 1) from by omega]
+
+/-- A `?`-read of an identifier list that is `some x` makes the bang
+    read `x`. -/
+theorem bang_of_getElem?_id {l : List Ident} {j : Nat} {x : Ident}
+    (h : l[j]? = some x) : l[j]! = x := by
+  rw [List.getElem!_eq_getElem?_getD, h]
+  rfl
+
+/-- The bang-read of a mapped list at an in-bounds position is the
+    image of its bang-read. -/
+theorem getElem!_map_eq {α β : Type} [Inhabited α] [Inhabited β]
+    (l : List α) (f : α → β) {j : Nat} (h : j < l.length) :
+    (l.map f)[j]! = f l[j]! := by
+  rw [List.getElem!_eq_getElem?_getD, List.getElem!_eq_getElem?_getD,
+    List.getElem?_map, List.getElem?_eq_getElem h]
+  rfl
+
+/-- The bang-read of an appended list at a left position. -/
+theorem getElem!_append_left {α : Type} [Inhabited α] {l₁ l₂ : List α}
+    {j : Nat} (h : j < l₁.length) : (l₁ ++ l₂)[j]! = l₁[j]! := by
+  rw [List.getElem!_eq_getElem?_getD, List.getElem!_eq_getElem?_getD,
+    List.getElem?_append_left h]
+
+/-- The bang-read of an appended list at a right position. -/
+theorem getElem!_append_right {α : Type} [Inhabited α] {l₁ l₂ : List α}
+    {j : Nat} (h : l₁.length ≤ j) : (l₁ ++ l₂)[j]! = l₂[j - l₁.length]! := by
+  rw [List.getElem!_eq_getElem?_getD, List.getElem!_eq_getElem?_getD,
+    List.getElem?_append_right h]
+
+/-- The k-literal shapes' `pinsK` values. -/
+theorem pinsK_varElemTabKs (x y : Ident) (tab : ArrayLiteral) :
+    (AuxShape.varElemTabKs x y tab).pinsK
+      = (tabLitVals tab).map Value.int := rfl
+
+/-- The k-literal value-literal shape's `pinsK` values. -/
+theorem pinsK_varElemTabValKs (x : Ident) (tab : ArrayLiteral) (k' : Int) :
+    (AuxShape.varElemTabValKs x tab k').pinsK
+      = (tabLitVals tab).map Value.int ++ [Value.int k'] := rfl
+
+/-- The k-literal shape's `pinsK` length. -/
+theorem pinsK_length_varElemTabKs (x y : Ident) (tab : ArrayLiteral) :
+    (AuxShape.varElemTabKs x y tab).pinsK.length = (tabLitVals tab).length := by
+  rw [pinsK_varElemTabKs, List.length_map]
+
+/-- The k-literal value-literal shape's `pinsK` length. -/
+theorem pinsK_length_varElemTabValKs (x : Ident) (tab : ArrayLiteral) (k' : Int) :
+    (AuxShape.varElemTabValKs x tab k').pinsK.length
+      = (tabLitVals tab).length + 1 := by
+  rw [pinsK_varElemTabValKs, List.length_append, List.length_map,
+    List.length_singleton]
+
+/-- The bool-table slot-value shape's `pinsK` values. -/
+theorem pinsK_varBoolTabLits (x y : Ident) (tab : ArrayLiteral) :
+    (AuxShape.varBoolTabLits x y tab).pinsK
+      = (tabBoolVals tab).map Value.bool := rfl
+
+/-- The bool-table literal-value shape's `pinsK` values. -/
+theorem pinsK_varBoolTabValLit (x : Ident) (tab : ArrayLiteral) (b' : Bool) :
+    (AuxShape.varBoolTabValLit x tab b').pinsK
+      = (tabBoolVals tab).map Value.bool ++ [Value.bool b'] := rfl
+
+/-- The bool-table slot-value shape's `pinsK` length. -/
+theorem pinsK_length_varBoolTabLits (x y : Ident) (tab : ArrayLiteral) :
+    (AuxShape.varBoolTabLits x y tab).pinsK.length
+      = (tabBoolVals tab).length := by
+  rw [pinsK_varBoolTabLits, List.length_map]
+
+/-- The bool-table literal-value shape's `pinsK` length. -/
+theorem pinsK_length_varBoolTabValLit (x : Ident) (tab : ArrayLiteral)
+    (b' : Bool) :
+    (AuxShape.varBoolTabValLit x tab b').pinsK.length
+      = (tabBoolVals tab).length + 1 := by
+  rw [pinsK_varBoolTabValLit, List.length_append, List.length_map,
+    List.length_singleton]
+
+/-- `auxSlotsK` has one slot per pinned value. -/
+theorem auxSlotsK_length {taken : List String} {base : Nat}
+    {ps : List Value} : (auxSlotsK taken base ps).length = ps.length := by
+  induction ps generalizing base with
+  | nil => rfl
+  | cons v vs ih => simp only [auxSlotsK, List.length_cons, ih]
+
+/-- The j-th slot of `auxSlotsK` (in bounds): its name is the (base+j)-th
+    aux name and its domain is the pinned value's singleton. -/
+theorem auxSlotsK_getElem?_lt {taken : List String} {base : Nat}
+    {ps : List Value} {j : Nat} (hj : j < ps.length) :
+    (auxSlotsK taken base ps)[j]?
+      = some (auxName taken (base + j), [ps[j]]) := by
+  induction ps generalizing base j with
+  | nil => simp at hj
+  | cons v vs ih =>
+      cases j with
+      | zero => rfl
+      | succ j2 =>
+          rw [auxSlotsK, List.getElem?_cons_succ]
+          rw [ih (base := base + 1) (by simpa using hj)]
+          have hidx : base + 1 + j2 = base + (j2 + 1) := by omega
+          rw [List.getElem_cons_succ, hidx]
+
+/-- The j-th slot of `auxSlotsK` (general form). -/
+theorem auxSlotsK_getElem? {taken : List String} {base : Nat}
+    {ps : List Value} {j : Nat} :
+    (auxSlotsK taken base ps)[j]?
+      = (ps[j]?).map (fun v => (auxName taken (base + j), [v])) := by
+  induction ps generalizing base j with
+  | nil => rfl
+  | cons v vs ih =>
+      cases j with
+      | zero => rfl
+      | succ j2 =>
+          rw [auxSlotsK]
+          simp only [List.getElem?_cons_succ]
+          rw [ih (base := base + 1)]
+          have hidx : base + 1 + j2 = base + (j2 + 1) := by omega
+          rw [show (fun v => (auxName taken (base + 1 + j2), [v]))
+              = (fun v => (auxName taken (base + (j2 + 1)), [v])) from by
+                funext v; rw [hidx]]
+
+/-- Every member of `auxSlotsK` is at some position, named by it. -/
+theorem auxSlotsK_mem {taken : List String} {base : Nat}
+    {ps : List Value} {p : String × List Value}
+    (hp : p ∈ auxSlotsK taken base ps) :
+    ∃ (j : Nat), ∃ (_ : j < ps.length),
+      p = (auxName taken (base + j), [ps[j]]) := by
+  induction ps generalizing base with
+  | nil => cases hp
+  | cons v vs ih =>
+      rcases List.mem_cons.mp hp with rfl | htl
+      · exact ⟨0, by simp, rfl⟩
+      · obtain ⟨j, hj, hpj⟩ := ih (base := base + 1) htl
+        have hj' : j + 1 < (v :: vs).length := by simpa using hj
+        refine ⟨j + 1, hj', ?_⟩
+        rw [hpj, List.getElem_cons_succ]
+        have hidx : base + 1 + j = base + (j + 1) := by omega
+        rw [hidx]
+
+/-- The name-position invariant transports across `auxSlotsK`. -/
+theorem auxSlotsK_append_named {taken : List String}
+    {auxs : List (String × List Value)} {ps : List Value}
+    (hinv : ∀ i p, auxs[i]? = some p → p.1 = auxName taken i) :
+    ∀ i p, (auxs ++ auxSlotsK taken auxs.length ps)[i]? = some p →
+      p.1 = auxName taken i := by
+  intro i p hip
+  by_cases hilt : i < auxs.length
+  · rw [List.getElem?_append_left hilt] at hip
+    exact hinv i p hip
+  · rw [List.getElem?_append_right (l₁ := auxs)
+      (Nat.le_of_not_lt hilt)] at hip
+    have hj : i - auxs.length < ps.length := by
+      have h1 := (List.getElem?_eq_some_iff.mp hip).1
+      rw [auxSlotsK_length] at h1
+      omega
+    rw [auxSlotsK_getElem?_lt hj] at hip
+    have hp : p = (auxName taken (auxs.length + (i - auxs.length)),
+        [ps[i - auxs.length]]) := (Option.some.inj hip).symm
+    rw [hp]
+    have hidx : auxs.length + (i - auxs.length) = i := by omega
+    rw [hidx]
+
+/-- The singleton-domain invariant transports across `auxSlotsK`. -/
+theorem auxSlotsK_append_single {taken : List String}
+    {auxs : List (String × List Value)} {ps : List Value}
+    (hsingle : ∀ p ∈ auxs, ∃ v, p.2 = [v]) :
+    ∀ p ∈ auxs ++ auxSlotsK taken auxs.length ps, ∃ v, p.2 = [v] := by
+  intro p hp
+  rcases List.mem_append.mp hp with hp | hp
+  · exact hsingle p hp
+  · obtain ⟨j, _, hpj⟩ := auxSlotsK_mem hp
+    exact ⟨ps[j], by rw [hpj]⟩
+
+/-- The (auxs.length + j)-th slot of an `auxSlotsK`-extended
+    accumulator is the j-th fresh slot. -/
+theorem auxSlotsK_append_getElem?_lt {taken : List String}
+    {auxs : List (String × List Value)} {ps : List Value} {j : Nat}
+    (hj : j < ps.length) :
+    (auxs ++ auxSlotsK taken auxs.length ps)[auxs.length + j]?
+      = some (auxName taken (auxs.length + j), [ps[j]]) := by
+  rw [List.getElem?_append_right (l₁ := auxs) (Nat.le_add_right _ _)]
+  rw [show auxs.length + j - auxs.length = j from by omega]
+  exact auxSlotsK_getElem?_lt hj
+
+/-- A nonempty `pinsK` forces `pin = none` and `pin2 = none` (the
+    k-literal element tables, whose pins are consumed through `pinsK`
+    alone). -/
+theorem pinsK_cons_pin_none {sh : AuxShape} {v : Value} {vs : List Value}
+    (h : sh.pinsK = v :: vs) : sh.pin = none ∧ sh.pin2 = none := by
+  cases sh <;> simp [AuxShape.pin, AuxShape.pin2, AuxShape.pinsK] at h ⊢
+
+/-- A `some` pin forces an empty `pinsK` (the older shapes). -/
+theorem pinsK_nil_of_pin_some {sh : AuxShape} {v : Value}
+    (h : sh.pin = some v) : sh.pinsK = [] := by
+  cases sh <;> simp [AuxShape.pin, AuxShape.pinsK] at h ⊢
+
+/-- Every pinned value of the k-literal element tables is an integer
+    or a Boolean. -/
+theorem pinsK_valued {sh : AuxShape} {v : Value} (hv : v ∈ sh.pinsK) :
+    (∃ n, v = Value.int n) ∨ (∃ b, v = Value.bool b) := by
+  cases sh with
+  | varElemTabKs x y tab =>
+      obtain ⟨n, _, hn⟩ := List.mem_map.mp hv
+      exact Or.inl ⟨n, hn.symm⟩
+  | varElemTabValKs x tab k' =>
+      rcases List.mem_append.mp hv with hv | hv
+      · obtain ⟨n, _, hn⟩ := List.mem_map.mp hv
+        exact Or.inl ⟨n, hn.symm⟩
+      · exact Or.inl ⟨k', List.mem_singleton.mp hv⟩
+  | varBoolTabLits x y tab =>
+      obtain ⟨b, _, hb⟩ := List.mem_map.mp hv
+      exact Or.inr ⟨b, hb.symm⟩
+  | varBoolTabValLit x tab b' =>
+      rcases List.mem_append.mp hv with hv | hv
+      · obtain ⟨b, _, hb⟩ := List.mem_map.mp hv
+        exact Or.inr ⟨b, hb.symm⟩
+      · exact Or.inr ⟨b', List.mem_singleton.mp hv⟩
+  | _ => simp [AuxShape.pinsK] at hv
+
+/-- A `some` second pin forces an empty `pinsK` (the older shapes). -/
+theorem pinsK_nil_of_pin2_some {sh : AuxShape} {v : Value}
+    (h : sh.pin2 = some v) : sh.pinsK = [] := by
+  cases sh <;> simp [AuxShape.pin2, AuxShape.pinsK] at h ⊢
+
 /-- Every taken string's length is dominated by `maxStrLength`. -/
 theorem maxStrLength_ge : ∀ (taken : List String) (t : String),
     t ∈ taken → t.length ≤ maxStrLength taken := by
@@ -333,18 +605,39 @@ theorem expandPlan_aux_spec {taken : List String} :
               rw [← h1]
               exact ih (auxs ++ [(auxName taken auxs.length, [v])]) auxs2 cs2
                 hrec hnew hnewsingle
-        · -- no aux slot (the pin is none)
-          cases hrec : expandPlan taken auxs rest with
-          | mk auxs2 cs2 =>
-              rw [hrec] at h
-              simp only at h
-              obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
-                  sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
-                Prod.mk.injEq _ _ _ _ ▸ h
-              rw [← h1]
-              exact ih auxs auxs2 cs2 hrec hinvaux hsingle
-
-
+        · -- no pin/pin2: either no aux slot at all (pinsK = []) or the
+          -- k-literal element table (one slot per pin)
+          split at h
+          · -- pinsK = []
+            cases hrec : expandPlan taken auxs rest with
+            | mk auxs2 cs2 =>
+                rw [hrec] at h
+                simp only at h
+                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                    sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                  Prod.mk.injEq _ _ _ _ ▸ h
+                rw [← h1]
+                exact ih auxs auxs2 cs2 hrec hinvaux hsingle
+          · -- pinsK = v :: vs: one fresh slot per pin
+            rename_i ph v vs hpins
+            have hnew : ∀ i p,
+                (auxs ++ auxSlotsK taken auxs.length (v :: vs))[i]? = some p →
+                p.1 = auxName taken i :=
+              auxSlotsK_append_named hinvaux
+            have hnewsingle : ∀ p ∈ auxs ++ auxSlotsK taken auxs.length (v :: vs),
+                ∃ w, p.2 = [w] :=
+              auxSlotsK_append_single hsingle
+            cases hrec : expandPlan taken
+                (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest with
+            | mk auxs2 cs2 =>
+                rw [hrec] at h
+                simp only at h
+                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                    sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                  Prod.mk.injEq _ _ _ _ ▸ h
+                rw [← h1]
+                exact ih (auxs ++ auxSlotsK taken auxs.length (v :: vs)) auxs2 cs2
+                  hrec hnew hnewsingle
 
 /-! ### The expansion pre-pass's membership inversions -/
 
@@ -432,17 +725,42 @@ theorem expandPlan_aux_grows {taken : List String} :
               have hread := hagree i hilt2
               rw [List.getElem?_append_left hilt] at hread
               exact hread
-        · -- no aux slot
-          rename_i hpin2
-          cases hrec : expandPlan taken auxs rest with
-          | mk auxs2 cs2 =>
-              rw [hrec] at h
-              simp only at h
-              obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
-                  sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
-                Prod.mk.injEq _ _ _ _ ▸ h
-              subst h1 h2
-              exact ih auxs auxs2 cs2 hrec
+        · -- no pin/pin2: no aux slot (pinsK = []) or one slot per pin
+          split at h
+          · -- pinsK = []
+            rename_i hpin2 hpinsnil
+            cases hrec : expandPlan taken auxs rest with
+            | mk auxs2 cs2 =>
+                rw [hrec] at h
+                simp only at h
+                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                    sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                  Prod.mk.injEq _ _ _ _ ▸ h
+                subst h1 h2
+                exact ih auxs auxs2 cs2 hrec
+          · -- pinsK = v :: vs
+            rename_i hpin hpin2 ph v vs hpinscons
+            cases hrec : expandPlan taken
+                (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest with
+            | mk auxs2 cs2 =>
+                rw [hrec] at h
+                simp only at h
+                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                    sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                  Prod.mk.injEq _ _ _ _ ▸ h
+                subst h1 h2
+                obtain ⟨hge, hagree⟩ :=
+                  ih (auxs ++ auxSlotsK taken auxs.length (v :: vs)) auxs2 cs2 hrec
+                have hlen : (auxs ++ auxSlotsK taken auxs.length (v :: vs)).length
+                    = auxs.length + (v :: vs).length := by
+                  rw [List.length_append, auxSlotsK_length]
+                refine ⟨Nat.le_trans (by rw [hlen]; simp) hge, ?_⟩
+                intro i hilt
+                have hilt2 : i < (auxs ++ auxSlotsK taken auxs.length (v :: vs)).length := by
+                  rw [hlen]; omega
+                have hread := hagree i hilt2
+                rw [List.getElem?_append_left hilt] at hread
+                exact hread
 
 /-- **The expansion's completeness**: every pinning shape's every
     piece is in the expanded list (the forward half the coverage
@@ -459,7 +777,9 @@ theorem expandPlan_pieces_mem {taken : List String} :
             ∃ v, sh.pin = some v ∧ auxs'[i]? = some (auxName taken i, [v])) ∧
           (sh.pin2 = none ∨
             ∃ v2, sh.pin2 = some v2 ∧
-              auxs'[i + 1]? = some (auxName taken (i + 1), [v2])) := by
+              auxs'[i + 1]? = some (auxName taken (i + 1), [v2])) ∧
+          (∀ j, j < sh.pinsK.length →
+            auxs'[i + j]? = some (auxName taken (i + j), [sh.pinsK[j]!])) := by
   intro cs
   induction cs with
   | nil =>
@@ -547,11 +867,14 @@ theorem expandPlan_pieces_mem {taken : List String} :
                   exact hpres
                 refine ⟨auxs.length, fun c' hc'mem =>
                   ⟨List.mem_append.mpr (Or.inl hc'mem),
-                    Or.inr ⟨v, hpin, hslotget1⟩, ?_⟩⟩
-                -- the second pin: the successor slot's name IS the
-                -- successor aux name
-                rw [auxName_succ] at hslotget2
-                exact Or.inr ⟨v2, hpin2, hslotget2⟩
+                    Or.inr ⟨v, hpin, hslotget1⟩, ?_, ?_⟩⟩
+                · -- the second pin: the successor slot's name IS the
+                  -- successor aux name
+                  rw [auxName_succ] at hslotget2
+                  exact Or.inr ⟨v2, hpin2, hslotget2⟩
+                · -- pinsK = [] (a `some` pin is an older shape)
+                  rw [pinsK_nil_of_pin_some hpin]
+                  simp
           · -- ONE aux slot
             rename_i v hpin hpin2
             cases hrec : expandPlan taken
@@ -588,43 +911,87 @@ theorem expandPlan_pieces_mem {taken : List String} :
                   exact hpres
                 refine ⟨auxs.length, fun c' hc'mem =>
                   ⟨List.mem_append.mpr (Or.inl hc'mem),
-                    Or.inr ⟨v, hpin, hslotget⟩, ?_⟩⟩
-                -- pin2 = none (the one-slot shapes): vacuous
-                rename_i hpin2
-                exact Or.inl hpin2
-          · -- no aux slot
-            rename_i hpin hpin2
-            cases hrec : expandPlan taken auxs rest with
-            | mk auxs2 cs2 =>
-                rw [hrec] at h
-                simp only at h
-                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
-                    sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
-                  Prod.mk.injEq _ _ _ _ ▸ h
-                subst h1 h2
-                refine ⟨auxs.length, fun c' hc'mem =>
-                  ⟨List.mem_append.mpr (Or.inl hc'mem), ?_, ?_⟩⟩
-                · -- sh.pin = none in this arm
-                  cases hpn : sh.pin with
-                  | none => exact Or.inl rfl
-                  | some v =>
-                      exfalso
-                      cases hpn2 : sh.pin2 with
-                      | none => exact hpin2 v hpn hpn2
-                      | some v2 => exact hpin v v2 hpn hpn2
-                · -- sh.pin2 = some only for the two-literal times
-                  -- shapes, whose pin is also some — excluded above
-                  cases hpn2 : sh.pin2 with
-                  | none => exact Or.inl rfl
-                  | some v2 =>
-                      exfalso
-                      cases hpn : sh.pin with
-                      | none =>
-                          -- pin2 = some forces pin = some (the
-                          -- three two-literal shapes all pin both)
-                          cases sh <;>
-                            simp [AuxShape.pin, AuxShape.pin2] at hpn hpn2
-                      | some v => exact hpin v v2 hpn hpn2
+                    Or.inr ⟨v, hpin, hslotget⟩, ?_, ?_⟩⟩
+                · -- pin2 = none (the one-slot shapes): vacuous
+                  rename_i hpin2
+                  exact Or.inl hpin2
+                · -- pinsK = [] (a `some` pin is an older shape)
+                  rw [pinsK_nil_of_pin_some hpin]
+                  simp
+          · -- no pin/pin2: no aux slot (pinsK = []) or one slot per pin
+            split at h
+            · -- pinsK = []
+              rename_i hpin hpin2 ph hpinsnil
+              cases hrec : expandPlan taken auxs rest with
+              | mk auxs2 cs2 =>
+                  rw [hrec] at h
+                  simp only at h
+                  obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                      sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                    Prod.mk.injEq _ _ _ _ ▸ h
+                  subst h1 h2
+                  refine ⟨auxs.length, fun c' hc'mem =>
+                    ⟨List.mem_append.mpr (Or.inl hc'mem), ?_, ?_, ?_⟩⟩
+                  · -- sh.pin = none in this arm
+                    cases hpn : sh.pin with
+                    | none => exact Or.inl rfl
+                    | some v =>
+                        exfalso
+                        cases hpn2 : sh.pin2 with
+                        | none => exact hpin2 v hpn hpn2
+                        | some v2 => exact hpin v v2 hpn hpn2
+                  · -- sh.pin2 = some only for the two-literal times
+                    -- shapes, whose pin is also some — excluded above
+                    cases hpn2 : sh.pin2 with
+                    | none => exact Or.inl rfl
+                    | some v2 =>
+                        exfalso
+                        cases hpn : sh.pin with
+                        | none =>
+                            -- pin2 = some forces pin = some (the
+                            -- three two-literal shapes all pin both)
+                            cases sh <;>
+                              simp [AuxShape.pin, AuxShape.pin2] at hpn hpn2
+                        | some v => exact hpin v v2 hpn hpn2
+                  · -- the empty pinsK clause
+                    rw [hpinsnil]
+                    simp
+            · -- pinsK = v :: vs: one slot per pin, positioned
+              rename_i hpin hpin2 ph v vs hpinscons
+              cases hrec : expandPlan taken
+                  (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest with
+              | mk auxs2 cs2 =>
+                  rw [hrec] at h
+                  simp only at h
+                  obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                      sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                    Prod.mk.injEq _ _ _ _ ▸ h
+                  subst h1 h2
+                  obtain ⟨hge2, hagree2⟩ :=
+                    expandPlan_aux_grows rest
+                      (auxs ++ auxSlotsK taken auxs.length (v :: vs)) auxs2 cs2 hrec
+                  obtain ⟨hpin_none, hpin2_none⟩ := pinsK_cons_pin_none hpinscons
+                  refine ⟨auxs.length, fun c' hc'mem =>
+                    ⟨List.mem_append.mpr (Or.inl hc'mem), ?_, ?_, ?_⟩⟩
+                  · rw [hpin_none]; exact Or.inl rfl
+                  · rw [hpin2_none]; exact Or.inl rfl
+                  · intro j hj
+                    rw [hpinscons] at hj
+                    have hlen : (auxs ++ auxSlotsK taken auxs.length (v :: vs)).length
+                        = auxs.length + (v :: vs).length := by
+                      rw [List.length_append, auxSlotsK_length]
+                    have hpos : auxs.length + j
+                        < (auxs ++ auxSlotsK taken auxs.length (v :: vs)).length := by
+                      rw [hlen]; omega
+                    have hpres := hagree2 (auxs.length + j) hpos
+                    rw [auxSlotsK_append_getElem?_lt hj] at hpres
+                    rw [hpinscons]
+                    have hbang : (v :: vs)[j]! = (v :: vs)[j] := by
+                      rw [List.getElem!_eq_getElem?_getD,
+                        List.getElem?_eq_getElem hj]
+                      rfl
+                    rw [hbang]
+                    exact hpres
       · -- c0 is in the tail: the tail's own recursion
         rw [expandPlan] at h
         split at h
@@ -638,7 +1005,7 @@ theorem expandPlan_pieces_mem {taken : List String} :
               subst h1 h2
               obtain ⟨i, hall⟩ := ih auxs auxs2 cs2 hrec c0 htl sh hshape
               refine ⟨i, fun c' hc'mem => ⟨List.mem_cons_of_mem _ (hall c' hc'mem).1,
-                (hall c' hc'mem).2.1, (hall c' hc'mem).2.2⟩⟩
+                (hall c' hc'mem).2.1, (hall c' hc'mem).2.2.1, (hall c' hc'mem).2.2.2⟩⟩
         · rename_i sh2 hshape2
           split at h
           · -- TWO aux slots
@@ -659,7 +1026,7 @@ theorem expandPlan_pieces_mem {taken : List String} :
                      ((auxName taken auxs.length).push '$', [v2])]) auxs2 cs2 hrec
                     c0 htl sh hshape
                 refine ⟨i, fun c' hc'mem => ⟨List.mem_append.mpr (Or.inr (hall c' hc'mem).1),
-                  (hall c' hc'mem).2.1, (hall c' hc'mem).2.2⟩⟩
+                  (hall c' hc'mem).2.1, (hall c' hc'mem).2.2.1, (hall c' hc'mem).2.2.2⟩⟩
           · -- ONE aux slot
             rename_i v hpin hpin2
             cases hrec : expandPlan taken
@@ -674,19 +1041,37 @@ theorem expandPlan_pieces_mem {taken : List String} :
                 obtain ⟨i, hall⟩ :=
                   ih (auxs ++ [(auxName taken auxs.length, [v])]) auxs2 cs2 hrec c0 htl sh hshape
                 refine ⟨i, fun c' hc'mem => ⟨List.mem_append.mpr (Or.inr (hall c' hc'mem).1),
-                  (hall c' hc'mem).2.1, (hall c' hc'mem).2.2⟩⟩
-          · rename_i hpin
-            cases hrec : expandPlan taken auxs rest with
-            | mk auxs2 cs2 =>
-                rw [hrec] at h
-                simp only at h
-                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
-                    sh2.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
-                  Prod.mk.injEq _ _ _ _ ▸ h
-                subst h1 h2
-                obtain ⟨i, hall⟩ := ih auxs auxs2 cs2 hrec c0 htl sh hshape
-                refine ⟨i, fun c' hc'mem => ⟨List.mem_append.mpr (Or.inr (hall c' hc'mem).1),
-                  (hall c' hc'mem).2.1, (hall c' hc'mem).2.2⟩⟩
+                  (hall c' hc'mem).2.1, (hall c' hc'mem).2.2.1, (hall c' hc'mem).2.2.2⟩⟩
+          · -- no pin/pin2 (tail): split on the head's pinsK
+            split at h
+            · -- pinsK = []
+              rename_i hpin hpin2 ph hpinsnil2
+              cases hrec : expandPlan taken auxs rest with
+              | mk auxs2 cs2 =>
+                  rw [hrec] at h
+                  simp only at h
+                  obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                      sh2.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                    Prod.mk.injEq _ _ _ _ ▸ h
+                  subst h1 h2
+                  obtain ⟨i, hall⟩ := ih auxs auxs2 cs2 hrec c0 htl sh hshape
+                  refine ⟨i, fun c' hc'mem => ⟨List.mem_append.mpr (Or.inr (hall c' hc'mem).1),
+                    (hall c' hc'mem).2.1, (hall c' hc'mem).2.2.1, (hall c' hc'mem).2.2.2⟩⟩
+            · -- pinsK = v :: vs (tail)
+              rename_i hpin hpin2 ph v vs hpinscons2
+              cases hrec : expandPlan taken
+                  (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest with
+              | mk auxs2 cs2 =>
+                  rw [hrec] at h
+                  simp only at h
+                  obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                      sh2.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                    Prod.mk.injEq _ _ _ _ ▸ h
+                  subst h1 h2
+                  obtain ⟨i, hall⟩ := ih (auxs ++ auxSlotsK taken auxs.length (v :: vs))
+                    auxs2 cs2 hrec c0 htl sh hshape
+                  refine ⟨i, fun c' hc'mem => ⟨List.mem_append.mpr (Or.inr (hall c' hc'mem).1),
+                    (hall c' hc'mem).2.1, (hall c' hc'mem).2.2.1, (hall c' hc'mem).2.2.2⟩⟩
 
 
 /-! ### The emitted aux slots' derived properties -/
@@ -788,6 +1173,31 @@ theorem auxShape_pin_valued (sh : AuxShape) (v : Value)
       exact Or.inr ⟨true, hvv.symm⟩
   | andTrue x y => rw [AuxShape.pin] at h; cases h
   | orFalse x y => rw [AuxShape.pin] at h; cases h
+  | xorSlots x y z => rw [AuxShape.pin] at h; cases h
+  | constElemValL x xs k =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | varElemTabLit x y pre k post =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | varElemTabValLit x pre k post k' =>
+      rw [AuxShape.pin] at h
+      have hvv : Value.int k = v := (Option.some.inj h)
+      exact Or.inl ⟨k, hvv.symm⟩
+  | varElemTabKs x y tab =>
+      rw [AuxShape.pin] at h
+      cases h
+  | varElemTabValKs x tab k' =>
+      rw [AuxShape.pin] at h
+      cases h
+  | varBoolTabLits x y tab =>
+      rw [AuxShape.pin] at h
+      cases h
+  | varBoolTabValLit x tab b' =>
+      rw [AuxShape.pin] at h
+      cases h
 
 /-- The second pin values are ints. -/
 theorem auxShape_pin2_valued (sh : AuxShape) (v : Value)
@@ -829,6 +1239,17 @@ theorem auxShape_pin2_valued (sh : AuxShape) (v : Value)
   | orTrue x y => simp [AuxShape.pin2] at h
   | andTrue x y => simp [AuxShape.pin2] at h
   | orFalse x y => simp [AuxShape.pin2] at h
+  | xorSlots x y z => simp [AuxShape.pin2] at h
+  | constElemValL x xs k => simp [AuxShape.pin2] at h
+  | varElemTabLit x y pre k post => simp [AuxShape.pin2] at h
+  | varElemTabValLit x pre k post k' =>
+      rw [AuxShape.pin2] at h
+      have hvv : Value.int k' = v := (Option.some.inj h)
+      exact Or.inl ⟨k', hvv.symm⟩
+  | varElemTabKs x y tab => simp [AuxShape.pin2] at h
+  | varElemTabValKs x tab k' => simp [AuxShape.pin2] at h
+  | varBoolTabLits x y tab => simp [AuxShape.pin2] at h
+  | varBoolTabValLit x tab b' => simp [AuxShape.pin2] at h
 
 /-- The emitted aux slots' singleton values are ints or bools. -/
 theorem expandPlan_aux_pinval {taken : List String} :
@@ -928,15 +1349,41 @@ theorem expandPlan_aux_pinval {taken : List String} :
                   obtain ⟨h1, _⟩ : auxs2 = auxs' ∧ _ = cs' := by
                     simpa using h
                   exact ih _ auxs2 cs2 hrec hnew p (h1 ▸ hp) hv
-        · -- no aux slot
-          rename_i hpin
-          cases hrec : expandPlan taken auxs rest with
-          | mk auxs2 cs2 =>
-              rw [hrec] at h
-              simp only at h
-              obtain ⟨h1, _⟩ : auxs2 = auxs' ∧ _ = cs' :=
-                Prod.mk.injEq _ _ _ _ ▸ h
-              exact ih auxs auxs2 cs2 hrec hall p (h1 ▸ hp) hv
+        · -- no pin/pin2: no aux slot (pinsK = []) or one slot per pin
+          split at h
+          · -- pinsK = []
+            rename_i hpin hpinsnil
+            cases hrec : expandPlan taken auxs rest with
+            | mk auxs2 cs2 =>
+                rw [hrec] at h
+                simp only at h
+                obtain ⟨h1, _⟩ : auxs2 = auxs' ∧ _ = cs' :=
+                  Prod.mk.injEq _ _ _ _ ▸ h
+                exact ih auxs auxs2 cs2 hrec hall p (h1 ▸ hp) hv
+          · -- pinsK = v :: vs: the fresh pins are integers
+            rename_i ph v vs hpinscons
+            have hnew : ∀ p ∈ auxs ++ auxSlotsK taken auxs.length (v :: vs),
+                ∀ w, p.2 = [w] →
+                (∃ k, w = Value.int k) ∨ (∃ b, w = Value.bool b) := by
+              intro p hp2 w hw
+              rcases List.mem_append.mp hp2 with hmem | hmem
+              · exact hall p hmem w hw
+              · obtain ⟨j, hj, hpj⟩ := auxSlotsK_mem hmem
+                rw [hpj] at hw
+                have hw' : w = (v :: vs)[j] := by simpa using hw.symm
+                have hmem' : (v :: vs)[j] ∈ sh.pinsK := by
+                  rw [hpinscons]
+                  exact List.getElem_mem hj
+                rcases pinsK_valued hmem' with ⟨n, hn⟩ | ⟨b, hb⟩
+                · exact Or.inl ⟨n, by rw [hw', hn]⟩
+                · exact Or.inr ⟨b, by rw [hw', hb]⟩
+            cases hrec : expandPlan taken
+                (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest with
+            | mk auxs2 cs2 =>
+                simp only [hrec] at h
+                obtain ⟨h1, _⟩ : auxs2 = auxs' ∧ _ = cs' :=
+                  Prod.mk.injEq _ _ _ _ ▸ h
+                exact ih _ auxs2 cs2 hrec hnew p (h1 ▸ hp) hv
 
 /-- Every member of the expanded list is either an original constraint
     or a piece of some pinning shape (with the shape's aux slot at the
@@ -954,7 +1401,9 @@ theorem expandPlan_origin {taken : List String} :
             (sh.pin = none ∨ ∃ v, sh.pin = some v ∧
               auxs'[i]? = some (auxName taken i, [v])) ∧
             (sh.pin2 = none ∨ ∃ v2, sh.pin2 = some v2 ∧
-              auxs'[i + 1]? = some (auxName taken (i + 1), [v2])) := by
+              auxs'[i + 1]? = some (auxName taken (i + 1), [v2])) ∧
+            (∀ j, j < sh.pinsK.length →
+              auxs'[i + j]? = some (auxName taken (i + j), [sh.pinsK[j]!])) := by
   intro cs
   induction cs with
   | nil =>
@@ -980,9 +1429,9 @@ theorem expandPlan_origin {taken : List String} :
             · rcases ih auxs auxs2 cs2 hrec c' htl with horig |
                 ⟨c2, hc2mem, sh, hshape2, i, hge, hmem, hslot⟩
               · exact Or.inl (List.mem_cons_of_mem _ horig)
-              · obtain ⟨hp1, hp2⟩ := hslot
+              · obtain ⟨hp1, hp2, hp3⟩ := hslot
                 exact Or.inr ⟨c2, List.mem_cons_of_mem _ hc2mem, sh, hshape2,
-                  i, hge, hmem, hp1, hp2⟩
+                  i, hge, hmem, hp1, hp2, hp3⟩
       · -- the head is a pinning shape
         rename_i sh hshape2
         split at h
@@ -1047,12 +1496,15 @@ theorem expandPlan_origin {taken : List String} :
               rcases List.mem_append.mp hc' with hpiece | htl
               · -- a piece of the head's shape: both slots positioned
                 refine Or.inr ⟨c, List.mem_cons_self, sh, hshape2, auxs.length,
-                  Nat.le_refl _, hpiece, ⟨Or.inr ⟨v, hpin, hslot1⟩, ?_⟩⟩
-                -- the second slot's name IS the successor aux name
-                show sh.pin2 = none ∨ ∃ v2, sh.pin2 = some v2 ∧
-                    auxs2[auxs.length + 1]? =
-                      some ((auxName taken auxs.length).push '$', [v2])
-                exact Or.inr ⟨v2, hpin2, hslot2⟩
+                  Nat.le_refl _, hpiece, ⟨Or.inr ⟨v, hpin, hslot1⟩, ?_, ?_⟩⟩
+                · -- the second slot's name IS the successor aux name
+                  show sh.pin2 = none ∨ ∃ v2, sh.pin2 = some v2 ∧
+                      auxs2[auxs.length + 1]? =
+                        some ((auxName taken auxs.length).push '$', [v2])
+                  exact Or.inr ⟨v2, hpin2, hslot2⟩
+                · -- pinsK = [] (a `some` pin is an older shape)
+                  rw [pinsK_nil_of_pin_some hpin]
+                  simp
               · -- from the tail: positions are at or beyond the two
                 -- newly consumed slots
                 rcases ih (auxs ++ [(auxName taken auxs.length, [v]),
@@ -1060,9 +1512,9 @@ theorem expandPlan_origin {taken : List String} :
                     hrec c' htl with horig |
                     ⟨c2, hc2mem, sh2, hshape3, i, hge, hmem, hslot⟩
                 · exact Or.inl (List.mem_cons_of_mem _ horig)
-                · obtain ⟨hp1, hp2⟩ := hslot
+                · obtain ⟨hp1, hp2, hp3⟩ := hslot
                   refine Or.inr ⟨c2, List.mem_cons_of_mem _ hc2mem, sh2, hshape3,
-                    i, ?_, hmem, hp1, hp2⟩
+                    i, ?_, hmem, hp1, hp2, hp3⟩
                   rw [hlen] at hge
                   omega
         · -- ONE aux slot
@@ -1079,7 +1531,7 @@ theorem expandPlan_origin {taken : List String} :
               rcases List.mem_append.mp hc' with hpiece | htl
               · -- a piece of the head's shape: the slot is positioned
                 refine Or.inr ⟨c, List.mem_cons_self, sh, hshape2, auxs.length,
-                  Nat.le_refl _, hpiece, ⟨Or.inr ⟨v, hpin, ?_⟩, ?_⟩⟩
+                  Nat.le_refl _, hpiece, ⟨Or.inr ⟨v, hpin, ?_⟩, ?_, ?_⟩⟩
                 · -- the final list's slot at auxs.length (grows)
                   obtain ⟨hge2, hagree2⟩ :=
                     expandPlan_aux_grows rest
@@ -1100,59 +1552,113 @@ theorem expandPlan_origin {taken : List String} :
                 · -- pin2 = none (the one-slot shapes): the arm's
                   -- own hypothesis states it directly
                   exact Or.inl hpin2
+                · -- pinsK = [] (a `some` pin is an older shape)
+                  rw [pinsK_nil_of_pin_some hpin]
+                  simp
               · -- from the tail: positions are at or beyond the
                 -- newly consumed slot
                 rcases ih (auxs ++ [(auxName taken auxs.length, [v])]) auxs2 cs2
                     hrec c' htl with horig |
                     ⟨c2, hc2mem, sh2, hshape3, i, hge, hmem, hslot⟩
                 · exact Or.inl (List.mem_cons_of_mem _ horig)
-                · obtain ⟨hp1, hp2⟩ := hslot
+                · obtain ⟨hp1, hp2, hp3⟩ := hslot
                   refine Or.inr ⟨c2, List.mem_cons_of_mem _ hc2mem, sh2, hshape3,
-                    i, ?_, hmem, hp1, hp2⟩
+                    i, ?_, hmem, hp1, hp2, hp3⟩
                   have hlennew : (auxs ++ [(auxName taken auxs.length, [v])]).length
                       = auxs.length + 1 := by
                     rw [List.length_append, List.length_singleton]
                   rw [hlennew] at hge
                   omega
-        · -- no aux slot (andTrue/orFalse: the pieces have no pin)
-          rename_i hpin hpin2
-          cases hrec : expandPlan taken auxs rest with
-          | mk auxs2 cs2 =>
-              rw [hrec] at h
-              simp only at h
-              obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
-                  sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
-                Prod.mk.injEq _ _ _ _ ▸ h
-              subst h1 h2
-              rcases List.mem_append.mp hc' with hpiece | htl
-              · refine Or.inr ⟨c, List.mem_cons_self, sh, hshape2, auxs.length,
-                  Nat.le_refl _, hpiece, ?_, ?_⟩
-                · -- sh.pin = none in this arm (the some/some and
-                  -- some/none patterns above were excluded)
-                  cases hpn : sh.pin with
-                  | none => exact Or.inl rfl
-                  | some v =>
-                      exfalso
-                      cases hpn2 : sh.pin2 with
-                      | none => exact hpin2 v hpn hpn2
-                      | some v2 => exact hpin v v2 hpn hpn2
-                · -- sh.pin2 = some only for the two-literal times
-                  -- shapes, whose pin is also some — excluded above
-                  cases hpn2 : sh.pin2 with
-                  | none => exact Or.inl rfl
-                  | some v2 =>
-                      exfalso
-                      cases hpn : sh.pin with
-                      | none =>
-                          cases sh <;>
-                            simp [AuxShape.pin, AuxShape.pin2] at hpn hpn2
-                      | some v => exact hpin v v2 hpn hpn2
-              · rcases ih auxs auxs2 cs2 hrec c' htl with horig |
-                  ⟨c2, hc2mem, sh2, hshape3, i, hge, hmem, hslot⟩
-                · exact Or.inl (List.mem_cons_of_mem _ horig)
-                · obtain ⟨hp1, hp2⟩ := hslot
-                  exact Or.inr ⟨c2, List.mem_cons_of_mem _ hc2mem, sh2, hshape3,
-                    i, hge, hmem, hp1, hp2⟩
+        · -- no pin/pin2: no aux slot (pinsK = []) or one slot per pin
+          split at h
+          · -- pinsK = []
+            rename_i hpin hpin2 ph hpinsnil
+            cases hrec : expandPlan taken auxs rest with
+            | mk auxs2 cs2 =>
+                rw [hrec] at h
+                simp only at h
+                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                    sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                  Prod.mk.injEq _ _ _ _ ▸ h
+                subst h1 h2
+                rcases List.mem_append.mp hc' with hpiece | htl
+                · refine Or.inr ⟨c, List.mem_cons_self, sh, hshape2, auxs.length,
+                    Nat.le_refl _, hpiece, ?_, ?_, ?_⟩
+                  · -- sh.pin = none in this arm (the some/some and
+                    -- some/none patterns above were excluded)
+                    cases hpn : sh.pin with
+                    | none => exact Or.inl rfl
+                    | some v =>
+                        exfalso
+                        cases hpn2 : sh.pin2 with
+                        | none => exact hpin2 v hpn hpn2
+                        | some v2 => exact hpin v v2 hpn hpn2
+                  · -- sh.pin2 = some only for the two-literal times
+                    -- shapes, whose pin is also some — excluded above
+                    cases hpn2 : sh.pin2 with
+                    | none => exact Or.inl rfl
+                    | some v2 =>
+                        exfalso
+                        cases hpn : sh.pin with
+                        | none =>
+                            cases sh <;>
+                              simp [AuxShape.pin, AuxShape.pin2] at hpn hpn2
+                        | some v => exact hpin v v2 hpn hpn2
+                  · -- the empty pinsK clause
+                    rw [hpinsnil]
+                    simp
+                · rcases ih auxs auxs2 cs2 hrec c' htl with horig |
+                    ⟨c2, hc2mem, sh2, hshape3, i, hge, hmem, hslot⟩
+                  · exact Or.inl (List.mem_cons_of_mem _ horig)
+                  · obtain ⟨hp1, hp2, hp3⟩ := hslot
+                    exact Or.inr ⟨c2, List.mem_cons_of_mem _ hc2mem, sh2, hshape3,
+                      i, hge, hmem, hp1, hp2, hp3⟩
+          · -- pinsK = v :: vs: one slot per pin, positioned
+            rename_i hpin hpin2 ph v vs hpinscons
+            cases hrec : expandPlan taken
+                (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest with
+            | mk auxs2 cs2 =>
+                rw [hrec] at h
+                simp only at h
+                obtain ⟨h1, h2⟩ : auxs2 = auxs' ∧
+                    sh.expand (Ident.mk (auxName taken auxs.length)) ++ cs2 = cs' :=
+                  Prod.mk.injEq _ _ _ _ ▸ h
+                subst h1 h2
+                obtain ⟨hge2, hagree2⟩ :=
+                  expandPlan_aux_grows rest
+                    (auxs ++ auxSlotsK taken auxs.length (v :: vs)) auxs2 cs2 hrec
+                obtain ⟨hpin_none, hpin2_none⟩ := pinsK_cons_pin_none hpinscons
+                have hlen : (auxs ++ auxSlotsK taken auxs.length (v :: vs)).length
+                    = auxs.length + (v :: vs).length := by
+                  rw [List.length_append, auxSlotsK_length]
+                rcases List.mem_append.mp hc' with hpiece | htl
+                · refine Or.inr ⟨c, List.mem_cons_self, sh, hshape2, auxs.length,
+                    Nat.le_refl _, hpiece, ?_, ?_, ?_⟩
+                  · rw [hpin_none]; exact Or.inl rfl
+                  · rw [hpin2_none]; exact Or.inl rfl
+                  · intro j hj
+                    rw [hpinscons] at hj
+                    have hpos : auxs.length + j
+                        < (auxs ++ auxSlotsK taken auxs.length (v :: vs)).length := by
+                      rw [hlen]; omega
+                    have hpres := hagree2 (auxs.length + j) hpos
+                    rw [auxSlotsK_append_getElem?_lt hj] at hpres
+                    rw [hpinscons]
+                    have hbang : (v :: vs)[j]! = (v :: vs)[j] := by
+                      rw [List.getElem!_eq_getElem?_getD,
+                        List.getElem?_eq_getElem hj]
+                      rfl
+                    rw [hbang]
+                    exact hpres
+                · rcases ih (auxs ++ auxSlotsK taken auxs.length (v :: vs)) auxs2 cs2
+                    hrec c' htl with horig |
+                    ⟨c2, hc2mem, sh2, hshape3, i, hge, hmem, hslot⟩
+                  · exact Or.inl (List.mem_cons_of_mem _ horig)
+                  · obtain ⟨hp1, hp2, hp3⟩ := hslot
+                    refine Or.inr ⟨c2, List.mem_cons_of_mem _ hc2mem, sh2, hshape3,
+                      i, ?_, hmem, hp1, hp2, hp3⟩
+                    rw [hlen] at hge
+                    omega
 
 /-- The model's aux slots' singleton pin values are ints or bools
     (the nine pinning shapes' pins). -/
@@ -1471,6 +1977,48 @@ theorem compileConstraint_bool_not_lit {env : Store} {names : List String}
       rw [hred] at h'
       exact (Except.ok.inj h').symm
 
+/-! ### The element-value classifier's range (PLAN C0) -/
 
+/-- The element-value classifier only returns the three PLAN C0
+    element shapes. This is what lets every OLD shape's argument
+    inversion discharge the element-name branches of `auxShapeOf`
+    uniformly (the element names dispatch through
+    `elemAuxShapeOf`). -/
+theorem elemAuxShapeOf_mem {c : ConstraintItem} {sh : AuxShape}
+    (h : elemAuxShapeOf c = some sh) :
+    (∃ (x : Ident) (xs : List Int) (k : Int),
+        sh = AuxShape.constElemValL x xs k) ∨
+    (∃ (x y : Ident) (pre : List Ident) (k : Int) (post : List Ident),
+        sh = AuxShape.varElemTabLit x y pre k post) ∨
+    (∃ (x : Ident) (pre : List Ident) (k : Int) (post : List Ident) (k' : Int),
+        sh = AuxShape.varElemTabValLit x pre k post k') ∨
+    (∃ (x y : Ident) (tab : ArrayLiteral),
+        sh = AuxShape.varElemTabKs x y tab) ∨
+    (∃ (x : Ident) (tab : ArrayLiteral) (k' : Int),
+        sh = AuxShape.varElemTabValKs x tab k') ∨
+    (∃ (x y : Ident) (tab : ArrayLiteral),
+        sh = AuxShape.varBoolTabLits x y tab) ∨
+    (∃ (x : Ident) (tab : ArrayLiteral) (b' : Bool),
+        sh = AuxShape.varBoolTabValLit x tab b') := by
+  unfold elemAuxShapeOf at h
+  split at h
+  all_goals (try split at h)
+  all_goals (try split at h)
+  all_goals (try split at h)
+  all_goals
+    first
+      | (injection h with h1
+         subst h1
+         first
+           | exact Or.inl ⟨_, _, _, rfl⟩
+           | exact Or.inr (Or.inl ⟨_, _, _, _, _, rfl⟩)
+           | exact Or.inr (Or.inr (Or.inl ⟨_, _, _, _, _, rfl⟩))
+           | exact Or.inr (Or.inr (Or.inr (Or.inl ⟨_, _, _, rfl⟩)))
+           | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨_, _, _, rfl⟩))))
+           | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr
+               (Or.inl ⟨_, _, _, rfl⟩)))))
+           | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr
+               (Or.inr ⟨_, _, _, rfl⟩))))))
+      | (exfalso; cases h)
 
 end LeanFzn.Compiler

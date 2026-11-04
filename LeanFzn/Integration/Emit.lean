@@ -12,6 +12,7 @@ DAG:
 -/
 
 import LeanFzn.Integration.Emit.Basic
+import LeanFzn.Integration.Emit.Model
 open LeanFzn.Compiler.Domains
 open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Compiler LeanFzn.Integration
 

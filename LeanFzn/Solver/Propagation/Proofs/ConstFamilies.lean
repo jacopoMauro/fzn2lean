@@ -93,14 +93,14 @@ theorem slotInt_of_int_read {a : Assignment} {s : Nat} {p : Int}
 /-- The maximum-domain bound on a fitting assignment's view. -/
 theorem fits_max_bound {st : State} {a : Assignment} {s : Nat}
     (hfit : Core.Assignment.Fits st.domains a) {mx : Int}
-    (hmx : domMaxI (st.domains.getD s []) = some mx)
+    (hmx : domMaxI (st.domains.getD s Dom.empty) = some mx)
     {i : Int} (hi : slotInt a s = some i) : i ≤ mx :=
   fits_domMaxI_ge (st := st) hfit hmx hi
 
 /-- The minimum-domain bound on a fitting assignment's view. -/
 theorem fits_min_bound {st : State} {a : Assignment} {s : Nat}
     (hfit : Core.Assignment.Fits st.domains a) {mn : Int}
-    (hmn : domMinI (st.domains.getD s []) = some mn)
+    (hmn : domMinI (st.domains.getD s Dom.empty) = some mn)
     {i : Int} (hi : slotInt a s = some i) : mn ≤ i :=
   fits_domMinI_le (st := st) hfit hmn hi
 
@@ -922,7 +922,8 @@ theorem propConstEqBool_safe (st : State) (i : Nat) (b : Bool) :
         · exact absurd hrun (by intro hc; cases hc)
         · exact absurd hrun (by intro hc; cases hc)
       · rename_i hmem
-        exact hmem (valueMemB_iff.mpr (hfit.2 i (.bool b) hcons))
+        exact hmem (valueMemB_iff.mpr
+          ((DomainLike.mem_iff _ _).mp (hfit.2 i (.bool b) hcons)))
     · -- entitlement: the clause's only literal is true at the solution
       intro cc hrun a _ hcons
       simp only [propConstEq] at hrun

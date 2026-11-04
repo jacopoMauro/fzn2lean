@@ -39,8 +39,8 @@ scheduled runs + skips.
 Run: lake env lean --run Tests/E1/SchedCounts.lean [--seeds N START] [--reps K]
 -/
 import Tests.UIP.LcgHarnessBattery
-import LeanFzn.Integration.Lcg
-import LeanFzn.Solver.UIP.Proofs.SchedulerStepSched
+import LeanFzn.Legacy.Integration.Lcg
+import LeanFzn.Legacy.Solver.UIP.Proofs.SchedulerStepSched
 open LeanFzn.Solver.Propagation LeanFzn.Compiler LeanFzn.Integration
 open LeanFzn.Solver.UIP LeanFzn.Solver.UIP.C3b LeanFzn.Solver.Core LeanFzn
 
@@ -68,67 +68,67 @@ def ScanCnt.add (a b : ScanCnt) : ScanCnt :=
   { scans := a.scans + b.scans, runs := a.runs + b.runs, skips := a.skips + b.skips,
     baseVisits := a.baseVisits + b.baseVisits, steps := a.steps + b.steps }
 
-/-- Verbatim `scanPropagatorsSchedAux` with `(runs, skips)` counters (no
-`scans`: the caller counts the invocation). -/
-def scanCountAux (f : BranchFrame) :
-    List (Option (List Domain × PropagationResult)) → List Propagator →
-      PruningEvent × List (Option (List Domain × PropagationResult)) × ScanCnt
+/-- Verbatim `scanPropagatorsSchedAux` (P2 version-keyed form) with
+`(runs, skips)` counters (no `scans`: the caller counts the invocation). -/
+def scanCountAux (f : BranchFrame) (v : SchedVersions) :
+    List (Option SchedEntry) → List Propagator →
+      PruningEvent × List (Option SchedEntry) × ScanCnt
   | seens, [] => (.stable, seens, {})
   | [], p :: ps =>
       match p.run (frameState f) with
       | .stable =>
-          let (ev, seens', c) := scanCountAux f [] ps
-          (ev, some (watchStamp f p.watches, .stable) :: seens', { c with runs := c.runs + 1 })
+          let (ev, seens', c) := scanCountAux f v [] ps
+          (ev, some (freshEntry v f p .stable) :: seens', { c with runs := c.runs + 1 })
       | .conflict c => (.conflict (if c.isEmpty then [] else [c]), [], { runs := 1 })
       | .implied l r =>
           if productive l f then
-            (.implied l r.clause true false, [], { runs := 1 })
+            (.implied l r.clause false false, [], { runs := 1 })
           else
-            let (ev, seens', c) := scanCountAux f [] ps
-            (ev, some (watchStamp f p.watches, .implied l r) :: seens',
+            let (ev, seens', c) := scanCountAux f v [] ps
+            (ev, some (freshEntry v f p (.implied l r)) :: seens',
               { c with runs := c.runs + 1 })
-  | some (w, r) :: seens, p :: ps =>
-      if stampEqB w (watchStamp f p.watches) && !p.watches.isEmpty then
-        match r with
+  | some e :: seens, p :: ps =>
+      if stampNatEqB e.stamps (watchVersions v p.watches) && !p.watches.isEmpty then
+        match e.result with
         | .stable =>
-            let (ev, seens', c) := scanCountAux f seens ps
-            (ev, some (w, r) :: seens', { c with skips := c.skips + 1 })
-        | .conflict c => (.conflict (if c.isEmpty then [] else [c]), some (w, r) :: seens,
+            let (ev, seens', c) := scanCountAux f v seens ps
+            (ev, some e :: seens', { c with skips := c.skips + 1 })
+        | .conflict c => (.conflict (if c.isEmpty then [] else [c]), some e :: seens,
             { skips := 1 })
         | .implied l r' =>
             if productive l f then
-              (.implied l r'.clause true false, some (w, r) :: seens, { skips := 1 })
+              (.implied l r'.clause false false, some e :: seens, { skips := 1 })
             else
-              let (ev, seens', c) := scanCountAux f seens ps
-              (ev, some (w, r) :: seens', { c with skips := c.skips + 1 })
+              let (ev, seens', c) := scanCountAux f v seens ps
+              (ev, some e :: seens', { c with skips := c.skips + 1 })
       else
         match p.run (frameState f) with
         | .stable =>
-            let (ev, seens', c) := scanCountAux f seens ps
-            (ev, some (watchStamp f p.watches, .stable) :: seens',
+            let (ev, seens', c) := scanCountAux f v seens ps
+            (ev, some (freshEntry v f p .stable) :: seens',
               { c with runs := c.runs + 1 })
-        | .conflict c => (.conflict (if c.isEmpty then [] else [c]), some (w, r) :: seens,
+        | .conflict c => (.conflict (if c.isEmpty then [] else [c]), some e :: seens,
             { runs := 1 })
         | .implied l r' =>
             if productive l f then
-              (.implied l r'.clause true false, some (w, r) :: seens, { runs := 1 })
+              (.implied l r'.clause false false, some e :: seens, { runs := 1 })
             else
-              let (ev, seens', c) := scanCountAux f seens ps
-              (ev, some (watchStamp f p.watches, .implied l r') :: seens',
+              let (ev, seens', c) := scanCountAux f v seens ps
+              (ev, some (freshEntry v f p (.implied l r')) :: seens',
                 { c with runs := c.runs + 1 })
   | none :: seens, p :: ps =>
       match p.run (frameState f) with
       | .stable =>
-          let (ev, seens', c) := scanCountAux f seens ps
-          (ev, some (watchStamp f p.watches, .stable) :: seens',
+          let (ev, seens', c) := scanCountAux f v seens ps
+          (ev, some (freshEntry v f p .stable) :: seens',
             { c with runs := c.runs + 1 })
       | .conflict c => (.conflict (if c.isEmpty then [] else [c]), none :: seens, { runs := 1 })
       | .implied l r =>
           if productive l f then
-            (.implied l r.clause true false, none :: seens, { runs := 1 })
+            (.implied l r.clause false false, none :: seens, { runs := 1 })
           else
-            let (ev, seens', c) := scanCountAux f seens ps
-            (ev, some (watchStamp f p.watches, .implied l r) :: seens',
+            let (ev, seens', c) := scanCountAux f v seens ps
+            (ev, some (freshEntry v f p (.implied l r)) :: seens',
               { c with runs := c.runs + 1 })
 
 /-- `nextPruningEventSched` (verbatim scan-occurrence logic) + counters. -/
@@ -137,8 +137,9 @@ def npeCount (original : List Clause) (props : List Propagator) (sched : PropSch
   match scanDatabase original f db with
   | .stable =>
       if frameViewedB f then
-        let (ev, seen, c) := scanCountAux f sched.seen props
-        (ev, { seen := seen }, { c with scans := c.scans + 1 })
+        let sched' := sched.sync f
+        let (ev, seen, c) := scanCountAux f sched'.versions sched'.seen props
+        (ev, { sched' with seen := seen }, { c with scans := c.scans + 1 })
       else (.stable, sched, {})
   | .conflict cs => (.conflict cs, sched, {})
   | .implied l c learnReason fromLearned =>
@@ -222,33 +223,35 @@ def runOneSrc (reps : Nat) (name src : String) (t : Totals) : IO Totals := do
     match inst.compiled with
     | none => return t
     | some p =>
-      if !lcgRouteGateMixed p then
+      if hroute : lcgRouteGateMixed p = true then
+        let leaf := lcgLeaf p
+        -- the certified BASELINE route is the fuel-free kernel solve itself: after
+        -- the wiring, `lcgRun` IS the scheduled route, so naming the kernel
+        -- explicitly keeps the before/after comparison alive.
+        let (baseNs, r0) ← bestNs reps
+          (fun _ => LcgPhaseKernel.solve p.domains (seedClauses p.constraints) (lcgProps p)
+            (lcgSeedEntailed p) (LcgHarness.frameGate_of_routeGate hroute))
+          (.sat [] : DriverResult leaf)
+        let (schedNs, r1) ← bestNs reps (fun _ => lcgRunSched p (LcgHarness.frameGate_of_routeGate hroute)) (.sat [] : DriverResult leaf)
+        let r2 := lcgRun p (LcgHarness.frameGate_of_routeGate hroute)
+        let (twinNs, res) ← bestNs 1
+          (fun _ => drive (leaf := leaf) 1000000 (SchedulerConfig.init p.domains
+            (seedClauses p.constraints) (lcgProps p)) (PropScheduler.init (lcgProps p)) {})
+          (({}, none) : ScanCnt × Option (DriverResult leaf))
+        let (cnt, rv) := res
+        let rvTag := match rv with
+          | some r => verdictTag r
+          | none => 0
+        let dis := if verdictTag r0 == verdictTag r1 && verdictTag r1 == rvTag
+            && verdictTag r2 == rvTag then 0 else 1
+        if dis == 1 then
+          IO.eprintln s!"{name}: VERDICT MISMATCH base={verdictTag r0} sched={verdictTag r1} wired={verdictTag r2} twin={rvTag}"
+        IO.println s!"{name} base={baseNs}ns sched={schedNs}ns twin={twinNs}ns steps={cnt.steps} scans={cnt.scans} baseVisits={cnt.baseVisits} schedVisits={cnt.runs} skips={cnt.skips} schedPositions={cnt.runs + cnt.skips}"
+        let t' : Totals := { t with instances := t.instances + 1, steps := t.steps + cnt.steps, scans := t.scans + cnt.scans, baseVisits := t.baseVisits + cnt.baseVisits, schedVisits := t.schedVisits + cnt.runs, skips := t.skips + cnt.skips, baseNs := t.baseNs + baseNs, schedNs := t.schedNs + schedNs, twinNs := t.twinNs + twinNs, disagree := t.disagree + dis }
+        return t'
+      else
         IO.println s!"{name}: NOT ROUTED (gate off)"
         return t
-      let leaf := lcgLeaf p
-      -- the certified BASELINE route is the fuel-free kernel solve itself: after
-      -- the wiring, `lcgRun` IS the scheduled route, so naming the kernel
-      -- explicitly keeps the before/after comparison alive.
-      let (baseNs, r0) ← bestNs reps
-        (fun _ => LcgPhaseKernel.solve p.domains (seedClauses p.constraints) (lcgProps p)
-          (lcgSeedEntailed p)) (.sat [] : DriverResult leaf)
-      let (schedNs, r1) ← bestNs reps (fun _ => lcgRunSched p) (.sat [] : DriverResult leaf)
-      let r2 := lcgRun p
-      let (twinNs, res) ← bestNs 1
-        (fun _ => drive (leaf := leaf) 1000000 (SchedulerConfig.init p.domains
-          (seedClauses p.constraints) (lcgProps p)) (PropScheduler.init (lcgProps p)) {})
-        (({}, none) : ScanCnt × Option (DriverResult leaf))
-      let (cnt, rv) := res
-      let rvTag := match rv with
-        | some r => verdictTag r
-        | none => 0
-      let dis := if verdictTag r0 == verdictTag r1 && verdictTag r1 == rvTag
-          && verdictTag r2 == rvTag then 0 else 1
-      if dis == 1 then
-        IO.eprintln s!"{name}: VERDICT MISMATCH base={verdictTag r0} sched={verdictTag r1} wired={verdictTag r2} twin={rvTag}"
-      IO.println s!"{name} base={baseNs}ns sched={schedNs}ns twin={twinNs}ns steps={cnt.steps} scans={cnt.scans} baseVisits={cnt.baseVisits} schedVisits={cnt.runs} skips={cnt.skips} schedPositions={cnt.runs + cnt.skips}"
-      let t' : Totals := { t with instances := t.instances + 1, steps := t.steps + cnt.steps, scans := t.scans + cnt.scans, baseVisits := t.baseVisits + cnt.baseVisits, schedVisits := t.schedVisits + cnt.runs, skips := t.skips + cnt.skips, baseNs := t.baseNs + baseNs, schedNs := t.schedNs + schedNs, twinNs := t.twinNs + twinNs, disagree := t.disagree + dis }
-      return t'
 
 def parseArgs : List String → Nat × Nat × Nat × Bool × Bool
   | "--seeds" :: n :: s :: rest =>

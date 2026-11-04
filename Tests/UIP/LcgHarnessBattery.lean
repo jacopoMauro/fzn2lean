@@ -175,6 +175,24 @@ def plusChain (n d cap : Nat) : String :=
   s!"constraint int_lin_le([-1, -1, -1], [x0, x1, x{n-1}], -{cap + 1});\n" ++
   "solve satisfy;\n"
 
+/-- PLAN G1-B: dense `bool2int` channels. Every source is a free Boolean and
+every target is a 0/1 view widened by `i % 3` (so 2 and 3 are unpinned
+removals); the last channel's target is the raw singleton `[1]`, which pins
+its source from the target side. Compiled through the source parser and run
+by the LCG route with its oracle cross-check. -/
+def bool2intChains (n : Nat) : String :=
+  String.join ((List.range n).map fun i =>
+    if i == n - 1 then s!"var bool: c{i};\nvar 1..1: t{i};\n"
+    else s!"var bool: c{i};\nvar 0..{1 + i % 3}: t{i};\n") ++
+  String.join ((List.range n).map fun i =>
+    s!"constraint bool2int(c{i}, t{i});\n") ++
+  "solve satisfy;\n"
+
+/-- PLAN G1-B: a `bool2int` channel whose target cannot read 0 or 1
+(`[2..2]`): both the channel propagator and the leaf check reject it. -/
+def bool2intUnsat : String :=
+  "var bool: cu;\nvar 2..2: tu;\nconstraint bool2int(cu, tu);\nsolve satisfy;\n"
+
 
 /-- Random small CSP (FlatZinc text) from a seed: 3..6 int vars over small
 domains (some negative), 3..9 constraints from the compiled fragment
@@ -298,7 +316,9 @@ def battery : List (String × String) :=
   , ("sat3-14-60", sat3 14 60 7)
   , ("plusChain-5-6-7", plusChain 5 6 7)
   , ("plusChain-6-5-6", plusChain 6 5 6)
-  , ("plusChain-6-6-8", plusChain 6 6 8) ]
+  , ("plusChain-6-6-8", plusChain 6 6 8)
+  , ("bool2int-6chains", bool2intChains 6)
+  , ("bool2int-unsat", bool2intUnsat) ]
 
 /-- Extra heavier timing instances (run with `--heavy`). -/
 def heavy : List (String × String) :=

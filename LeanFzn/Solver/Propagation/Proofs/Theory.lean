@@ -427,7 +427,7 @@ theorem scanConflict_excludes
     bounds the slot's integer view above in every fitting assignment. -/
 theorem fits_domMaxI_ge {st : State} {a : Assignment} {s : Nat} {mx : Int}
     (hfit : a.Fits st.domains)
-    (hmax : domMaxI (st.domains.getD s []) = some mx)
+    (hmax : domMaxI (st.domains.getD s Dom.empty) = some mx)
     {i : Int} (hslot : slotInt a s = some i) :
     i ≤ mx := by
   obtain ⟨v, hv, hvi, hlt⟩ := slotInt_mem (doms := st.domains) hfit hslot
@@ -437,7 +437,7 @@ theorem fits_domMaxI_ge {st : State} {a : Assignment} {s : Nat} {mx : Int}
     slot's integer view below in every fitting assignment. -/
 theorem fits_domMinI_le {st : State} {a : Assignment} {s : Nat} {mn : Int}
     (hfit : a.Fits st.domains)
-    (hmin : domMinI (st.domains.getD s []) = some mn)
+    (hmin : domMinI (st.domains.getD s Dom.empty) = some mn)
     {i : Int} (hslot : slotInt a s = some i) :
     mn ≤ i := by
   obtain ⟨v, hv, hvi, hlt⟩ := slotInt_mem (doms := st.domains) hfit hslot
@@ -449,8 +449,8 @@ theorem fits_domMinI_le {st : State} {a : Assignment} {s : Nat} {mn : Int}
 theorem narrowHi_conflict_inv {st : State} {s : Nat} {hi : Int}
     {ng : Clause} {c : Clause}
     (h : narrowHi st s hi ng = .conflict c) :
-    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
-      domMaxI (st.domains.getD s []) = some mx ∧ mn > hi ∧ c = ng := by
+    ∃ mn mx, domMinI (st.domains.getD s Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD s Dom.empty) = some mx ∧ mn > hi ∧ c = ng := by
   unfold narrowHi at h
   split at h
   · rename_i mn mx hmn hmx
@@ -471,8 +471,8 @@ theorem narrowHi_conflict_inv {st : State} {s : Nat} {hi : Int}
 theorem narrowLo_conflict_inv {st : State} {s : Nat} {lo : Int}
     {ng : Clause} {c : Clause}
     (h : narrowLo st s lo ng = .conflict c) :
-    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
-      domMaxI (st.domains.getD s []) = some mx ∧ mx < lo ∧ c = ng := by
+    ∃ mn mx, domMinI (st.domains.getD s Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD s Dom.empty) = some mx ∧ mx < lo ∧ c = ng := by
   unfold narrowLo at h
   split at h
   · rename_i mn mx hmn hmx
@@ -498,7 +498,7 @@ theorem leSlot_gate_excludes
     {st : State} {a : Assignment} {i j : Nat} {ng' : Clause}
     (hfit : a.Fits st.domains)
     (yj : Int)
-    (hjy : domMaxI (st.domains.getD j []) = some yj)
+    (hjy : domMaxI (st.domains.getD j Dom.empty) = some yj)
     (hc : narrowHi st i yj [posLe i yj, negLe j yj] = .conflict ng')
     (hle : ∀ (p q : Int), slotInt a i = some p → slotInt a j = some q →
       p ≤ q)
@@ -1256,7 +1256,7 @@ exhaustion, and the conflict-origin entitlement chain -/
     firing preserves full membership), so each step's narrowing keeps
     it fitting. -/
 theorem fold_fits : ∀ (trail : List TrailEntry) (a : Assignment)
-    (doms : List (List Value)),
+    (doms : List Domain),
     a.Fits doms →
     (∀ e ∈ trail, e.literal.eval a = some true) →
     a.Fits (trail.foldl (fun acc e => domOfLit acc e.literal) doms) := by
@@ -1654,35 +1654,35 @@ instance (problem : LeanFzn.Solver.Propagation.Problem Constraint Objective) :
 
 /-- When every domain has at most one int value, decideLiteral is
     none (the bisection needs two distinct extrema). -/
-theorem domMinI_of_nil {d : List Value} (h : domInts d = []) :
+theorem domMinI_of_nil {α : Type} [DomainElems α] {d : α} (h : domInts d = []) :
     domMinI d = none := by
   unfold domMinI
   rw [h]
   rfl
 
-theorem domMaxI_of_nil {d : List Value} (h : domInts d = []) :
+theorem domMaxI_of_nil {α : Type} [DomainElems α] {d : α} (h : domInts d = []) :
     domMaxI d = none := by
   unfold domMaxI
   rw [h]
   rfl
 
-theorem domMinI_of_single {d : List Value} {v : Int}
+theorem domMinI_of_single {α : Type} [DomainElems α] {d : α} {v : Int}
     (h : domInts d = [v]) : domMinI d = some v := by
   unfold domMinI
   rw [h]
   simp [minI]
 
-theorem domMaxI_of_single {d : List Value} {v : Int}
+theorem domMaxI_of_single {α : Type} [DomainElems α] {d : α} {v : Int}
     (h : domInts d = [v]) : domMaxI d = some v := by
   unfold domMaxI
   rw [h]
   simp [maxI]
 
 theorem decideLiteral_none_of_all_single
-    (doms : List (List Value))
+    (doms : List Domain)
     (hall : ∀ d ∈ doms, (domInts d).length ≤ 1) :
     decideLiteral.go 0 doms = none := by
-  have hgo : ∀ (s : Nat) (ds : List (List Value)),
+  have hgo : ∀ (s : Nat) (ds : List Domain),
       (∀ d ∈ ds, (domInts d).length ≤ 1) →
       decideLiteral.go s ds = none := by
     intro s ds
@@ -1716,14 +1716,13 @@ theorem decideLiteral_none_of_all_single
   exact hgo 0 doms hall
 
 /-- A singleton domain has at most one integer-viewed value. -/
-theorem domInts_le_of_singleton {d : List Value}
+theorem domInts_le_of_singleton {d : Domain}
     (h : d.length = 1) : (domInts d).length ≤ 1 := by
-  match hd : d with
-  | [v] =>
-      unfold domInts
-      cases v <;> simp
-  | v1 :: v2 :: rest => exfalso; simp only [List.length_cons] at h; omega
-  | [] => exfalso; simp only [List.length_nil] at h; omega
+  unfold domInts
+  rw [domElems_eq_enum]
+  refine Nat.le_trans (List.length_filterMap_le _ _) ?_
+  rw [Dom.length_eq_enum] at h
+  omega
 
 /-- THE FRAGMENT DISCIPLINE at the initial state: when the problem's
     domains are all singletons, `decideLiteral` at the initial root
@@ -1759,10 +1758,16 @@ theorem filter_le_one {α : Type} (p : α → Bool) (l : List α)
       omega
 
 /-- domFilterInt keeps the ≤ 1 length discipline. -/
-theorem domFilterInt_le_one {d : List Value} {keep : Int → Bool}
+theorem domFilterInt_le_one {d : Domain} {keep : Int → Bool}
     (h : d.length ≤ 1) : (domFilterInt keep d).length ≤ 1 := by
   unfold domFilterInt
-  exact filter_le_one _ _ h
+  dsimp only
+  split
+  · exact h
+  · rename_i hne
+    rw [Dom.length_eq_enum, Dom.enum_ofList]
+    exact Nat.le_trans (List.length_filter_le _ _)
+      (by rwa [Dom.length_eq_enum] at h)
 
 /-! ## The per-slot discipline through getD -/
 
@@ -1770,10 +1775,10 @@ theorem domFilterInt_le_one {d : List Value} {keep : Int → Bool}
     length: updateSlot reads the old slot and replaces it by f of it.
     (Out of range, getD is [] on both sides and f's value on the
     DEFAULT is irrelevant — the discipline only needs in-range.) -/
-theorem length_getD_updateSlot_eq : ∀ (doms : List (List Value)) (s : Nat)
-    (f : List Value → List Value),
+theorem length_getD_updateSlot_eq : ∀ (doms : List Domain) (s : Nat)
+    (f : Domain → Domain),
     s < doms.length →
-    ((updateSlot doms s f).getD s []).length = (f (doms.getD s [])).length := by
+    ((updateSlot doms s f).getD s Dom.empty).length = (f (doms.getD s Dom.empty)).length := by
   intro doms
   induction doms with
   | nil => intro s f hlt; simp only [List.length_nil] at hlt; exact absurd hlt (by omega)
@@ -1787,10 +1792,10 @@ theorem length_getD_updateSlot_eq : ∀ (doms : List (List Value)) (s : Nat)
           exact ih s' f (by omega)
 
 /-- Length at a DIFFERENT index after updateSlot is unchanged. -/
-theorem length_getD_updateSlot_ne : ∀ (doms : List (List Value))
-    (s s0 : Nat) (f : List Value → List Value),
+theorem length_getD_updateSlot_ne : ∀ (doms : List Domain)
+    (s s0 : Nat) (f : Domain → Domain),
     s0 ≠ s →
-    ((updateSlot doms s f).getD s0 []).length = (doms.getD s0 []).length := by
+    ((updateSlot doms s f).getD s0 Dom.empty).length = (doms.getD s0 Dom.empty).length := by
   intro doms
   induction doms with
   | nil =>
@@ -1816,9 +1821,9 @@ theorem length_getD_updateSlot_ne : ∀ (doms : List (List Value))
 /-- THE PER-SLOT DISCIPLINE: if every slot of doms has ≤ 1 value, so
     does every slot of domOfLit doms l — for ANY literal (both
     polarities, both atom kinds). -/
-theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
-    (∀ s : Nat, (doms.getD s []).length ≤ 1) →
-    (∀ s : Nat, ((domOfLit doms l).getD s []).length ≤ 1) := by
+theorem domOfLt_getD_le_one : ∀ (doms : List Domain) (l : Literal),
+    (∀ s : Nat, (doms.getD s Dom.empty).length ≤ 1) →
+    (∀ s : Nat, ((domOfLit doms l).getD s Dom.empty).length ≤ 1) := by
   intro doms l hall
   cases l with
   | mk atom pos =>
@@ -1828,7 +1833,7 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
       | intLe sl k =>
           -- NEGATIVE int literal: filter p > k at slot sl
           intro s
-          show ((domOfLit doms ⟨.intLe sl k, false⟩).getD s []).length ≤ 1
+          show ((domOfLit doms ⟨.intLe sl k, false⟩).getD s Dom.empty).length ≤ 1
           unfold domOfLit
           simp only [Bool.false_eq_true, if_false]
           by_cases hs : s = sl
@@ -1836,31 +1841,29 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
             by_cases hrange : sl < doms.length
             · rw [length_getD_updateSlot_eq doms sl _ hrange]
               exact domFilterInt_le_one
-                (d := doms.getD sl [])
+                (d := doms.getD sl Dom.empty)
                 (keep := fun p => decide (p > k))
                 (hall sl)
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
-              rw [setSlot_eq_self_of_le doms (domFilterInt
-                (fun p => decide (p > k)) (doms.getD sl [])) sl hge]
+              rw [List.set_eq_of_length_le hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s
       | boolEq sl b =>
           -- NEGATIVE bool literal: pin to !b at slot sl
           intro s
-          show ((domOfLit doms ⟨.boolEq sl b, false⟩).getD s []).length ≤ 1
+          show ((domOfLit doms ⟨.boolEq sl b, false⟩).getD s Dom.empty).length ≤ 1
           unfold domOfLit
           simp only [Bool.false_eq_true, if_false]
           by_cases hs : s = sl
           · rw [hs]
             by_cases hrange : sl < doms.length
             · rw [length_getD_updateSlot_eq doms sl _ hrange]
-              exact Nat.le_trans (List.length_filter_le _ _) (hall sl)
+              exact Nat.le_trans (Dom.length_filter_le _ _) (hall sl)
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
-              rw [setSlot_eq_self_of_le doms ((doms.getD sl []).filter
-                (fun v => v.eqB (Value.bool !b))) sl hge]
+              rw [List.set_eq_of_length_le hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s
@@ -1868,7 +1871,7 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
           -- NEGATIVE intNe literal: filter p = k at slot sl (a
           -- sub-list, so the ≤ 1 discipline carries over)
           intro s
-          show ((domOfLit doms ⟨.intNe sl k, false⟩).getD s []).length ≤ 1
+          show ((domOfLit doms ⟨.intNe sl k, false⟩).getD s Dom.empty).length ≤ 1
           unfold domOfLit
           simp only [Bool.false_eq_true, if_false]
           by_cases hs : s = sl
@@ -1876,13 +1879,12 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
             by_cases hrange : sl < doms.length
             · rw [length_getD_updateSlot_eq doms sl _ hrange]
               exact domFilterInt_le_one
-                (d := doms.getD sl [])
+                (d := doms.getD sl Dom.empty)
                 (keep := fun p => decide (p = k))
                 (hall sl)
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
-              rw [setSlot_eq_self_of_le doms (domFilterInt
-                (fun p => decide (p = k)) (doms.getD sl [])) sl hge]
+              rw [List.set_eq_of_length_le hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s
@@ -1891,7 +1893,7 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
       | intLe sl k =>
           -- POSITIVE int literal: filter p ≤ k at slot sl
           intro s
-          show ((domOfLit doms ⟨.intLe sl k, true⟩).getD s []).length ≤ 1
+          show ((domOfLit doms ⟨.intLe sl k, true⟩).getD s Dom.empty).length ≤ 1
           unfold domOfLit
           simp only [if_true]
           by_cases hs : s = sl
@@ -1899,31 +1901,29 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
             by_cases hrange : sl < doms.length
             · rw [length_getD_updateSlot_eq doms sl _ hrange]
               exact domFilterInt_le_one
-                (d := doms.getD sl [])
+                (d := doms.getD sl Dom.empty)
                 (keep := fun p => decide (p ≤ k))
                 (hall sl)
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
-              rw [setSlot_eq_self_of_le doms (domFilterInt
-                (fun p => decide (p ≤ k)) (doms.getD sl [])) sl hge]
+              rw [List.set_eq_of_length_le hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s
       | boolEq sl b =>
           -- POSITIVE bool literal: pin to b at slot sl
           intro s
-          show ((domOfLit doms ⟨.boolEq sl b, true⟩).getD s []).length ≤ 1
+          show ((domOfLit doms ⟨.boolEq sl b, true⟩).getD s Dom.empty).length ≤ 1
           unfold domOfLit
           simp only [if_true]
           by_cases hs : s = sl
           · rw [hs]
             by_cases hrange : sl < doms.length
             · rw [length_getD_updateSlot_eq doms sl _ hrange]
-              exact Nat.le_trans (List.length_filter_le _ _) (hall sl)
+              exact Nat.le_trans (Dom.length_filter_le _ _) (hall sl)
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
-              rw [setSlot_eq_self_of_le doms ((doms.getD sl []).filter
-                (fun v => v.eqB (Value.bool b))) sl hge]
+              rw [List.set_eq_of_length_le hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s
@@ -1931,7 +1931,7 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
           -- POSITIVE intNe literal: filter p ≠ k at slot sl (a
           -- sub-list, so the ≤ 1 discipline carries over)
           intro s
-          show ((domOfLit doms ⟨.intNe sl k, true⟩).getD s []).length ≤ 1
+          show ((domOfLit doms ⟨.intNe sl k, true⟩).getD s Dom.empty).length ≤ 1
           unfold domOfLit
           simp only [if_true]
           by_cases hs : s = sl
@@ -1939,13 +1939,12 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
             by_cases hrange : sl < doms.length
             · rw [length_getD_updateSlot_eq doms sl _ hrange]
               exact domFilterInt_le_one
-                (d := doms.getD sl [])
+                (d := doms.getD sl Dom.empty)
                 (keep := fun p => decide (p ≠ k))
                 (hall sl)
             · have hge : doms.length ≤ sl := Nat.le_of_not_lt hrange
               unfold updateSlot
-              rw [setSlot_eq_self_of_le doms (domFilterInt
-                (fun p => decide (p ≠ k)) (doms.getD sl [])) sl hge]
+              rw [List.set_eq_of_length_le hge]
               exact hall sl
           · rw [length_getD_updateSlot_ne doms sl s _ (fun h => hs h)]
             exact hall s
@@ -1955,11 +1954,11 @@ theorem domOfLt_getD_le_one : ∀ (doms : List (List Value)) (l : Literal),
 /-- decideLiteral is none at ANY state with the ≤ 1-per-slot
     discipline: no bisection anywhere. -/
 theorem decideLiteral_none_of_le_one (st : State)
-    (hall : ∀ s : Nat, (st.domains.getD s []).length ≤ 1) :
+    (hall : ∀ s : Nat, (st.domains.getD s Dom.empty).length ≤ 1) :
     decideLiteral st = none := by
   unfold decideLiteral
-  have hgo : ∀ (s : Nat) (ds : List (List Value)),
-      (∀ s2 : Nat, (ds.getD s2 []).length ≤ 1) →
+  have hgo : ∀ (s : Nat) (ds : List Domain),
+      (∀ s2 : Nat, (ds.getD s2 Dom.empty).length ≤ 1) →
       decideLiteral.go s ds = none := by
     intro s ds
     induction ds generalizing s with
@@ -1972,16 +1971,12 @@ theorem decideLiteral_none_of_le_one (st : State)
           simp only [List.getD_cons_zero] at this
           exact this
         have hdi : (domInts d).length ≤ 1 := by
-          match hd : d with
-          | [] => simp [domInts]
-          | [v] =>
-              unfold domInts
-              cases v <;> simp
-          | v1 :: v2 :: rest2 =>
-              exfalso
-              simp only [List.length_cons] at hd1
-              omega
-        have hrest : ∀ s2 : Nat, (rest.getD s2 []).length ≤ 1 := by
+          unfold domInts
+          rw [domElems_eq_enum]
+          refine Nat.le_trans (List.length_filterMap_le _ _) ?_
+          rw [Dom.length_eq_enum] at hd1
+          exact hd1
+        have hrest : ∀ s2 : Nat, (rest.getD s2 Dom.empty).length ≤ 1 := by
           intro s2
           have := hall (s2 + 1)
           simp only [List.getD_cons_succ] at this
@@ -2033,8 +2028,8 @@ theorem enqueueNorm_domains_cases {st : State} {l : Literal}
     change is a domOfLit step (enqueueNorm's fresh arm) or none. -/
 theorem propagateLoop_le_one {props : List Propagator} :
     ∀ (fuel : Nat) (st : State),
-      (∀ s : Nat, (st.domains.getD s []).length ≤ 1) →
-      (∀ s : Nat, ((propagateLoop fuel props st).domains.getD s []).length ≤ 1) := by
+      (∀ s : Nat, (st.domains.getD s Dom.empty).length ≤ 1) →
+      (∀ s : Nat, ((propagateLoop fuel props st).domains.getD s Dom.empty).length ≤ 1) := by
   intro fuel
   induction fuel with
   | zero => intro st hall; exact hall
@@ -2056,19 +2051,19 @@ theorem propagateLoop_le_one {props : List Propagator} :
               rw [hUnf]
               -- the sweep's own discipline (runPropagators lemma):
               have hgo : ∀ (ps : List Propagator) (acc : State),
-                  (∀ s : Nat, (List.getD acc.domains s []).length ≤ 1) →
+                  (∀ s : Nat, (List.getD acc.domains s Dom.empty).length ≤ 1) →
                   (∀ s : Nat, (List.getD
                     (runPropagators.go ps acc).domains
-                    s []).length ≤ 1) := by
+                    s Dom.empty).length ≤ 1) := by
                 intro ps
                 induction ps with
                 | nil => intro acc hall; exact hall
                 | cons p rest ihp =>
                     intro acc hall
                     have hstep : ∀ (acc2 : State) (s : Nat),
-                        (∀ s : Nat, (List.getD acc2.domains s []).length ≤ 1) →
+                        (∀ s : Nat, (List.getD acc2.domains s Dom.empty).length ≤ 1) →
                       (List.getD (runPropagators.go (p :: rest) acc2).domains
-                        s []).length ≤ 1 := by
+                        s Dom.empty).length ≤ 1 := by
                       intro acc2 s hall2
                       simp only [runPropagators.go]
                       split
@@ -2086,7 +2081,7 @@ theorem propagateLoop_le_one {props : List Propagator} :
                           next lig rsn hr =>
                             have hdom : ∀ s2 : Nat, (List.getD
                                 (enqueueNorm acc2 lig (some rsn)).domains
-                                s2 []).length ≤ 1 := by
+                                s2 Dom.empty).length ≤ 1 := by
                               intro s2
                               rcases enqueueNorm_domains_cases (st := acc2)
                                 (l := lig) (reason := some rsn) with hd | hd
@@ -2110,7 +2105,7 @@ theorem propagateLoop_le_one {props : List Propagator} :
                   -- scan conflict: only the conflict field is set
                   show ∀ s : Nat, (List.getD
                     (propagateLoop (k+1) props st).domains
-                    s []).length ≤ 1
+                    s Dom.empty).length ≤ 1
                   rw [show propagateLoop (k+1) props st
                     = { st with conflict := some c } by
                     simp [propagateLoop, hc, hscan, Option.isSome_none]]
@@ -2125,7 +2120,7 @@ theorem propagateLoop_le_one {props : List Propagator} :
                       -- the enqueued state's discipline (three arms)
                       have hdom : ∀ s : Nat, (List.getD
                           (enqueueNorm st l (some r)).domains
-                          s []).length ≤ 1 := by
+                          s Dom.empty).length ≤ 1 := by
                         intro s
                         rcases enqueueNorm_domains_cases (st := st)
                           (l := l) (reason := some r) with hd | hd
@@ -2219,9 +2214,9 @@ theorem newDecisionLevel_domFold {problem : LeanFzn.Solver.Propagation.Problem C
 
 /-- Each root fact's domOfLit step is the identity: it pins a bound
     derived from the domain's own extrema. -/
-theorem domOfLit_rootFact_id {doms : List (List Value)}
-    : ∀ (ds : List (List Value)) (s : Nat) (l : Literal),
-      (∀ i, ds.getD i [] = doms.getD (s + i) []) →
+theorem domOfLit_rootFact_id {doms : List Domain}
+    : ∀ (ds : List Domain) (s : Nat) (l : Literal),
+      (∀ i, ds.getD i Dom.empty = doms.getD (s + i) Dom.empty) →
       l ∈ rootFacts.go s ds → domOfLit doms l = doms := by
   intro ds
   induction ds with
@@ -2229,11 +2224,11 @@ theorem domOfLit_rootFact_id {doms : List (List Value)}
   | cons d rest ih =>
       intro s l hcorr hl
       simp only [rootFacts.go] at hl
-      have hd : doms.getD s [] = d := by
+      have hd : doms.getD s Dom.empty = d := by
         have := hcorr 0
         simpa using this.symm
-      have hcorr' : ∀ i, rest.getD i []
-          = doms.getD (s + 1 + i) [] := by
+      have hcorr' : ∀ i, rest.getD i Dom.empty
+          = doms.getD (s + 1 + i) Dom.empty := by
         intro i
         have h := hcorr (i + 1)
         simp only [List.getD_cons_succ] at h
@@ -2300,8 +2295,8 @@ theorem rootFact_trail_fold (problem : LeanFzn.Solver.Propagation.Problem Constr
         domOfLit_rootFact_id (doms := problem.domains)
           (ds := problem.domains) (s := 0) (l := e.literal)
           (fun i => by
-            show problem.domains.getD i [] =
-              problem.domains.getD (0 + i) []
+            show problem.domains.getD i Dom.empty =
+              problem.domains.getD (0 + i) Dom.empty
             rw [Nat.zero_add])
           (by
             show e.literal ∈ rootFacts problem.domains
@@ -2391,10 +2386,10 @@ theorem initial_domFold (problem : LeanFzn.Solver.Propagation.Problem Constraint
     domains have it: each fold step is a domOfLit narrowing, and the
     per-slot lemma closes each one. -/
 theorem fold_domOfLt_getD_le_one :
-    ∀ (doms : List (List Value)) (tr : List TrailEntry),
-    (∀ s : Nat, (doms.getD s []).length ≤ 1) →
+    ∀ (doms : List Domain) (tr : List TrailEntry),
+    (∀ s : Nat, (doms.getD s Dom.empty).length ≤ 1) →
     (∀ s : Nat, ((tr.foldl (fun acc e => domOfLit acc e.literal)
-      doms).getD s []).length ≤ 1) := by
+      doms).getD s Dom.empty).length ≤ 1) := by
   intro doms tr
   induction tr generalizing doms with
   | nil => intro hall; exact hall
@@ -2408,8 +2403,8 @@ theorem fold_domOfLt_getD_le_one :
     inherits the problem's per-slot discipline as the fold's. -/
 theorem domFold_le_one {problem : LeanFzn.Solver.Propagation.Problem Constraint Objective}
     {st : State} (hf : DomFold problem st)
-    (hfrag : ∀ s : Nat, (problem.domains.getD s []).length ≤ 1) :
-    ∀ s : Nat, (st.domains.getD s []).length ≤ 1 := by
+    (hfrag : ∀ s : Nat, (problem.domains.getD s Dom.empty).length ≤ 1) :
+    ∀ s : Nat, (st.domains.getD s Dom.empty).length ≤ 1 := by
   intro s
   rw [hf]
   exact fold_domOfLt_getD_le_one problem.domains st.trail hfrag s
@@ -2417,8 +2412,8 @@ theorem domFold_le_one {problem : LeanFzn.Solver.Propagation.Problem Constraint 
 /-! ## The ≤ 1 discipline at the fragment -/
 
 /-- getD splits: in range it is the member, out of range the default. -/
-theorem getD_split {L : List (List Value)} (s : Nat) :
-    L.getD s [] = (if h : s < L.length then L[s] else []) := by
+theorem getD_split {L : List Domain} (s : Nat) :
+    L.getD s Dom.empty = (if h : s < L.length then L[s] else Dom.empty) := by
   simp only [List.getD]
   split
   · rename_i h
@@ -2432,7 +2427,7 @@ theorem getD_split {L : List (List Value)} (s : Nat) :
     ≤ 1 (in range a singleton member; out of range the empty default) -/
 theorem problem_fragment_le_one {problem : LeanFzn.Solver.Propagation.Problem Constraint Objective}
     (hfrag : PropFragment problem) :
-    ∀ s : Nat, (problem.domains.getD s []).length ≤ 1 := by
+    ∀ s : Nat, (problem.domains.getD s Dom.empty).length ≤ 1 := by
   intro s
   rw [getD_split]
   split
@@ -2441,7 +2436,8 @@ theorem problem_fragment_le_one {problem : LeanFzn.Solver.Propagation.Problem Co
       hfrag problem.domains[s] (List.getElem_mem h)
     rw [hd]
     exact Nat.le_refl 1
-  · simp
+  · rw [Dom.length_eq_enum, Dom.enum_empty]
+    exact Nat.zero_le 1
 
 /-- The post-propagation state's discipline inside the fragment: the
     entry satisfies DomFold, so the propagateLoop-from-entry state has
@@ -2451,7 +2447,7 @@ theorem fragment_entry_le_one {problem : LeanFzn.Solver.Propagation.Problem Cons
     (hf : DomFold problem st)
     (hfrag : PropFragment problem) :
     ∀ s : Nat, (List.getD (propagateLoop (engineFuel st) props st).domains
-      s []).length ≤ 1 :=
+      s Dom.empty).length ≤ 1 :=
   fun s => propagateLoop_le_one (props := props) (engineFuel st) st
     (domFold_le_one hf (problem_fragment_le_one hfrag)) s
 
@@ -2471,7 +2467,7 @@ theorem go_fragment_no_decide {problem : LeanFzn.Solver.Propagation.Problem Cons
     {props : List Propagator} :
     ∀ (fuel : Nat) (st : State),
       st.decisionLevel = 0 →
-      (∀ s : Nat, (st.domains.getD s []).length ≤ 1) →
+      (∀ s : Nat, (st.domains.getD s Dom.empty).length ≤ 1) →
       lcgSearch.go problem constraintHoldsB props fuel st = .unsat →
         ((propagateLoop (engineFuel st) props st).conflict.isSome = true
           ∨
@@ -2490,7 +2486,7 @@ theorem go_fragment_no_decide {problem : LeanFzn.Solver.Propagation.Problem Cons
       -- the discipline at the post-propagation state
       have hdisc1 : ∀ s : Nat, (List.getD
           (propagateLoop (32 + 8 * st.domains.length + 4 * st.trail.length)
-            props st).domains s []).length ≤ 1 :=
+            props st).domains s Dom.empty).length ≤ 1 :=
         fun s => propagateLoop_le_one
           (32 + 8 * st.domains.length + 4 * st.trail.length) st hdisc s
       -- the level stays 0 through propagation

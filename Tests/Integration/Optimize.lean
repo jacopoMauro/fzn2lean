@@ -4,7 +4,7 @@ import LeanFzn.Parser.Parser
 import LeanFzn.Checker.Check
 import LeanFzn.Checker.Objective
 import LeanFzn.Integration.Emit
-import LeanFzn.Integration.CertifiedSolve
+import LeanFzn.Legacy.Integration.CertifiedSolve
 open LeanFzn LeanFzn.Compiler LeanFzn.Checker LeanFzn.Semantics
 open LeanFzn.Solver.Propagation.DomainFiltering
 open LeanFzn.Solver.Core

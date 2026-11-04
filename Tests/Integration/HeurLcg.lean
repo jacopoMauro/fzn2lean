@@ -15,7 +15,7 @@ route (`Integration/LcgHeur.lean`). For every fixture the test checks that
 Dependencies/DAG: Integration.LcgHeur + Integration.Lcg -> this test leaf ->
 HeurLcgRunner.
 -/
-import LeanFzn.Integration.LcgHeur
+import LeanFzn.Legacy.Integration.LcgHeur
 import LeanFzn.Compiler.Normalize
 
 namespace HeurLcgFixtures

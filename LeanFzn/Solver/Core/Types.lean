@@ -18,18 +18,24 @@ DAG:
 -/
 
 import LeanFzn.Semantics.Model
+import LeanFzn.Solver.Core.CompactDomain
 open LeanFzn.Semantics
 
 
 namespace LeanFzn.Solver.Core
+
+open LeanFzn.Solver.Propagation
 
 open LeanFzn
 
 /-- Stable position of a decision variable in a compiled problem. -/
 abbrev Slot := Nat
 
-/-- Finite candidate values for one slot. -/
-abbrev Domain := List Value
+/-- Finite candidate values for one slot.  D2 S1: the compact `Dom`
+    representation, with the legacy `List Value` view available as
+    `Dom.enum` (the `general` constructor keeps the exact list). -/
+abbrev Domain := Dom
+
 
 /-- One value per slot, in problem order. -/
 abbrev Assignment := List Value

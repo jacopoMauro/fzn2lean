@@ -75,6 +75,12 @@ theorem auxShapeOf_timesRKK_args {c : ConstraintItem} {x : Ident} {k k' : Int}
              | exact absurd h (by simp)
              | (exfalso; injection h with h1; cases h1)
              | (exfalso; cases h))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The timesKRR shape's argument inversion. -/
 theorem auxShapeOf_timesKRR_args {c : ConstraintItem} {x : Ident} {k k' : Int}
@@ -130,6 +136,12 @@ theorem auxShapeOf_timesKRR_args {c : ConstraintItem} {x : Ident} {k k' : Int}
              | exact absurd h (by simp)
              | (exfalso; injection h with h1; cases h1)
              | (exfalso; cases h))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The timesKKR shape's argument inversion. -/
 theorem auxShapeOf_timesKKR_args {c : ConstraintItem} {x : Ident} {k k' : Int}
@@ -185,6 +197,12 @@ theorem auxShapeOf_timesKKR_args {c : ConstraintItem} {x : Ident} {k k' : Int}
              | exact absurd h (by simp)
              | (exfalso; injection h with h1; cases h1)
              | (exfalso; cases h))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 
 /-- The neRK shape's argument inversion. -/
@@ -224,6 +242,12 @@ theorem auxShapeOf_neRK_inv {c : ConstraintItem} {x : Ident} {k : Int}
              | exact absurd h (by simp)
              | (exfalso; injection h with h1; cases h1)
              | (exfalso; cases h))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The neKR shape's argument inversion. -/
 theorem auxShapeOf_neKR_inv {c : ConstraintItem} {x : Ident} {k : Int}
@@ -261,6 +285,12 @@ theorem auxShapeOf_neKR_inv {c : ConstraintItem} {x : Ident} {k : Int}
              | exact absurd h (by simp)
              | (exfalso; injection h with h1; cases h1)
              | (exfalso; cases h))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 
 
@@ -301,6 +331,12 @@ theorem auxShapeOf_andTrue_args {c : ConstraintItem} {x y : Ident}
     first
       | exact absurd h (by simp)
       | (exfalso; split at h <;> exact absurd h (by simp))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The andFalse shape's argument inversion. -/
 theorem auxShapeOf_andFalse_args {c : ConstraintItem} {x y : Ident}
@@ -339,6 +375,12 @@ theorem auxShapeOf_andFalse_args {c : ConstraintItem} {x y : Ident}
     first
       | exact absurd h (by simp)
       | (exfalso; split at h <;> exact absurd h (by simp))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The orTrue shape's argument inversion. -/
 theorem auxShapeOf_orTrue_args {c : ConstraintItem} {x y : Ident}
@@ -377,6 +419,12 @@ theorem auxShapeOf_orTrue_args {c : ConstraintItem} {x y : Ident}
     first
       | exact absurd h (by simp)
       | (exfalso; split at h <;> exact absurd h (by simp))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The orFalse shape's argument inversion. -/
 theorem auxShapeOf_orFalse_args {c : ConstraintItem} {x y : Ident}
@@ -415,6 +463,12 @@ theorem auxShapeOf_orFalse_args {c : ConstraintItem} {x y : Ident}
     first
       | exact absurd h (by simp)
       | (exfalso; split at h <;> exact absurd h (by simp))
+      -- the element arms (PLAN C0): the classifier's range rules
+      -- out the older shapes
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 
 end LeanFzn.Compiler

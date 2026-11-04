@@ -309,11 +309,11 @@ theorem Atom.eval_eq_evalAtValue (atom : Atom) (a : Assignment)
 def Atom.WellFormedIn (atom : Atom) (domains : List Domain) : Prop :=
   match atom with
   | .boolEq slot _ => slot < domains.length ∧
-      ∀ v ∈ domains.getD slot [], ∃ b, v = .bool b
+      ∀ v ∈ domains.getD slot Dom.empty, ∃ b, v = .bool b
   | .intLe slot _ => slot < domains.length ∧
-      ∀ v ∈ domains.getD slot [], Value.intView v ≠ none
+      ∀ v ∈ domains.getD slot Dom.empty, Value.intView v ≠ none
   | .intNe slot _ => slot < domains.length ∧
-      ∀ v ∈ domains.getD slot [], Value.intView v ≠ none
+      ∀ v ∈ domains.getD slot Dom.empty, Value.intView v ≠ none
 
 /-- Every literal of a clause fits the domains. -/
 def Clause.WellFormedIn (clause : Clause) (domains : List Domain) : Prop :=
@@ -371,7 +371,7 @@ theorem Atom.eval_ne_none_of_fits (atom : Atom) (a : Assignment)
     obtain ⟨hslot, hbools⟩ := hwf
     have hs : s < a.length := by rw [hlen]; omega
     have hq : a[s]? = some a[s] := (List.getElem?_eq_some_iff).mpr ⟨hs, rfl⟩
-    have hin : a[s] ∈ domains.getD s [] := hmem s a[s] hq
+    have hin : a[s] ∈ domains.getD s Dom.empty := hmem s a[s] hq
     obtain ⟨x, hx⟩ := hbools a[s] hin
     have hx' : a[s]? = some (.bool x) := by rw [hq, hx]
     show (match a[s]? with
@@ -383,7 +383,7 @@ theorem Atom.eval_ne_none_of_fits (atom : Atom) (a : Assignment)
     obtain ⟨hslot, hints⟩ := hwf
     have hs : s < a.length := by rw [hlen]; omega
     have hq : a[s]? = some a[s] := (List.getElem?_eq_some_iff).mpr ⟨hs, rfl⟩
-    have hin : a[s] ∈ domains.getD s [] := hmem s a[s] hq
+    have hin : a[s] ∈ domains.getD s Dom.empty := hmem s a[s] hq
     show (slotInt a s).map (fun i => decide (i ≤ k)) ≠ none
     rw [slotInt, hq]
     cases hv : Value.intView a[s] with
@@ -393,7 +393,7 @@ theorem Atom.eval_ne_none_of_fits (atom : Atom) (a : Assignment)
     obtain ⟨hslot, hints⟩ := hwf
     have hs : s < a.length := by rw [hlen]; omega
     have hq : a[s]? = some a[s] := (List.getElem?_eq_some_iff).mpr ⟨hs, rfl⟩
-    have hin : a[s] ∈ domains.getD s [] := hmem s a[s] hq
+    have hin : a[s] ∈ domains.getD s Dom.empty := hmem s a[s] hq
     show (slotInt a s).map (fun i => decide (i ≠ k)) ≠ none
     rw [slotInt, hq]
     cases hv : Value.intView a[s] with
@@ -544,8 +544,8 @@ per-slot choice: every in-range slot picks a carving domain value
 any value with vacuous properties out of range, where `getD` is `[]`). -/
 
 /-- Out of range, `getD` returns the empty domain. -/
-private theorem getD_eq_nil_of_lt (l : List Domain) (s : Nat)
-    (h : ¬ s < l.length) : l.getD s [] = [] := by
+private theorem getD_eq_empty_of_lt (l : List Domain) (s : Nat)
+    (h : ¬ s < l.length) : l.getD s Dom.empty = Dom.empty := by
   simp only [List.getD_eq_getElem?_getD]
   rw [List.getElem?_eq_none_iff.mpr (by omega)]
   rfl
@@ -553,21 +553,21 @@ private theorem getD_eq_nil_of_lt (l : List Domain) (s : Nat)
 /-- Slot-wise choice: the per-slot existential, totalized over all `s` by
         picking a vacuous witness out of range. -/
 private noncomputable def slotPick (domains : List Domain) (v : Valuation)
-    (hcarv : ∀ s, s < domains.length → ∃ val ∈ domains.getD s [],
+    (hcarv : ∀ s, s < domains.length → ∃ val ∈ domains.getD s Dom.empty,
       CarvesAt v s val) (s : Nat) : Value :=
-  (Classical.epsilon (fun val => val ∈ domains.getD s [] ∧ CarvesAt v s val))
+  (Classical.epsilon (fun val => val ∈ domains.getD s Dom.empty ∧ CarvesAt v s val))
 
 private theorem slotPick_spec (domains : List Domain) (v : Valuation)
-    (hcarv : ∀ s, s < domains.length → ∃ val ∈ domains.getD s [],
+    (hcarv : ∀ s, s < domains.length → ∃ val ∈ domains.getD s Dom.empty,
       CarvesAt v s val) (s : Nat) (hs : s < domains.length) :
-    slotPick domains v hcarv s ∈ domains.getD s [] ∧
+    slotPick domains v hcarv s ∈ domains.getD s Dom.empty ∧
       CarvesAt v s (slotPick domains v hcarv s) :=
   Classical.epsilon_spec (hcarv s hs)
 
 /-- The realized assignment: one chosen value per slot position. -/
 private noncomputable def pickAssignment (domains : List Domain)
     (v : Valuation)
-    (hcarv : ∀ s, s < domains.length → ∃ val ∈ domains.getD s [],
+    (hcarv : ∀ s, s < domains.length → ∃ val ∈ domains.getD s Dom.empty,
       CarvesAt v s val) : Assignment :=
   (List.range domains.length).map (slotPick domains v hcarv)
 
@@ -575,7 +575,7 @@ private noncomputable def pickAssignment (domains : List Domain)
     domain value is realized by a fitting assignment that reproduces it
     on every well-formed atom. -/
 theorem exists_fitting_of_carves (domains : List Domain) (v : Valuation)
-    (hcarv : ∀ s, s < domains.length → ∃ val ∈ domains.getD s [],
+    (hcarv : ∀ s, s < domains.length → ∃ val ∈ domains.getD s Dom.empty,
       CarvesAt v s val) :
     ∃ a, a.Fits domains ∧
       ∀ atom, atom.WellFormedIn domains → atom.eval a = v atom := by
@@ -595,7 +595,7 @@ theorem exists_fitting_of_carves (domains : List Domain) (v : Valuation)
         rw [hlen] at he
         exact he
       have hmem := (slotPick_spec domains v hcarv slot hs).1
-      show value ∈ domains.getD slot []
+      show value ∈ domains.getD slot Dom.empty
       have hpickAt : (pickAssignment domains v hcarv)[slot]?
           = some (slotPick domains v hcarv slot) := by
         show (((List.range domains.length).map

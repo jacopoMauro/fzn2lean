@@ -1,0 +1,2580 @@
+/-
+File: LeanFzn/Engine/Props/BoolExt.lean
+
+Dedicated Boolean propagators for the remaining Boolean families:
+`bool_not`, `bool_and`, `bool_or`, `bool_eq` and `array_bool_and`.
+`bool_clause` already has its N6 propagator in `Props/Bool.lean` and is
+deliberately not duplicated here.
+
+The module is built around a small Boolean-domain abstraction.  A
+`BArg` records, for one operand slot, the two current Boolean values
+(`curF`, `curT`) and two proposed values (`newF`, `newT`) after a
+propagation step.  A step that removes values proves a `BSpec`: every
+relation tuple inside the current box remains inside the proposed box.
+The output layer is generic: a conflict clause is the list of negated
+current singleton facts of all operands, and a prune reason for a removed
+value `v` of slot `s` is `s = !v` together with the negated singleton
+facts of the other operands.  Both are entailed by the corresponding
+constraint whenever the step is sound.
+
+Non-Boolean or empty operand domains make the run a `.fix` no-op.  The
+duplicated-slot cases (`i = j` for the binary families, repeated slots in
+`array_bool_and`) are also `.fix`: the Boolean abstractions below keep one
+`BArg` per operand position, so duplicate positions would let a batch
+prune both values of one domain.  Returning `.fix` there keeps every
+emitted prune non-emptying.  `array_bool_and` additionally takes the
+initial converted domains in its soundness contracts so that a Boolean
+current source domain can be tied to Boolean values in accepted
+assignments (the leaf semantics of `array_bool_and` treats a non-Boolean
+source as `false`, unlike the binary Boolean families).
+
+Dependencies:
+  - LeanFzn.Engine.Prop: `PropV2`, `EClause.ofLiterals`, `Entailed`.
+  - LeanFzn.Engine.Dom: `DomC`, `DomC.fixedValue`, `DomC.evalLit`.
+  - LeanFzn.Engine.Props.Linear: `ViewWF` (not needed below: every
+    Boolean fact follows from the `.bool` constructor).
+
+DAG:
+  LeanFzn.Engine.Prop -> LeanFzn.Engine.Props.BoolExt
+-/
+import LeanFzn.Engine.Prop
+
+open LeanFzn LeanFzn.Compiler LeanFzn.Semantics LeanFzn.Solver.Core
+open LeanFzn.Solver.Propagation
+open LeanFzn.Solver.Propagation.DomainFiltering
+
+namespace LeanFzn.Engine
+
+/-! ## Boolean operand boxes -/
+
+/-- The Boolean state of one operand slot.
+
+`curF`/`curT` say whether the current compact domain contains `false` /
+`true`; `newF`/`newT` are the proposed values after one propagation step.
+`ofDom?` only builds arguments whose current domain is a nonempty
+`.bool` domain, so at least one of `curF`, `curT` is `true`. -/
+structure BArg where
+  slot : Nat
+  curF : Bool
+  curT : Bool
+  newF : Bool
+  newT : Bool
+  deriving Repr, DecidableEq, Inhabited
+
+namespace BArg
+
+/-- Current membership of a Boolean value. -/
+def cur (a : BArg) (v : Bool) : Bool := if v then a.curT else a.curF
+
+/-- Proposed membership of a Boolean value. -/
+def new (a : BArg) (v : Bool) : Bool := if v then a.newT else a.newF
+
+/-- The proposed box is contained in the current box. -/
+def Sub (a : BArg) : Prop := ∀ v, a.new v = true → a.cur v = true
+
+/-- No Boolean value survives for this operand. -/
+def emptyNew (a : BArg) : Bool := !a.newF && !a.newT
+
+/-- The negated singleton fact of a fixed operand (`s ≠ false` is
+`posBool s true`; `s ≠ true` is `posBool s false`). -/
+def fixedLit? (a : BArg) : Option Literal :=
+  if a.curF && !a.curT then some (posBool a.slot true)
+  else if a.curT && !a.curF then some (posBool a.slot false)
+  else none
+
+/-- All negated singleton facts of a fixed operand (zero or one). -/
+def fixedLit (a : BArg) : List Literal := a.fixedLit?.toList
+
+/-- The three nonempty Boolean domain shapes recognised by the
+propagators.  Keeping the shape separate from the argument record makes
+the malformed-input proofs uniform. -/
+inductive BShape where
+  | fixedFalse
+  | fixedTrue
+  | full
+  deriving Repr, DecidableEq, Inhabited
+
+namespace BShape
+
+def curF : BShape → Bool
+  | fixedFalse | full => true
+  | fixedTrue => false
+
+def curT : BShape → Bool
+  | fixedFalse => false
+  | fixedTrue | full => true
+
+/-- Recognise a nonempty Boolean compact domain. -/
+def ofDom? (d : DomC) : Option BShape :=
+  match d with
+  | .bool _ =>
+      match d.fixedValue with
+      | some (.bool false) => some .fixedFalse
+      | some (.bool true) => some .fixedTrue
+      | some _ => none
+      | none =>
+          if d.mem (.bool false) && d.mem (.bool true) then some .full
+          else none
+  | _ => none
+
+theorem ofDom?_isBool {d : DomC} {sh : BShape}
+    (h : ofDom? d = some sh) : ∃ bits, d = .bool bits := by
+  cases d with
+  | bool bits => exact ⟨bits, rfl⟩
+  | bounds lo hi => simp [ofDom?] at h
+  | bitset lo words => simp [ofDom?] at h
+  | boundsHoles lo hi holes => simp [ofDom?] at h
+
+theorem ofDom?_fixedFalse {d : DomC} {sh : BShape}
+    (h : ofDom? d = some sh) (hsh : sh = fixedFalse) :
+    d.fixedValue = some (.bool false) := by
+  subst hsh
+  cases d with
+  | bool bits =>
+      dsimp [ofDom?] at h
+      split at h
+      · assumption
+      · cases h
+      · cases h
+      · split at h <;> cases h
+  | bounds lo hi => simp [ofDom?] at h
+  | bitset lo words => simp [ofDom?] at h
+  | boundsHoles lo hi holes => simp [ofDom?] at h
+
+theorem ofDom?_fixedTrue {d : DomC} {sh : BShape}
+    (h : ofDom? d = some sh) (hsh : sh = fixedTrue) :
+    d.fixedValue = some (.bool true) := by
+  subst hsh
+  cases d with
+  | bool bits =>
+      dsimp [ofDom?] at h
+      split at h
+      · cases h
+      · assumption
+      · cases h
+      · split at h <;> cases h
+  | bounds lo hi => simp [ofDom?] at h
+  | bitset lo words => simp [ofDom?] at h
+  | boundsHoles lo hi holes => simp [ofDom?] at h
+
+theorem ofDom?_full_none {d : DomC} {sh : BShape}
+    (h : ofDom? d = some sh) (hsh : sh = full) :
+    d.fixedValue = none := by
+  subst hsh
+  cases d with
+  | bool bits =>
+      dsimp [ofDom?] at h
+      split at h
+      · cases h
+      · cases h
+      · cases h
+      · split at h
+        · assumption
+        · cases h
+  | bounds lo hi => simp [ofDom?] at h
+  | bitset lo words => simp [ofDom?] at h
+  | boundsHoles lo hi holes => simp [ofDom?] at h
+
+end BShape
+
+/-- Build the argument of a slot from a recognised shape. -/
+def ofShape (s : Nat) (sh : BShape) : BArg :=
+  { slot := s, curF := sh.curF, curT := sh.curT,
+    newF := sh.curF, newT := sh.curT }
+
+/-- Build the argument of a slot whose current compact domain is a
+nonempty `Bool` domain.  Fixed domains are recognised through
+`fixedValue`; a domain with both values must have both membership bits
+set.  Every other shape (integer domains, empty Boolean domains,
+out-of-range slots) is malformed for these propagators. -/
+def ofDom? (s : Nat) (d : DomC) : Option BArg :=
+  (BShape.ofDom? d).map (ofShape s)
+
+/-- Read the Boolean argument of a slot from an engine view. -/
+def mk? (doms : Array DomC) (s : Nat) : Option BArg :=
+  BArg.ofDom? s (doms.getD s DomC.empty)
+
+theorem ofDom?_slot {s : Nat} {d : DomC} {a : BArg}
+    (h : BArg.ofDom? s d = some a) : a.slot = s := by
+  unfold BArg.ofDom? at h
+  cases hsh : BShape.ofDom? d with
+  | none => simp [hsh] at h
+  | some sh =>
+      simp [hsh] at h
+      subst a
+      rfl
+
+/-- The current flags of a successfully built argument are one of the
+three nonempty Boolean domains. -/
+theorem ofDom?_cur_cases {s : Nat} {d : DomC} {a : BArg}
+    (h : BArg.ofDom? s d = some a) :
+    (a.curF = true ∧ a.curT = false) ∨
+      (a.curF = false ∧ a.curT = true) ∨
+      (a.curF = true ∧ a.curT = true) := by
+  unfold BArg.ofDom? at h
+  cases hsh : BShape.ofDom? d with
+  | none => simp [hsh] at h
+  | some sh =>
+      simp [hsh] at h
+      subst a
+      cases sh <;> simp [BArg.ofShape, BShape.curF, BShape.curT]
+
+theorem ofDom?_isBool {s : Nat} {d : DomC} {a : BArg}
+    (h : BArg.ofDom? s d = some a) : ∃ bits, d = .bool bits := by
+  unfold BArg.ofDom? at h
+  cases hsh : BShape.ofDom? d with
+  | none => simp [hsh] at h
+  | some sh => exact BShape.ofDom?_isBool hsh
+
+theorem ofDom?_eq_none_of_not_bool {s : Nat} {d : DomC}
+    (h : ∀ bits, d ≠ .bool bits) : BArg.ofDom? s d = none := by
+  cases d with
+  | bool bits => exact absurd rfl (h bits)
+  | bounds lo hi => rfl
+  | bitset lo words => rfl
+  | boundsHoles lo hi holes => rfl
+
+theorem ofDom?_fixed_false {s : Nat} {d : DomC} {a : BArg}
+    (h : BArg.ofDom? s d = some a) (hf : a.curF = true) (ht : a.curT = false) :
+    d.fixedValue = some (.bool false) := by
+  unfold BArg.ofDom? at h
+  cases hsh : BShape.ofDom? d with
+  | none => simp [hsh] at h
+  | some sh =>
+      simp [hsh] at h
+      subst a
+      cases sh with
+      | fixedFalse => exact BShape.ofDom?_fixedFalse hsh rfl
+      | fixedTrue => simp [BArg.ofShape, BShape.curF] at hf
+      | full => simp [BArg.ofShape, BShape.curT] at ht
+
+theorem ofDom?_fixed_true {s : Nat} {d : DomC} {a : BArg}
+    (h : BArg.ofDom? s d = some a) (hf : a.curF = false) (ht : a.curT = true) :
+    d.fixedValue = some (.bool true) := by
+  unfold BArg.ofDom? at h
+  cases hsh : BShape.ofDom? d with
+  | none => simp [hsh] at h
+  | some sh =>
+      simp [hsh] at h
+      subst a
+      cases sh with
+      | fixedFalse => simp [BArg.ofShape, BShape.curF] at hf
+      | fixedTrue => exact BShape.ofDom?_fixedTrue hsh rfl
+      | full => simp [BArg.ofShape, BShape.curF] at hf
+
+theorem ofDom?_full_fixed_none {s : Nat} {d : DomC} {a : BArg}
+    (h : BArg.ofDom? s d = some a) (hf : a.curF = true) (ht : a.curT = true) :
+    d.fixedValue = none := by
+  unfold BArg.ofDom? at h
+  cases hsh : BShape.ofDom? d with
+  | none => simp [hsh] at h
+  | some sh =>
+      simp [hsh] at h
+      subst a
+      cases sh with
+      | fixedFalse => simp [BArg.ofShape, BShape.curT] at ht
+      | fixedTrue => simp [BArg.ofShape, BShape.curF] at hf
+      | full => exact BShape.ofDom?_full_none hsh rfl
+
+/-- The negated singleton facts of an operand built from `d` evaluate to
+`false` on `d`. -/
+theorem ofDom?_evalLit_fixed {s : Nat} {d : DomC} {a : BArg}
+    (h : BArg.ofDom? s d = some a) :
+    ∀ l ∈ a.fixedLit, d.evalLit l = some false := by
+  rcases ofDom?_cur_cases h with ⟨hf, ht⟩ | ⟨hf, ht⟩ | ⟨hf, ht⟩
+  · have hfv := ofDom?_fixed_false h hf ht
+    have hsa : a.slot = s := ofDom?_slot h
+    intro l hl
+    have hl' : l = posBool s true := by
+      simpa [BArg.fixedLit, BArg.fixedLit?, hf, ht, hsa] using hl
+    subst hl'
+    simpa using DomC.evalLit_posBool_of_fixed (d := d) (s := s) (b := false) hfv
+  · have hfv := ofDom?_fixed_true h hf ht
+    have hsa : a.slot = s := ofDom?_slot h
+    intro l hl
+    have hl' : l = posBool s false := by
+      simpa [BArg.fixedLit, BArg.fixedLit?, hf, ht, hsa] using hl
+    subst hl'
+    simpa using DomC.evalLit_posBool_of_fixed (d := d) (s := s) (b := true) hfv
+  · have hfv := ofDom?_full_fixed_none h hf ht
+    intro l hl
+    simp [BArg.fixedLit, BArg.fixedLit?, hf, ht] at hl
+
+/-- A Boolean literal is unassigned on a full Boolean domain. -/
+theorem ofDom?_evalLit_none_full {s : Nat} {d : DomC} {a : BArg}
+    (h : BArg.ofDom? s d = some a) (hf : a.curF = true) (ht : a.curT = true)
+    (b : Bool) : d.evalLit (posBool a.slot b) = none := by
+  have hfv := ofDom?_full_fixed_none h hf ht
+  simp [DomC.evalLit, posBool, hfv]
+
+end BArg
+
+/-! ## Lists of Boolean operands -/
+
+/-- The evaluator's Boolean view of an operand.  A missing or non-Boolean
+value reads as `false`; on an accepted assignment the source operand of
+`array_bool_and` may be non-Boolean, and `slotIsBoolB` also reads it as
+`false` for the `true` test. -/
+def BArg.valAt (a : BArg) (b : Assignment) : Bool :=
+  match b[a.slot]? with
+  | some (.bool v) => v
+  | _ => false
+
+namespace BArgs
+
+/-- Negated singleton facts of all currently fixed operands. -/
+def fixedLits : List BArg → List Literal
+  | [] => []
+  | a :: as => a.fixedLit ++ fixedLits as
+
+/-- All Boolean tuples in the current box.  Each operand contributes the
+values still present in its current domain. -/
+def enum : List BArg → List (List Bool)
+  | [] => [[]]
+  | a :: as =>
+      (if a.curF then (enum as).map (fun vs => false :: vs) else []) ++
+      (if a.curT then (enum as).map (fun vs => true :: vs) else [])
+
+/-- Pointwise membership in the current Boolean box. -/
+def curVec : List BArg → List Bool → Bool
+  | [], [] => true
+  | a :: as, v :: vs => a.cur v && curVec as vs
+  | _, _ => false
+
+/-- The values of an accepted assignment at a list of Boolean operands. -/
+def valsOf (b : Assignment) (args : List BArg) : List Bool :=
+  args.map (fun a => a.valAt b)
+
+/-- Read a list of operand slots.  A non-Boolean or out-of-range slot
+makes the whole list malformed. -/
+def ofSlots (doms : Array DomC) : List Nat → Option (List BArg)
+  | [] => some []
+  | s :: ss =>
+      match BArg.mk? doms s with
+      | none => none
+      | some a =>
+          match ofSlots doms ss with
+          | none => none
+          | some as => some (a :: as)
+
+/-- Every operand has at least one current Boolean value. -/
+def AllCur (args : List BArg) : Prop :=
+  ∀ a ∈ args, a.curF = true ∨ a.curT = true
+
+theorem ofSlots_map_slot {doms : Array DomC} {slots : List Nat} {args : List BArg}
+    (h : ofSlots doms slots = some args) : args.map BArg.slot = slots := by
+  induction slots generalizing args with
+  | nil =>
+      simp [ofSlots] at h
+      subst args
+      rfl
+  | cons s ss ih =>
+      simp only [ofSlots] at h
+      cases ha : BArg.mk? doms s with
+      | none => rw [ha] at h; cases h
+      | some a =>
+          rw [ha] at h
+          cases hr : ofSlots doms ss with
+          | none => rw [hr] at h; cases h
+          | some as =>
+              rw [hr] at h
+              injection h with hargs
+              subst hargs
+              simp only [List.map_cons, ih hr]
+              rw [BArg.ofDom?_slot ha]
+
+theorem ofSlots_allCur {doms : Array DomC} {slots : List Nat} {args : List BArg}
+    (h : ofSlots doms slots = some args) : AllCur args := by
+  induction slots generalizing args with
+  | nil =>
+      simp [ofSlots] at h
+      subst args
+      intro a ha
+      simp at ha
+  | cons s ss ih =>
+      simp only [ofSlots] at h
+      cases ha : BArg.mk? doms s with
+      | none => rw [ha] at h; cases h
+      | some a =>
+          rw [ha] at h
+          cases hr : ofSlots doms ss with
+          | none => rw [hr] at h; cases h
+          | some as =>
+              rw [hr] at h
+              injection h with hargs
+              subst hargs
+              intro x hx
+              rcases List.mem_cons.mp hx with rfl | hx
+              · rcases BArg.ofDom?_cur_cases ha with h | h | h
+                · exact Or.inl h.1
+                · exact Or.inr h.2
+                · exact Or.inl h.1
+              · exact ih hr x hx
+
+/-- A slot whose view domain is not a nonempty Boolean domain makes the
+whole operand list malformed. -/
+theorem ofSlots_eq_none_of_mem_mk_none {doms : Array DomC} {slots : List Nat}
+    {s : Nat} (hs : s ∈ slots) (hm : BArg.mk? doms s = none) :
+    ofSlots doms slots = none := by
+  induction slots with
+  | nil => simp at hs
+  | cons t ts ih =>
+      rw [List.mem_cons] at hs
+      rcases hs with rfl | hs
+      · simp [ofSlots, hm]
+      · simp only [ofSlots]
+        cases hmt : BArg.mk? doms t with
+        | none => rfl
+        | some a =>
+            simp only [ih hs]
+
+/-- Duplicate operand slots are rejected: a batch that treats two
+positions independently would otherwise be able to prune both values of
+one domain. -/
+def hasDupSlot : List BArg → Bool
+  | [] => false
+  | a :: as => as.any (fun b => b.slot == a.slot) || hasDupSlot as
+
+end BArgs
+
+/-! ## Truth-table support -/
+
+namespace BArgs
+
+/-- Membership in the enumerator, in terms of the current box. -/
+theorem mem_enum_iff {args : List BArg} {vs : List Bool} :
+    vs ∈ enum args ↔ vs.length = args.length ∧ curVec args vs = true := by
+  induction args generalizing vs with
+  | nil =>
+      cases vs <;> simp [enum, curVec]
+  | cons a as ih =>
+      cases vs with
+      | nil => simp [enum]
+      | cons v tl =>
+          by_cases hf : a.curF
+          · by_cases ht : a.curT
+            · cases v <;>
+                simp [enum, hf, ht, List.mem_append, ih, curVec, BArg.cur]
+            · cases v <;>
+                simp [enum, hf, ht, List.mem_append, ih, curVec, BArg.cur]
+          · by_cases ht : a.curT
+            · cases v <;>
+                simp [enum, hf, ht, List.mem_append, ih, curVec, BArg.cur]
+            · cases v <;>
+                simp [enum, hf, ht, List.mem_append, ih, curVec, BArg.cur]
+
+/-- Is there a satisfying tuple in the current box with value `v` at
+position `pos`? -/
+def hasSupport (R : List Bool → Bool) (args : List BArg) (pos : Nat) (v : Bool) : Bool :=
+  (enum args).any (fun vs => (vs.getD pos false == v) && R vs)
+
+/-- Is there any satisfying tuple in the current box? -/
+def hasAnySupport (R : List Bool → Bool) (args : List BArg) : Bool :=
+  (enum args).any R
+
+theorem hasSupport_true {R : List Bool → Bool} {args : List BArg} {pos : Nat} {v : Bool}
+    (h : hasSupport R args pos v = true) :
+    ∃ vs ∈ enum args, vs.getD pos false = v ∧ R vs = true := by
+  unfold hasSupport at h
+  obtain ⟨vs, hvs, hb⟩ := List.any_eq_true.mp h
+  have hb' : (vs.getD pos false == v) = true ∧ R vs = true := by
+    simpa only [Bool.and_eq_true] using hb
+  exact ⟨vs, hvs, beq_iff_eq.mp hb'.1, hb'.2⟩
+
+theorem hasAnySupport_false {R : List Bool → Bool} {args : List BArg}
+    (h : hasAnySupport R args = false) :
+    ∀ vs ∈ enum args, R vs = false := by
+  intro vs hvs
+  have h' := List.any_eq_false.mp h vs hvs
+  simpa using h'
+
+theorem hasSupport_false {R : List Bool → Bool} {args : List BArg}
+    {pos : Nat} {v : Bool} (h : hasSupport R args pos v = false) :
+    ∀ vs ∈ enum args, ((vs.getD pos false == v) && R vs) = false := by
+  intro vs hvs
+  have h' := List.any_eq_false.mp h vs hvs
+  simpa using h'
+
+theorem valsOf_length (b : Assignment) (args : List BArg) :
+    (valsOf b args).length = args.length := by
+  simp [valsOf]
+
+theorem valsOf_getD {b : Assignment} {args : List BArg} {p : Nat}
+    (hp : p < args.length) :
+    (valsOf b args).getD p false = (args.getD p default).valAt b := by
+  unfold valsOf
+  rw [List.getD_eq_getElem?_getD, List.getD_eq_getElem?_getD]
+  simp only [List.getElem?_map]
+  cases h : args[p]? with
+  | none =>
+      rw [List.getElem?_eq_getElem hp] at h
+      cases h
+  | some a =>
+      simp [h]
+
+theorem getD_mem {args : List BArg} {p : Nat} (hp : p < args.length) :
+    args.getD p default ∈ args := by
+  rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hp]
+  exact List.getElem_mem hp
+
+/-- Every literal of `fixedLits` is one of the two `posBool` pins of an
+operand. -/
+theorem mem_fixedLits {args : List BArg} {l : Literal}
+    (h : l ∈ fixedLits args) :
+    ∃ a ∈ args, l = posBool a.slot true ∨ l = posBool a.slot false := by
+  induction args with
+  | nil => simp [fixedLits] at h
+  | cons a as ih =>
+      simp only [fixedLits, List.mem_append] at h
+      rcases h with h | h
+      · by_cases hf : a.curF
+        · by_cases ht : a.curT
+          · simp [BArg.fixedLit, BArg.fixedLit?, hf, ht] at h
+          · simp [BArg.fixedLit, BArg.fixedLit?, hf, ht] at h
+            subst h
+            exact ⟨a, by simp, Or.inl rfl⟩
+        · by_cases ht : a.curT
+          · simp [BArg.fixedLit, BArg.fixedLit?, hf, ht] at h
+            subst h
+            exact ⟨a, by simp, Or.inr rfl⟩
+          · simp [BArg.fixedLit, BArg.fixedLit?, hf, ht] at h
+      · obtain ⟨a', ha', h'⟩ := ih h
+        exact ⟨a', by simp [ha'], h'⟩
+
+end BArgs
+
+namespace BArg
+
+/-- Turn failure of truth for a Boolean pin into falsity on a slot known
+to carry a Boolean value. -/
+theorem eval_posBool_eq_false_of_not_true {b : Assignment} {s : Nat} {x : Bool}
+    (hbool : ∃ v, b[s]? = some (.bool v))
+    (h : (posBool s x).eval b ≠ some true) :
+    (posBool s x).eval b = some false := by
+  obtain ⟨v, hv⟩ := hbool
+  have hne : v ≠ x := by
+    intro hveq
+    apply h
+    rw [eval_posBool_iff]
+    simpa [hveq] using hv
+  rw [eval_posBool_false_iff]
+  exact ⟨v, hv, hne⟩
+
+end BArg
+
+namespace BArgs
+
+theorem fixedLits_false_of_not_true {args : List BArg} {b : Assignment}
+    (hbool : ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (hnot : ∀ l ∈ fixedLits args, l.eval b ≠ some true) :
+    ∀ l ∈ fixedLits args, l.eval b = some false := by
+  intro l hl
+  obtain ⟨a, ha, rfl | rfl⟩ := mem_fixedLits hl
+  · exact BArg.eval_posBool_eq_false_of_not_true (hbool a ha) (hnot _ hl)
+  · exact BArg.eval_posBool_eq_false_of_not_true (hbool a ha) (hnot _ hl)
+
+end BArgs
+
+namespace BArg
+
+/-- `valAt` is true exactly when the slot carries Boolean `true`. -/
+theorem valAt_eq_true_iff {a : BArg} {b : Assignment} :
+    a.valAt b = true ↔ b[a.slot]? = some (.bool true) := by
+  unfold valAt
+  cases h : b[a.slot]? with
+  | none => simp
+  | some v =>
+      cases v with
+      | bool x => cases x <;> simp [h]
+      | int x => simp [h]
+      | setOfInt x => simp [h]
+      | array x => simp [h]
+
+/-- The Boolean reading of an operand is the actual value when the slot
+carries a Boolean. -/
+theorem valAt_eq_of_some_bool {a : BArg} {b : Assignment} {v : Bool}
+    (h : b[a.slot]? = some (.bool v)) : a.valAt b = v := by
+  unfold valAt
+  rw [h]
+
+/-- The Boolean reading of an operand is exactly the executable
+`slotIsBoolB` test used by `array_bool_and`: non-Boolean and missing
+values both read as `false`. -/
+theorem valAt_eq_slotIsBoolB (a : BArg) (b : Assignment) :
+    a.valAt b = slotIsBoolB b a.slot true := by
+  unfold valAt slotIsBoolB
+  cases h : b[a.slot]? with
+  | none => rfl
+  | some v =>
+      cases v with
+      | bool x => cases x <;> rfl
+      | int x => rfl
+      | setOfInt x => rfl
+      | array x => rfl
+
+/-- Every literal in an operand's fixed facts pins that operand's slot. -/
+theorem slot_of_mem_fixedLit {a : BArg} {l : Literal}
+    (h : l ∈ a.fixedLit) : l.atom.slot = a.slot := by
+  unfold BArg.fixedLit at h
+  cases hf : a.fixedLit? with
+  | none => rw [hf] at h; simp at h
+  | some x =>
+      rw [hf, Option.toList_some] at h
+      simp only [List.mem_singleton] at h
+      subst h
+      unfold BArg.fixedLit? at hf
+      split at hf
+      · injection hf with hx
+        subst hx
+        rfl
+      · split at hf
+        · injection hf with hx
+          subst hx
+          rfl
+        · cases hf
+
+/-- A current operand containing `false` keeps `false` on a Boolean
+assignment whose fixed facts are false. -/
+theorem cur_false_of_fixedLits_false {a : BArg} {b : Assignment}
+    (ha : a.curF = true ∨ a.curT = true)
+    (hb : b[a.slot]? = some (.bool false))
+    (hfalse : ∀ l ∈ a.fixedLit, l.eval b = some false) :
+    a.cur false = true := by
+  simp only [BArg.cur, Bool.false_eq_true, ↓reduceIte]
+  by_cases hf : a.curF = true
+  · exact hf
+  · have ht : a.curT = true := by
+      rcases ha with h | h
+      · exact absurd h hf
+      · exact h
+    have hl : posBool a.slot false ∈ a.fixedLit := by
+      simp [BArg.fixedLit, BArg.fixedLit?, hf, ht]
+    have hff := hfalse _ hl
+    rw [eval_posBool_false_iff] at hff
+    obtain ⟨x, hx, hne⟩ := hff
+    rw [hb] at hx
+    injection hx with hx
+    cases hx
+    exact absurd rfl hne
+
+/-- A current operand containing `true` keeps `true` on a Boolean
+assignment whose fixed facts are false. -/
+theorem cur_true_of_fixedLits_false {a : BArg} {b : Assignment}
+    (ha : a.curF = true ∨ a.curT = true)
+    (hb : b[a.slot]? = some (.bool true))
+    (hfalse : ∀ l ∈ a.fixedLit, l.eval b = some false) :
+    a.cur true = true := by
+  simp only [BArg.cur, ↓reduceIte]
+  by_cases ht : a.curT = true
+  · exact ht
+  · have hf : a.curF = true := by
+      rcases ha with h | h
+      · exact h
+      · exact absurd h ht
+    have hl : posBool a.slot true ∈ a.fixedLit := by
+      simp [BArg.fixedLit, BArg.fixedLit?, hf, ht]
+    have hff := hfalse _ hl
+    rw [eval_posBool_false_iff] at hff
+    obtain ⟨x, hx, hne⟩ := hff
+    rw [hb] at hx
+    injection hx with hx
+    cases hx
+    exact absurd rfl hne
+
+/-- A false fixed fact determines the Boolean value of the operand. -/
+theorem valAt_of_fixed_false {a : BArg} {b : Assignment}
+    (hf : a.curF = true) (ht : a.curT = false)
+    (hfalse : ∀ l ∈ a.fixedLit, l.eval b = some false) :
+    a.valAt b = false := by
+  have hl : posBool a.slot true ∈ a.fixedLit := by
+    simp [BArg.fixedLit, BArg.fixedLit?, hf, ht]
+  have hff := hfalse _ hl
+  rw [eval_posBool_false_iff] at hff
+  obtain ⟨x, hx, hne⟩ := hff
+  have hx' : x = false := by cases x <;> simp_all
+  subst hx'
+  simp [BArg.valAt, hx]
+
+/-- A false fixed fact determines the Boolean value of the operand. -/
+theorem valAt_of_fixed_true {a : BArg} {b : Assignment}
+    (hf : a.curF = false) (ht : a.curT = true)
+    (hfalse : ∀ l ∈ a.fixedLit, l.eval b = some false) :
+    a.valAt b = true := by
+  have hl : posBool a.slot false ∈ a.fixedLit := by
+    simp [BArg.fixedLit, BArg.fixedLit?, hf, ht]
+  have hff := hfalse _ hl
+  rw [eval_posBool_false_iff] at hff
+  obtain ⟨x, hx, hne⟩ := hff
+  have hx' : x = true := by cases x <;> simp_all
+  subst hx'
+  simp [BArg.valAt, hx]
+
+/-- Every current value of an operand stays current when all fixed facts
+are false: fixed operands are forced to their remaining value, and full
+operands contain both values. -/
+theorem cur_valAt_of_fixedLits_false {a : BArg} {b : Assignment}
+    (ha : a.curF = true ∨ a.curT = true)
+    (hfalse : ∀ l ∈ a.fixedLit, l.eval b = some false) :
+    a.cur (a.valAt b) = true := by
+  by_cases hf : a.curF = true
+  · by_cases ht : a.curT = true
+    · simp [BArg.cur, hf, ht]
+    · have ht' : a.curT = false := by simpa using ht
+      have hv := valAt_of_fixed_false hf ht' hfalse
+      rw [hv]
+      simp [BArg.cur, hf]
+  · have hf' : a.curF = false := by simpa using hf
+    have ht : a.curT = true := by
+      rcases ha with h | h
+      · exact absurd h hf
+      · exact h
+    have hv := valAt_of_fixed_true hf' ht hfalse
+    rw [hv]
+    simp [BArg.cur, ht]
+
+end BArg
+
+namespace BArgs
+
+/-- If all fixed facts are false, the assignment's Boolean tuple lies in
+the current box.  No hypothesis on the assignment is needed beyond the
+false fixed facts: those already force the corresponding Boolean
+values. -/
+theorem curVec_valsOf_of_fixedLits_false {args : List BArg} {b : Assignment}
+    (hcur : AllCur args)
+    (hfalse : ∀ l ∈ fixedLits args, l.eval b = some false) :
+    curVec args (valsOf b args) = true := by
+  induction args with
+  | nil => simp [curVec, valsOf]
+  | cons a as ih =>
+      simp only [curVec, valsOf, List.map_cons]
+      have ha : a.curF = true ∨ a.curT = true := hcur a (by simp)
+      have hfalsea : ∀ l ∈ a.fixedLit, l.eval b = some false := by
+        intro l hl
+        exact hfalse l (by simp [fixedLits, hl])
+      rw [BArg.cur_valAt_of_fixedLits_false ha hfalsea]
+      simp only [Bool.true_and]
+      exact ih
+        (fun x hx => hcur x (by simp [hx]))
+        (fun l hl => hfalse l (by simp [fixedLits, hl]))
+
+end BArgs
+
+/-! ## Support plans and their output -/
+
+/-- One proposed value removal with its decoded reason.  `pos` is the
+operand position in the plan's argument list. -/
+structure BPrune where
+  pos : Nat
+  slot : Nat
+  val : Bool
+  lit : Literal
+  reason : Clause
+
+/-- A view-independent Boolean propagation plan. -/
+structure BPlan where
+  conflict? : Option (List Literal)
+  prunes : List BPrune
+
+namespace BArgs
+
+/-- Remove every current value with no satisfying completion. -/
+def mkPrunes (R : List Bool → Bool) (args : List BArg) : List BPrune :=
+  (List.range args.length).flatMap fun p =>
+    let a := args.getD p default
+    (if a.curF && !hasSupport R args p false then
+      [{ pos := p, slot := a.slot, val := false,
+         lit := posBool a.slot true,
+         reason := posBool a.slot true :: fixedLits args }]
+     else []) ++
+    (if a.curT && !hasSupport R args p true then
+      [{ pos := p, slot := a.slot, val := true,
+         lit := posBool a.slot false,
+         reason := posBool a.slot false :: fixedLits args }]
+     else [])
+
+/-- Conflict when there is no satisfying tuple, otherwise prune every
+unsupported current Boolean value. -/
+def mkPlan (R : List Bool → Bool) (args : List BArg) : BPlan :=
+  if hasAnySupport R args then
+    { conflict? := none, prunes := mkPrunes R args }
+  else
+    { conflict? := some (fixedLits args), prunes := [] }
+
+/-- Every entry of `mkPrunes` arose from a position and one of the two
+current values, with the exact reason shape. -/
+theorem mem_mkPrunes {R : List Bool → Bool} {args : List BArg} {bp : BPrune}
+    (h : bp ∈ mkPrunes R args) :
+    (∃ p, p < args.length ∧ (args.getD p default).curF = true ∧
+      hasSupport R args p false = false ∧
+      bp = { pos := p, slot := (args.getD p default).slot, val := false,
+             lit := posBool (args.getD p default).slot true,
+             reason := posBool (args.getD p default).slot true :: fixedLits args }) ∨
+    (∃ p, p < args.length ∧ (args.getD p default).curT = true ∧
+      hasSupport R args p true = false ∧
+      bp = { pos := p, slot := (args.getD p default).slot, val := true,
+             lit := posBool (args.getD p default).slot false,
+             reason := posBool (args.getD p default).slot false :: fixedLits args }) := by
+  unfold mkPrunes at h
+  rw [List.mem_flatMap] at h
+  obtain ⟨p, hp, hbp⟩ := h
+  rw [List.mem_range] at hp
+  simp only [List.mem_append] at hbp
+  rcases hbp with hbp | hbp
+  · by_cases hf : ((args.getD p default).curF && !hasSupport R args p false) = true
+    · have hf2 : (args.getD p default).curF = true ∧
+          (!hasSupport R args p false) = true := by
+        simpa only [Bool.and_eq_true] using hf
+      rw [if_pos hf] at hbp
+      simp only [List.mem_singleton] at hbp
+      subst bp
+      exact Or.inl ⟨p, hp, hf2.1, by simpa using hf2.2, rfl⟩
+    · rw [if_neg hf] at hbp
+      simp at hbp
+  · by_cases ht : ((args.getD p default).curT && !hasSupport R args p true) = true
+    · have ht2 : (args.getD p default).curT = true ∧
+          (!hasSupport R args p true) = true := by
+        simpa only [Bool.and_eq_true] using ht
+      rw [if_pos ht] at hbp
+      simp only [List.mem_singleton] at hbp
+      subst bp
+      exact Or.inr ⟨p, hp, ht2.1, by simpa using ht2.2, rfl⟩
+    · rw [if_neg ht] at hbp
+      simp at hbp
+
+/-- The conflict clause of a support plan is entailed whenever every
+accepted assignment satisfies the relation and reads Boolean values at
+all operands. -/
+theorem mkPlan_conflict_entailed (p : CompiledProblem DomConstraint)
+    (R : List Bool → Bool) (args : List BArg) (ls : List Literal)
+    (hR : ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      R (valsOf b args) = true)
+    (hbool : ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (hcur : AllCur args)
+    (hls : (mkPlan R args).conflict? = some ls) :
+    Entailed p ls := by
+  intro b hb hacc
+  by_cases hany : hasAnySupport R args = true
+  · simp [mkPlan, hany] at hls
+  · have hls' : fixedLits args = ls := by simpa [mkPlan, hany] using hls
+    subst hls'
+    by_cases hsat : Clause.SatisfiedBy (fixedLits args) b
+    · exact hsat
+    · exfalso
+      have hnot : ∀ l ∈ fixedLits args, l.eval b ≠ some true := by
+        intro l hl ht
+        exact hsat ⟨l, hl, ht⟩
+      have hfalse := fixedLits_false_of_not_true (hbool b hb hacc) hnot
+      have hcv := curVec_valsOf_of_fixedLits_false hcur hfalse
+      have hmem : valsOf b args ∈ enum args :=
+        mem_enum_iff.mpr ⟨valsOf_length b args, hcv⟩
+      have hanyf : hasAnySupport R args = false := by simpa using hany
+      have hr := hR b hb hacc
+      have hf := hasAnySupport_false hanyf _ hmem
+      rw [hr] at hf
+      exact Bool.noConfusion hf
+
+/-- Every reason produced by `mkPrunes` is entailed under the same
+relation and Boolean-value hypotheses. -/
+theorem mkPrunes_reason_entailed (p : CompiledProblem DomConstraint)
+    (R : List Bool → Bool) (args : List BArg)
+    (hR : ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      R (valsOf b args) = true)
+    (hbool : ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (hcur : AllCur args) {bp : BPrune}
+    (hbp : bp ∈ mkPrunes R args) :
+    Entailed p bp.reason := by
+  intro b hb hacc
+  by_cases hsat : Clause.SatisfiedBy bp.reason b
+  · exact hsat
+  · exfalso
+    have hr := hR b hb hacc
+    rcases mem_mkPrunes hbp with
+      ⟨pos, hpos, _hcurF, hsupp, rfl⟩ |
+      ⟨pos, hpos, _hcurT, hsupp, rfl⟩
+    · have hhead : (posBool (args.getD pos default).slot true).eval b ≠ some true := by
+        intro ht
+        exact hsat ⟨_, List.mem_cons_self, ht⟩
+      have htail : ∀ l ∈ fixedLits args, l.eval b ≠ some true := by
+        intro l hl ht
+        exact hsat ⟨l, List.mem_cons_of_mem _ hl, ht⟩
+      have hbarg : ∃ v, b[(args.getD pos default).slot]? = some (.bool v) :=
+        hbool b hb hacc _ (getD_mem hpos)
+      have hheadf := BArg.eval_posBool_eq_false_of_not_true hbarg hhead
+      rw [eval_posBool_false_iff] at hheadf
+      obtain ⟨x, hx, hne⟩ := hheadf
+      have hx' : x = false := by cases x <;> simp_all
+      subst hx'
+      have hfalse := fixedLits_false_of_not_true (hbool b hb hacc) htail
+      have hcv := curVec_valsOf_of_fixedLits_false hcur hfalse
+      have hmem : valsOf b args ∈ enum args :=
+        mem_enum_iff.mpr ⟨valsOf_length b args, hcv⟩
+      have hx' : b[(args[pos]?.getD default).slot]? = some (.bool false) := by
+        simpa [List.getD_eq_getElem?_getD] using hx
+      have hget : (valsOf b args).getD pos false = false := by
+        rw [valsOf_getD hpos]
+        simp [BArg.valAt, List.getD_eq_getElem?_getD, hx']
+      have hb1 : ((valsOf b args).getD pos false == false) = true := by
+        rw [hget]
+        simp
+      have hbad := hasSupport_false hsupp _ hmem
+      rw [hb1, hr] at hbad
+      exact Bool.noConfusion hbad
+    · have hhead : (posBool (args.getD pos default).slot false).eval b ≠ some true := by
+        intro ht
+        exact hsat ⟨_, List.mem_cons_self, ht⟩
+      have htail : ∀ l ∈ fixedLits args, l.eval b ≠ some true := by
+        intro l hl ht
+        exact hsat ⟨l, List.mem_cons_of_mem _ hl, ht⟩
+      have hbarg : ∃ v, b[(args.getD pos default).slot]? = some (.bool v) :=
+        hbool b hb hacc _ (getD_mem hpos)
+      have hheadf := BArg.eval_posBool_eq_false_of_not_true hbarg hhead
+      rw [eval_posBool_false_iff] at hheadf
+      obtain ⟨x, hx, hne⟩ := hheadf
+      have hx' : x = true := by cases x <;> simp_all
+      subst hx'
+      have hfalse := fixedLits_false_of_not_true (hbool b hb hacc) htail
+      have hcv := curVec_valsOf_of_fixedLits_false hcur hfalse
+      have hmem : valsOf b args ∈ enum args :=
+        mem_enum_iff.mpr ⟨valsOf_length b args, hcv⟩
+      have hx' : b[(args[pos]?.getD default).slot]? = some (.bool true) := by
+        simpa [List.getD_eq_getElem?_getD] using hx
+      have hget : (valsOf b args).getD pos false = true := by
+        rw [valsOf_getD hpos]
+        simp [BArg.valAt, List.getD_eq_getElem?_getD, hx']
+      have hb1 : ((valsOf b args).getD pos false == true) = true := by
+        rw [hget]
+        simp
+      have hbad := hasSupport_false hsupp _ hmem
+      rw [hb1, hr] at hbad
+      exact Bool.noConfusion hbad
+
+/-- Every prune reason in `mkPlan` is entailed. -/
+theorem mkPlan_prunes_entailed (p : CompiledProblem DomConstraint)
+    (R : List Bool → Bool) (args : List BArg)
+    (hR : ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      R (valsOf b args) = true)
+    (hbool : ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (hcur : AllCur args) {q : BPrune}
+    (hq : q ∈ (mkPlan R args).prunes) :
+    Entailed p q.reason := by
+  by_cases hany : hasAnySupport R args = true
+  · exact mkPrunes_reason_entailed p R args hR hbool hcur
+      (by simpa [mkPlan, hany] using hq)
+  · simp [mkPlan, hany] at hq
+
+end BArgs
+
+namespace BPlan
+
+/-- Turn a support plan into a `PropOut`, attaching the supplied
+entailment proofs for the conflict clause and every prune reason. -/
+def out (p : CompiledProblem DomConstraint) (T : LitTable) (plan : BPlan)
+    (hconf : ∀ ls, plan.conflict? = some ls → Entailed p ls)
+    (hprune : ∀ q ∈ plan.prunes, Entailed p q.reason) : PropOut p T :=
+  match hc : plan.conflict? with
+  | some ls => .conflict (EClause.ofLiterals p T ls (hconf ls hc))
+  | none =>
+      match _hp : plan.prunes with
+      | [] => .fix
+      | _ :: _ =>
+          .prune ((plan.prunes.attach.map fun q =>
+            (pLit q.1.lit,
+              EClause.ofLiterals p T q.1.reason
+                (hprune q.1 q.2))).toArray)
+
+theorem out_run_conflict (p : CompiledProblem DomConstraint) (T : LitTable)
+    (plan : BPlan)
+    (hconf : ∀ ls, plan.conflict? = some ls → Entailed p ls)
+    (hprune : ∀ q ∈ plan.prunes, Entailed p q.reason)
+    {ec : EClause p T}
+    (h : plan.out p T hconf hprune = .conflict ec) :
+    ∃ ls, plan.conflict? = some ls ∧ T.decodeClause ec.lits = ls ∧
+      Entailed p ls := by
+  unfold BPlan.out at h
+  split at h
+  · rename_i ls hls
+    injection h with hec
+    subst hec
+    exact ⟨ls, hls, LitTable.decodeClause_map_pLit T ls, hconf ls hls⟩
+  · split at h <;> cases h
+
+theorem out_run_prune (p : CompiledProblem DomConstraint) (T : LitTable)
+    (plan : BPlan)
+    (hconf : ∀ ls, plan.conflict? = some ls → Entailed p ls)
+    (hprune : ∀ q ∈ plan.prunes, Entailed p q.reason)
+    {ps : Array (PLit × EClause p T)}
+    (h : plan.out p T hconf hprune = .prune ps) :
+    plan.conflict? = none ∧ plan.prunes ≠ [] ∧
+      (∀ q ∈ ps.toList, ∃ q' ∈ plan.prunes,
+        q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+          Entailed p q'.reason) := by
+  unfold BPlan.out at h
+  split at h
+  · cases h
+  · rename_i hc
+    split at h
+    · cases h
+    · rename_i ps0 hps0
+      injection h with hps
+      subst hps
+      refine ⟨hc, by simp [hps0], ?_⟩
+      intro q hq
+      rw [Array.mem_toList_iff, List.mem_toArray, List.mem_map] at hq
+      obtain ⟨y, hy, rfl⟩ := hq
+      refine ⟨y.1, y.2, rfl, ?_, ?_⟩
+      · change T.decodeClause (Array.map pLit y.1.reason.toArray) = y.1.reason
+        exact LitTable.decodeClause_map_pLit T y.1.reason
+      · exact hprune y.1 y.2
+
+theorem out_run_fix_of_no_prunes (p : CompiledProblem DomConstraint) (T : LitTable)
+    (plan : BPlan)
+    (hconf : ∀ ls, plan.conflict? = some ls → Entailed p ls)
+    (hprune : ∀ q ∈ plan.prunes, Entailed p q.reason)
+    (hc : plan.conflict? = none) (hp : plan.prunes = []) :
+    plan.out p T hconf hprune = .fix := by
+  unfold BPlan.out
+  split
+  · rename_i ls hls
+    rw [hc] at hls
+    cases hls
+  · split
+    · rfl
+    · rename_i ps0 hps0
+      rw [hp] at hps0
+      cases hps0
+
+end BPlan
+
+/-! ## Fixed-arity operand shapes and relation specifications -/
+
+namespace BArgs
+
+/-- The two operands of a binary constraint. -/
+theorem ofSlots_two {doms : Array DomC} {i j : Nat} {args : List BArg}
+    (h : ofSlots doms [i, j] = some args) :
+    ∃ a b, args = [a, b] ∧ a.slot = i ∧ b.slot = j := by
+  have hmap := ofSlots_map_slot h
+  have hlen : args.length = 2 := by
+    have := congrArg List.length hmap
+    simpa using this
+  cases args with
+  | nil => simp at hlen
+  | cons a as =>
+      cases as with
+      | nil => simp at hlen
+      | cons b bs =>
+          cases bs with
+          | nil =>
+              have h1 : a.slot = i := by
+                have := congrArg (fun l : List Nat => l[0]?) hmap
+                simpa using this
+              have h2 : b.slot = j := by
+                have := congrArg (fun l : List Nat => l[1]?) hmap
+                simpa using this
+              exact ⟨a, b, rfl, h1, h2⟩
+          | cons c cs => simp at hlen
+
+/-- The three operands of a ternary constraint. -/
+theorem ofSlots_three {doms : Array DomC} {i j k : Nat} {args : List BArg}
+    (h : ofSlots doms [i, j, k] = some args) :
+    ∃ a b c, args = [a, b, c] ∧ a.slot = i ∧ b.slot = j ∧ c.slot = k := by
+  have hmap := ofSlots_map_slot h
+  have hlen : args.length = 3 := by
+    have := congrArg List.length hmap
+    simpa using this
+  cases args with
+  | nil => simp at hlen
+  | cons a as =>
+      cases as with
+      | nil => simp at hlen
+      | cons b bs =>
+          cases bs with
+          | nil => simp at hlen
+          | cons c cs =>
+              cases cs with
+              | nil =>
+                  have h1 : a.slot = i := by
+                    have := congrArg (fun l : List Nat => l[0]?) hmap
+                    simpa using this
+                  have h2 : b.slot = j := by
+                    have := congrArg (fun l : List Nat => l[1]?) hmap
+                    simpa using this
+                  have h3 : c.slot = k := by
+                    have := congrArg (fun l : List Nat => l[2]?) hmap
+                    simpa using this
+                  exact ⟨a, b, c, rfl, h1, h2, h3⟩
+              | cons d ds => simp at hlen
+
+/-- The array operand list splits into the sources and the single result
+slot. -/
+theorem ofSlots_array : ∀ (is : List Nat) {k : Nat} {args : List BArg}
+    {doms : Array DomC}, ofSlots doms (is ++ [k]) = some args →
+      ∃ src ak, args = src ++ [ak] ∧ src.map BArg.slot = is ∧ ak.slot = k := by
+  intro is
+  induction is with
+  | nil =>
+      intro k args doms h
+      simp only [List.nil_append] at h
+      cases ha : BArg.mk? doms k with
+      | none => simp [ofSlots, ha] at h
+      | some ak =>
+          have hargs : args = [ak] := by simpa [ofSlots, ha] using h.symm
+          subst hargs
+          exact ⟨[], ak, rfl, rfl, BArg.ofDom?_slot ha⟩
+  | cons s ss ih =>
+      intro k args doms h
+      simp only [List.cons_append] at h
+      cases ha : BArg.mk? doms s with
+      | none => simp [ofSlots, ha] at h
+      | some a =>
+          cases hr : ofSlots doms (ss ++ [k]) with
+          | none => simp [ofSlots, ha, hr] at h
+          | some rest =>
+              have hargs : args = a :: rest := by
+                simpa [ofSlots, ha, hr] using h.symm
+              subst hargs
+              obtain ⟨src, ak, rfl, hmap, hk⟩ := ih hr
+              exact ⟨a :: src, ak, rfl,
+                by simp [BArg.ofDom?_slot ha, hmap], hk⟩
+
+/-- A full plan computation: no operands for malformed views or duplicate
+operand slots, otherwise the support plan. -/
+def planOf (R : List Bool → Bool) (slots : List Nat) (doms : Array DomC) :
+    Option (List BArg × BPlan) :=
+  match ofSlots doms slots with
+  | none => none
+  | some args =>
+      if hasDupSlot args then none else some (args, mkPlan R args)
+
+theorem planOf_some {R : List Bool → Bool} {slots : List Nat}
+    {doms : Array DomC} {args : List BArg} {plan : BPlan}
+    (h : planOf R slots doms = some (args, plan)) :
+    ofSlots doms slots = some args ∧ hasDupSlot args = false ∧
+      plan = mkPlan R args := by
+  unfold planOf at h
+  cases hf : ofSlots doms slots with
+  | none => rw [hf] at h; cases h
+  | some args0 =>
+      rw [hf] at h
+      change (if hasDupSlot args0 = true then none
+        else some (args0, mkPlan R args0)) = some (args, plan) at h
+      by_cases hd : hasDupSlot args0 = true
+      · rw [if_pos hd] at h; cases h
+      · rw [if_neg hd] at h
+        injection h with hpair
+        injection hpair with hargs hpl
+        subst hargs
+        subst hpl
+        exact ⟨rfl, by simpa using hd, rfl⟩
+
+/-- A non-conflicting plan is exactly the support-prune list. -/
+theorem planOf_prunes_eq {R : List Bool → Bool} {slots : List Nat}
+    {doms : Array DomC} {args : List BArg} {plan : BPlan}
+    (h : planOf R slots doms = some (args, plan))
+    (hc : plan.conflict? = none) :
+    plan.prunes = mkPrunes R args := by
+  obtain ⟨_hargs, _hdup, rfl⟩ := planOf_some h
+  unfold mkPlan at hc ⊢
+  by_cases hany : hasAnySupport R args = true
+  · simp [hany]
+  · simp [hany] at hc
+
+end BArgs
+
+/-- Relation of `bool_not`: the second operand is the negation of the
+first. -/
+def boolNotR (vs : List Bool) : Bool :=
+  vs.getD 1 false == !(vs.getD 0 false)
+
+/-- Relation of `bool_and`: the third operand is the conjunction of the
+first two. -/
+def boolAndR (vs : List Bool) : Bool :=
+  vs.getD 2 false == (vs.getD 0 false && vs.getD 1 false)
+
+/-- Relation of `bool_or`: the third operand is the disjunction of the
+first two. -/
+def boolOrR (vs : List Bool) : Bool :=
+  vs.getD 2 false == (vs.getD 0 false || vs.getD 1 false)
+
+/-- Relation of `bool_eq`: the two operands agree. -/
+def boolEqR (vs : List Bool) : Bool :=
+  vs.getD 0 false == vs.getD 1 false
+
+/-- Relation of `array_bool_and`: the last operand is the conjunction of
+the first `n` operands.  The `take` formulation avoids index arithmetic in
+the soundness proof. -/
+def arrayBoolAndR (n : Nat) (vs : List Bool) : Bool :=
+  vs.getD n false == (vs.take n).all id
+
+/-- `getD` of the appended last element at its own index. -/
+theorem getD_append_singleton_self (vs : List Bool) (x : Bool) :
+    (vs ++ [x]).getD vs.length false = x := by
+  induction vs with
+  | nil => rfl
+  | cons v vs ih =>
+      simp only [List.cons_append, List.length_cons, List.getD_cons_succ]
+      exact ih
+
+namespace BArgs
+
+/-- Runtime guard: the initial compiled domain of a slot is a Boolean
+domain.  `array_bool_and` sources need this because the leaf semantics
+treats a non-Boolean source as `false`, while the Boolean support box only
+describes Boolean values. -/
+def initBoolB (p : CompiledProblem DomConstraint) (s : Nat) : Bool :=
+  match DomC.ofDom? (p.domains.getD s Dom.empty) with
+  | some (.bool _) => true
+  | _ => false
+
+theorem initBoolB_some {p : CompiledProblem DomConstraint} {s : Nat}
+    (h : initBoolB p s = true) :
+    ∃ bits, DomC.ofDom? (p.domains.getD s Dom.empty) = some (.bool bits) := by
+  unfold initBoolB at h
+  rw [List.getD_eq_getElem?_getD] at h
+  cases hd : p.domains[s]? with
+  | none =>
+      have hget : (p.domains[s]?).getD Dom.empty = Dom.empty := by simp [hd]
+      rw [hget] at h
+      rw [DomC.ofDom?_empty] at h
+      simp at h
+  | some d =>
+      have hget : (p.domains[s]?).getD Dom.empty = d := by simp [hd]
+      rw [hget] at h
+      cases hc : DomC.ofDom? d with
+      | none => simp [hc] at h
+      | some c =>
+          cases c with
+          | bool bits =>
+              refine ⟨bits, ?_⟩
+              rw [List.getD_eq_getElem?_getD, hget]
+              exact hc
+          | bounds lo hi => simp [hc] at h
+          | bitset lo words => simp [hc] at h
+          | boundsHoles lo hi holes => simp [hc] at h
+
+theorem exists_bool_of_mem_bool {bits : UInt8} {v : Value}
+    (h : (DomC.bool bits).mem v = true) : ∃ b, v = .bool b := by
+  cases v <;> simp [DomC.mem] at h ⊢
+
+/-- A Boolean initial domain forces a Boolean value at that slot in every
+enumerated assignment. -/
+theorem mem_getD_bool_of_init {p : CompiledProblem DomConstraint}
+    {b : Assignment} {s : Nat} {bits : UInt8}
+    (hb : b ∈ allAssigns p.domains)
+    (hconv : DomC.ofDom? (p.domains.getD s Dom.empty) = some (.bool bits)) :
+    ∃ v, b[s]? = some (.bool v) := by
+  have hfit := allAssigns_fits_dom p.domains b hb
+  have hslt : s < p.domains.length := by
+    apply Nat.lt_of_not_le
+    intro hle
+    have hnone : p.domains[s]? = none := List.getElem?_eq_none hle
+    rw [List.getD_eq_getElem?_getD, hnone] at hconv
+    change DomC.ofDom? Dom.empty = some (.bool bits) at hconv
+    rw [DomC.ofDom?_empty] at hconv
+    cases hconv
+  have hsblt : s < b.length := by rw [hfit.1]; exact hslt
+  obtain ⟨v, hv⟩ : ∃ v, b[s]? = some v := ⟨b[s], List.getElem?_eq_getElem hsblt⟩
+  have hvdom : v ∈ p.domains.getD s Dom.empty := hfit.2 s v hv
+  have hmem : (DomC.bool bits).mem v = true :=
+    (DomC.mem_iff _ _ hconv v).mpr hvdom
+  obtain ⟨bv, rfl⟩ := exists_bool_of_mem_bool hmem
+  exact ⟨bv, hv⟩
+
+/-- Every accepted assignment reads the operands of `bool_not` as Boolean
+and satisfies the truth-table relation. -/
+theorem boolNotR_spec (p : CompiledProblem DomConstraint) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints)
+    (doms : Array DomC) (args : List BArg)
+    (hargs : ofSlots doms [i, j] = some args) :
+    ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      boolNotR (valsOf b args) = true ∧
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v) := by
+  intro b hb hacc
+  obtain ⟨a1, a2, rfl, hs1, hs2⟩ := ofSlots_two hargs
+  have hsat : (DomConstraint.boolNotSlot i j).satisfiedB b = true :=
+    List.all_eq_true.mp hacc _ hmem
+  obtain ⟨x, y, hbi, hbj, hxy⟩ := (DomConstraint.satisfiedB_iff _ _).mp hsat
+  have hbi1 : b[a1.slot]? = some x := by rwa [hs1]
+  have hbj2 : b[a2.slot]? = some y := by rwa [hs2]
+  constructor
+  · rcases hxy with ⟨hx, hy⟩ | ⟨hx, hy⟩
+    · subst x; subst y
+      have hv1 : a1.valAt b = true := BArg.valAt_eq_of_some_bool hbi1
+      have hv2 : a2.valAt b = false := BArg.valAt_eq_of_some_bool hbj2
+      simp [valsOf, boolNotR, hv1, hv2]
+    · subst x; subst y
+      have hv1 : a1.valAt b = false := BArg.valAt_eq_of_some_bool hbi1
+      have hv2 : a2.valAt b = true := BArg.valAt_eq_of_some_bool hbj2
+      simp [valsOf, boolNotR, hv1, hv2]
+  · intro a ha
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at ha
+    rcases hxy with ⟨hx, hy⟩ | ⟨hx, hy⟩
+    · subst x; subst y
+      rcases ha with rfl | rfl
+      · exact ⟨true, by rwa [hs1]⟩
+      · exact ⟨false, by rwa [hs2]⟩
+    · subst x; subst y
+      rcases ha with rfl | rfl
+      · exact ⟨false, by rwa [hs1]⟩
+      · exact ⟨true, by rwa [hs2]⟩
+
+/-- Every accepted assignment reads the operands of `bool_and` as Boolean
+and satisfies the truth-table relation. -/
+theorem boolAndR_spec (p : CompiledProblem DomConstraint) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints)
+    (doms : Array DomC) (args : List BArg)
+    (hargs : ofSlots doms [i, j, k] = some args) :
+    ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      boolAndR (valsOf b args) = true ∧
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v) := by
+  intro b hb hacc
+  obtain ⟨a1, a2, a3, rfl, hs1, hs2, hs3⟩ := ofSlots_three hargs
+  have hsat : (DomConstraint.boolAndSlot i j k).satisfiedB b = true :=
+    List.all_eq_true.mp hacc _ hmem
+  obtain ⟨x, y, z, hbi, hbj, hbk, hrel⟩ :=
+    (DomConstraint.satisfiedB_iff _ _).mp hsat
+  have hbi1 : b[a1.slot]? = some (.bool x) := by rwa [hs1]
+  have hbj2 : b[a2.slot]? = some (.bool y) := by rwa [hs2]
+  have hbk3 : b[a3.slot]? = some (.bool z) := by rwa [hs3]
+  constructor
+  · have hv1 : a1.valAt b = x := BArg.valAt_eq_of_some_bool hbi1
+    have hv2 : a2.valAt b = y := BArg.valAt_eq_of_some_bool hbj2
+    have hv3 : a3.valAt b = z := BArg.valAt_eq_of_some_bool hbk3
+    simp [valsOf, boolAndR, hv1, hv2, hv3, hrel]
+  · intro a ha
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at ha
+    rcases ha with rfl | rfl | rfl
+    · exact ⟨x, hbi1⟩
+    · exact ⟨y, hbj2⟩
+    · exact ⟨z, hbk3⟩
+
+/-- Every accepted assignment reads the operands of `bool_or` as Boolean
+and satisfies the truth-table relation. -/
+theorem boolOrR_spec (p : CompiledProblem DomConstraint) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints)
+    (doms : Array DomC) (args : List BArg)
+    (hargs : ofSlots doms [i, j, k] = some args) :
+    ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      boolOrR (valsOf b args) = true ∧
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v) := by
+  intro b hb hacc
+  obtain ⟨a1, a2, a3, rfl, hs1, hs2, hs3⟩ := ofSlots_three hargs
+  have hsat : (DomConstraint.boolOrSlot i j k).satisfiedB b = true :=
+    List.all_eq_true.mp hacc _ hmem
+  obtain ⟨x, y, z, hbi, hbj, hbk, hrel⟩ :=
+    (DomConstraint.satisfiedB_iff _ _).mp hsat
+  have hbi1 : b[a1.slot]? = some (.bool x) := by rwa [hs1]
+  have hbj2 : b[a2.slot]? = some (.bool y) := by rwa [hs2]
+  have hbk3 : b[a3.slot]? = some (.bool z) := by rwa [hs3]
+  constructor
+  · have hv1 : a1.valAt b = x := BArg.valAt_eq_of_some_bool hbi1
+    have hv2 : a2.valAt b = y := BArg.valAt_eq_of_some_bool hbj2
+    have hv3 : a3.valAt b = z := BArg.valAt_eq_of_some_bool hbk3
+    simp [valsOf, boolOrR, hv1, hv2, hv3, hrel]
+  · intro a ha
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at ha
+    rcases ha with rfl | rfl | rfl
+    · exact ⟨x, hbi1⟩
+    · exact ⟨y, hbj2⟩
+    · exact ⟨z, hbk3⟩
+
+/-- Every accepted assignment reads the operands of `bool_eq` as Boolean
+and satisfies equality. -/
+theorem boolEqR_spec (p : CompiledProblem DomConstraint) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints)
+    (doms : Array DomC) (args : List BArg)
+    (hargs : ofSlots doms [i, j] = some args) :
+    ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      boolEqR (valsOf b args) = true ∧
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v) := by
+  intro b hb hacc
+  obtain ⟨a1, a2, rfl, hs1, hs2⟩ := ofSlots_two hargs
+  have hsat : (DomConstraint.boolEqSlot i j).satisfiedB b = true :=
+    List.all_eq_true.mp hacc _ hmem
+  obtain ⟨x, y, hbi, hbj, hrel⟩ :=
+    (DomConstraint.satisfiedB_iff _ _).mp hsat
+  have hbi1 : b[a1.slot]? = some (.bool x) := by rwa [hs1]
+  have hbj2 : b[a2.slot]? = some (.bool y) := by rwa [hs2]
+  constructor
+  · have hv1 : a1.valAt b = x := BArg.valAt_eq_of_some_bool hbi1
+    have hv2 : a2.valAt b = y := BArg.valAt_eq_of_some_bool hbj2
+    simp [valsOf, boolEqR, hv1, hv2, hrel]
+  · intro a ha
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at ha
+    rcases ha with rfl | rfl
+    · exact ⟨x, hbi1⟩
+    · exact ⟨y, hbj2⟩
+
+/-- Every accepted assignment satisfies the `array_bool_and` relation on
+the operand vector, provided the initial source domains are Boolean. -/
+theorem arrayBoolAndR_spec (p : CompiledProblem DomConstraint)
+    (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (doms : Array DomC) (args : List BArg)
+    (hargs : ofSlots doms (is ++ [k]) = some args)
+    (hinit : ∀ s ∈ is, initBoolB p s = true) :
+    ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+      arrayBoolAndR is.length (valsOf b args) = true ∧
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v) := by
+  intro b hb hacc
+  obtain ⟨src, ak, rfl, hmap, hk⟩ := ofSlots_array is hargs
+  have hsat : (DomConstraint.arrayBoolAndSlot is k).satisfiedB b = true :=
+    List.all_eq_true.mp hacc _ hmem
+  have hsem : b[k]? = some (.bool (is.all fun i => slotIsBoolB b i true)) :=
+    (DomConstraint.satisfiedB_iff _ _).mp hsat
+  have hbk : b[ak.slot]? = some (.bool (is.all fun i => slotIsBoolB b i true)) := by
+    rwa [hk]
+  have hvalk : ak.valAt b = is.all fun i => slotIsBoolB b i true :=
+    BArg.valAt_eq_of_some_bool hbk
+  have hvals_src : valsOf b src = is.map (fun i => slotIsBoolB b i true) := by
+    calc
+      valsOf b src = src.map (fun a => BArg.valAt a b) := rfl
+      _ = src.map (fun a => slotIsBoolB b a.slot true) := by
+        apply List.map_congr_left
+        intro a _ha
+        exact BArg.valAt_eq_slotIsBoolB a b
+      _ = is.map (fun i => slotIsBoolB b i true) := by
+        rw [← hmap, List.map_map]
+        simp [Function.comp]
+  have hvals : valsOf b (src ++ [ak]) =
+      is.map (fun i => slotIsBoolB b i true) ++
+        [is.all fun i => slotIsBoolB b i true] := by
+    simp only [valsOf, List.map_append, List.map_cons, List.map_nil]
+    rw [show src.map (fun a => BArg.valAt a b) =
+      is.map (fun i => slotIsBoolB b i true) from hvals_src]
+    rw [hvalk]
+  constructor
+  · have htake : List.take is.length (valsOf b (src ++ [ak])) =
+        is.map (fun i => slotIsBoolB b i true) := by
+      rw [hvals]
+      rw [List.take_append_of_le_length (by simp)]
+      rw [List.take_of_length_le (by simp)]
+    have hget : (valsOf b (src ++ [ak])).getD is.length false =
+        is.all fun i => slotIsBoolB b i true := by
+      rw [hvals]
+      simpa [List.length_map] using
+        getD_append_singleton_self
+          (is.map (fun i => slotIsBoolB b i true))
+          (is.all fun i => slotIsBoolB b i true)
+    simp only [arrayBoolAndR]
+    rw [hget, htake, List.all_map]
+    simp [Function.comp]
+  · intro a ha
+    rw [List.mem_append] at ha
+    rcases ha with ha | ha
+    · have hmem_is : a.slot ∈ is := by
+        have := List.mem_map_of_mem (f := BArg.slot) ha
+        rwa [hmap] at this
+      obtain ⟨bits, hconv⟩ := initBoolB_some (hinit a.slot hmem_is)
+      exact mem_getD_bool_of_init hb hconv
+    · obtain rfl := List.mem_singleton.mp ha
+      exact ⟨_, hbk⟩
+
+/-- Membership in `fixedLits` gives membership in one operand's own fixed
+facts. -/
+theorem mem_fixedLits_fixedLit {args : List BArg} {l : Literal}
+    (h : l ∈ fixedLits args) : ∃ a ∈ args, l ∈ a.fixedLit := by
+  induction args with
+  | nil => simp [fixedLits] at h
+  | cons a as ih =>
+      simp only [fixedLits, List.mem_append] at h
+      rcases h with h | h
+      · exact ⟨a, by simp, h⟩
+      · obtain ⟨a', ha', h'⟩ := ih h
+        exact ⟨a', by simp [ha'], h'⟩
+
+/-- A member of a successfully parsed operand list is exactly the
+`BArg.mk?` result at its own slot. -/
+theorem ofSlots_mem_mk {doms : Array DomC} {slots : List Nat}
+    {args : List BArg} (h : ofSlots doms slots = some args)
+    {a : BArg} (ha : a ∈ args) : BArg.mk? doms a.slot = some a := by
+  induction slots generalizing args with
+  | nil =>
+      simp [ofSlots] at h
+      subst args
+      simp at ha
+  | cons s ss ih =>
+      simp only [ofSlots] at h
+      cases hm : BArg.mk? doms s with
+      | none => rw [hm] at h; cases h
+      | some a0 =>
+          rw [hm] at h
+          cases hr : ofSlots doms ss with
+          | none => rw [hr] at h; cases h
+          | some rest =>
+              rw [hr] at h
+              injection h with hargs
+              subst hargs
+              rcases List.mem_cons.mp ha with rfl | ha
+              · simpa [BArg.mk?, BArg.ofDom?_slot hm] using hm
+              · exact ih hr ha
+
+/-- The fixed facts of a successfully parsed operand list all evaluate to
+`false` on the view domains. -/
+theorem ofSlots_eval_fixed {doms : Array DomC} {slots : List Nat}
+    {args : List BArg} (h : ofSlots doms slots = some args)
+    {l : Literal} (hl : l ∈ fixedLits args) :
+    (doms.getD l.atom.slot DomC.empty).evalLit l = some false := by
+  obtain ⟨a, ha, hla⟩ := mem_fixedLits_fixedLit hl
+  have hmk := ofSlots_mem_mk h ha
+  have hsl := BArg.slot_of_mem_fixedLit hla
+  rw [hsl]
+  exact BArg.ofDom?_evalLit_fixed hmk l hla
+
+/-- Truth of `hasAnySupport` exposes a satisfying tuple in the box. -/
+theorem hasAnySupport_true {R : List Bool → Bool} {args : List BArg}
+    (h : hasAnySupport R args = true) :
+    ∃ vs ∈ enum args, R vs = true := by
+  unfold hasAnySupport at h
+  exact List.any_eq_true.mp h
+
+/-- A tuple in the current box has the current value at every in-range
+position. -/
+theorem curVec_getD {args : List BArg} {vs : List Bool} {p : Nat}
+    (h : curVec args vs = true) (hp : p < args.length) :
+    (args.getD p default).cur (vs.getD p false) = true := by
+  induction args generalizing vs p with
+  | nil => simp at hp
+  | cons a as ih =>
+      cases vs with
+      | nil => simp [curVec] at h
+      | cons v vs =>
+          simp only [curVec, Bool.and_eq_true] at h
+          obtain ⟨ha, hrest⟩ := h
+          cases p with
+          | zero => simpa using ha
+          | succ p =>
+              simp only [List.length_cons, Nat.succ_lt_succ_iff] at hp
+              simpa using ih hrest hp
+
+/-- If a value has no support but some tuple has support, the opposite
+value is still current. -/
+theorem cur_other_of_prune {R : List Bool → Bool} {args : List BArg}
+    {p : Nat} {v : Bool} (hany : hasAnySupport R args = true)
+    (hsupp : hasSupport R args p v = false) (hp : p < args.length) :
+    (args.getD p default).cur (!v) = true := by
+  obtain ⟨vs, hvs, hr⟩ := hasAnySupport_true hany
+  have hcur := curVec_getD (mem_enum_iff.mp hvs).2 hp
+  have hne : vs.getD p false ≠ v := by
+    intro heq
+    have ht : hasSupport R args p v = true := by
+      unfold hasSupport
+      rw [List.any_eq_true]
+      exact ⟨vs, hvs, by rw [heq, hr]; simp⟩
+    rw [hsupp] at ht
+    cases ht
+  have hother : vs.getD p false = !v := by
+    cases hv : vs.getD p false <;> cases vv : v <;> simp_all
+  rwa [hother] at hcur
+
+/-- A conflicting support plan's clause is exactly the fixed facts. -/
+theorem mkPlan_conflict_eq_fixedLits {R : List Bool → Bool}
+    {args : List BArg} {ls : List Literal}
+    (h : (mkPlan R args).conflict? = some ls) : ls = fixedLits args := by
+  unfold mkPlan at h
+  by_cases hany : hasAnySupport R args = true
+  · simp [hany] at h
+  · have h' : fixedLits args = ls := by simpa [hany] using h
+    exact h'.symm
+
+/-- The reason and pruned literal of a generated prune have the exact
+complement shape. -/
+theorem mem_mkPrunes_shape {R : List Bool → Bool} {args : List BArg} {bp : BPrune}
+    (h : bp ∈ mkPrunes R args) :
+    bp.reason = posBool bp.slot (!bp.val) :: fixedLits args ∧
+      bp.lit = posBool bp.slot (!bp.val) := by
+  rcases mem_mkPrunes h with ⟨p, hp, _, _, rfl⟩ | ⟨p, hp, _, _, rfl⟩
+  · exact ⟨rfl, rfl⟩
+  · exact ⟨rfl, rfl⟩
+
+/-- A generated prune is sound: its literal is unassigned on the view and
+every other literal of its reason is already false.  This uses that a
+non-conflicting plan has a satisfying tuple, so a pruned value cannot be
+the unique value of a fixed domain. -/
+theorem mkPrunes_evalLit_none {R : List Bool → Bool} {args : List BArg}
+    {doms : Array DomC} {slots : List Nat}
+    (hargs : ofSlots doms slots = some args)
+    (hany : hasAnySupport R args = true)
+    {bp : BPrune} (hbp : bp ∈ mkPrunes R args) :
+    (doms.getD bp.lit.atom.slot DomC.empty).evalLit bp.lit = none ∧
+      ∀ q ∈ bp.reason, q ≠ bp.lit →
+        (doms.getD q.atom.slot DomC.empty).evalLit q = some false := by
+  rcases mem_mkPrunes hbp with ⟨p, hp, hcurF, hsupp, rfl⟩ |
+    ⟨p, hp, hcurT, hsupp, rfl⟩
+  · have hcurT : (args.getD p default).curT = true := by
+      have := cur_other_of_prune hany hsupp hp
+      simpa [BArg.cur] using this
+    have hmk := ofSlots_mem_mk hargs (getD_mem hp)
+    constructor
+    · exact BArg.ofDom?_evalLit_none_full hmk hcurF hcurT true
+    · intro q hq hne
+      have hqtail : q ∈ fixedLits args := by
+        simp only [List.mem_cons] at hq
+        rcases hq with rfl | hq
+        · exact absurd rfl hne
+        · exact hq
+      exact ofSlots_eval_fixed hargs hqtail
+  · have hcurF : (args.getD p default).curF = true := by
+      have := cur_other_of_prune hany hsupp hp
+      simpa [BArg.cur] using this
+    have hmk := ofSlots_mem_mk hargs (getD_mem hp)
+    constructor
+    · exact BArg.ofDom?_evalLit_none_full hmk hcurF hcurT false
+    · intro q hq hne
+      have hqtail : q ∈ fixedLits args := by
+        simp only [List.mem_cons] at hq
+        rcases hq with rfl | hq
+        · exact absurd rfl hne
+        · exact hq
+      exact ofSlots_eval_fixed hargs hqtail
+
+end BArgs
+
+namespace BPlan
+
+/-- Exact conflict output of a plan computed by `BArgs.planOf`, exposing
+the fixed source facts. -/
+theorem out_run_conflict_plan {p : CompiledProblem DomConstraint} {T : LitTable}
+    {R : List Bool → Bool} {slots : List Nat} {doms : Array DomC}
+    {args : List BArg} {plan : BPlan}
+    (hplan : BArgs.planOf R slots doms = some (args, plan))
+    {hconf : ∀ ls, plan.conflict? = some ls → Entailed p ls}
+    {hprune : ∀ q ∈ plan.prunes, Entailed p q.reason}
+    {ec : EClause p T}
+    (h : plan.out p T hconf hprune = .conflict ec) :
+    ∃ ls, plan.conflict? = some ls ∧ ls = BArgs.fixedLits args ∧
+      T.decodeClause ec.lits = ls ∧ Entailed p ls := by
+  obtain ⟨ls, hls, hdec, hent⟩ := out_run_conflict p T plan hconf hprune h
+  obtain ⟨_hargs, _hdup, rfl⟩ := BArgs.planOf_some hplan
+  exact ⟨ls, hls, BArgs.mkPlan_conflict_eq_fixedLits hls, hdec, hent⟩
+
+/-- Exact prune output of a plan computed by `BArgs.planOf`, exposing the
+fixed source facts and the exact reason shape. -/
+theorem out_run_prune_plan {p : CompiledProblem DomConstraint} {T : LitTable}
+    {R : List Bool → Bool} {slots : List Nat} {doms : Array DomC}
+    {args : List BArg} {plan : BPlan}
+    (hplan : BArgs.planOf R slots doms = some (args, plan))
+    {hconf : ∀ ls, plan.conflict? = some ls → Entailed p ls}
+    {hprune : ∀ q ∈ plan.prunes, Entailed p q.reason}
+    {ps : Array (PLit × EClause p T)}
+    (h : plan.out p T hconf hprune = .prune ps) :
+    plan.conflict? = none ∧ plan.prunes ≠ [] ∧
+      ∀ q ∈ ps.toList, ∃ q' ∈ plan.prunes,
+        q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+          q'.reason = posBool q'.slot (!q'.val) :: BArgs.fixedLits args ∧
+          Entailed p q'.reason := by
+  obtain ⟨hc, hne, hforall⟩ := out_run_prune p T plan hconf hprune h
+  obtain ⟨_hargs, _hdup, rfl⟩ := BArgs.planOf_some hplan
+  have hpr : (BArgs.mkPlan R args).prunes = BArgs.mkPrunes R args :=
+    BArgs.planOf_prunes_eq hplan hc
+  refine ⟨hc, hne, ?_⟩
+  intro q hq
+  obtain ⟨q', hq', hlit, hdec, hent⟩ := hforall q hq
+  refine ⟨q', hq', hlit, hdec, ?_, hent⟩
+  exact (BArgs.mem_mkPrunes_shape (by rwa [hpr] at hq')).1
+
+/-- A pruned literal of a plan computed by `BArgs.planOf` is unassigned
+and the rest of its reason is false. -/
+theorem out_run_prune_lit_none_plan {p : CompiledProblem DomConstraint}
+    {T : LitTable} {R : List Bool → Bool} {slots : List Nat}
+    {doms : Array DomC} {args : List BArg} {plan : BPlan}
+    (hplan : BArgs.planOf R slots doms = some (args, plan))
+    {hconf : ∀ ls, plan.conflict? = some ls → Entailed p ls}
+    {hprune : ∀ q ∈ plan.prunes, Entailed p q.reason}
+    {ps : Array (PLit × EClause p T)}
+    (h : plan.out p T hconf hprune = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    (doms.getD q.1.lit.atom.slot DomC.empty).evalLit q.1.lit = none ∧
+      ∀ q' ∈ T.decodeClause q.2.lits, q' ≠ q.1.lit →
+        (doms.getD q'.atom.slot DomC.empty).evalLit q' = some false := by
+  obtain ⟨hc, _hne, hforall⟩ := out_run_prune p T plan hconf hprune h
+  obtain ⟨hargs, _hdup, rfl⟩ := BArgs.planOf_some hplan
+  have hpr : (BArgs.mkPlan R args).prunes = BArgs.mkPrunes R args :=
+    BArgs.planOf_prunes_eq hplan hc
+  have hany : BArgs.hasAnySupport R args = true := by
+    cases hh : BArgs.hasAnySupport R args with
+    | false => simp [BArgs.mkPlan, hh] at hc
+    | true => rfl
+  obtain ⟨q', hq', hlit, hdec, _hent⟩ := hforall q hq
+  have hq'' : q' ∈ BArgs.mkPrunes R args := by rwa [hpr] at hq'
+  obtain ⟨hnone, hfalse⟩ := BArgs.mkPrunes_evalLit_none hargs hany hq''
+  constructor
+  · rw [hlit]
+    exact hnone
+  · intro r hr hne
+    rw [hdec] at hr
+    exact hfalse r hr (by rwa [hlit] at hne)
+
+end BPlan
+
+/-! ## Generic certified truth-table propagator -/
+
+/-- Generic Boolean truth-table propagator over a fixed operand list.
+`hR` proves the relation on every accepted assignment and `hbool` proves
+that every accepted assignment reads the operands as Booleans.  The plan
+is computed on the current Boolean box; malformed views and duplicate
+operand slots produce `.fix`. -/
+def boolSupportPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
+    (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v)) : PropV2 p T :=
+  { vars := slots.toArray
+    events := slots.toArray.map fun s => (s, .fix)
+    run := fun view =>
+      match hplan : BArgs.planOf R slots view.doms with
+      | none => .fix
+      | some ap =>
+          BPlan.out p T (BArgs.mkPlan R ap.1)
+            (fun ls hls =>
+              BArgs.mkPlan_conflict_entailed p R ap.1 ls
+                (hR view.doms ap.1 (BArgs.planOf_some hplan).1)
+                (hbool view.doms ap.1 (BArgs.planOf_some hplan).1)
+                (BArgs.ofSlots_allCur (BArgs.planOf_some hplan).1) hls)
+            (fun q hq =>
+              BArgs.mkPlan_prunes_entailed p R ap.1
+                (hR view.doms ap.1 (BArgs.planOf_some hplan).1)
+                (hbool view.doms ap.1 (BArgs.planOf_some hplan).1)
+                (BArgs.ofSlots_allCur (BArgs.planOf_some hplan).1) hq) }
+
+/-! ### Generic run contracts -/
+
+theorem boolSupportPropWith_run_conflict (p : CompiledProblem DomConstraint)
+    (T : LitTable) (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ec : EClause p T}
+    (h : (boolSupportPropWith p T R slots hR hbool).run view = .conflict ec) :
+    ∃ args plan ls,
+      BArgs.planOf R slots view.doms = some (args, plan) ∧
+      plan.conflict? = some ls ∧ ls = BArgs.fixedLits args ∧
+      T.decodeClause ec.lits = ls ∧ Entailed p ls := by
+  unfold boolSupportPropWith at h
+  dsimp only at h
+  split at h
+  · cases h
+  · rename_i ap hplan
+    cases ap with
+    | mk args plan =>
+      have hpl : plan = BArgs.mkPlan R args :=
+        (BArgs.planOf_some hplan).2.2
+      have hplan' : BArgs.planOf R slots view.doms =
+          some (args, BArgs.mkPlan R args) := by
+        rw [← hpl]
+        exact hplan
+      obtain ⟨ls, hls, hls', hdec, hent⟩ :=
+        BPlan.out_run_conflict_plan (R := R) (slots := slots)
+          (doms := view.doms) (args := args)
+          (plan := BArgs.mkPlan R args) hplan' h
+      exact ⟨args, BArgs.mkPlan R args, ls, hplan', hls, hls', hdec, hent⟩
+
+theorem boolSupportPropWith_run_prune (p : CompiledProblem DomConstraint)
+    (T : LitTable) (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ps : Array (PLit × EClause p T)}
+    (h : (boolSupportPropWith p T R slots hR hbool).run view = .prune ps) :
+    ∃ args plan,
+      BArgs.planOf R slots view.doms = some (args, plan) ∧
+      plan.conflict? = none ∧ plan.prunes ≠ [] ∧
+      (∀ q ∈ ps.toList, ∃ q' ∈ plan.prunes,
+        q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+          q'.reason = posBool q'.slot (!q'.val) :: BArgs.fixedLits args ∧
+          Entailed p q'.reason) := by
+  unfold boolSupportPropWith at h
+  dsimp only at h
+  split at h
+  · cases h
+  · rename_i ap hplan
+    cases ap with
+    | mk args plan =>
+      have hpl : plan = BArgs.mkPlan R args :=
+        (BArgs.planOf_some hplan).2.2
+      have hplan' : BArgs.planOf R slots view.doms =
+          some (args, BArgs.mkPlan R args) := by
+        rw [← hpl]
+        exact hplan
+      obtain ⟨hc, hne, hforall⟩ :=
+        BPlan.out_run_prune_plan (R := R) (slots := slots)
+          (doms := view.doms) (args := args)
+          (plan := BArgs.mkPlan R args) hplan' h
+      exact ⟨args, BArgs.mkPlan R args, hplan', hc, hne, hforall⟩
+
+theorem boolSupportPropWith_conflict_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ec : EClause p T}
+    (h : (boolSupportPropWith p T R slots hR hbool).run view = .conflict ec) :
+    Entailed p (T.decodeClause ec.lits) := by
+  obtain ⟨_, _, _, _, _, _, hdec, hent⟩ :=
+    boolSupportPropWith_run_conflict p T R slots hR hbool view h
+  rwa [hdec]
+
+theorem boolSupportPropWith_conflict_lits_false
+    (p : CompiledProblem DomConstraint)
+    (T : LitTable) (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ec : EClause p T}
+    (h : (boolSupportPropWith p T R slots hR hbool).run view = .conflict ec) :
+    ∀ q ∈ T.decodeClause ec.lits,
+      (view.doms.getD q.atom.slot DomC.empty).evalLit q = some false := by
+  obtain ⟨args, _, _, hplan, _, hls', hdec, _⟩ :=
+    boolSupportPropWith_run_conflict p T R slots hR hbool view h
+  have hargs := (BArgs.planOf_some hplan).1
+  rw [hdec, hls']
+  intro q hq
+  exact BArgs.ofSlots_eval_fixed hargs hq
+
+theorem boolSupportPropWith_prune_reason_entailed
+    (p : CompiledProblem DomConstraint)
+    (T : LitTable) (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ps : Array (PLit × EClause p T)}
+    (h : (boolSupportPropWith p T R slots hR hbool).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    Entailed p (T.decodeClause q.2.lits) := by
+  obtain ⟨_, _, _, _, _, hforall⟩ :=
+    boolSupportPropWith_run_prune p T R slots hR hbool view h
+  obtain ⟨_, _, _, hdec, _, hent⟩ := hforall q hq
+  rwa [hdec]
+
+theorem boolSupportPropWith_prune_lit_none
+    (p : CompiledProblem DomConstraint)
+    (T : LitTable) (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ps : Array (PLit × EClause p T)}
+    (h : (boolSupportPropWith p T R slots hR hbool).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    (view.doms.getD q.1.lit.atom.slot DomC.empty).evalLit q.1.lit = none ∧
+      ∀ q' ∈ T.decodeClause q.2.lits, q' ≠ q.1.lit →
+        (view.doms.getD q'.atom.slot DomC.empty).evalLit q' = some false := by
+  unfold boolSupportPropWith at h
+  dsimp only at h
+  split at h
+  · cases h
+  · rename_i ap hplan
+    cases ap with
+    | mk args plan =>
+      have hpl : plan = BArgs.mkPlan R args :=
+        (BArgs.planOf_some hplan).2.2
+      have hplan' : BArgs.planOf R slots view.doms =
+          some (args, BArgs.mkPlan R args) := by
+        rw [← hpl]
+        exact hplan
+      exact BPlan.out_run_prune_lit_none_plan (R := R) (slots := slots)
+        (doms := view.doms) (args := args)
+        (plan := BArgs.mkPlan R args) hplan' h hq
+
+theorem boolSupportPropWith_run_fix_of_no_plan
+    (p : CompiledProblem DomConstraint) (T : LitTable)
+    (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView)
+    (hpn : BArgs.planOf R slots view.doms = none) :
+    (boolSupportPropWith p T R slots hR hbool).run view = .fix := by
+  unfold boolSupportPropWith
+  dsimp only
+  split
+  · rfl
+  · rename_i ap hplan
+    rw [hpn] at hplan
+    cases hplan
+
+/-! ## Dedicated propagators -/
+
+/-- Certified `bool_not` propagator. -/
+def boolNotPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
+    (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) : PropV2 p T :=
+  boolSupportPropWith p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j))
+    (fun doms args hargs b hb hacc =>
+      (BArgs.boolNotR_spec p i j hmem doms args hargs b hb hacc).1)
+    (fun doms args hargs b hb hacc =>
+      (BArgs.boolNotR_spec p i j hmem doms args hargs b hb hacc).2)
+
+/-- Certified `bool_and` propagator. -/
+def boolAndPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
+    (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) : PropV2 p T :=
+  boolSupportPropWith p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k))
+    (fun doms args hargs b hb hacc =>
+      (BArgs.boolAndR_spec p i j k hmem doms args hargs b hb hacc).1)
+    (fun doms args hargs b hb hacc =>
+      (BArgs.boolAndR_spec p i j k hmem doms args hargs b hb hacc).2)
+
+/-- Certified `bool_or` propagator. -/
+def boolOrPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
+    (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) : PropV2 p T :=
+  boolSupportPropWith p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k))
+    (fun doms args hargs b hb hacc =>
+      (BArgs.boolOrR_spec p i j k hmem doms args hargs b hb hacc).1)
+    (fun doms args hargs b hb hacc =>
+      (BArgs.boolOrR_spec p i j k hmem doms args hargs b hb hacc).2)
+
+/-- Certified `bool_eq` propagator. -/
+def boolEqPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
+    (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) : PropV2 p T :=
+  boolSupportPropWith p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j))
+    (fun doms args hargs b hb hacc =>
+      (BArgs.boolEqR_spec p i j hmem doms args hargs b hb hacc).1)
+    (fun doms args hargs b hb hacc =>
+      (BArgs.boolEqR_spec p i j hmem doms args hargs b hb hacc).2)
+
+/-- Certified `array_bool_and` propagator.  The runtime guard requires the
+initial source domains to be Boolean: the leaf semantics reads a
+non-Boolean source as `false`, while the Boolean support box only
+describes Boolean values.  When the guard fails the propagator is a
+sound `.fix`. -/
+def arrayBoolAndPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
+    (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints) : PropV2 p T :=
+  { vars := (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)).toArray
+    events := (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)).toArray.map
+      fun s => (s, .fix)
+    run := fun view =>
+      if hguard : is.all (BArgs.initBoolB p) = true then
+        (boolSupportPropWith p T (arrayBoolAndR is.length)
+          (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k))
+          (fun doms args hargs b hb hacc =>
+            (BArgs.arrayBoolAndR_spec p is k hmem doms args hargs
+              (List.all_eq_true.mp hguard) b hb hacc).1)
+          (fun doms args hargs b hb hacc =>
+            (BArgs.arrayBoolAndR_spec p is k hmem doms args hargs
+              (List.all_eq_true.mp hguard) b hb hacc).2)).run view
+      else .fix }
+
+/-! ### `bool_not` contracts -/
+
+theorem boolNotPropWith_run_conflict (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolNotPropWith p T i j hmem).run view = .conflict ec) :
+    ∃ args plan ls,
+      BArgs.planOf boolNotR
+          (dcSlotsFull (DomConstraint.boolNotSlot i j)) view.doms =
+        some (args, plan) ∧
+      plan.conflict? = some ls ∧ ls = BArgs.fixedLits args ∧
+      T.decodeClause ec.lits = ls ∧ Entailed p ls :=
+  boolSupportPropWith_run_conflict p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j)) _ _ view h
+
+theorem boolNotPropWith_run_prune (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolNotPropWith p T i j hmem).run view = .prune ps) :
+    ∃ args plan,
+      BArgs.planOf boolNotR
+          (dcSlotsFull (DomConstraint.boolNotSlot i j)) view.doms =
+        some (args, plan) ∧
+      plan.conflict? = none ∧ plan.prunes ≠ [] ∧
+      (∀ q ∈ ps.toList, ∃ q' ∈ plan.prunes,
+        q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+          q'.reason = posBool q'.slot (!q'.val) :: BArgs.fixedLits args ∧
+          Entailed p q'.reason) :=
+  boolSupportPropWith_run_prune p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j)) _ _ view h
+
+theorem boolNotPropWith_conflict_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolNotPropWith p T i j hmem).run view = .conflict ec) :
+    Entailed p (T.decodeClause ec.lits) :=
+  boolSupportPropWith_conflict_entailed p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j)) _ _ view h
+
+theorem boolNotPropWith_conflict_lits_false (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolNotPropWith p T i j hmem).run view = .conflict ec) :
+    ∀ q ∈ T.decodeClause ec.lits,
+      (view.doms.getD q.atom.slot DomC.empty).evalLit q = some false :=
+  boolSupportPropWith_conflict_lits_false p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j)) _ _ view h
+
+theorem boolNotPropWith_prune_reason_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolNotPropWith p T i j hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    Entailed p (T.decodeClause q.2.lits) :=
+  boolSupportPropWith_prune_reason_entailed p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j)) _ _ view h hq
+
+theorem boolNotPropWith_prune_lit_none (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolNotPropWith p T i j hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    (view.doms.getD q.1.lit.atom.slot DomC.empty).evalLit q.1.lit = none ∧
+      ∀ q' ∈ T.decodeClause q.2.lits, q' ≠ q.1.lit →
+        (view.doms.getD q'.atom.slot DomC.empty).evalLit q' = some false :=
+  boolSupportPropWith_prune_lit_none p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j)) _ _ view h hq
+
+theorem boolNotPropWith_run_fix_of_malformed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) (view : EngineView)
+    (hi : BArg.mk? view.doms i = none) :
+    (boolNotPropWith p T i j hmem).run view = .fix := by
+  have hop : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.boolNotSlot i j)) = none := by
+    change BArgs.ofSlots view.doms [i, j] = none
+    exact BArgs.ofSlots_eq_none_of_mem_mk_none (by simp) hi
+  have hpn : BArgs.planOf boolNotR
+      (dcSlotsFull (DomConstraint.boolNotSlot i j)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [hop]
+  exact boolSupportPropWith_run_fix_of_no_plan p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j)) _ _ view hpn
+
+/-! ### `bool_and` contracts -/
+
+theorem boolAndPropWith_run_conflict (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolAndPropWith p T i j k hmem).run view = .conflict ec) :
+    ∃ args plan ls,
+      BArgs.planOf boolAndR
+          (dcSlotsFull (DomConstraint.boolAndSlot i j k)) view.doms =
+        some (args, plan) ∧
+      plan.conflict? = some ls ∧ ls = BArgs.fixedLits args ∧
+      T.decodeClause ec.lits = ls ∧ Entailed p ls :=
+  boolSupportPropWith_run_conflict p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k)) _ _ view h
+
+theorem boolAndPropWith_run_prune (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolAndPropWith p T i j k hmem).run view = .prune ps) :
+    ∃ args plan,
+      BArgs.planOf boolAndR
+          (dcSlotsFull (DomConstraint.boolAndSlot i j k)) view.doms =
+        some (args, plan) ∧
+      plan.conflict? = none ∧ plan.prunes ≠ [] ∧
+      (∀ q ∈ ps.toList, ∃ q' ∈ plan.prunes,
+        q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+          q'.reason = posBool q'.slot (!q'.val) :: BArgs.fixedLits args ∧
+          Entailed p q'.reason) :=
+  boolSupportPropWith_run_prune p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k)) _ _ view h
+
+theorem boolAndPropWith_conflict_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolAndPropWith p T i j k hmem).run view = .conflict ec) :
+    Entailed p (T.decodeClause ec.lits) :=
+  boolSupportPropWith_conflict_entailed p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k)) _ _ view h
+
+theorem boolAndPropWith_conflict_lits_false (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolAndPropWith p T i j k hmem).run view = .conflict ec) :
+    ∀ q ∈ T.decodeClause ec.lits,
+      (view.doms.getD q.atom.slot DomC.empty).evalLit q = some false :=
+  boolSupportPropWith_conflict_lits_false p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k)) _ _ view h
+
+theorem boolAndPropWith_prune_reason_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolAndPropWith p T i j k hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    Entailed p (T.decodeClause q.2.lits) :=
+  boolSupportPropWith_prune_reason_entailed p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k)) _ _ view h hq
+
+theorem boolAndPropWith_prune_lit_none (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolAndPropWith p T i j k hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    (view.doms.getD q.1.lit.atom.slot DomC.empty).evalLit q.1.lit = none ∧
+      ∀ q' ∈ T.decodeClause q.2.lits, q' ≠ q.1.lit →
+        (view.doms.getD q'.atom.slot DomC.empty).evalLit q' = some false :=
+  boolSupportPropWith_prune_lit_none p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k)) _ _ view h hq
+
+theorem boolAndPropWith_run_fix_of_malformed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) (view : EngineView)
+    (hi : BArg.mk? view.doms i = none) :
+    (boolAndPropWith p T i j k hmem).run view = .fix := by
+  have hop : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.boolAndSlot i j k)) = none := by
+    change BArgs.ofSlots view.doms [i, j, k] = none
+    exact BArgs.ofSlots_eq_none_of_mem_mk_none (by simp) hi
+  have hpn : BArgs.planOf boolAndR
+      (dcSlotsFull (DomConstraint.boolAndSlot i j k)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [hop]
+  exact boolSupportPropWith_run_fix_of_no_plan p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k)) _ _ view hpn
+
+/-! ### `bool_or` contracts -/
+
+theorem boolOrPropWith_run_conflict (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolOrPropWith p T i j k hmem).run view = .conflict ec) :
+    ∃ args plan ls,
+      BArgs.planOf boolOrR
+          (dcSlotsFull (DomConstraint.boolOrSlot i j k)) view.doms =
+        some (args, plan) ∧
+      plan.conflict? = some ls ∧ ls = BArgs.fixedLits args ∧
+      T.decodeClause ec.lits = ls ∧ Entailed p ls :=
+  boolSupportPropWith_run_conflict p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k)) _ _ view h
+
+theorem boolOrPropWith_run_prune (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolOrPropWith p T i j k hmem).run view = .prune ps) :
+    ∃ args plan,
+      BArgs.planOf boolOrR
+          (dcSlotsFull (DomConstraint.boolOrSlot i j k)) view.doms =
+        some (args, plan) ∧
+      plan.conflict? = none ∧ plan.prunes ≠ [] ∧
+      (∀ q ∈ ps.toList, ∃ q' ∈ plan.prunes,
+        q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+          q'.reason = posBool q'.slot (!q'.val) :: BArgs.fixedLits args ∧
+          Entailed p q'.reason) :=
+  boolSupportPropWith_run_prune p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k)) _ _ view h
+
+theorem boolOrPropWith_conflict_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolOrPropWith p T i j k hmem).run view = .conflict ec) :
+    Entailed p (T.decodeClause ec.lits) :=
+  boolSupportPropWith_conflict_entailed p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k)) _ _ view h
+
+theorem boolOrPropWith_conflict_lits_false (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolOrPropWith p T i j k hmem).run view = .conflict ec) :
+    ∀ q ∈ T.decodeClause ec.lits,
+      (view.doms.getD q.atom.slot DomC.empty).evalLit q = some false :=
+  boolSupportPropWith_conflict_lits_false p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k)) _ _ view h
+
+theorem boolOrPropWith_prune_reason_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolOrPropWith p T i j k hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    Entailed p (T.decodeClause q.2.lits) :=
+  boolSupportPropWith_prune_reason_entailed p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k)) _ _ view h hq
+
+theorem boolOrPropWith_prune_lit_none (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolOrPropWith p T i j k hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    (view.doms.getD q.1.lit.atom.slot DomC.empty).evalLit q.1.lit = none ∧
+      ∀ q' ∈ T.decodeClause q.2.lits, q' ≠ q.1.lit →
+        (view.doms.getD q'.atom.slot DomC.empty).evalLit q' = some false :=
+  boolSupportPropWith_prune_lit_none p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k)) _ _ view h hq
+
+theorem boolOrPropWith_run_fix_of_malformed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) (view : EngineView)
+    (hi : BArg.mk? view.doms i = none) :
+    (boolOrPropWith p T i j k hmem).run view = .fix := by
+  have hop : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.boolOrSlot i j k)) = none := by
+    change BArgs.ofSlots view.doms [i, j, k] = none
+    exact BArgs.ofSlots_eq_none_of_mem_mk_none (by simp) hi
+  have hpn : BArgs.planOf boolOrR
+      (dcSlotsFull (DomConstraint.boolOrSlot i j k)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [hop]
+  exact boolSupportPropWith_run_fix_of_no_plan p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k)) _ _ view hpn
+
+/-! ### `bool_eq` contracts -/
+
+theorem boolEqPropWith_run_conflict (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolEqPropWith p T i j hmem).run view = .conflict ec) :
+    ∃ args plan ls,
+      BArgs.planOf boolEqR
+          (dcSlotsFull (DomConstraint.boolEqSlot i j)) view.doms =
+        some (args, plan) ∧
+      plan.conflict? = some ls ∧ ls = BArgs.fixedLits args ∧
+      T.decodeClause ec.lits = ls ∧ Entailed p ls :=
+  boolSupportPropWith_run_conflict p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j)) _ _ view h
+
+theorem boolEqPropWith_run_prune (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolEqPropWith p T i j hmem).run view = .prune ps) :
+    ∃ args plan,
+      BArgs.planOf boolEqR
+          (dcSlotsFull (DomConstraint.boolEqSlot i j)) view.doms =
+        some (args, plan) ∧
+      plan.conflict? = none ∧ plan.prunes ≠ [] ∧
+      (∀ q ∈ ps.toList, ∃ q' ∈ plan.prunes,
+        q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+          q'.reason = posBool q'.slot (!q'.val) :: BArgs.fixedLits args ∧
+          Entailed p q'.reason) :=
+  boolSupportPropWith_run_prune p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j)) _ _ view h
+
+theorem boolEqPropWith_conflict_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolEqPropWith p T i j hmem).run view = .conflict ec) :
+    Entailed p (T.decodeClause ec.lits) :=
+  boolSupportPropWith_conflict_entailed p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j)) _ _ view h
+
+theorem boolEqPropWith_conflict_lits_false (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) (view : EngineView)
+    {ec : EClause p T}
+    (h : (boolEqPropWith p T i j hmem).run view = .conflict ec) :
+    ∀ q ∈ T.decodeClause ec.lits,
+      (view.doms.getD q.atom.slot DomC.empty).evalLit q = some false :=
+  boolSupportPropWith_conflict_lits_false p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j)) _ _ view h
+
+theorem boolEqPropWith_prune_reason_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolEqPropWith p T i j hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    Entailed p (T.decodeClause q.2.lits) :=
+  boolSupportPropWith_prune_reason_entailed p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j)) _ _ view h hq
+
+theorem boolEqPropWith_prune_lit_none (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) (view : EngineView)
+    {ps : Array (PLit × EClause p T)}
+    (h : (boolEqPropWith p T i j hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    (view.doms.getD q.1.lit.atom.slot DomC.empty).evalLit q.1.lit = none ∧
+      ∀ q' ∈ T.decodeClause q.2.lits, q' ≠ q.1.lit →
+        (view.doms.getD q'.atom.slot DomC.empty).evalLit q' = some false :=
+  boolSupportPropWith_prune_lit_none p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j)) _ _ view h hq
+
+theorem boolEqPropWith_run_fix_of_malformed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) (view : EngineView)
+    (hi : BArg.mk? view.doms i = none) :
+    (boolEqPropWith p T i j hmem).run view = .fix := by
+  have hop : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.boolEqSlot i j)) = none := by
+    change BArgs.ofSlots view.doms [i, j] = none
+    exact BArgs.ofSlots_eq_none_of_mem_mk_none (by simp) hi
+  have hpn : BArgs.planOf boolEqR
+      (dcSlotsFull (DomConstraint.boolEqSlot i j)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [hop]
+  exact boolSupportPropWith_run_fix_of_no_plan p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j)) _ _ view hpn
+
+/-! ### `array_bool_and` contracts -/
+
+theorem arrayBoolAndPropWith_run_conflict (p : CompiledProblem DomConstraint)
+    (T : LitTable) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (view : EngineView) {ec : EClause p T}
+    (h : (arrayBoolAndPropWith p T is k hmem).run view = .conflict ec) :
+    is.all (BArgs.initBoolB p) = true ∧
+      ∃ args plan ls,
+        BArgs.planOf (arrayBoolAndR is.length)
+            (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) view.doms =
+          some (args, plan) ∧
+        plan.conflict? = some ls ∧ ls = BArgs.fixedLits args ∧
+        T.decodeClause ec.lits = ls ∧ Entailed p ls := by
+  unfold arrayBoolAndPropWith at h
+  dsimp only at h
+  split at h
+  · rename_i hguard
+    obtain ⟨args, plan, ls, hplan, hls, hls', hdec, hent⟩ :=
+      boolSupportPropWith_run_conflict p T (arrayBoolAndR is.length)
+        (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view h
+    exact ⟨hguard, args, plan, ls, hplan, hls, hls', hdec, hent⟩
+  · cases h
+
+theorem arrayBoolAndPropWith_run_prune (p : CompiledProblem DomConstraint)
+    (T : LitTable) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (view : EngineView) {ps : Array (PLit × EClause p T)}
+    (h : (arrayBoolAndPropWith p T is k hmem).run view = .prune ps) :
+    is.all (BArgs.initBoolB p) = true ∧
+      ∃ args plan,
+        BArgs.planOf (arrayBoolAndR is.length)
+            (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) view.doms =
+          some (args, plan) ∧
+        plan.conflict? = none ∧ plan.prunes ≠ [] ∧
+        (∀ q ∈ ps.toList, ∃ q' ∈ plan.prunes,
+          q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+            q'.reason = posBool q'.slot (!q'.val) :: BArgs.fixedLits args ∧
+            Entailed p q'.reason) := by
+  unfold arrayBoolAndPropWith at h
+  dsimp only at h
+  split at h
+  · rename_i hguard
+    obtain ⟨args, plan, hplan, hc, hne, hforall⟩ :=
+      boolSupportPropWith_run_prune p T (arrayBoolAndR is.length)
+        (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view h
+    exact ⟨hguard, args, plan, hplan, hc, hne, hforall⟩
+  · cases h
+
+theorem arrayBoolAndPropWith_conflict_entailed
+    (p : CompiledProblem DomConstraint)
+    (T : LitTable) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (view : EngineView) {ec : EClause p T}
+    (h : (arrayBoolAndPropWith p T is k hmem).run view = .conflict ec) :
+    Entailed p (T.decodeClause ec.lits) := by
+  unfold arrayBoolAndPropWith at h
+  dsimp only at h
+  split at h
+  · exact boolSupportPropWith_conflict_entailed p T (arrayBoolAndR is.length)
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view h
+  · cases h
+
+theorem arrayBoolAndPropWith_conflict_lits_false
+    (p : CompiledProblem DomConstraint)
+    (T : LitTable) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (view : EngineView) {ec : EClause p T}
+    (h : (arrayBoolAndPropWith p T is k hmem).run view = .conflict ec) :
+    ∀ q ∈ T.decodeClause ec.lits,
+      (view.doms.getD q.atom.slot DomC.empty).evalLit q = some false := by
+  unfold arrayBoolAndPropWith at h
+  dsimp only at h
+  split at h
+  · exact boolSupportPropWith_conflict_lits_false p T
+      (arrayBoolAndR is.length)
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view h
+  · cases h
+
+theorem arrayBoolAndPropWith_prune_reason_entailed
+    (p : CompiledProblem DomConstraint)
+    (T : LitTable) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (view : EngineView) {ps : Array (PLit × EClause p T)}
+    (h : (arrayBoolAndPropWith p T is k hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    Entailed p (T.decodeClause q.2.lits) := by
+  unfold arrayBoolAndPropWith at h
+  dsimp only at h
+  split at h
+  · exact boolSupportPropWith_prune_reason_entailed p T
+      (arrayBoolAndR is.length)
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view h hq
+  · cases h
+
+theorem arrayBoolAndPropWith_prune_lit_none
+    (p : CompiledProblem DomConstraint)
+    (T : LitTable) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (view : EngineView) {ps : Array (PLit × EClause p T)}
+    (h : (arrayBoolAndPropWith p T is k hmem).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    (view.doms.getD q.1.lit.atom.slot DomC.empty).evalLit q.1.lit = none ∧
+      ∀ q' ∈ T.decodeClause q.2.lits, q' ≠ q.1.lit →
+        (view.doms.getD q'.atom.slot DomC.empty).evalLit q' = some false := by
+  unfold arrayBoolAndPropWith at h
+  dsimp only at h
+  split at h
+  · exact boolSupportPropWith_prune_lit_none p T (arrayBoolAndR is.length)
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view h hq
+  · cases h
+
+theorem arrayBoolAndPropWith_run_fix_of_malformed
+    (p : CompiledProblem DomConstraint)
+    (T : LitTable) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (view : EngineView) {s : Nat} (hs : s ∈ is)
+    (hi : BArg.mk? view.doms s = none) :
+    (arrayBoolAndPropWith p T is k hmem).run view = .fix := by
+  have hop : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) = none := by
+    change BArgs.ofSlots view.doms (is ++ [k]) = none
+    exact BArgs.ofSlots_eq_none_of_mem_mk_none (List.mem_append.mpr (Or.inl hs)) hi
+  have hpn : BArgs.planOf (arrayBoolAndR is.length)
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [hop]
+  unfold arrayBoolAndPropWith
+  dsimp only
+  split
+  · exact boolSupportPropWith_run_fix_of_no_plan p T
+      (arrayBoolAndR is.length)
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view hpn
+  · rfl
+
+/-! ### General malformed-view statements
+
+These take the whole operand list as malformed, so they cover a
+non-Boolean or out-of-range domain at *any* operand, including the result
+slot of `array_bool_and`. -/
+
+theorem boolNotPropWith_run_fix_of_slots_none
+    (p : CompiledProblem DomConstraint) (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) (view : EngineView)
+    (h : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.boolNotSlot i j)) = none) :
+    (boolNotPropWith p T i j hmem).run view = .fix := by
+  have hpn : BArgs.planOf boolNotR
+      (dcSlotsFull (DomConstraint.boolNotSlot i j)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [h]
+  exact boolSupportPropWith_run_fix_of_no_plan p T boolNotR
+    (dcSlotsFull (DomConstraint.boolNotSlot i j)) _ _ view hpn
+
+theorem boolAndPropWith_run_fix_of_slots_none
+    (p : CompiledProblem DomConstraint) (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) (view : EngineView)
+    (h : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.boolAndSlot i j k)) = none) :
+    (boolAndPropWith p T i j k hmem).run view = .fix := by
+  have hpn : BArgs.planOf boolAndR
+      (dcSlotsFull (DomConstraint.boolAndSlot i j k)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [h]
+  exact boolSupportPropWith_run_fix_of_no_plan p T boolAndR
+    (dcSlotsFull (DomConstraint.boolAndSlot i j k)) _ _ view hpn
+
+theorem boolOrPropWith_run_fix_of_slots_none
+    (p : CompiledProblem DomConstraint) (T : LitTable) (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) (view : EngineView)
+    (h : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.boolOrSlot i j k)) = none) :
+    (boolOrPropWith p T i j k hmem).run view = .fix := by
+  have hpn : BArgs.planOf boolOrR
+      (dcSlotsFull (DomConstraint.boolOrSlot i j k)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [h]
+  exact boolSupportPropWith_run_fix_of_no_plan p T boolOrR
+    (dcSlotsFull (DomConstraint.boolOrSlot i j k)) _ _ view hpn
+
+theorem boolEqPropWith_run_fix_of_slots_none
+    (p : CompiledProblem DomConstraint) (T : LitTable) (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) (view : EngineView)
+    (h : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.boolEqSlot i j)) = none) :
+    (boolEqPropWith p T i j hmem).run view = .fix := by
+  have hpn : BArgs.planOf boolEqR
+      (dcSlotsFull (DomConstraint.boolEqSlot i j)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [h]
+  exact boolSupportPropWith_run_fix_of_no_plan p T boolEqR
+    (dcSlotsFull (DomConstraint.boolEqSlot i j)) _ _ view hpn
+
+theorem arrayBoolAndPropWith_run_fix_of_slots_none
+    (p : CompiledProblem DomConstraint) (T : LitTable) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (view : EngineView)
+    (h : BArgs.ofSlots view.doms
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) = none) :
+    (arrayBoolAndPropWith p T is k hmem).run view = .fix := by
+  have hpn : BArgs.planOf (arrayBoolAndR is.length)
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) view.doms = none := by
+    unfold BArgs.planOf
+    rw [h]
+  unfold arrayBoolAndPropWith
+  dsimp only
+  split
+  · exact boolSupportPropWith_run_fix_of_no_plan p T
+      (arrayBoolAndR is.length)
+      (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view hpn
+  · rfl
+
+end LeanFzn.Engine

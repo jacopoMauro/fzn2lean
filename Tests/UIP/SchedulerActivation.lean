@@ -52,7 +52,8 @@ Negative controls (the gate "bypassing the analyzer must fail tests"):
 -/
 
 import Tests.UIP.SchedulerFixtures
-import LeanFzn.Solver.UIP.Proofs.Scheduler
+import LeanFzn.Legacy.Solver.UIP.Proofs.Scheduler
+import LeanFzn.Legacy.Solver.UIP.Proofs.SchedulerReachable
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 
@@ -101,7 +102,7 @@ so the fixture's conflict literals `x0 > 5`, `x2 > 9`, `x4 > 2` are NOT false
 under the original domains — otherwise the LCG analyzer's root drop would
 (soundly) discard them and the multi-resolution shape would collapse. -/
 def actBox : List Domain :=
-  [[.int 0, .int 1, .int 6], [.int 7, .int 9], [.int 0, .int 1, .int 10],
+  Ds [[.int 0, .int 1, .int 6], [.int 7, .int 9], [.int 0, .int 1, .int 10],
    [.int 0, .int 1], [.int 0, .int 1, .int 3]]
 
 /-- A real propagator: reports T1's `mConflict` on any 5-slot box (all its
@@ -113,13 +114,13 @@ def conflictProp : Propagator :=
 /-- The level-1 checkpoint: slot 0 already at {0,1} (the level-1 decision
 `x0 ≤ 5`), slot 1 at {7,9} so `¬(x1 ≤ 7)` narrows it to {9}. -/
 def actCheckpoint : DecisionCheckpoint (fun _ : Assignment => true) :=
-  { level := 1, frame := (actBox, []), trail := [] }
+  { level := 1, frame := legacyFrame (actBox.map Dom.enum) [], trail := [] }
 
 /-- The activation configuration: `mTrail` at level 3, no recorded evidence
 yet (the dispatcher must PRODUCE the conflict through its own route). -/
 def actCfg : SchedulerConfig (fun _ : Assignment => true) :=
   { orig := actBox, original := [], props := [conflictProp],
-    branch := { frame := (actBox, []), trail := mTrail, level := 3,
+    branch := { frame := legacyFrame (actBox.map Dom.enum) [], trail := mTrail, level := 3,
                 learned := [] },
     checkpoints := [actCheckpoint], pending := [], log := {} }
 
@@ -203,7 +204,7 @@ conflict-free SAT prefix does to the counters: nothing (all zero). -/
 def satLeaf : Assignment → Bool := fun a => a.head? == some (Value.int 0)
 
 def satCfg : SchedulerConfig satLeaf :=
-  SchedulerConfig.init (leaf := satLeaf) [[.int 0, .int 1]] [] []
+  SchedulerConfig.init (leaf := satLeaf) (Ds [[.int 0, .int 1]]) [] []
 
 /-- The real dispatcher run from `init`, threaded with the PROVED
 reachability closure. -/

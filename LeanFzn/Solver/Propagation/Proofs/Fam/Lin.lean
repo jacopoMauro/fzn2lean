@@ -141,10 +141,27 @@ transfer lemmas apply verbatim) -/
     coefficients, `ct·mx` for negative ones (ct < 0: smallest at
     max). -/
 def minContrib (st : State) (p : Int × Nat) : Option (Nat × Int × Int) :=
-  match domMinI (st.domains.getD p.2 []), domMaxI (st.domains.getD p.2 []) with
+  match domMinI (st.domains.getD p.2 Dom.empty), domMaxI (st.domains.getD p.2 Dom.empty) with
   | some mn, some mx =>
       if p.1 ≥ 0 then some (p.2, p.1, p.1 * mn) else some (p.2, p.1, p.1 * mx)
   | _, _ => none
+
+/-- Structural twin of `minContrib`: the compact bounds read the stored
+    endpoints instead of enumerating a wide hole interval on every sweep
+    step. -/
+def minContribFast (st : State) (p : Int × Nat) : Option (Nat × Int × Int) :=
+  match Dom.minInt? (st.domains.getD p.2 Dom.empty),
+      Dom.maxInt? (st.domains.getD p.2 Dom.empty) with
+  | some mn, some mx =>
+      if p.1 ≥ 0 then some (p.2, p.1, p.1 * mn) else some (p.2, p.1, p.1 * mx)
+  | _, _ => none
+
+theorem minContribFast_eq (st : State) (p : Int × Nat) :
+    minContribFast st p = minContrib st p := by
+  unfold minContribFast minContrib
+  rw [minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+attribute [implemented_by minContribFast] minContrib
 
 /-- The folded sum of the min-contributions. -/
 def sumMin (st : State) : List (Int × Nat) → Option Int
@@ -163,10 +180,25 @@ def sumMin (st : State) : List (Int × Nat) → Option Int
     coefficients, `ct·mn` for negative ones (ct < 0: largest at
     min). The exact dual of Propagators.lean's `minContrib`. -/
 def maxContrib (st : State) (p : Int × Nat) : Option (Nat × Int × Int) :=
-  match domMinI (st.domains.getD p.2 []), domMaxI (st.domains.getD p.2 []) with
+  match domMinI (st.domains.getD p.2 Dom.empty), domMaxI (st.domains.getD p.2 Dom.empty) with
   | some mn, some mx =>
       if p.1 ≥ 0 then some (p.2, p.1, p.1 * mx) else some (p.2, p.1, p.1 * mn)
   | _, _ => none
+
+/-- Structural twin of `maxContrib`. -/
+def maxContribFast (st : State) (p : Int × Nat) : Option (Nat × Int × Int) :=
+  match Dom.minInt? (st.domains.getD p.2 Dom.empty),
+      Dom.maxInt? (st.domains.getD p.2 Dom.empty) with
+  | some mn, some mx =>
+      if p.1 ≥ 0 then some (p.2, p.1, p.1 * mx) else some (p.2, p.1, p.1 * mn)
+  | _, _ => none
+
+theorem maxContribFast_eq (st : State) (p : Int × Nat) :
+    maxContribFast st p = maxContrib st p := by
+  unfold maxContribFast maxContrib
+  rw [minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+attribute [implemented_by maxContribFast] maxContrib
 
 /-- The folded max-contribution sum of a pair list (the dual of
     `sumMin`; same fold shape). -/
@@ -189,10 +221,25 @@ def sumMax (st : State) : List (Int × Nat) → Option Int
     `ct = 0` contributes 0 (no pin needed). -/
 def linCauseMinPair (st : State) (p : Int × Nat) : Option Literal :=
   if p.1 > 0 then
-    (domMinI (st.domains.getD p.2 [])).map fun mn => posLe p.2 (mn - 1)
+    (domMinI (st.domains.getD p.2 Dom.empty)).map fun mn => posLe p.2 (mn - 1)
   else if p.1 < 0 then
-    (domMaxI (st.domains.getD p.2 [])).map fun mx => negLe p.2 mx
+    (domMaxI (st.domains.getD p.2 Dom.empty)).map fun mx => negLe p.2 mx
   else none
+
+/-- Structural twin of `linCauseMinPair`. -/
+def linCauseMinPairFast (st : State) (p : Int × Nat) : Option Literal :=
+  if p.1 > 0 then
+    (Dom.minInt? (st.domains.getD p.2 Dom.empty)).map fun mn => posLe p.2 (mn - 1)
+  else if p.1 < 0 then
+    (Dom.maxInt? (st.domains.getD p.2 Dom.empty)).map fun mx => negLe p.2 mx
+  else none
+
+theorem linCauseMinPairFast_eq (st : State) (p : Int × Nat) :
+    linCauseMinPairFast st p = linCauseMinPair st p := by
+  unfold linCauseMinPairFast linCauseMinPair
+  rw [minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+attribute [implemented_by linCauseMinPairFast] linCauseMinPair
 
 /-- The max-contribution cause of a term: the dual discipline.
     `ct > 0` contributes `ct·mx` at `x ≤ mx` (cause `x > mx`);
@@ -200,10 +247,25 @@ def linCauseMinPair (st : State) (p : Int × Nat) : Option Literal :=
     `ct = 0` contributes 0 (no pin needed). -/
 def linCauseMaxPair (st : State) (p : Int × Nat) : Option Literal :=
   if p.1 > 0 then
-    (domMaxI (st.domains.getD p.2 [])).map fun mx => negLe p.2 mx
+    (domMaxI (st.domains.getD p.2 Dom.empty)).map fun mx => negLe p.2 mx
   else if p.1 < 0 then
-    (domMinI (st.domains.getD p.2 [])).map fun mn => posLe p.2 (mn - 1)
+    (domMinI (st.domains.getD p.2 Dom.empty)).map fun mn => posLe p.2 (mn - 1)
   else none
+
+/-- Structural twin of `linCauseMaxPair`. -/
+def linCauseMaxPairFast (st : State) (p : Int × Nat) : Option Literal :=
+  if p.1 > 0 then
+    (Dom.maxInt? (st.domains.getD p.2 Dom.empty)).map fun mx => negLe p.2 mx
+  else if p.1 < 0 then
+    (Dom.minInt? (st.domains.getD p.2 Dom.empty)).map fun mn => posLe p.2 (mn - 1)
+  else none
+
+theorem linCauseMaxPairFast_eq (st : State) (p : Int × Nat) :
+    linCauseMaxPairFast st p = linCauseMaxPair st p := by
+  unfold linCauseMaxPairFast linCauseMaxPair
+  rw [minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+attribute [implemented_by linCauseMaxPairFast] linCauseMaxPair
 
 /-- The min-contribution cause list of a rest list (the tail of
     every min-nogood emitted by the ±1 arms). -/
@@ -393,6 +455,456 @@ def propLinEq2 (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
   | [] => .stable
   | ps => linSweep coeffs is (linDeduceEq st b) (ps.zipIdx) 0
 
+/-
+Cached-bounds fast twin of `propLinEq2`.
+
+`propLinEq2`'s per-sweep-step work is bound by `List.getD` on the frame
+spine: one `linDeduceEq` call performs several hundred `st.domains.getD`
+lookups (one per rest term, repeated in the guard, the min-sum, the
+max-sum and the cause lists).  The logical code re-reads every slot from
+the whole frame list on every visit.
+
+The twin reads the (at most `is.length`) distinct slot bounds ONCE per
+propagator call into a tiny association list, then serves every later
+lookup from that cache, falling back to the frame for slots outside
+`is` (so the correctness statement needs no membership side
+conditions).  Every definition below is a literal transcription of its
+logical counterpart with `st.domains.getD · Dom.empty` replaced by a
+bounds function; the equality theorem bottoms out in
+`minInt?_eq_domMinI`/`maxInt?_eq_domMaxI`.
+-/
+
+/-- The cached integer bounds of a domain (the two extrema the deduction
+    kernel reads). -/
+def linBounds (d : Domain) : Option Int × Option Int :=
+  (d.minInt?, d.maxInt?)
+
+/-- Bounds of the slots `is`, read once from the frame. -/
+def linCache (st : State) (is : List Nat) : List (Nat × Option Int × Option Int) :=
+  is.map fun s =>
+    let d := st.domains.getD s Dom.empty
+    (s, linBounds d)
+
+/-- Bounds lookup with frame fallback. -/
+def linLookupB (st : State) (cache : List (Nat × Option Int × Option Int)) (s : Nat) :
+    Option Int × Option Int :=
+  match cache.find? (fun p => p.1 == s) with
+  | some p => p.2
+  | none => linBounds (st.domains.getD s Dom.empty)
+
+/-- Every element of a cache produced by `linCache` stores the bounds of
+    its own slot. -/
+theorem linLookupB_aux (st : State) (l : List (Nat × Option Int × Option Int))
+    (s : Nat) (h : ∀ q ∈ l, q.2 = linBounds (st.domains.getD q.1 Dom.empty)) :
+    linLookupB st l s = linBounds (st.domains.getD s Dom.empty) := by
+  unfold linLookupB
+  induction l with
+  | nil => rfl
+  | cons q qs ih =>
+      by_cases hq : (q.1 == s) = true
+      · rw [List.find?_cons_of_pos (p := fun p : Nat × Option Int × Option Int => p.1 == s)
+          (a := q) (l := qs) hq]
+        dsimp only
+        rw [← beq_iff_eq.mp hq]
+        exact h q List.mem_cons_self
+      · rw [List.find?_cons_of_neg (p := fun p : Nat × Option Int × Option Int => p.1 == s)
+          (a := q) (l := qs) hq]
+        exact ih fun p hp => h p (List.mem_cons_of_mem q hp)
+
+/-- The cache lookup agrees with the frame on every slot. -/
+theorem linLookupB_eq (st : State) (is : List Nat) (s : Nat) :
+    linLookupB st (linCache st is) s = linBounds (st.domains.getD s Dom.empty) := by
+  refine linLookupB_aux st (linCache st is) s ?_
+  intro q hq
+  obtain ⟨t, _, ht⟩ := List.mem_map.mp hq
+  rw [← ht]
+
+/-- Cached twin of `minContrib`. -/
+def minContribB (f : Nat → Option Int × Option Int) (p : Int × Nat) :
+    Option (Nat × Int × Int) :=
+  let q := f p.2
+  match q.1, q.2 with
+  | some mn, some mx =>
+      if p.1 ≥ 0 then some (p.2, p.1, p.1 * mn) else some (p.2, p.1, p.1 * mx)
+  | _, _ => none
+
+theorem minContribB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (p : Int × Nat) :
+    minContribB f p = minContrib st p := by
+  simp only [minContribB, minContrib, linBounds, h p.2,
+    minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+/-- Cached twin of `maxContrib`. -/
+def maxContribB (f : Nat → Option Int × Option Int) (p : Int × Nat) :
+    Option (Nat × Int × Int) :=
+  let q := f p.2
+  match q.1, q.2 with
+  | some mn, some mx =>
+      if p.1 ≥ 0 then some (p.2, p.1, p.1 * mx) else some (p.2, p.1, p.1 * mn)
+  | _, _ => none
+
+theorem maxContribB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (p : Int × Nat) :
+    maxContribB f p = maxContrib st p := by
+  simp only [maxContribB, maxContrib, linBounds, h p.2,
+    minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+/-- Cached twin of `sumMin`. -/
+def sumMinB (f : Nat → Option Int × Option Int) : List (Int × Nat) → Option Int
+  | [] => none
+  | p :: rest =>
+      match minContribB f p with
+      | none => sumMinB f rest
+      | some t =>
+          match sumMinB f rest with
+          | none => some t.2.2
+          | some s => some (s + t.2.2)
+
+theorem sumMinB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) :
+    ∀ rest, sumMinB f rest = sumMin st rest
+  | [] => rfl
+  | p :: rest => by
+      simp only [sumMinB, sumMin, minContribB_eq st f h p,
+        sumMinB_eq st f h rest]
+
+/-- Cached twin of `sumMax`. -/
+def sumMaxB (f : Nat → Option Int × Option Int) : List (Int × Nat) → Option Int
+  | [] => none
+  | p :: rest =>
+      match maxContribB f p with
+      | none => sumMaxB f rest
+      | some t =>
+          match sumMaxB f rest with
+          | none => some t.2.2
+          | some s => some (s + t.2.2)
+
+theorem sumMaxB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) :
+    ∀ rest, sumMaxB f rest = sumMax st rest
+  | [] => rfl
+  | p :: rest => by
+      simp only [sumMaxB, sumMax, maxContribB_eq st f h p,
+        sumMaxB_eq st f h rest]
+
+/-- Cached twin of `linCauseMinPair`. -/
+def linCauseMinPairB (f : Nat → Option Int × Option Int) (p : Int × Nat) :
+    Option Literal :=
+  let q := f p.2
+  if p.1 > 0 then
+    q.1.map fun mn => posLe p.2 (mn - 1)
+  else if p.1 < 0 then
+    q.2.map fun mx => negLe p.2 mx
+  else none
+
+theorem linCauseMinPairB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (p : Int × Nat) :
+    linCauseMinPairB f p = linCauseMinPair st p := by
+  simp only [linCauseMinPairB, linCauseMinPair, linBounds, h p.2,
+    minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+/-- Cached twin of `linCauseMaxPair`. -/
+def linCauseMaxPairB (f : Nat → Option Int × Option Int) (p : Int × Nat) :
+    Option Literal :=
+  let q := f p.2
+  if p.1 > 0 then
+    q.2.map fun mx => negLe p.2 mx
+  else if p.1 < 0 then
+    q.1.map fun mn => posLe p.2 (mn - 1)
+  else none
+
+theorem linCauseMaxPairB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (p : Int × Nat) :
+    linCauseMaxPairB f p = linCauseMaxPair st p := by
+  simp only [linCauseMaxPairB, linCauseMaxPair, linBounds, h p.2,
+    minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+
+/-- Cached twin of `linCausesMin`. -/
+def linCausesMinB (f : Nat → Option Int × Option Int) (rest : List (Int × Nat)) :
+    Clause :=
+  rest.filterMap (linCauseMinPairB f)
+
+theorem linCausesMinB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty))
+    (rest : List (Int × Nat)) :
+    linCausesMinB f rest = linCausesMin st rest := by
+  unfold linCausesMinB linCausesMin
+  induction rest with
+  | nil => rfl
+  | cons p ps ih =>
+      rw [List.filterMap_cons, List.filterMap_cons,
+        linCauseMinPairB_eq st f h p, ih]
+
+/-- Cached twin of `linCausesMax`. -/
+def linCausesMaxB (f : Nat → Option Int × Option Int) (rest : List (Int × Nat)) :
+    Clause :=
+  rest.filterMap (linCauseMaxPairB f)
+
+theorem linCausesMaxB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty))
+    (rest : List (Int × Nat)) :
+    linCausesMaxB f rest = linCausesMax st rest := by
+  unfold linCausesMaxB linCausesMax
+  induction rest with
+  | nil => rfl
+  | cons p ps ih =>
+      rw [List.filterMap_cons, List.filterMap_cons,
+        linCauseMaxPairB_eq st f h p, ih]
+
+/-- Cached twin of `narrowHi`. -/
+def narrowHiB (f : Nat → Option Int × Option Int) (s : Nat) (hi : Int)
+    (ng : Clause) : PropagationResult :=
+  let q := f s
+  match q.1, q.2 with
+  | some mn, some mx =>
+      if mn > hi then .conflict ng
+      else if decide (hi < mx) then
+        .implied (posLe s hi) { clause := ng }
+      else .stable
+  | _, _ => .stable
+
+theorem narrowHiB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (s : Nat)
+    (hi : Int) (ng : Clause) :
+    narrowHiB f s hi ng = narrowHi st s hi ng := by
+  simp only [narrowHiB, narrowHi, linBounds, h s,
+    minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+  rfl
+
+/-- Cached twin of `narrowLo`. -/
+def narrowLoB (f : Nat → Option Int × Option Int) (s : Nat) (lo : Int)
+    (ng : Clause) : PropagationResult :=
+  let q := f s
+  match q.1, q.2 with
+  | some mn, some mx =>
+      if mx < lo then .conflict ng
+      else if decide (mn < lo) then
+        .implied (negLe s (lo - 1)) { clause := ng }
+      else .stable
+  | _, _ => .stable
+
+theorem narrowLoB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (s : Nat)
+    (lo : Int) (ng : Clause) :
+    narrowLoB f s lo ng = narrowLo st s lo ng := by
+  simp only [narrowLoB, narrowLo, linBounds, h s,
+    minInt?_eq_domMinI, maxInt?_eq_domMaxI]
+  rfl
+
+/-- Cached twin of `linEqArmHiMin`. -/
+def linEqArmHiMinB (f : Nat → Option Int × Option Int) (m : Nat) (b : Int)
+    (rest : List (Int × Nat)) : Option Int → PropagationResult
+  | some lr => narrowHiB f m (b - lr) ([posLe m (b - lr)] ++ linCausesMinB f rest)
+  | none => .stable
+
+theorem linEqArmHiMinB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (m : Nat) (b : Int)
+    (rest : List (Int × Nat)) (o : Option Int) :
+    linEqArmHiMinB f m b rest o = linEqArmHiMin st m b rest o := by
+  cases o with
+  | none => rfl
+  | some lr =>
+      simp only [linEqArmHiMinB, linEqArmHiMin, narrowHiB_eq st f h,
+        linCausesMinB_eq st f h]
+
+/-- Cached twin of `linEqArmLoMax`. -/
+def linEqArmLoMaxB (f : Nat → Option Int × Option Int) (m : Nat) (b : Int)
+    (rest : List (Int × Nat)) : Option Int → PropagationResult
+  | some hr => narrowLoB f m (b - hr) ([negLe m (b - hr - 1)] ++ linCausesMaxB f rest)
+  | none => .stable
+
+theorem linEqArmLoMaxB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (m : Nat) (b : Int)
+    (rest : List (Int × Nat)) (o : Option Int) :
+    linEqArmLoMaxB f m b rest o = linEqArmLoMax st m b rest o := by
+  cases o with
+  | none => rfl
+  | some hr =>
+      simp only [linEqArmLoMaxB, linEqArmLoMax, narrowLoB_eq st f h,
+        linCausesMaxB_eq st f h]
+
+/-- Cached twin of `linEqArmLoMin`. -/
+def linEqArmLoMinB (f : Nat → Option Int × Option Int) (m : Nat) (b : Int)
+    (rest : List (Int × Nat)) : Option Int → PropagationResult
+  | some lr => narrowLoB f m (lr - b) ([negLe m (lr - b - 1)] ++ linCausesMinB f rest)
+  | none => .stable
+
+theorem linEqArmLoMinB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (m : Nat) (b : Int)
+    (rest : List (Int × Nat)) (o : Option Int) :
+    linEqArmLoMinB f m b rest o = linEqArmLoMin st m b rest o := by
+  cases o with
+  | none => rfl
+  | some lr =>
+      simp only [linEqArmLoMinB, linEqArmLoMin, narrowLoB_eq st f h,
+        linCausesMinB_eq st f h]
+
+/-- Cached twin of `linEqArmHiMax`. -/
+def linEqArmHiMaxB (f : Nat → Option Int × Option Int) (m : Nat) (b : Int)
+    (rest : List (Int × Nat)) : Option Int → PropagationResult
+  | some hr => narrowHiB f m (hr - b) ([posLe m (hr - b)] ++ linCausesMaxB f rest)
+  | none => .stable
+
+theorem linEqArmHiMaxB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (m : Nat) (b : Int)
+    (rest : List (Int × Nat)) (o : Option Int) :
+    linEqArmHiMaxB f m b rest o = linEqArmHiMax st m b rest o := by
+  cases o with
+  | none => rfl
+  | some hr =>
+      simp only [linEqArmHiMaxB, linEqArmHiMax, narrowHiB_eq st f h,
+        linCausesMaxB_eq st f h]
+
+/-- Cached twin of `linGenArmHiMin`. -/
+def linGenArmHiMinB (f : Nat → Option Int × Option Int) (m : Nat) (b c : Int)
+    (rest : List (Int × Nat)) : Option Int → PropagationResult
+  | some lr => narrowHiB f m ((b - lr) / c)
+      ([posLe m ((b - lr) / c)] ++ linCausesMinB f rest)
+  | none => .stable
+
+theorem linGenArmHiMinB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (m : Nat) (b c : Int)
+    (rest : List (Int × Nat)) (o : Option Int) :
+    linGenArmHiMinB f m b c rest o = linGenArmHiMin st m b c rest o := by
+  cases o with
+  | none => rfl
+  | some lr =>
+      simp only [linGenArmHiMinB, linGenArmHiMin, narrowHiB_eq st f h,
+        linCausesMinB_eq st f h]
+
+/-- Cached twin of `linGenArmLoMin`. -/
+def linGenArmLoMinB (f : Nat → Option Int × Option Int) (m : Nat) (b c : Int)
+    (rest : List (Int × Nat)) : Option Int → PropagationResult
+  | some lr => narrowLoB f m (-((b - lr) / (-c)))
+      ([negLe m (-((b - lr) / (-c)) - 1)] ++ linCausesMinB f rest)
+  | none => .stable
+
+theorem linGenArmLoMinB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (m : Nat) (b c : Int)
+    (rest : List (Int × Nat)) (o : Option Int) :
+    linGenArmLoMinB f m b c rest o = linGenArmLoMin st m b c rest o := by
+  cases o with
+  | none => rfl
+  | some lr =>
+      simp only [linGenArmLoMinB, linGenArmLoMin, narrowLoB_eq st f h,
+        linCausesMinB_eq st f h]
+
+/-- Cached twin of `linGenArmLoMax`. -/
+def linGenArmLoMaxB (f : Nat → Option Int × Option Int) (m : Nat) (b c : Int)
+    (rest : List (Int × Nat)) : Option Int → PropagationResult
+  | some hr => narrowLoB f m (-((hr - b) / c))
+      ([negLe m (-((hr - b) / c) - 1)] ++ linCausesMaxB f rest)
+  | none => .stable
+
+theorem linGenArmLoMaxB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (m : Nat) (b c : Int)
+    (rest : List (Int × Nat)) (o : Option Int) :
+    linGenArmLoMaxB f m b c rest o = linGenArmLoMax st m b c rest o := by
+  cases o with
+  | none => rfl
+  | some hr =>
+      simp only [linGenArmLoMaxB, linGenArmLoMax, narrowLoB_eq st f h,
+        linCausesMaxB_eq st f h]
+
+/-- Cached twin of `linGenArmHiMax`. -/
+def linGenArmHiMaxB (f : Nat → Option Int × Option Int) (m : Nat) (b c : Int)
+    (rest : List (Int × Nat)) : Option Int → PropagationResult
+  | some hr => narrowHiB f m ((hr - b) / (-c))
+      ([posLe m ((hr - b) / (-c))] ++ linCausesMaxB f rest)
+  | none => .stable
+
+theorem linGenArmHiMaxB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (m : Nat) (b c : Int)
+    (rest : List (Int × Nat)) (o : Option Int) :
+    linGenArmHiMaxB f m b c rest o = linGenArmHiMax st m b c rest o := by
+  cases o with
+  | none => rfl
+  | some hr =>
+      simp only [linGenArmHiMaxB, linGenArmHiMax, narrowHiB_eq st f h,
+        linCausesMaxB_eq st f h]
+
+/-- Cached twin of `linDeduceEq`. -/
+def linDeduceEqB (f : Nat → Option Int × Option Int) (b : Int) (m : Nat) (c : Int)
+    (rest : List (Int × Nat)) : PropagationResult :=
+  if rest.all (fun p => (minContribB f p).isSome) then
+    if c = 1 then
+      firstEvent
+        [ linEqArmHiMinB f m b rest (sumMinB f rest)
+        , linEqArmLoMaxB f m b rest (sumMaxB f rest) ]
+    else if c = -1 then
+      firstEvent
+        [ linEqArmLoMinB f m b rest (sumMinB f rest)
+        , linEqArmHiMaxB f m b rest (sumMaxB f rest) ]
+    else if c > 0 then
+      firstEvent
+        [ linGenArmHiMinB f m b c rest (sumMinB f rest)
+        , linGenArmLoMaxB f m b c rest (sumMaxB f rest) ]
+    else if c < 0 then
+      firstEvent
+        [ linGenArmLoMinB f m b c rest (sumMinB f rest)
+        , linGenArmHiMaxB f m b c rest (sumMaxB f rest) ]
+    else .stable
+  else .stable
+
+theorem linDeduceEqB_eq (st : State) (f : Nat → Option Int × Option Int)
+    (h : ∀ s, f s = linBounds (st.domains.getD s Dom.empty)) (b : Int) (m : Nat)
+    (c : Int) (rest : List (Int × Nat)) :
+    linDeduceEqB f b m c rest = linDeduceEq st b m c rest := by
+  unfold linDeduceEqB linDeduceEq
+  rw [List.all_congr rfl (fun p => by rw [minContribB_eq st f h p])]
+  by_cases h1 : c = 1
+  · rw [if_pos h1, if_pos h1, sumMinB_eq st f h, sumMaxB_eq st f h,
+      linEqArmHiMinB_eq st f h, linEqArmLoMaxB_eq st f h]
+  · rw [if_neg h1, if_neg h1]
+    by_cases h2 : c = -1
+    · rw [if_pos h2, if_pos h2, sumMinB_eq st f h, sumMaxB_eq st f h,
+        linEqArmLoMinB_eq st f h, linEqArmHiMaxB_eq st f h]
+    · rw [if_neg h2, if_neg h2]
+      by_cases h3 : c > 0
+      · rw [if_pos h3, if_pos h3, sumMinB_eq st f h, sumMaxB_eq st f h,
+          linGenArmHiMinB_eq st f h, linGenArmLoMaxB_eq st f h]
+      · rw [if_neg h3, if_neg h3]
+        by_cases h4 : c < 0
+        · rw [if_pos h4, if_pos h4, sumMinB_eq st f h, sumMaxB_eq st f h,
+            linGenArmLoMinB_eq st f h, linGenArmHiMaxB_eq st f h]
+        · rw [if_neg h4, if_neg h4]
+
+/-- Congruence of the sweep in the deduction kernel. -/
+theorem linSweep_congr (coeffs : List Int) (is : List Nat)
+    (f g : Nat → Int → List (Int × Nat) → PropagationResult)
+    (h : ∀ m c rest, f m c rest = g m c rest) :
+    ∀ ps idx, linSweep coeffs is f ps idx = linSweep coeffs is g ps idx
+  | [], _ => rfl
+  | ((c, m), i) :: rest, idx => by
+      simp only [linSweep]
+      rw [h m c]
+      split
+      · exact linSweep_congr coeffs is f g h rest (idx + 1)
+      · rfl
+
+/-- Cached-bounds twin of `propLinEq2`: read each involved slot's bounds
+    once, then sweep with the bound-parameterised kernel. -/
+def propLinEq2Fast (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
+    PropagationResult :=
+  match coeffs.zip is with
+  | [] => .stable
+  | ps =>
+      let cache := linCache st is
+      linSweep coeffs is (linDeduceEqB (linLookupB st cache) b) ps.zipIdx 0
+
+theorem propLinEq2Fast_eq (st : State) (coeffs : List Int) (is : List Nat)
+    (b : Int) :
+    propLinEq2Fast st coeffs is b = propLinEq2 st coeffs is b := by
+  unfold propLinEq2Fast propLinEq2
+  cases hz : coeffs.zip is with
+  | nil => rfl
+  | cons p ps =>
+      dsimp only
+      exact linSweep_congr coeffs is _ _
+        (fun m c rest => linDeduceEqB_eq st _ (linLookupB_eq st is) b m c rest) _ 0
+
+attribute [implemented_by propLinEq2Fast] propLinEq2
+
 /-! ## The standalone registration -/
 
 /-- The propagators of this module's two families: `linLe` (the
@@ -410,8 +922,8 @@ def propagatorOfProvedBLin : DomConstraint → Option Propagator
     over two int slots with generous problem domains. -/
 def linLe2_probI : Problem DomConstraint Unit where
   names := ["x", "t"]
-  domains := [[Value.int (-2), Value.int 3, Value.int 5],
-    [Value.int (-2), Value.int 10]]
+  domains := [Dom.ofList [Value.int (-2), Value.int 3, Value.int 5],
+    Dom.ofList [Value.int (-2), Value.int 10]]
   constraints := [DomConstraint.linLe [1, 2] [0, 1] 0]
   objective := ()
   clauses := []
@@ -419,7 +931,8 @@ def linLe2_probI : Problem DomConstraint Unit where
 /-- The witness state (the obstruction's `stI`): slot-`x`'s domain
     read `{0,5}` (min 0), slot-`t`'s domain read `{0,10}`. -/
 def linLe2_stI : State where
-  domains := [[Value.int 0, Value.int 5], [Value.int 0, Value.int 10]]
+  domains := [Dom.ofList [Value.int 0, Value.int 5],
+    Dom.ofList [Value.int 0, Value.int 10]]
   trail := []
   decisionLevel := 0
   clauses := []
@@ -453,7 +966,8 @@ negated). -/
 /-- The general-c witness state: slot-`x`'s domain `{0,5}`,
     slot-`y`'s domain `{1,3}` (min 1, max 3). -/
 def linLe2_gen_stI : State where
-  domains := [[Value.int 0, Value.int 5], [Value.int 1, Value.int 3]]
+  domains := [Dom.ofList [Value.int 0, Value.int 5],
+    Dom.ofList [Value.int 1, Value.int 3]]
   trail := []
   decisionLevel := 0
   clauses := []
@@ -493,10 +1007,12 @@ theorem linLe2_aI_solution :
         rw [show linLe2_aI[0]? = some (Value.int 3) from rfl] at hv2
         injection hv2 with hv3
         rw [← hv3]
-        have hdom : linLe2_probI.domains.getD 0 []
+        have hdom : Dom.enum (linLe2_probI.domains.getD 0 Dom.empty)
             = [Value.int (-2), Value.int 3, Value.int 5] := rfl
-        rw [hdom]
-        exact List.mem_cons_of_mem _ (List.mem_cons_self)
+        have hmem : Value.int 3 ∈ Dom.enum (linLe2_probI.domains.getD 0 Dom.empty) := by
+          rw [hdom]
+          exact List.mem_cons_of_mem _ (List.mem_cons_self)
+        exact (DomainLike.mem_iff _ _).mpr hmem
     | succ n =>
         have hn : n = 0 := by omega
         subst hn
@@ -504,10 +1020,12 @@ theorem linLe2_aI_solution :
         rw [show linLe2_aI[1]? = some (Value.int (-2)) from rfl] at hv2
         injection hv2 with hv3
         rw [← hv3]
-        have hdom : linLe2_probI.domains.getD 1 []
+        have hdom : Dom.enum (linLe2_probI.domains.getD 1 Dom.empty)
             = [Value.int (-2), Value.int 10] := rfl
-        rw [hdom]
-        exact List.mem_cons_self
+        have hmem : Value.int (-2) ∈ Dom.enum (linLe2_probI.domains.getD 1 Dom.empty) := by
+          rw [hdom]
+          exact List.mem_cons_self
+        exact (DomainLike.mem_iff _ _).mpr hmem
   · intro dc hdc
     have hdc2 : dc = DomConstraint.linLe [1, 2] [0, 1] 0 :=
       List.mem_singleton.mp hdc
@@ -536,8 +1054,8 @@ theorem linLe2_aI_cause_true : (posLe 1 (-1)).eval linLe2_aI = some true := rfl
     triple shape. -/
 theorem minContrib_inv {st : State} {p : Int × Nat} {t : Nat × Int × Int}
     (ht : minContrib st p = some t) :
-    ∃ mn mx, domMinI (st.domains.getD p.2 []) = some mn ∧
-      domMaxI (st.domains.getD p.2 []) = some mx ∧
+    ∃ mn mx, domMinI (st.domains.getD p.2 Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD p.2 Dom.empty) = some mx ∧
       t = (p.2, p.1, if p.1 ≥ 0 then p.1 * mn else p.1 * mx) := by
   unfold minContrib at ht
   split at ht
@@ -557,8 +1075,8 @@ theorem minContrib_inv {st : State} {p : Int × Nat} {t : Nat × Int × Int}
     triple shape (the dual selection). -/
 theorem maxContrib_inv {st : State} {p : Int × Nat} {t : Nat × Int × Int}
     (ht : maxContrib st p = some t) :
-    ∃ mn mx, domMinI (st.domains.getD p.2 []) = some mn ∧
-      domMaxI (st.domains.getD p.2 []) = some mx ∧
+    ∃ mn mx, domMinI (st.domains.getD p.2 Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD p.2 Dom.empty) = some mx ∧
       t = (p.2, p.1, if p.1 ≥ 0 then p.1 * mx else p.1 * mn) := by
   unfold maxContrib at ht
   split at ht
@@ -728,6 +1246,334 @@ theorem lin2_reads_of_others {coeffs : List Int} {is : List Nat} {i : Nat}
         (fun q => q.2 != i)).map (·.1)) → ∃ x, slotInt a p.2 = some x :=
   fun p hp => hreads p (lin2_others_mem_zip hp)
 
+/-! ## Locality of the linear-family kernels (PLAN P1 scheduled scan)
+
+Every read of the kernels below goes through `st.domains.getD s Dom.empty` for a
+slot `s` drawn from the constraint's slot list: the contribution sums and
+cause lists read only the pairs' slots, the deduction arms read the passed
+rest list's slots plus the narrowed slot `m`, and the sweeps draw their
+slots from `coeffs.zip is`. These lemmas record that pointwise-equal
+domains on the read slots yield equal runs — the `PropLocalOne` premiss
+of the scheduled scan's equivalence theorems, instantiated for the
+concrete registrations in `ScheduledFamilies.lean`. -/
+
+/-- `filterMap` respects a pointwise-equal function on a list. -/
+theorem lin2_filterMap_local {α β : Type} {f g : α → Option β} {l : List α}
+    (h : ∀ a ∈ l, f a = g a) :
+    l.filterMap f = l.filterMap g := by
+  induction l with
+  | nil => rfl
+  | cons a l ih =>
+      have ha := h a (List.mem_cons_self ..)
+      have hl := ih (fun b hb => h b (List.mem_cons_of_mem _ hb))
+      simp only [List.filterMap_cons, ha, hl]
+
+/-- `narrowHi` reads only its slot's domain. -/
+theorem linNarrowHi_local {s : Nat} {hi : Int} {ng : Clause} {st1 st2 : State}
+    (h : st1.domains.getD s Dom.empty = st2.domains.getD s Dom.empty) :
+    narrowHi st1 s hi ng = narrowHi st2 s hi ng := by
+  simp only [narrowHi, h]
+
+/-- `narrowLo` reads only its slot's domain. -/
+theorem linNarrowLo_local {s : Nat} {lo : Int} {ng : Clause} {st1 st2 : State}
+    (h : st1.domains.getD s Dom.empty = st2.domains.getD s Dom.empty) :
+    narrowLo st1 s lo ng = narrowLo st2 s lo ng := by
+  simp only [narrowLo, h]
+
+/-- `minContrib` reads only the pair's slot. -/
+theorem minContrib_local {st1 st2 : State} {p : Int × Nat}
+    (h : st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    minContrib st1 p = minContrib st2 p := by
+  simp only [minContrib, h]
+
+/-- `maxContrib` reads only the pair's slot. -/
+theorem maxContrib_local {st1 st2 : State} {p : Int × Nat}
+    (h : st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    maxContrib st1 p = maxContrib st2 p := by
+  simp only [maxContrib, h]
+
+/-- The min-contribution sum depends only on the pairs' slots. -/
+theorem sumMin_local {st1 st2 : State} {ps : List (Int × Nat)}
+    (h : ∀ p ∈ ps, st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    sumMin st1 ps = sumMin st2 ps := by
+  induction ps with
+  | nil => rfl
+  | cons p rest ih =>
+      have hp := minContrib_local (h p (List.mem_cons_self ..))
+      have hr := ih (fun q hq => h q (List.mem_cons_of_mem _ hq))
+      rw [sumMin, sumMin, hp, hr]
+
+/-- The max-contribution sum depends only on the pairs' slots. -/
+theorem sumMax_local {st1 st2 : State} {ps : List (Int × Nat)}
+    (h : ∀ p ∈ ps, st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    sumMax st1 ps = sumMax st2 ps := by
+  induction ps with
+  | nil => rfl
+  | cons p rest ih =>
+      have hp := maxContrib_local (h p (List.mem_cons_self ..))
+      have hr := ih (fun q hq => h q (List.mem_cons_of_mem _ hq))
+      rw [sumMax, sumMax, hp, hr]
+
+/-- The min-contribution cause reads only the pair's slot. -/
+theorem linCauseMinPair_local {st1 st2 : State} {p : Int × Nat}
+    (h : st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    linCauseMinPair st1 p = linCauseMinPair st2 p := by
+  simp only [linCauseMinPair, h]
+
+/-- The max-contribution cause reads only the pair's slot. -/
+theorem linCauseMaxPair_local {st1 st2 : State} {p : Int × Nat}
+    (h : st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    linCauseMaxPair st1 p = linCauseMaxPair st2 p := by
+  simp only [linCauseMaxPair, h]
+
+/-- The min-cause list depends only on the pairs' slots. -/
+theorem linCausesMin_local {st1 st2 : State} {rest : List (Int × Nat)}
+    (h : ∀ p ∈ rest, st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    linCausesMin st1 rest = linCausesMin st2 rest :=
+  lin2_filterMap_local (fun p hp => linCauseMinPair_local (h p hp))
+
+/-- The max-cause list depends only on the pairs' slots. -/
+theorem linCausesMax_local {st1 st2 : State} {rest : List (Int × Nat)}
+    (h : ∀ p ∈ rest, st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    linCausesMax st1 rest = linCausesMax st2 rest :=
+  lin2_filterMap_local (fun p hp => linCauseMaxPair_local (h p hp))
+
+/-- The `c > 0` upper-bound arm reads only the narrowed slot and the
+    rest list's slots. -/
+theorem linGenArmHiMin_local {st1 st2 : State} {m : Nat} {b c : Int}
+    {rest : List (Int × Nat)} (o : Option Int)
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hc : linCausesMin st1 rest = linCausesMin st2 rest) :
+    linGenArmHiMin st1 m b c rest o = linGenArmHiMin st2 m b c rest o := by
+  cases o with
+  | none => rfl
+  | some lr =>
+      unfold linGenArmHiMin
+      rw [hc]
+      exact linNarrowHi_local hm
+
+/-- The `c < 0` lower-bound arm reads only the narrowed slot and the
+    rest list's slots. -/
+theorem linGenArmLoMin_local {st1 st2 : State} {m : Nat} {b c : Int}
+    {rest : List (Int × Nat)} (o : Option Int)
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hc : linCausesMin st1 rest = linCausesMin st2 rest) :
+    linGenArmLoMin st1 m b c rest o = linGenArmLoMin st2 m b c rest o := by
+  cases o with
+  | none => rfl
+  | some lr =>
+      unfold linGenArmLoMin
+      rw [hc]
+      exact linNarrowLo_local hm
+
+/-- The `c > 0` equality lower-bound arm reads only the narrowed slot and
+    the rest list's slots. -/
+theorem linGenArmLoMax_local {st1 st2 : State} {m : Nat} {b c : Int}
+    {rest : List (Int × Nat)} (o : Option Int)
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hc : linCausesMax st1 rest = linCausesMax st2 rest) :
+    linGenArmLoMax st1 m b c rest o = linGenArmLoMax st2 m b c rest o := by
+  cases o with
+  | none => rfl
+  | some hr =>
+      unfold linGenArmLoMax
+      rw [hc]
+      exact linNarrowLo_local hm
+
+/-- The `c < 0` equality upper-bound arm reads only the narrowed slot and
+    the rest list's slots. -/
+theorem linGenArmHiMax_local {st1 st2 : State} {m : Nat} {b c : Int}
+    {rest : List (Int × Nat)} (o : Option Int)
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hc : linCausesMax st1 rest = linCausesMax st2 rest) :
+    linGenArmHiMax st1 m b c rest o = linGenArmHiMax st2 m b c rest o := by
+  cases o with
+  | none => rfl
+  | some hr =>
+      unfold linGenArmHiMax
+      rw [hc]
+      exact linNarrowHi_local hm
+
+/-- The `x_m ≤ b − loRest` eq arm reads only the narrowed slot and the
+    rest list's slots. -/
+theorem linEqArmHiMin_local {st1 st2 : State} {m : Nat} {b : Int}
+    {rest : List (Int × Nat)} (o : Option Int)
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hc : linCausesMin st1 rest = linCausesMin st2 rest) :
+    linEqArmHiMin st1 m b rest o = linEqArmHiMin st2 m b rest o := by
+  cases o with
+  | none => rfl
+  | some lr =>
+      unfold linEqArmHiMin
+      rw [hc]
+      exact linNarrowHi_local hm
+
+/-- The `x_m ≥ b − hiRest` eq arm reads only the narrowed slot and the
+    rest list's slots. -/
+theorem linEqArmLoMax_local {st1 st2 : State} {m : Nat} {b : Int}
+    {rest : List (Int × Nat)} (o : Option Int)
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hc : linCausesMax st1 rest = linCausesMax st2 rest) :
+    linEqArmLoMax st1 m b rest o = linEqArmLoMax st2 m b rest o := by
+  cases o with
+  | none => rfl
+  | some hr =>
+      unfold linEqArmLoMax
+      rw [hc]
+      exact linNarrowLo_local hm
+
+/-- The `x_m ≥ loRest − b` eq arm reads only the narrowed slot and the
+    rest list's slots. -/
+theorem linEqArmLoMin_local {st1 st2 : State} {m : Nat} {b : Int}
+    {rest : List (Int × Nat)} (o : Option Int)
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hc : linCausesMin st1 rest = linCausesMin st2 rest) :
+    linEqArmLoMin st1 m b rest o = linEqArmLoMin st2 m b rest o := by
+  cases o with
+  | none => rfl
+  | some lr =>
+      unfold linEqArmLoMin
+      rw [hc]
+      exact linNarrowLo_local hm
+
+/-- The `x_m ≤ hiRest − b` eq arm reads only the narrowed slot and the
+    rest list's slots. -/
+theorem linEqArmHiMax_local {st1 st2 : State} {m : Nat} {b : Int}
+    {rest : List (Int × Nat)} (o : Option Int)
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hc : linCausesMax st1 rest = linCausesMax st2 rest) :
+    linEqArmHiMax st1 m b rest o = linEqArmHiMax st2 m b rest o := by
+  cases o with
+  | none => rfl
+  | some hr =>
+      unfold linEqArmHiMax
+      rw [hc]
+      exact linNarrowHi_local hm
+
+/-- The completeness guard depends only on the rest list's slots. -/
+theorem all_minContrib_isSome_local {st1 st2 : State} {rest : List (Int × Nat)}
+    (h : ∀ p ∈ rest, st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    rest.all (fun p => (minContrib st1 p).isSome) =
+      rest.all (fun p => (minContrib st2 p).isSome) := by
+  induction rest with
+  | nil => rfl
+  | cons p rest ih =>
+      have hp := minContrib_local (h p (List.mem_cons_self ..))
+      have hr := ih (fun q hq => h q (List.mem_cons_of_mem _ hq))
+      simp only [List.all_cons, hp, hr]
+
+/-- `linDeduceLe` reads only the narrowed slot `m` and the rest list's
+    slots. -/
+theorem linDeduceLe_local {st1 st2 : State} {b : Int} {m : Nat} {c : Int}
+    {rest : List (Int × Nat)}
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hrest : ∀ p ∈ rest, st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    linDeduceLe st1 b m c rest = linDeduceLe st2 b m c rest := by
+  have hall := all_minContrib_isSome_local hrest
+  have hsum := sumMin_local hrest
+  have hcm := linCausesMin_local hrest
+  have hhi : ∀ o, linGenArmHiMin st1 m b c rest o = linGenArmHiMin st2 m b c rest o :=
+    fun o => linGenArmHiMin_local o hm hcm
+  have hlo : ∀ o, linGenArmLoMin st1 m b c rest o = linGenArmLoMin st2 m b c rest o :=
+    fun o => linGenArmLoMin_local o hm hcm
+  unfold linDeduceLe
+  rw [hall, hsum, hcm]
+  simp only [linNarrowHi_local hm, linNarrowLo_local hm, hhi, hlo]
+
+/-- `linDeduceEq` reads only the narrowed slot `m` and the rest list's
+    slots. -/
+theorem linDeduceEq_local {st1 st2 : State} {b : Int} {m : Nat} {c : Int}
+    {rest : List (Int × Nat)}
+    (hm : st1.domains.getD m Dom.empty = st2.domains.getD m Dom.empty)
+    (hrest : ∀ p ∈ rest, st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty) :
+    linDeduceEq st1 b m c rest = linDeduceEq st2 b m c rest := by
+  have hall := all_minContrib_isSome_local hrest
+  have hsum := sumMin_local hrest
+  have hmax := sumMax_local hrest
+  have hcm := linCausesMin_local hrest
+  have hcx := linCausesMax_local hrest
+  have h1 : ∀ o, linEqArmHiMin st1 m b rest o = linEqArmHiMin st2 m b rest o :=
+    fun o => linEqArmHiMin_local o hm hcm
+  have h2 : ∀ o, linEqArmLoMax st1 m b rest o = linEqArmLoMax st2 m b rest o :=
+    fun o => linEqArmLoMax_local o hm hcx
+  have h3 : ∀ o, linEqArmLoMin st1 m b rest o = linEqArmLoMin st2 m b rest o :=
+    fun o => linEqArmLoMin_local o hm hcm
+  have h4 : ∀ o, linEqArmHiMax st1 m b rest o = linEqArmHiMax st2 m b rest o :=
+    fun o => linEqArmHiMax_local o hm hcx
+  have g1 : ∀ o, linGenArmHiMin st1 m b c rest o = linGenArmHiMin st2 m b c rest o :=
+    fun o => linGenArmHiMin_local o hm hcm
+  have g2 : ∀ o, linGenArmLoMax st1 m b c rest o = linGenArmLoMax st2 m b c rest o :=
+    fun o => linGenArmLoMax_local o hm hcx
+  have g3 : ∀ o, linGenArmLoMin st1 m b c rest o = linGenArmLoMin st2 m b c rest o :=
+    fun o => linGenArmLoMin_local o hm hcm
+  have g4 : ∀ o, linGenArmHiMax st1 m b c rest o = linGenArmHiMax st2 m b c rest o :=
+    fun o => linGenArmHiMax_local o hm hcx
+  unfold linDeduceEq
+  rw [hall, hsum, hmax]
+  simp only [h1, h2, h3, h4, g1, g2, g3, g4]
+
+/-- The sweep depends only on the positions' slots and the `rest` lists
+    drawn from `coeffs.zip is`. -/
+theorem linSweep_local {coeffs : List Int} {is : List Nat}
+    {f1 f2 : Nat → Int → List (Int × Nat) → PropagationResult} :
+    ∀ (ps : List ((Int × Nat) × Nat)) (idx : Nat),
+      (∀ p ∈ ps, ∀ rest, (∀ q ∈ rest, q ∈ coeffs.zip is) →
+        f1 p.1.2 p.1.1 rest = f2 p.1.2 p.1.1 rest) →
+      linSweep coeffs is f1 ps idx = linSweep coeffs is f2 ps idx := by
+  intro ps
+  induction ps with
+  | nil => intro idx _; rfl
+  | cons p rest ih =>
+      intro idx hf
+      obtain ⟨⟨c, m⟩, i⟩ := p
+      have hp := hf ((c, m), i) (List.mem_cons_self ..)
+      have hr : ∀ q ∈ rest, ∀ r, (∀ z ∈ r, z ∈ coeffs.zip is) →
+          f1 q.1.2 q.1.1 r = f2 q.1.2 q.1.1 r :=
+        fun q hq => hf q (List.mem_cons_of_mem _ hq)
+      rw [linSweep, linSweep]
+      rw [hp (((coeffs.zip is).zipIdx.filter (fun q => q.2 != i)).map (·.1))
+            (fun r hr => lin2_others_mem_zip hr)]
+      cases hc : f2 m c (((coeffs.zip is).zipIdx.filter (fun q => q.2 != i)).map (·.1)) with
+      | stable => exact ih (idx + 1) hr
+      | implied _ _ => rfl
+      | conflict _ => rfl
+
+/-- `propLinLe2` reads only the slots of `is`: pointwise-equal domains
+    on `is` yield equal runs. -/
+theorem propLinLe2_local {st1 st2 : State} {coeffs : List Int} {is : List Nat}
+    {b : Int}
+    (h : ∀ i ∈ is, st1.domains.getD i Dom.empty = st2.domains.getD i Dom.empty) :
+    propLinLe2 st1 coeffs is b = propLinLe2 st2 coeffs is b := by
+  unfold propLinLe2
+  cases hz : coeffs.zip is with
+  | nil => rfl
+  | cons p ps =>
+      show linSweep coeffs is (linDeduceLe st1 b) ((p :: ps).zipIdx) 0 =
+           linSweep coeffs is (linDeduceLe st2 b) ((p :: ps).zipIdx) 0
+      refine linSweep_local ((p :: ps).zipIdx) 0 ?_
+      intro q hq rest hrest
+      exact linDeduceLe_local
+        (h q.1.2 (mem_zip_snd (hz.symm ▸ lin2_mem_zip_of_zipIdx _ 0 q hq)))
+        (fun r hr => h r.2 (mem_zip_snd (hrest r hr)))
+
+/-- `propLinEq2` reads only the slots of `is`: pointwise-equal domains
+    on `is` yield equal runs. -/
+theorem propLinEq2_local {st1 st2 : State} {coeffs : List Int} {is : List Nat}
+    {b : Int}
+    (h : ∀ i ∈ is, st1.domains.getD i Dom.empty = st2.domains.getD i Dom.empty) :
+    propLinEq2 st1 coeffs is b = propLinEq2 st2 coeffs is b := by
+  unfold propLinEq2
+  cases hz : coeffs.zip is with
+  | nil => rfl
+  | cons p ps =>
+      show linSweep coeffs is (linDeduceEq st1 b) ((p :: ps).zipIdx) 0 =
+           linSweep coeffs is (linDeduceEq st2 b) ((p :: ps).zipIdx) 0
+      refine linSweep_local ((p :: ps).zipIdx) 0 ?_
+      intro q hq rest hrest
+      exact linDeduceEq_local
+        (h q.1.2 (mem_zip_snd (hz.symm ▸ lin2_mem_zip_of_zipIdx _ 0 q hq)))
+        (fun r hr => h r.2 (mem_zip_snd (hrest r hr)))
+
 /-! ## The state-free contribution sums under falsified causes -/
 
 /-- Under the completeness guard, a `none` sum forces the empty
@@ -826,10 +1672,10 @@ theorem lin2_sumMin_le {a : Assignment} {st : State} {rest : List (Int × Nat)}
         · -- cause posLe p.2 (mn − 1), false → mn ≤ xt
           have hcause : linCauseMinPair st p = some (posLe p.2 (mn - 1)) := by
             show (if p.1 > 0 then
-                (domMinI (st.domains.getD p.2 [])).map
+                (domMinI (st.domains.getD p.2 Dom.empty)).map
                   fun m => posLe p.2 (m - 1)
               else if p.1 < 0 then
-                (domMaxI (st.domains.getD p.2 [])).map fun m => negLe p.2 m
+                (domMaxI (st.domains.getD p.2 Dom.empty)).map fun m => negLe p.2 m
               else none) = _
             rw [if_pos hpos, hmn, Option.map_some]
           have hmem : posLe p.2 (mn - 1) ∈ linCausesMin st rest := by
@@ -846,10 +1692,10 @@ theorem lin2_sumMin_le {a : Assignment} {st : State} {rest : List (Int × Nat)}
           · -- cause negLe p.2 mx, false → xt ≤ mx
             have hcause : linCauseMinPair st p = some (negLe p.2 mx) := by
               show (if p.1 > 0 then
-                  (domMinI (st.domains.getD p.2 [])).map
+                  (domMinI (st.domains.getD p.2 Dom.empty)).map
                     fun m => posLe p.2 (m - 1)
                 else if p.1 < 0 then
-                  (domMaxI (st.domains.getD p.2 [])).map fun m => negLe p.2 m
+                  (domMaxI (st.domains.getD p.2 Dom.empty)).map fun m => negLe p.2 m
                 else none) = _
               rw [if_neg (by omega : ¬ p.1 > 0), if_pos hneg, hmx,
                 Option.map_some]
@@ -967,9 +1813,9 @@ theorem lin2_sumMax_ge {a : Assignment} {st : State} {rest : List (Int × Nat)}
         · -- cause negLe p.2 mx, false → xt ≤ mx
           have hcause : linCauseMaxPair st p = some (negLe p.2 mx) := by
             show (if p.1 > 0 then
-                (domMaxI (st.domains.getD p.2 [])).map fun m => negLe p.2 m
+                (domMaxI (st.domains.getD p.2 Dom.empty)).map fun m => negLe p.2 m
               else if p.1 < 0 then
-                (domMinI (st.domains.getD p.2 [])).map
+                (domMinI (st.domains.getD p.2 Dom.empty)).map
                   fun m => posLe p.2 (m - 1)
               else none) = _
             rw [if_pos hpos, hmx, Option.map_some]
@@ -987,9 +1833,9 @@ theorem lin2_sumMax_ge {a : Assignment} {st : State} {rest : List (Int × Nat)}
           · -- cause posLe p.2 (mn − 1), false → mn ≤ xt
             have hcause : linCauseMaxPair st p = some (posLe p.2 (mn - 1)) := by
               show (if p.1 > 0 then
-                  (domMaxI (st.domains.getD p.2 [])).map fun m => negLe p.2 m
+                  (domMaxI (st.domains.getD p.2 Dom.empty)).map fun m => negLe p.2 m
                 else if p.1 < 0 then
-                  (domMinI (st.domains.getD p.2 [])).map
+                  (domMinI (st.domains.getD p.2 Dom.empty)).map
                     fun m => posLe p.2 (m - 1)
                 else none) = _
               rw [if_neg (by omega : ¬ p.1 > 0), if_pos hneg, hmn,
@@ -1112,14 +1958,14 @@ theorem lin2_entry_dot {a : Assignment} {coeffs : List Int} {is : List Nat}
     `negLe` below a negative one. -/
 theorem lin2_causeMin_inv {st : State} {p : Int × Nat} {q : Literal}
     (h : linCauseMinPair st p = some q) :
-    (∃ mn, domMinI (st.domains.getD p.2 []) = some mn ∧
+    (∃ mn, domMinI (st.domains.getD p.2 Dom.empty) = some mn ∧
         q = posLe p.2 (mn - 1) ∧ p.1 > 0) ∨
-    (∃ mx, domMaxI (st.domains.getD p.2 []) = some mx ∧
+    (∃ mx, domMaxI (st.domains.getD p.2 Dom.empty) = some mx ∧
         q = negLe p.2 mx ∧ p.1 < 0) := by
   unfold linCauseMinPair at h
   by_cases hpos : p.1 > 0
   · rw [if_pos hpos] at h
-    cases hmn : domMinI (st.domains.getD p.2 []) with
+    cases hmn : domMinI (st.domains.getD p.2 Dom.empty) with
     | none =>
         rw [hmn] at h
         exact absurd h (by intro hc; cases hc)
@@ -1129,7 +1975,7 @@ theorem lin2_causeMin_inv {st : State} {p : Int × Nat} {q : Literal}
         exact Or.inl ⟨mn, rfl, hq2.symm, hpos⟩
   · by_cases hneg : p.1 < 0
     · rw [if_neg (by omega : ¬ p.1 > 0), if_pos hneg] at h
-      cases hmx : domMaxI (st.domains.getD p.2 []) with
+      cases hmx : domMaxI (st.domains.getD p.2 Dom.empty) with
       | none =>
           rw [hmx] at h
           exact absurd h (by intro hc; cases hc)
@@ -1144,14 +1990,14 @@ theorem lin2_causeMin_inv {st : State} {p : Int × Nat} {q : Literal}
     `posLe` below a negative one. -/
 theorem lin2_causeMax_inv {st : State} {p : Int × Nat} {q : Literal}
     (h : linCauseMaxPair st p = some q) :
-    (∃ mx, domMaxI (st.domains.getD p.2 []) = some mx ∧
+    (∃ mx, domMaxI (st.domains.getD p.2 Dom.empty) = some mx ∧
         q = negLe p.2 mx ∧ p.1 > 0) ∨
-    (∃ mn, domMinI (st.domains.getD p.2 []) = some mn ∧
+    (∃ mn, domMinI (st.domains.getD p.2 Dom.empty) = some mn ∧
         q = posLe p.2 (mn - 1) ∧ p.1 < 0) := by
   unfold linCauseMaxPair at h
   by_cases hpos : p.1 > 0
   · rw [if_pos hpos] at h
-    cases hmx : domMaxI (st.domains.getD p.2 []) with
+    cases hmx : domMaxI (st.domains.getD p.2 Dom.empty) with
     | none =>
         rw [hmx] at h
         exact absurd h (by intro hc; cases hc)
@@ -1161,7 +2007,7 @@ theorem lin2_causeMax_inv {st : State} {p : Int × Nat} {q : Literal}
         exact Or.inl ⟨mx, rfl, hq2.symm, hpos⟩
   · by_cases hneg : p.1 < 0
     · rw [if_neg (by omega : ¬ p.1 > 0), if_pos hneg] at h
-      cases hmn : domMinI (st.domains.getD p.2 []) with
+      cases hmn : domMinI (st.domains.getD p.2 Dom.empty) with
       | none =>
           rw [hmn] at h
           exact absurd h (by intro hc; cases hc)
@@ -4695,8 +5541,39 @@ def domIntOnlyB (d : List Value) : Bool :=
     slot is in range, has a nonempty domain, and its domain holds only
     integers. -/
 def domsIntOnlyB (doms : List Domain) (is : List Nat) : Bool :=
-  is.all (fun i => decide (i < doms.length) && decide (0 < (doms.getD i []).length)
-    && domIntOnlyB (doms.getD i []))
+  is.all (fun i => decide (i < doms.length) && decide (0 < (doms.getD i Dom.empty).length)
+    && domIntOnlyB (Dom.enum (doms.getD i Dom.empty)))
+
+/-- The enumerated integer-kind scan is the structural compact test. -/
+theorem domIntOnlyB_enum_eq (d : Dom) :
+    domIntOnlyB (Dom.enum d) = Dom.allIntBStruct d :=
+  (Dom.allIntBStruct_eq d).symm
+
+/-- Structural twin of the integer-only operand guard: the compact
+    constructor tag answers the kind test without materialising any
+    operand domain.  The range test is the lookup itself: each operand is
+    fetched once and the domain list length is never recomputed. -/
+def domsIntOnlyBFast (doms : List Domain) (is : List Nat) : Bool :=
+  is.all (fun i =>
+    match doms[i]? with
+    | some d => decide (0 < d.length) && Dom.allIntBStruct d
+    | none => false)
+
+theorem domsIntOnlyBFast_eq (doms : List Domain) (is : List Nat) :
+    domsIntOnlyBFast doms is = domsIntOnlyB doms is := by
+  unfold domsIntOnlyBFast domsIntOnlyB
+  apply List.all_congr rfl
+  intro i
+  rw [domIntOnlyB_enum_eq]
+  by_cases hi : i < doms.length
+  · rw [List.getElem?_eq_getElem hi, List.getD_eq_getElem?_getD,
+      List.getElem?_eq_getElem hi]
+    simp [hi]
+  · rw [List.getElem?_eq_none (by omega), List.getD_eq_getElem?_getD,
+      List.getElem?_eq_none (by omega)]
+    simp [hi]
+
+attribute [implemented_by domsIntOnlyBFast] domsIntOnlyB
 
 /-- The delegation escape of the `r = true` direction: the reified fact is
     true only when the slot reads `true`, so `r = false` refutes the whole
@@ -4752,13 +5629,50 @@ theorem domBoolOnlyB_eq {d : List Value} (h : domBoolOnlyB d = true) :
 def linLeReifEscB (is : List Nat) : Clause :=
   is.flatMap (fun i => [posBool i false, posBool i true])
 
+/-- The dual (PLAN G1d) emission of the bounds-decide-`b` arm: when the
+    reif slot is unpinned (and Boolean-valued) and the operand domains are
+    integer-only with complete extrema, a minimum-contribution sum exceeding
+    `b` pins the reif slot to `false` (the inequality can hold for no
+    operand instantiation). -/
+def propLinLeReifBDual (st : State) (coeffs : List Int) (is : List Nat)
+    (b : Int) (r : Nat) : PropagationResult :=
+  match sumMin st (coeffs.zip is) with
+  | some lo => if b < lo then
+      .implied (posBool r false)
+        { clause := posBool r false
+            :: (linLeReifEscB is ++ linCausesMin st (coeffs.zip is)) }
+    else .stable
+  | none => .stable
+
+/-- The dual arm's complete emission shape. -/
+theorem propLinLeReifBDual_emission_inv {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {r : Nat} {res : PropagationResult}
+    (h : propLinLeReifBDual st coeffs is b r = res) :
+    res = .stable ∨
+    ∃ lo, sumMin st (coeffs.zip is) = some lo ∧ b < lo ∧
+      res = .implied (posBool r false)
+        { clause := posBool r false
+            :: (linLeReifEscB is ++ linCausesMin st (coeffs.zip is)) } := by
+  unfold propLinLeReifBDual at h
+  cases hs : sumMin st (coeffs.zip is) with
+  | none => simp only [hs] at h; exact Or.inl h.symm
+  | some lo =>
+      simp only [hs] at h
+      by_cases hlt : b < lo
+      · rw [if_pos hlt] at h
+        exact Or.inr ⟨lo, rfl, hlt, h.symm⟩
+      · rw [if_neg hlt] at h
+        exact Or.inl h.symm
+
 /-- The bounds-decide-`b` arm: when the reif slot is unpinned (and
     Boolean-valued) and the operand domains are integer-only with complete
-    extrema, an exceeding max-contribution sum pins the reif slot to `true`. -/
+    extrema, an exceeding max-contribution sum pins the reif slot to `true`
+    (PLAN L1b), and the dual: a minimum-contribution sum exceeding `b` pins
+    it to `false` (PLAN G1d). -/
 def propLinLeReifB (st : State) (coeffs : List Int) (is : List Nat) (b : Int)
     (r : Nat) : PropagationResult :=
   if (domBoolPin st.domains r true || domBoolPin st.domains r false) = true then .stable
-  else if (domBoolOnlyB (st.domains.getD r []) && is.all (fun i => decide (i ≠ r))
+  else if (domBoolOnlyB (Dom.enum (st.domains.getD r Dom.empty)) && is.all (fun i => decide (i ≠ r))
       && domsIntOnlyB st.domains is) = true then
     if ((coeffs.zip is).all (fun p => (minContrib st p).isSome)) = true then
       match sumMax st (coeffs.zip is) with
@@ -4766,8 +5680,8 @@ def propLinLeReifB (st : State) (coeffs : List Int) (is : List Nat) (b : Int)
           .implied (posBool r true)
             { clause := posBool r true
                 :: (linLeReifEscB is ++ linCausesMax st (coeffs.zip is)) }
-        else .stable
-      | none => .stable
+        else propLinLeReifBDual st coeffs is b r
+      | none => propLinLeReifBDual st coeffs is b r
     else .stable
   else .stable
 
@@ -4776,20 +5690,29 @@ theorem propLinLeReifB_emission_inv {st : State} {coeffs : List Int}
     (h : propLinLeReifB st coeffs is b r = res) :
     res = .stable ∨
     ((domBoolPin st.domains r true || domBoolPin st.domains r false) = false ∧
-     domBoolOnlyB (st.domains.getD r []) = true ∧
+     domBoolOnlyB (Dom.enum (st.domains.getD r Dom.empty)) = true ∧
      (is.all (fun i => decide (i ≠ r))) = true ∧
      domsIntOnlyB st.domains is = true ∧
      (∀ p ∈ coeffs.zip is, (minContrib st p).isSome = true) ∧
      ∃ hr, sumMax st (coeffs.zip is) = some hr ∧ hr ≤ b ∧
        res = .implied (posBool r true)
          { clause := posBool r true
-             :: (linLeReifEscB is ++ linCausesMax st (coeffs.zip is)) }) := by
+             :: (linLeReifEscB is ++ linCausesMax st (coeffs.zip is)) }) ∨
+    ((domBoolPin st.domains r true || domBoolPin st.domains r false) = false ∧
+     domBoolOnlyB (Dom.enum (st.domains.getD r Dom.empty)) = true ∧
+     (is.all (fun i => decide (i ≠ r))) = true ∧
+     domsIntOnlyB st.domains is = true ∧
+     (∀ p ∈ coeffs.zip is, (minContrib st p).isSome = true) ∧
+     ∃ lo, sumMin st (coeffs.zip is) = some lo ∧ b < lo ∧
+       res = .implied (posBool r false)
+         { clause := posBool r false
+             :: (linLeReifEscB is ++ linCausesMin st (coeffs.zip is)) }) := by
   unfold propLinLeReifB at h
   by_cases h1 : (domBoolPin st.domains r true || domBoolPin st.domains r false) = true
   · rw [if_pos h1] at h
     exact Or.inl h.symm
   · rw [if_neg h1] at h
-    by_cases h2 : (domBoolOnlyB (st.domains.getD r [])
+    by_cases h2 : (domBoolOnlyB (Dom.enum (st.domains.getD r Dom.empty))
         && is.all (fun i => decide (i ≠ r))
         && domsIntOnlyB st.domains is) = true
     · rw [if_pos h2] at h
@@ -4799,27 +5722,40 @@ theorem propLinLeReifB_emission_inv {st : State} {coeffs : List Int}
       by_cases h3 : ((coeffs.zip is).all (fun p => (minContrib st p).isSome)) = true
       · rw [if_pos h3] at h
         cases hsm : sumMax st (coeffs.zip is) with
-        | none => simp only [hsm] at h; exact Or.inl h.symm
+        | none =>
+            simp only [hsm] at h
+            rcases propLinLeReifBDual_emission_inv h with
+              hstable | ⟨lo, hs, hlt, hres⟩
+            · exact Or.inl hstable
+            · exact Or.inr (Or.inr ⟨Bool.eq_false_iff.mpr h1, hb, hne, hi,
+                fun p hp => List.all_eq_true.mp h3 p hp, lo, hs, hlt, hres⟩)
         | some hr =>
             simp only [hsm] at h
             by_cases h4 : hr ≤ b
             · rw [if_pos h4] at h
-              exact Or.inr ⟨Bool.eq_false_iff.mpr h1, hb, hne, hi,
-                fun p hp => List.all_eq_true.mp h3 p hp, hr, rfl, h4, h.symm⟩
+              exact Or.inr (Or.inl ⟨Bool.eq_false_iff.mpr h1, hb, hne, hi,
+                fun p hp => List.all_eq_true.mp h3 p hp, hr, rfl, h4, h.symm⟩)
             · rw [if_neg h4] at h
-              exact Or.inl h.symm
+              rcases propLinLeReifBDual_emission_inv h with
+                hstable | ⟨lo, hs, hlt, hres⟩
+              · exact Or.inl hstable
+              · exact Or.inr (Or.inr ⟨Bool.eq_false_iff.mpr h1, hb, hne, hi,
+                  fun p hp => List.all_eq_true.mp h3 p hp, lo, hs, hlt, hres⟩)
       · rw [if_neg h3] at h
         exact Or.inl h.symm
     · rw [if_neg h2] at h
       exact Or.inl h.symm
 
-/-- The bounds arm never reports a conflict (its emission is `.stable` or an
-    implied pin). -/
+/-- The bounds arm never reports a conflict (its emissions are `.stable` or
+    an implied pin). -/
 theorem propLinLeReifB_ne_conflict {st : State} {coeffs : List Int}
     {is : List Nat} {b : Int} {r : Nat} {c : Clause}
     (h : propLinLeReifB st coeffs is b r = .conflict c) : False := by
-  rcases propLinLeReifB_emission_inv h with hst | ⟨-, -, -, -, -, hr, hsum, hle, hres⟩
+  rcases propLinLeReifB_emission_inv h with
+    hst | ⟨-, -, -, -, -, hr, hsum, hle, hres⟩ |
+    ⟨-, -, -, -, -, lo, hsum, hle, hres⟩
   · cases hst
+  · cases hres
   · cases hres
 
 /-! ## The max-contribution sum bounds a fitting assignment's dot -/
@@ -4936,8 +5872,8 @@ theorem mul_le_maxContrib_of_cause_false {st : State} {p : Int × Nat}
     (hfalse : ∀ q, linCauseMaxPair st p = some q → q.eval a = some false) :
     p.1 * x ≤ t.2.2 := by
   obtain ⟨mn, mx, hmn, hmx⟩ : ∃ mn mx,
-      domMinI (st.domains.getD p.2 []) = some mn ∧
-      domMaxI (st.domains.getD p.2 []) = some mx := by
+      domMinI (st.domains.getD p.2 Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD p.2 Dom.empty) = some mx := by
     cases hc : minContrib st p with
     | none => rw [hc] at hmin; exact absurd hmin (by simp)
     | some t0 =>
@@ -5057,18 +5993,21 @@ theorem dotOver_le_sumMax_of_causes_false {st : State} {a : Assignment}
     `int_lin_le_reif coeffs is b r`:
     * the reif slot pinned `true`: propagate the underlying `Σ ≤ b` with the
       escape `r = false` woven into every clause;
-    * the reif slot pinned `false` over integer-only operand domains: report
-      the underlying `Σ ≥ b+1` conflicts, with the escapes `r = true` and
-      the operand Boolean-value literals woven in;
-    * the reif slot unpinned: the bounds arm `propLinLeReifB` (PLAN L1b). -/
+    * the reif slot pinned `false` over integer-only operand domains:
+      propagate the underlying `Σ ≥ b+1` (the delegated `propLinLe2` on the
+      negated coefficients) — both its conflicts and its bound implications
+      (PLAN G1d), with the escapes `r = true` and the operand Boolean-value
+      literals woven into every clause;
+    * the reif slot unpinned: the bounds arm `propLinLeReifB` (PLAN L1b,
+      both directions since PLAN G1d). -/
 def propLinLeReif (st : State) (coeffs : List Int) (is : List Nat) (b : Int)
     (r : Nat) : PropagationResult :=
   if coeffs.length == is.length then
     if domBoolPin st.domains r true then
       augmentRes (linLeReifEscTrue r) (propLinLe2 st coeffs is b)
     else if domBoolPin st.domains r false && domsIntOnlyB st.domains is then
-      conflictsOnly (augmentRes (linLeReifEscFalse is r)
-        (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1))))
+      augmentRes (linLeReifEscFalse is r)
+        (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1)))
     else propLinLeReifB st coeffs is b r
   else .stable
 
@@ -5087,8 +6026,8 @@ theorem propLinLeReif_run_false {st : State} {coeffs : List Int}
     (h1 : ¬ (domBoolPin st.domains r true = true))
     (h2 : (domBoolPin st.domains r false && domsIntOnlyB st.domains is) = true) :
     propLinLeReif st coeffs is b r
-      = conflictsOnly (augmentRes (linLeReifEscFalse is r)
-          (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1)))) := by
+      = augmentRes (linLeReifEscFalse is r)
+          (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1))) := by
   simp [propLinLeReif, hlenB, h2, if_neg h1]
 
 /-- The unpinned arm's run equation: the delegation falls through to the
@@ -5104,8 +6043,8 @@ theorem propLinLeReif_run_b {st : State} {coeffs : List Int}
         augmentRes (linLeReifEscTrue r) (propLinLe2 st coeffs is b)
       else if (domBoolPin st.domains r false
           && domsIntOnlyB st.domains is) = true then
-        conflictsOnly (augmentRes (linLeReifEscFalse is r)
-          (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1))))
+        augmentRes (linLeReifEscFalse is r)
+          (propLinLe2 st (coeffs.map (fun c => -c)) is (-(b + 1)))
       else propLinLeReifB st coeffs is b r)
     else .stable) = propLinLeReifB st coeffs is b r
   rw [if_pos hlenB, if_neg h1, if_neg h2]
@@ -5210,8 +6149,8 @@ theorem domIntOnlyB_eq {d : List Value} (h : domIntOnlyB d = true) :
 
 theorem domsIntOnlyB_eq {doms : List Domain} {is : List Nat}
     (h : domsIntOnlyB doms is = true) :
-    ∀ i ∈ is, i < doms.length ∧ 0 < (doms.getD i []).length
-      ∧ ∀ v ∈ doms.getD i [], ∃ k : Int, v = .int k := by
+    ∀ i ∈ is, i < doms.length ∧ 0 < (doms.getD i Dom.empty).length
+      ∧ ∀ v ∈ Dom.enum (doms.getD i Dom.empty), ∃ k : Int, v = .int k := by
   intro i hi
   have h1 := List.all_eq_true.mp h i hi
   rw [Bool.and_eq_true, Bool.and_eq_true] at h1
@@ -5227,8 +6166,10 @@ theorem domsIntOnlyB_fits_read {doms : List Domain} {is : List Nat}
   obtain ⟨hrange, -, hint⟩ := domsIntOnlyB_eq hg i hi
   have hlen : i < a.length := by rw [hfit.1]; exact hrange
   have hread : a[i]? = some a[i] := List.getElem?_eq_getElem hlen
-  have hmem : a[i] ∈ doms.getD i [] := hfit.2 i (a[i]) hread
-  obtain ⟨k, hk⟩ := hint (a[i]) hmem
+  have hmem : a[i] ∈ doms.getD i Dom.empty := hfit.2 i (a[i]) hread
+  have hmemE : a[i] ∈ Dom.enum (doms.getD i Dom.empty) :=
+    (DomainLike.mem_iff _ _).mp hmem
+  obtain ⟨k, hk⟩ := hint (a[i]) hmemE
   exact ⟨k, by rw [List.getElem!_eq_getElem?_getD, hread]; exact hk⟩
 
 /-- The guard's per-slot read at a faithful assignment. -/
@@ -5238,11 +6179,16 @@ theorem domsIntOnlyB_faithful_read {doms : List Domain} {is : List Nat}
     ∀ i ∈ is, ∃ k : Int, a[i]! = .int k := by
   intro i hi
   obtain ⟨hrange, hne, hint⟩ := domsIntOnlyB_eq hg i hi
-  obtain ⟨v, hv⟩ := List.exists_mem_of_ne_nil (doms.getD i [])
-    (by intro h0; rw [h0] at hne; simp at hne)
+  have hneE : Dom.enum (doms.getD i Dom.empty) ≠ [] := by
+    intro h0
+    have hlen0 : (doms.getD i Dom.empty).length = 0 := by
+      rw [Dom.length_eq_enum, h0]
+      rfl
+    omega
+  obtain ⟨v, hv⟩ := List.exists_mem_of_ne_nil _ hneE
   obtain ⟨y, hy, -, hsort⟩ := hfaith i hrange
   have hyint : ∃ k : Int, y = .int k := by
-    rcases hsort v hv with ⟨hintv, hyi⟩ | ⟨hbv, hyb⟩
+    rcases hsort v ((DomainLike.mem_iff _ _).mpr hv) with ⟨hintv, hyi⟩ | ⟨hbv, hyb⟩
     · exact hyi
     · obtain ⟨k, hk⟩ := hint v hv
       rcases hbv with ⟨b, hb⟩
@@ -5434,7 +6380,8 @@ theorem propLinLeReifB_implied_true {st : State} {coeffs : List Int}
       l.eval a = some true := by
   intro a hfit hcons
   rcases propLinLeReifB_emission_inv hrun with hstable |
-    ⟨-, -, -, hint, hcomp, hr, hsum, hle, hres⟩
+    ⟨-, -, -, hint, hcomp, hr, hsum, hle, hres⟩ |
+    ⟨-, hb, -, hint, hcomp, lo, hsum, hlt, hres⟩
   · exact absurd hstable (by intro hc; cases hc)
   · have hl : l = posBool r true := by
       injection hres
@@ -5468,6 +6415,66 @@ theorem propLinLeReifB_implied_true {st : State} {coeffs : List Int}
     have hrb : rb = true := hiff.mpr hdot
     rw [hrb] at hread
     exact posBool_eval_true hread
+  · -- PLAN G1d: the dual pin is `r = false`; a fitting solution reads a
+    -- Boolean at `r`, and `r = true` would make the dot at most `b` while
+    -- the minimum-contribution sum already exceeds it
+    have hl : l = posBool r false := by
+      injection hres
+    rw [hl]
+    obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv hcons
+    obtain ⟨hlenR, hallR⟩ := domBoolOnlyB_eq hb
+    have hneR : st.domains.getD r Dom.empty ≠ Dom.empty := by
+      intro h0
+      rw [h0, Dom.enum_empty] at hlenR
+      simp at hlenR
+    have hltR : r < st.domains.length := by
+      by_cases hr : r < st.domains.length
+      · exact hr
+      · exact absurd (getD_nil_of_length_le hr) hneR
+    have hltA : r < a.length := by
+      rw [hfit.1]
+      exact hltR
+    have hreadA : a[r]? = some a[r] := List.getElem?_eq_getElem hltA
+    have hmemA : a[r] ∈ Dom.enum (st.domains.getD r Dom.empty) :=
+      (DomainLike.mem_iff _ _).mp (hfit.2 r a[r] hreadA)
+    obtain ⟨rb2, hrb2⟩ := hallR a[r] hmemA
+    have hread2 : a[r]? = some (.bool rb2) := by rw [hreadA, hrb2]
+    have hrb2eq : rb2 = rb := bool_read_eq hread2 hread
+    have hreads : ∀ p ∈ coeffs.zip is, ∃ x : Int, a[p.2]! = .int x :=
+      fun p hp => domsIntOnlyB_fits_read hint hfit p.2 (mem_zip_snd hp)
+    have hreadsZ : ∀ p ∈ coeffs.zip is, ∃ i : Int, slotInt a p.2 = some i :=
+      fun p hp => by
+        obtain ⟨x, hx⟩ := hreads p hp
+        exact ⟨x, slotInt_of_getElem_int hx⟩
+    have hcf : ∀ q ∈ linCausesMin st (coeffs.zip is), q.eval a = some false :=
+      lin2_causesMin_false_of_fits hfit hreadsZ
+    have hlen2 : (is.map (fun i => a[i]!)).length = (intVals coeffs).length := by
+      rw [List.length_map, intVals_length]; omega
+    obtain ⟨d, hd⟩ := dotProduct_intVals_exists_of_length hlen2
+      (by intro x hx
+          obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hx
+          exact domsIntOnlyB_fits_read hint hfit i hi)
+    have hd' : dotOver (coeffs.zip is) a 0 = some d := by
+      rw [← dotProduct_eq_dotOver hlen]; exact hd
+    have hdle : lo ≤ d := by
+      have hleZ := lin2_sumMin_le hreadsZ hcomp hcf (coeffs.zip is)
+        (fun _ hp => hp) lo hsum 0 d hd'
+      omega
+    have hdot : dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = false := by
+      rw [dotLe, hd]
+      exact decide_eq_false (by omega)
+    have hrbf : rb = false := by
+      cases rb with
+      | false => rfl
+      | true =>
+          exfalso
+          have hdotT : dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b = true :=
+            hiff.mp rfl
+          rw [hdotT] at hdot
+          exact Bool.noConfusion hdot
+    have hrbf2 : rb2 = false := hrb2eq.trans hrbf
+    rw [hrbf2] at hread2
+    exact posBool_eval_true hread2
 
 /-! ## The safe triple at fitting solutions -/
 
@@ -5499,7 +6506,15 @@ theorem propLinLeReif_safe (st : State) (coeffs : List Int) (is : List Nat)
       · by_cases h2 : (domBoolPin st.domains r false
             && domsIntOnlyB st.domains is) = true
         · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
-          exact (conflictsOnly_implied_elim hrun).elim
+          obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+          have h2' := h2
+          rw [Bool.and_eq_true] at h2'
+          obtain ⟨hpf, hg⟩ := h2'
+          have hreads := domsIntOnlyB_fits_read hg hfit
+          have hcons' := linLeReif_false_dot hcons (fits_of_domBoolPin hfit hpf)
+            hreads hlen
+          exact (propLinLe2_safe st (coeffs.map (fun c => -c)) is (-(b + 1))
+            (by simp [hlen])).1 l rs0 hres a hfit hcons'
         · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
           exact propLinLeReifB_implied_true hlen hrun a hfit hcons
     · intro c hrun a hfit hcons
@@ -5511,8 +6526,7 @@ theorem propLinLeReif_safe (st : State) (coeffs : List Int) (is : List Nat)
       · by_cases h2 : (domBoolPin st.domains r false
             && domsIntOnlyB st.domains is) = true
         · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
-          have hrun2 := conflictsOnly_conflict_inv hrun
-          obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun2
+          obtain ⟨c0, hres, -⟩ := augmentRes_conflict_inv hrun
           have h2' := h2
           rw [Bool.and_eq_true] at h2'
           obtain ⟨hpf, hg⟩ := h2'
@@ -5534,8 +6548,7 @@ theorem propLinLeReif_safe (st : State) (coeffs : List Int) (is : List Nat)
       · by_cases h2 : (domBoolPin st.domains r false
             && domsIntOnlyB st.domains is) = true
         · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
-          have hrun2 := conflictsOnly_conflict_inv hrun
-          obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun2
+          obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
           have h2' := h2
           rw [Bool.and_eq_true] at h2'
           obtain ⟨hpf, hg⟩ := h2'
@@ -5639,8 +6652,7 @@ theorem propLinLeReif_entitled {st : State} {coeffs : List Int}
     · by_cases h2 : (domBoolPin st.domains r false
           && domsIntOnlyB st.domains is) = true
       · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
-        have hrun2 := conflictsOnly_conflict_inv hrun
-        obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun2
+        obtain ⟨c0, hres, hcl⟩ := augmentRes_conflict_inv hrun
         have h2' := h2
         rw [Bool.and_eq_true] at h2'
         obtain ⟨hpf, hg⟩ := h2'
@@ -5753,7 +6765,8 @@ theorem propLinLeReifB_reason_valid {problem : Problem DomConstraint Unit}
     Reason.Valid problem DomConstraint.SatisfiedBy rs l ∧
       (∀ q ∈ rs.clause, q = q.norm) := by
   rcases propLinLeReifB_emission_inv hrun with hstable |
-    ⟨-, -, -, -, hcomp, hr, hsum, hle, hres⟩
+    ⟨-, -, -, -, hcomp, hr, hsum, hle, hres⟩ |
+    ⟨-, hb, -, -, hcomp, lo, hsum, hlt, hres⟩
   · exact absurd hstable (by intro hc; cases hc)
   · have hl : l = posBool r true := by
       injection hres
@@ -5792,7 +6805,7 @@ theorem propLinLeReifB_reason_valid {problem : Problem DomConstraint Unit}
               have hlt : i < problem.domains.length := hlreif i hi
               have hia : i < a.length := by rw [ha.1.1]; exact hlt
               have hread' : a[i]? = some a[i] := List.getElem?_eq_getElem hia
-              have hmem : a[i] ∈ problem.domains.getD i [] :=
+              have hmem : a[i] ∈ problem.domains.getD i Dom.empty :=
                 ha.1.2 i (a[i]) hread'
               have hv := hview _ (getD_mem_of_lt hlt) _ hmem
               cases hv' : a[i] with
@@ -5868,6 +6881,114 @@ theorem propLinLeReifB_reason_valid {problem : Problem DomConstraint Unit}
           · rw [List.mem_singleton.mp hq2]
             rfl
         · exact lin2_causesMax_norm q hq
+  · -- PLAN G1d: the dual pin is `r = false`; at `r = false` the pivot is
+    -- true, and at `r = true` the operand escapes, a true min-cause, or
+    -- `r = false`'s own falsity (the minimum-contribution sum exceeds `b`)
+    -- supply a true clause literal
+    have hl : l = posBool r false := by
+      injection hres
+    have hcl : rs.clause = posBool r false ::
+        (linLeReifEscB is ++ linCausesMin st (coeffs.zip is)) := by
+      injection hres with h1 h3
+      rw [h3]
+    refine ⟨lin2_reason_valid_of_clause_true ?_ ?_, ?_⟩
+    · rw [hl, hcl]
+      exact List.mem_cons_self
+    · intro a ha
+      obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv (ha.2 _ hprob)
+      rw [hcl]
+      cases rb with
+      | false =>
+          exact ⟨posBool r false, List.mem_cons_self, posBool_eval_true hread⟩
+      | true =>
+          by_cases hbools : ∃ i ∈ is, ∃ bb : Bool, a[i]? = some (.bool bb)
+          · obtain ⟨i, hi, bb, hbi⟩ := hbools
+            obtain ⟨q, hq, hqt⟩ := linLeReifEscB_true_of_bool_read hi hbi
+            exact ⟨q, List.mem_cons_of_mem _
+              (List.mem_append_left _ hq), hqt⟩
+          · have hallint : ∀ i ∈ is, ∃ k : Int, a[i]! = .int k := by
+              intro i hi
+              have hlt : i < problem.domains.length := hlreif i hi
+              have hia : i < a.length := by rw [ha.1.1]; exact hlt
+              have hread' : a[i]? = some a[i] := List.getElem?_eq_getElem hia
+              have hmem : a[i] ∈ problem.domains.getD i Dom.empty :=
+                ha.1.2 i (a[i]) hread'
+              have hv := hview _ (getD_mem_of_lt hlt) _ hmem
+              cases hv' : a[i] with
+              | int k =>
+                  exact ⟨k, by
+                    rw [List.getElem!_eq_getElem?_getD, hread', hv']
+                    rfl⟩
+              | bool bb =>
+                  exact absurd ⟨i, hi, bb, by rw [hread', hv']⟩ hbools
+              | setOfInt s =>
+                  rw [hv'] at hv
+                  exact absurd rfl hv
+              | array s =>
+                  rw [hv'] at hv
+                  exact absurd rfl hv
+            have hneZip : coeffs.zip is ≠ [] := by
+              intro h0
+              rw [h0] at hsum
+              exact absurd hsum (by simp [sumMin])
+            have hreadsZip : ∀ p ∈ coeffs.zip is,
+                ∃ x : Int, a[p.2]! = .int x :=
+              fun p hp => hallint p.2 (mem_zip_snd hp)
+            have hreadsZ : ∀ p ∈ coeffs.zip is,
+                ∃ i : Int, slotInt a p.2 = some i :=
+              fun p hp => by
+                obtain ⟨x, hx⟩ := hreadsZip p hp
+                exact ⟨x, slotInt_of_getElem_int hx⟩
+            by_cases hcause : ∃ q ∈ linCausesMin st (coeffs.zip is),
+                q.eval a = some true
+            · obtain ⟨q, hq, hqt⟩ := hcause
+              exact ⟨q, List.mem_cons_of_mem _
+                (List.mem_append_right _ hq), hqt⟩
+            · have hcf : ∀ q ∈ linCausesMin st (coeffs.zip is),
+                  q.eval a = some false := by
+                intro q hq
+                obtain ⟨bv, hbval⟩ := lin2_causesMin_eval_some
+                  (fun p hp => by
+                    obtain ⟨k, hk⟩ := hallint p.2 (mem_zip_snd hp)
+                    exact ⟨k, slotInt_of_getElem_int hk⟩) hq
+                cases bv with
+                | true => exact absurd ⟨q, hq, hbval⟩ hcause
+                | false => exact hbval
+              have hlen2 : (is.map (fun i => a[i]!)).length
+                  = (intVals coeffs).length := by
+                rw [List.length_map, intVals_length]
+                omega
+              obtain ⟨d, hd⟩ := dotProduct_intVals_exists_of_length hlen2
+                (by intro x hx
+                    obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hx
+                    exact hallint i hi)
+              have hd' : dotOver (coeffs.zip is) a 0 = some d := by
+                rw [← dotProduct_eq_dotOver hlen]
+                exact hd
+              have hdle : lo ≤ d := by
+                have hleZ := lin2_sumMin_le hreadsZ hcomp hcf (coeffs.zip is)
+                  (fun _ hp => hp) lo hsum 0 d hd'
+                omega
+              have hdot : dotLe (intVals coeffs)
+                  (is.map (fun i => a[i]!)) b = false := by
+                rw [dotLe, hd]
+                exact decide_eq_false (by omega)
+              have hdotT : dotLe (intVals coeffs)
+                  (is.map (fun i => a[i]!)) b = true := hiff.mp rfl
+              rw [hdotT] at hdot
+              exact Bool.noConfusion hdot
+    · intro q hq
+      rw [hcl] at hq
+      rcases List.mem_cons.mp hq with rfl | hq
+      · rfl
+      · rcases List.mem_append.mp hq with hq | hq
+        · rw [linLeReifEscB] at hq
+          obtain ⟨i, -, hq2⟩ := List.mem_flatMap.mp hq
+          rcases List.mem_cons.mp hq2 with rfl | hq2
+          · rfl
+          · rw [List.mem_singleton.mp hq2]
+            rfl
+        · exact lin2_causesMin_norm q hq
 
 /-- The delegation's implied literals carry valid, normalized reasons at
     every internal solution of any problem containing the reified
@@ -5915,8 +7036,72 @@ theorem propLinLeReif_reason_valid {problem : Problem DomConstraint Unit}
           simp [posBool, Literal.norm]
     · by_cases h2 : (domBoolPin st.domains r false
           && domsIntOnlyB st.domains is) = true
-      · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
-        exact absurd hrun (conflictsOnly_implied_elim)
+      · -- PLAN G1d: the retained delegated bound implication at `r = false`
+        rw [propLinLeReif_run_false hlenB h1 h2] at hrun
+        obtain ⟨rs0, hres, hcl⟩ := augmentRes_implied_inv hrun
+        obtain ⟨hpiv, hnorm0, htrue0⟩ :=
+          propLinLe2_implied_clause_all (by simp [hlen]) hres
+        have h2' := h2
+        rw [Bool.and_eq_true] at h2'
+        obtain ⟨hpf, hg⟩ := h2'
+        refine ⟨lin2_reason_valid_of_clause_true ?_ ?_, ?_⟩
+        · rw [hcl]
+          exact mem_insertAfterHead_of_mem hpiv
+        · intro a ha
+          obtain ⟨rb, hread, hiff⟩ := linLeReif_satisfied_inv (ha.2 _ hprob)
+          rw [hcl]
+          cases rb with
+          | true =>
+              exact ⟨posBool r true,
+                mem_insertAfterHead_of_mem_extras (by simp [linLeReifEscFalse]),
+                posBool_eval_true hread⟩
+          | false =>
+              by_cases hbools : ∃ i ∈ is, ∃ bb : Bool, a[i]? = some (.bool bb)
+              · obtain ⟨i, hi, bb, hbi⟩ := hbools
+                obtain ⟨q, hq, hqt⟩ := linLeReifEscB_true_of_bool_read hi hbi
+                have hqf : q ∈ linLeReifEscFalse is r := by
+                  rw [linLeReifEscFalse]
+                  exact List.mem_cons_of_mem _ hq
+                exact ⟨q, mem_insertAfterHead_of_mem_extras hqf, hqt⟩
+              · have hallint : ∀ i ∈ is, ∃ k : Int, a[i]! = .int k := by
+                  intro i hi
+                  have hlt : i < problem.domains.length :=
+                    hlreif _ hprob coeffs is b r rfl i hi
+                  have hia : i < a.length := by rw [ha.1.1]; exact hlt
+                  have hread' : a[i]? = some a[i] :=
+                    List.getElem?_eq_getElem hia
+                  have hmem : a[i] ∈ problem.domains.getD i Dom.empty :=
+                    ha.1.2 i (a[i]) hread'
+                  have hv := hview _ (getD_mem_of_lt hlt) _ hmem
+                  cases hv' : a[i] with
+                  | int k =>
+                      exact ⟨k, by
+                        rw [List.getElem!_eq_getElem?_getD, hread', hv']
+                        rfl⟩
+                  | bool bb =>
+                      exact absurd ⟨i, hi, bb, by rw [hread', hv']⟩ hbools
+                  | setOfInt s =>
+                      rw [hv'] at hv
+                      exact absurd rfl hv
+                  | array s =>
+                      rw [hv'] at hv
+                      exact absurd rfl hv
+                have hcons' := linLeReif_false_dot (ha.2 _ hprob) hread
+                  hallint hlen
+                obtain ⟨q, hq, hqt⟩ := htrue0 a hcons'
+                exact ⟨q, mem_insertAfterHead_of_mem hq, hqt⟩
+        · intro q hq
+          rw [hcl] at hq
+          rcases mem_insertAfterHead hq with hq | hq
+          · exact hnorm0 q hq
+          · rw [linLeReifEscFalse] at hq
+            rcases List.mem_cons.mp hq with rfl | hq
+            · rfl
+            · obtain ⟨i, -, hq2⟩ := List.mem_flatMap.mp hq
+              rcases List.mem_cons.mp hq2 with rfl | hq2
+              · rfl
+              · rw [List.mem_singleton.mp hq2]
+                rfl
       · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
         exact propLinLeReifB_reason_valid hview hprob
           (hlreif _ hprob coeffs is b r rfl) hlen hrun
@@ -5930,9 +7115,21 @@ theorem propLinLeReif_reason_valid {problem : Problem DomConstraint Unit}
 
 /-- The integer a slot is pinned to by its (singleton integer) domain. -/
 def pinInt (doms : List Domain) (s : Nat) : Option Int :=
-  match doms.getD s [] with
+  match Dom.enum (doms.getD s Dom.empty) with
   | [.int v] => some v
   | _ => none
+
+/-- Fast twin of `pinInt`: inspect the compact representation directly
+    instead of materialising `Dom.enum`. -/
+def pinIntFast (doms : List Domain) (s : Nat) : Option Int :=
+  (doms.getD s Dom.empty).intSingleton?
+
+theorem pinIntFast_eq (doms : List Domain) (s : Nat) :
+    pinIntFast doms s = pinInt doms s := by
+  unfold pinIntFast pinInt
+  exact Dom.intSingleton?_eq _
+
+attribute [implemented_by pinIntFast] pinInt
 
 /-- Sum of the pinned operands' contributions. -/
 def linNeSum (doms : List Domain) : List (Int × Nat) → Int
@@ -5968,18 +7165,18 @@ def propLinNe (st : State) (coeffs : List Int) (is : List Nat) (b : Int) :
           .conflict (linNeCauses st.domains (coeffs.zip is))
         else .stable
     | [(c, m)] =>
-        if c != 0 && (b - linNeSum st.domains (coeffs.zip is)) % c == 0
-            && valueMemB (.int ((b - linNeSum st.domains (coeffs.zip is)) / c))
-                (st.domains.getD m []) then
-          .implied (posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c))
-            { clause := posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c)
-                :: linNeCauses st.domains (coeffs.zip is) }
+        let s := b - linNeSum st.domains (coeffs.zip is)
+        if c != 0 && s % c == 0
+            && Dom.memBool (st.domains.getD m Dom.empty) (.int (s / c)) then
+          .implied (posNe m (s / c))
+            { clause := posNe m (s / c) :: linNeCauses st.domains (coeffs.zip is) }
         else .stable
     | _ => .stable
   else .stable
 
 theorem eq_of_pinInt {doms : List Domain} {s : Nat} {v : Int}
-    (h : pinInt doms s = some v) : doms.getD s [] = [.int v] := by
+    (h : pinInt doms s = some v) :
+    Dom.enum (doms.getD s Dom.empty) = [.int v] := by
   unfold pinInt at h
   split at h
   · rename_i v' heq
@@ -5989,7 +7186,7 @@ theorem eq_of_pinInt {doms : List Domain} {s : Nat} {v : Int}
   · cases h
 
 theorem pinInt_of_eq {doms : List Domain} {s : Nat} {v : Int}
-    (h : doms.getD s [] = [.int v]) : pinInt doms s = some v := by
+    (h : Dom.enum (doms.getD s Dom.empty) = [.int v]) : pinInt doms s = some v := by
   unfold pinInt
   rw [h]
 
@@ -6051,6 +7248,84 @@ theorem linNeFree_mem {doms : List Domain} {ps : List (Int × Nat)} {p : Int × 
           · obtain ⟨h1, h2⟩ := ih h
             exact ⟨List.mem_cons_of_mem _ h1, h2⟩
 
+/-! ## Locality of the `int_lin_ne` kernel (PLAN P1 scheduled scan)
+
+Every read of the `int_lin_ne` kernel goes through `st.domains.getD s Dom.empty`
+for a slot `s` drawn from the constraint's slot list (`pinInt` on the
+`coeffs.zip is` pairs); these lemmas record that pointwise-equal domains
+on the read slots yield equal runs. -/
+
+/-- `pinInt` reads only its slot's domain. -/
+theorem pinInt_local {doms1 doms2 : List Domain} {s : Nat}
+    (h : doms1.getD s Dom.empty = doms2.getD s Dom.empty) :
+    pinInt doms1 s = pinInt doms2 s := by
+  unfold pinInt
+  rw [h]
+
+/-- `linNeSum` depends only on the pairs' slots. -/
+theorem linNeSum_local {doms1 doms2 : List Domain} {ps : List (Int × Nat)}
+    (h : ∀ p ∈ ps, doms1.getD p.2 Dom.empty = doms2.getD p.2 Dom.empty) :
+    linNeSum doms1 ps = linNeSum doms2 ps := by
+  induction ps with
+  | nil => rfl
+  | cons p rest ih =>
+      obtain ⟨c, s⟩ := p
+      have hp := pinInt_local (h (c, s) (List.mem_cons_self ..))
+      have hr := ih (fun q hq => h q (List.mem_cons_of_mem _ hq))
+      rw [linNeSum, linNeSum, hp, hr]
+
+/-- `linNeCauses` depends only on the pairs' slots. -/
+theorem linNeCauses_local {doms1 doms2 : List Domain} {ps : List (Int × Nat)}
+    (h : ∀ p ∈ ps, doms1.getD p.2 Dom.empty = doms2.getD p.2 Dom.empty) :
+    linNeCauses doms1 ps = linNeCauses doms2 ps := by
+  induction ps with
+  | nil => rfl
+  | cons p rest ih =>
+      obtain ⟨c, s⟩ := p
+      have hp := pinInt_local (h (c, s) (List.mem_cons_self ..))
+      have hr := ih (fun q hq => h q (List.mem_cons_of_mem _ hq))
+      rw [linNeCauses, linNeCauses, hp, hr]
+
+/-- `linNeFree` depends only on the pairs' slots. -/
+theorem linNeFree_local {doms1 doms2 : List Domain} {ps : List (Int × Nat)}
+    (h : ∀ p ∈ ps, doms1.getD p.2 Dom.empty = doms2.getD p.2 Dom.empty) :
+    linNeFree doms1 ps = linNeFree doms2 ps := by
+  induction ps with
+  | nil => rfl
+  | cons p rest ih =>
+      obtain ⟨c, s⟩ := p
+      have hp := pinInt_local (h (c, s) (List.mem_cons_self ..))
+      have hr := ih (fun q hq => h q (List.mem_cons_of_mem _ hq))
+      rw [linNeFree, linNeFree, hp, hr]
+
+/-- `propLinNe` reads only the slots of `is`: pointwise-equal domains on
+    `is` yield equal runs. -/
+theorem propLinNe_local {st1 st2 : State} {coeffs : List Int} {is : List Nat}
+    {b : Int}
+    (h : ∀ i ∈ is, st1.domains.getD i Dom.empty = st2.domains.getD i Dom.empty) :
+    propLinNe st1 coeffs is b = propLinNe st2 coeffs is b := by
+  have hzip : ∀ p ∈ coeffs.zip is,
+      st1.domains.getD p.2 Dom.empty = st2.domains.getD p.2 Dom.empty :=
+    fun p hp => h p.2 (mem_zip_snd hp)
+  have hfree := linNeFree_local hzip
+  have hsum := linNeSum_local hzip
+  have hcauses := linNeCauses_local hzip
+  unfold propLinNe
+  rw [hfree, hsum, hcauses]
+  by_cases hlen : (coeffs.length == is.length) = true
+  · simp only [if_pos hlen]
+    cases hfl : linNeFree st2.domains (coeffs.zip is) with
+    | nil => rfl
+    | cons q qs =>
+        cases qs with
+        | nil =>
+            obtain ⟨c, m⟩ := q
+            have hm : m ∈ is :=
+              mem_zip_snd (linNeFree_mem (hfl ▸ List.mem_singleton_self (c, m))).1
+            simp only [h m hm]
+        | cons q' qs' => rfl
+  · simp only [if_neg hlen]
+
 /-- Pinned operands read their pins, so the dot product factors through the
     unpinned operands. -/
 theorem dotOver_scan {doms : List Domain} {a : Assignment}
@@ -6110,9 +7385,11 @@ theorem pinInt_read_of_fits {doms : List Domain} {a : Assignment}
       cases hg
   have hlen : s < a.length := by rw [hfit.1]; exact hlt
   have hread : a[s]? = some a[s] := List.getElem?_eq_getElem hlen
-  have hmem : a[s] ∈ doms.getD s [] := hfit.2 s (a[s]) hread
-  rw [hg] at hmem
-  have : a[s] = .int v := List.mem_singleton.mp hmem
+  have hmem : a[s] ∈ doms.getD s Dom.empty := hfit.2 s (a[s]) hread
+  have hmemE : a[s] ∈ Dom.enum (doms.getD s Dom.empty) :=
+    (DomainLike.mem_iff _ _).mp hmem
+  rw [hg] at hmemE
+  have : a[s] = .int v := List.mem_singleton.mp hmemE
   rw [List.getElem!_eq_getElem?_getD, hread]
   exact this
 
@@ -6146,6 +7423,7 @@ theorem propLinNe_conflict_inv {st : State} {coeffs : List Int} {is : List Nat}
   unfold propLinNe at h
   by_cases hl : (coeffs.length == is.length) = true
   · rw [if_pos hl] at h
+    dsimp only at h
     refine ⟨beq_iff_eq.mp hl, ?_⟩
     split at h
     · rename_i hfree
@@ -6168,13 +7446,14 @@ theorem propLinNe_implied_inv {st : State} {coeffs : List Int} {is : List Nat}
       linNeFree st.domains (coeffs.zip is) = [(c, m)] ∧ c ≠ 0 ∧
       (b - linNeSum st.domains (coeffs.zip is)) % c = 0 ∧
       Value.int ((b - linNeSum st.domains (coeffs.zip is)) / c) ∈
-        st.domains.getD m [] ∧
+        st.domains.getD m Dom.empty ∧
       l = posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c) ∧
       rs = { clause := posNe m ((b - linNeSum st.domains (coeffs.zip is)) / c)
               :: linNeCauses st.domains (coeffs.zip is) } := by
   unfold propLinNe at h
   by_cases hl : (coeffs.length == is.length) = true
   · rw [if_pos hl] at h
+    dsimp only at h
     refine ⟨beq_iff_eq.mp hl, ?_⟩
     split at h
     · split at h <;> cases h
@@ -6184,7 +7463,8 @@ theorem propLinNe_implied_inv {st : State} {coeffs : List Int} {is : List Nat}
         injection h with h1 h2
         simp only [Bool.and_eq_true, bne_iff_ne, ne_eq, beq_iff_eq] at hc
         obtain ⟨⟨hc0, hmod⟩, hmem⟩ := hc
-        exact ⟨c, m, hfree, hc0, hmod, valueMemB_iff.mp hmem, h1.symm, h2.symm⟩
+        exact ⟨c, m, hfree, hc0, hmod,
+          (DomainLike.mem_iff _ _).mpr ((Dom.memBool_iff _ _).mp hmem), h1.symm, h2.symm⟩
       · cases h
     · cases h
   · rw [if_neg hl] at h
@@ -6348,8 +7628,8 @@ twins (the module's usual "local copies of shared kernels" discipline). -/
 theorem linReifNarrowHi_bounds_of_implied {st : State} {s : Nat} {hi : Int}
     {ng : Clause} {l : Literal} {rs : Reason}
     (h : narrowHi st s hi ng = .implied l rs) :
-    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
-      domMaxI (st.domains.getD s []) = some mx := by
+    ∃ mn mx, domMinI (st.domains.getD s Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD s Dom.empty) = some mx := by
   unfold narrowHi at h
   split at h
   · rename_i mn mx hmn hmx
@@ -6359,8 +7639,8 @@ theorem linReifNarrowHi_bounds_of_implied {st : State} {s : Nat} {hi : Int}
 theorem linReifNarrowLo_bounds_of_implied {st : State} {s : Nat} {lo : Int}
     {ng : Clause} {l : Literal} {rs : Reason}
     (h : narrowLo st s lo ng = .implied l rs) :
-    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
-      domMaxI (st.domains.getD s []) = some mx := by
+    ∃ mn mx, domMinI (st.domains.getD s Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD s Dom.empty) = some mx := by
   unfold narrowLo at h
   split at h
   · rename_i mn mx hmn hmx
@@ -6368,11 +7648,15 @@ theorem linReifNarrowLo_bounds_of_implied {st : State} {s : Nat} {lo : Int}
   · cases h
 
 theorem linReif_getD_ne_nil_of_domMinI {d' : List Domain} {s : Nat}
-    {mn : Int} (h : domMinI (d'.getD s []) = some mn) :
-    d'.getD s [] ≠ [] := by
+    {mn : Int} (h : domMinI (d'.getD s Dom.empty) = some mn) :
+    d'.getD s Dom.empty ≠ Dom.empty := by
   intro h0
   rw [h0] at h
-  rw [show domMinI ([] : List Value) = none from rfl] at h
+  have h0' : domMinI (Dom.empty : Domain) = none := by
+    unfold domMinI domInts
+    rw [domElems_eq_enum, Dom.enum_empty]
+    rfl
+  rw [h0'] at h
   exact absurd h (by simp)
 
 /-! ## L5: the pinned reified linear equalities/disequalities
@@ -7000,9 +8284,9 @@ theorem propLinEqReif_implied_order {st : State} {coeffs : List Int}
     {is : List Nat} {b : Int} {r : Nat} {l : Literal} {rs : Reason}
     (hrun : propLinEqReif st coeffs is b r = .implied l rs) :
     (∃ m k mn mx, (l = posLe m k ∨ l = negLe m k) ∧
-      domMinI (st.domains.getD m []) = some mn ∧
-      domMaxI (st.domains.getD m []) = some mx) ∨
-    (∃ m v, l = posNe m v ∧ Value.int v ∈ st.domains.getD m []) := by
+      domMinI (st.domains.getD m Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD m Dom.empty) = some mx) ∨
+    (∃ m v, l = posNe m v ∧ Value.int v ∈ st.domains.getD m Dom.empty) := by
   by_cases hlenB : (coeffs.length == is.length) = true
   · by_cases h1 : domBoolPin st.domains r true = true
     · rw [propLinEqReif_run_true hlenB h1] at hrun
@@ -7057,9 +8341,9 @@ theorem propLinNeReif_implied_order {st : State} {coeffs : List Int}
     {is : List Nat} {b : Int} {r : Nat} {l : Literal} {rs : Reason}
     (hrun : propLinNeReif st coeffs is b r = .implied l rs) :
     (∃ m k mn mx, (l = posLe m k ∨ l = negLe m k) ∧
-      domMinI (st.domains.getD m []) = some mn ∧
-      domMaxI (st.domains.getD m []) = some mx) ∨
-    (∃ m v, l = posNe m v ∧ Value.int v ∈ st.domains.getD m []) := by
+      domMinI (st.domains.getD m Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD m Dom.empty) = some mx) ∨
+    (∃ m v, l = posNe m v ∧ Value.int v ∈ st.domains.getD m Dom.empty) := by
   by_cases hlenB : (coeffs.length == is.length) = true
   · by_cases h1 : domBoolPin st.domains r true = true
     · rw [propLinNeReif_run_true hlenB h1] at hrun
@@ -7085,7 +8369,7 @@ theorem slotInt_exists_of_state_ne_nil {problem : Problem DomConstraint Unit}
     (hview : IntViewedDoms problem.domains)
     (hsub : DomSub st.domains problem.domains)
     (ha : ProblemSolution problem DomConstraint.SatisfiedBy a)
-    (hne : st.domains.getD m [] ≠ []) :
+    (hne : st.domains.getD m Dom.empty ≠ Dom.empty) :
     ∃ x, slotInt a m = some x := by
   have hlt1 : m < st.domains.length := by
     by_cases hlt : m < st.domains.length
@@ -7094,7 +8378,7 @@ theorem slotInt_exists_of_state_ne_nil {problem : Problem DomConstraint Unit}
   have hlt2 : m < problem.domains.length := by rw [← hsub.1]; exact hlt1
   have hlt3 : m < a.length := by rw [ha.1.1]; exact hlt2
   have hread : a[m]? = some a[m] := List.getElem?_eq_getElem hlt3
-  have hmem : a[m] ∈ problem.domains.getD m [] := ha.1.2 m (a[m]) hread
+  have hmem : a[m] ∈ problem.domains.getD m Dom.empty := ha.1.2 m (a[m]) hread
   have hx : Value.intView (a[m]) ≠ none :=
     hview _ (getD_mem_of_lt hlt2) _ hmem
   obtain ⟨x, hx2⟩ : ∃ x, Value.intView (a[m]) = some x := by
@@ -7164,8 +8448,8 @@ namespace LeanFzn.Solver.Propagation
 theorem narrowHi_bounds_of_implied {st : State} {s : Nat} {hi : Int}
     {ng : Clause} {l : Literal} {rs : Reason}
     (h : narrowHi st s hi ng = .implied l rs) :
-    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
-      domMaxI (st.domains.getD s []) = some mx := by
+    ∃ mn mx, domMinI (st.domains.getD s Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD s Dom.empty) = some mx := by
   unfold narrowHi at h
   split at h
   · rename_i mn mx hmn hmx
@@ -7175,8 +8459,8 @@ theorem narrowHi_bounds_of_implied {st : State} {s : Nat} {hi : Int}
 theorem narrowLo_bounds_of_implied {st : State} {s : Nat} {lo : Int}
     {ng : Clause} {l : Literal} {rs : Reason}
     (h : narrowLo st s lo ng = .implied l rs) :
-    ∃ mn mx, domMinI (st.domains.getD s []) = some mn ∧
-      domMaxI (st.domains.getD s []) = some mx := by
+    ∃ mn mx, domMinI (st.domains.getD s Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD s Dom.empty) = some mx := by
   unfold narrowLo at h
   split at h
   · rename_i mn mx hmn hmx
@@ -7190,56 +8474,77 @@ theorem domMinI_ne_none_of_some {d : List Value} {mn : Int}
   exact absurd hc (by simp)
 
 theorem getD_ne_nil_of_domMinI {d' : List Domain} {s : Nat}
-    {mn : Int} (h : domMinI (d'.getD s []) = some mn) :
-    d'.getD s [] ≠ [] := by
+    {mn : Int} (h : domMinI (d'.getD s Dom.empty) = some mn) :
+    d'.getD s Dom.empty ≠ Dom.empty := by
   intro h0
   rw [h0] at h
-  rw [show domMinI ([] : List Value) = none from rfl] at h
+  have h0' : domMinI (Dom.empty : Domain) = none := by
+    unfold domMinI domInts
+    rw [domElems_eq_enum, Dom.enum_empty]
+    rfl
+  rw [h0'] at h
   exact absurd h (by simp)
+
+/-- The order-literal shape of a delegated `propLinLe2` implied pivot. -/
+theorem propLinLe2_implied_order {st : State} {coeffs : List Int}
+    {is : List Nat} {b : Int} {l : Literal} {rs : Reason}
+    (hrun : propLinLe2 st coeffs is b = .implied l rs) :
+    ∃ m k mn mx, (l = posLe m k ∨ l = negLe m k) ∧
+      domMinI (st.domains.getD m Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD m Dom.empty) = some mx := by
+  rcases propLinLe2_emission_inv hrun with hstable |
+    ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
+    ⟨m, i, rest, lr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩
+  · exact absurd hstable (by intro hc; cases hc)
+  · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
+    obtain ⟨mn, mx, hmn, hmx⟩ := narrowHi_bounds_of_implied hnarrow.symm
+    exact ⟨m, b - lr, mn, mx, Or.inl hl, hmn, hmx⟩
+  · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
+    obtain ⟨mn, mx, hmn, hmx⟩ := narrowLo_bounds_of_implied hnarrow.symm
+    exact ⟨m, lr - b - 1, mn, mx, Or.inr hl, hmn, hmx⟩
+  · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
+    obtain ⟨mn, mx, hmn, hmx⟩ := narrowHi_bounds_of_implied hnarrow.symm
+    exact ⟨m, (b - lr) / c, mn, mx, Or.inl hl, hmn, hmx⟩
+  · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
+    obtain ⟨mn, mx, hmn, hmx⟩ := narrowLo_bounds_of_implied hnarrow.symm
+    exact ⟨m, -((b - lr) / (-c)) - 1, mn, mx, Or.inr hl, hmn, hmx⟩
 
 /-- The implied literal of the delegation is either an order literal on a
     slot whose state domain has both extrema (hence is nonempty and in
-    range), or the bounds arm's plain pin `posBool r true` (with the
-    Boolean-only state domain guard that justified it). -/
+    range) — a delegated emission, either in a pinned direction or in the
+    retained `r = false` direction (PLAN G1d) — or one of the bounds arm's
+    plain pins `posBool r b` (with the Boolean-only state domain guard that
+    justified it). -/
 theorem propLinLeReif_implied_order {st : State} {coeffs : List Int}
     {is : List Nat} {b : Int} {r : Nat} {l : Literal} {rs : Reason}
     (hrun : propLinLeReif st coeffs is b r = .implied l rs) :
     (∃ m k mn mx, (l = posLe m k ∨ l = negLe m k) ∧
-      domMinI (st.domains.getD m []) = some mn ∧
-      domMaxI (st.domains.getD m []) = some mx) ∨
-    (l = posBool r true ∧ domBoolOnlyB (st.domains.getD r []) = true) := by
+      domMinI (st.domains.getD m Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD m Dom.empty) = some mx) ∨
+    ((l = posBool r true ∨ l = posBool r false) ∧
+      domBoolOnlyB (Dom.enum (st.domains.getD r Dom.empty)) = true) := by
   by_cases hlenB : (coeffs.length == is.length) = true
   · have hlen : coeffs.length = is.length := beq_iff_eq.mp hlenB
     by_cases h1 : domBoolPin st.domains r true = true
     · rw [propLinLeReif_run_true hlenB h1] at hrun
       obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
-      rcases propLinLe2_emission_inv hres with hstable |
-        ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
-        ⟨m, i, rest, lr, hmem, hrest, hguard, hsum, hnarrow⟩ |
-        ⟨m, i, rest, lr, c, hmem, hpos, hrest, hguard, hsum, hnarrow⟩ |
-        ⟨m, i, rest, lr, c, hmem, hneg, hrest, hguard, hsum, hnarrow⟩
-      · exact absurd hstable (by intro hc; cases hc)
-      · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
-        obtain ⟨mn, mx, hmn, hmx⟩ := narrowHi_bounds_of_implied hnarrow.symm
-        exact Or.inl ⟨m, b - lr, mn, mx, Or.inl hl, hmn, hmx⟩
-      · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
-        obtain ⟨mn, mx, hmn, hmx⟩ := narrowLo_bounds_of_implied hnarrow.symm
-        exact Or.inl ⟨m, lr - b - 1, mn, mx, Or.inr hl, hmn, hmx⟩
-      · obtain ⟨hl, -⟩ := narrowHi_implied_inv hnarrow.symm
-        obtain ⟨mn, mx, hmn, hmx⟩ := narrowHi_bounds_of_implied hnarrow.symm
-        exact Or.inl ⟨m, (b - lr) / c, mn, mx, Or.inl hl, hmn, hmx⟩
-      · obtain ⟨hl, -⟩ := narrowLo_implied_inv hnarrow.symm
-        obtain ⟨mn, mx, hmn, hmx⟩ := narrowLo_bounds_of_implied hnarrow.symm
-        exact Or.inl ⟨m, -((b - lr) / (-c)) - 1, mn, mx, Or.inr hl, hmn, hmx⟩
+      exact Or.inl (propLinLe2_implied_order hres)
     · by_cases h2 : (domBoolPin st.domains r false
           && domsIntOnlyB st.domains is) = true
-      · rw [propLinLeReif_run_false hlenB h1 h2] at hrun
-        exact (conflictsOnly_implied_elim hrun).elim
+      · -- PLAN G1d: the retained delegated implied emission
+        rw [propLinLeReif_run_false hlenB h1 h2] at hrun
+        obtain ⟨rs0, hres, -⟩ := augmentRes_implied_inv hrun
+        exact Or.inl (propLinLe2_implied_order hres)
       · rw [propLinLeReif_run_b hlenB h1 h2] at hrun
         rcases propLinLeReifB_emission_inv hrun with hstable |
+          ⟨-, hb, -, -, -, -, -, -, hres⟩ |
           ⟨-, hb, -, -, -, -, -, -, hres⟩
         · exact absurd hstable (by intro hc; cases hc)
-        · refine Or.inr ⟨?_, hb⟩
+        · refine Or.inr ⟨Or.inl ?_, hb⟩
+          injection hres
+        · refine Or.inr ⟨Or.inr ?_, hb⟩
           injection hres
   · rw [propLinLeReif_run_arity (Bool.eq_false_iff.mpr hlenB)] at hrun
     cases hrun
@@ -7261,7 +8566,7 @@ theorem propLinLeReif_implied_decided {problem : Problem DomConstraint Unit}
     ∃ t, l.eval a = some t := by
   rcases propLinLeReif_implied_order hrun with
     ⟨m, k, mn, mx, hord, hmn, hmx⟩ | ⟨hbool, -⟩
-  · have hgetD : st.domains.getD m [] ≠ [] := getD_ne_nil_of_domMinI hmn
+  · have hgetD : st.domains.getD m Dom.empty ≠ Dom.empty := getD_ne_nil_of_domMinI hmn
     have hlt1 : m < st.domains.length := by
       by_cases hlt : m < st.domains.length
       · exact hlt
@@ -7269,7 +8574,7 @@ theorem propLinLeReif_implied_decided {problem : Problem DomConstraint Unit}
     have hlt2 : m < problem.domains.length := by rw [← hsub.1]; exact hlt1
     have hlt3 : m < a.length := by rw [ha.1.1]; exact hlt2
     have hread : a[m]? = some a[m] := List.getElem?_eq_getElem hlt3
-    have hmem : a[m] ∈ problem.domains.getD m [] := ha.1.2 m (a[m]) hread
+    have hmem : a[m] ∈ problem.domains.getD m Dom.empty := ha.1.2 m (a[m]) hread
     have hx : Value.intView (a[m]) ≠ none :=
       hview _ (getD_mem_of_lt hlt2) _ hmem
     obtain ⟨x, hx2⟩ : ∃ x, Value.intView (a[m]) = some x := by
@@ -7285,9 +8590,9 @@ theorem propLinLeReif_implied_decided {problem : Problem DomConstraint Unit}
     rcases hord with rfl | rfl
     · exact ⟨decide (x ≤ k), by simp [posLe, Literal.eval, Atom.eval, hslot]⟩
     · exact ⟨!(decide (x ≤ k)), by simp [negLe, Literal.eval, Atom.eval, hslot]⟩
-  · subst hbool
-    obtain ⟨rb, hread, -⟩ := linLeReif_satisfied_inv hcons
-    exact posBool_eval_bool hread
+  · rcases hbool with hbool | hbool <;> subst hbool <;>
+      obtain ⟨rb, hread, -⟩ := linLeReif_satisfied_inv hcons <;>
+      exact posBool_eval_bool hread
 
 
 end LeanFzn.Solver.Propagation

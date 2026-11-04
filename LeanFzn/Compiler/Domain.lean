@@ -1,6 +1,7 @@
 import LeanFzn.Semantics.ValueEquality
 import LeanFzn.Semantics.Globals
 import LeanFzn.Parser.Parser
+import LeanFzn.Solver.Core.CompactDomain
 
 
 /-!
@@ -47,9 +48,33 @@ Genuinely infinite domains (unbounded `var int`, set variables)
 remain outside the finite fragment and are rejected with a reason.
 -/
 
+namespace LeanFzn.Solver.Propagation
+namespace Dom
+
+open LeanFzn
+open LeanFzn.Semantics
+open LeanFzn.Semantics.Evaluation
+
+/-- **Compiler-facing range equality.**  The compact direct-range
+    constructor `Dom.ofIntRange` is exactly the canonical
+    `Dom.ofList` form of the materialized interval enumeration
+    `setElems (.interval lo hi)`, for every pair of bounds (reversed
+    ranges included).  This is the compiler-owned name for the
+    interface law landed with the S1 `Domain := Dom` switch; the
+    construction itself is in `Solver/Core/CompactDomain.lean`, so the
+    compiler never repeats the canonical-constructor decision
+    conditions. -/
+theorem ofIntRange_eq (lo hi : Int) :
+    ofIntRange lo hi =
+      ofList ((LeanFzn.Semantics.Evaluation.setElems (.interval lo hi)).map Value.int) :=
+  ofIntRange_eq_ofList lo hi
+
+end Dom
+end LeanFzn.Solver.Propagation
+
 namespace LeanFzn.Compiler.Domains
 open LeanFzn.Semantics LeanFzn.Semantics.Evaluation
-open LeanFzn
+open LeanFzn LeanFzn.Solver.Propagation
 
 /-- The finite domain of one search variable: a finite list of
     integer values (a materialized range or an enumerated set) or the
@@ -154,6 +179,98 @@ theorem varDomain_values_iff {ty : BasicVarType} {d : VarDomain}
   | setOfIntRange lo hi => simp only [varDomain] at h; simp at h
   | setOfIntSet xs => simp only [varDomain] at h; simp at h
 
+/-! ## Direct `Dom` extraction (S6)
+
+The reference extraction below materializes every finite domain as a
+`List Value`; the compiler then canonicalizes that list with
+`Dom.ofList`.  Wide intervals (1HZ5: 3.27M values) pay this twice.
+The twins in this section build the *same* canonical `Dom` directly:
+`Dom.ofIntRange` for `var lo..hi` and `Dom.ofList` for the genuinely
+enumerated shapes.  The forward theorems below prove the projections
+(`Dom.enum`/`canonSlot`) and the compiler equality in
+`LeanFzn.Compiler.Compile` (`compileModelFast_eq`). -/
+
+/-- Projection of a compiled slot back to the legacy value list. -/
+def enumSlot (p : String × Dom) : String × List Value :=
+  (p.1, Dom.enum p.2)
+
+/-- Canonicalization test on a compiled slot: the domain is the
+    `Dom.ofList` normal form of its own enumeration. -/
+def canonSlot (p : String × Dom) : String × Dom :=
+  (p.1, Dom.ofList (Dom.enum p.2))
+
+/-- Convert a legacy value slot to its direct `Dom` form. -/
+def ofListSlot (p : String × List Value) : String × Dom :=
+  (p.1, Dom.ofList p.2)
+
+@[simp] theorem enumSlot_ofListSlot (p : String × List Value) :
+    enumSlot (ofListSlot p) = p := by
+  cases p with
+  | mk n vs => simp [enumSlot, ofListSlot, Dom.enum_ofList]
+
+@[simp] theorem canonSlot_ofListSlot (p : String × List Value) :
+    canonSlot (ofListSlot p) = ofListSlot p := by
+  cases p with
+  | mk n vs => simp [canonSlot, ofListSlot, Dom.enum_ofList]
+
+/-- Fast twin of `varDomain`: the same rejections, but the accepted
+    domain is built in compact form.  An interval never materializes
+    its value list. -/
+def varDomainDom : BasicVarType → Except String Dom
+  | .par .bool => .ok (Dom.ofList [.bool false, .bool true])
+  | .par .int => .error "unbounded var int is outside the finite fragment"
+  | .par .setOfInt => .error "set variables are outside the finite fragment"
+  | .intRange lo hi => .ok (Dom.ofIntRange lo hi)
+  | .intSet xs => .ok (Dom.ofList (xs.map Value.int))
+  | .setOfIntRange _ _ => .error "set variables are outside the finite fragment"
+  | .setOfIntSet _ => .error "set variables are outside the finite fragment"
+
+/-- `varDomainDom` enumerates exactly like `varDomain`. -/
+theorem varDomainDom_eq (ty : BasicVarType) :
+    (varDomainDom ty).map Dom.enum = (varDomain ty).map VarDomain.values := by
+  cases ty with
+  | par t =>
+      cases t with
+      | bool =>
+          simp [varDomainDom, varDomain, VarDomain.values, Dom.enum_ofList,
+                Except.map]
+      | int => simp [varDomainDom, varDomain, Except.map]
+      | setOfInt => simp [varDomainDom, varDomain, Except.map]
+  | intRange lo hi =>
+      simp [varDomainDom, varDomain, VarDomain.values, Dom.enum_ofIntRange,
+            Except.map]
+  | intSet xs =>
+      simp [varDomainDom, varDomain, VarDomain.values, Dom.enum_ofList,
+            Except.map]
+  | setOfIntRange lo hi => simp [varDomainDom, varDomain, Except.map]
+  | setOfIntSet xs => simp [varDomainDom, varDomain, Except.map]
+
+/-- Every `Dom` produced by `varDomainDom` is in `Dom.ofList` normal
+    form (so canonicalizing its enumeration returns it unchanged). -/
+theorem varDomainDom_canonical {ty : BasicVarType} {d : Dom}
+    (h : varDomainDom ty = .ok d) :
+    Dom.ofList (Dom.enum d) = d := by
+  cases ty with
+  | par t =>
+      cases t with
+      | bool =>
+          simp [varDomainDom] at h
+          subst h
+          simp [Dom.enum_ofList]
+      | int => simp [varDomainDom] at h
+      | setOfInt => simp [varDomainDom] at h
+  | intRange lo hi =>
+      simp [varDomainDom] at h
+      subst h
+      rw [Dom.enum_ofIntRange]
+      exact (Dom.ofIntRange_eq lo hi).symm
+  | intSet xs =>
+      simp [varDomainDom] at h
+      subst h
+      rw [Dom.enum_ofList]
+  | setOfIntRange lo hi => simp [varDomainDom] at h
+  | setOfIntSet xs => simp [varDomainDom] at h
+
 /-- The search slot of one variable declaration, if any: an
     initializer-free basic variable with a finite domain.  Variables
     with initializers (and array variables, which the grammar always
@@ -181,6 +298,173 @@ def declSlots : List VarDeclItem → Except String (List (String × List Value))
       | .ok none => declSlots rest
       | .ok (some p) => (declSlots rest).map (fun slots => p :: slots)
 
+/-- Fast twin of `declSlot`: the same name rejection and the same
+    extraction errors, but the slot domain is built in compact form. -/
+def declSlotDom (d : VarDeclItem) : Except String (Option (String × Dom)) :=
+  match d with
+  | .basic ty n _ none =>
+      if n.name == "array1d" then
+        .error "variable named 'array1d' cannot be emitted in a solution string"
+      else
+        match varDomainDom ty with
+        | .ok dom => .ok (some (n.name, dom))
+        | .error e => .error e
+  | _ => .ok none
+
+/-- Fast twin of `declSlots`: the same order, names and rejections,
+    with each domain built directly as a `Dom`. -/
+def declSlotsDom : List VarDeclItem → Except String (List (String × Dom))
+  | [] => .ok []
+  | d :: rest =>
+      match declSlotDom d with
+      | .error e => .error e
+      | .ok none => declSlotsDom rest
+      | .ok (some p) => (declSlotsDom rest).map (fun slots => p :: slots)
+
+/-- `declSlotDom` reproduces the legacy slot list under `enumSlot`. -/
+theorem declSlotDom_eq (d : VarDeclItem) :
+    (declSlotDom d).map (Option.map enumSlot) = declSlot d := by
+  cases d with
+  | basic ty n anns init =>
+      cases init with
+      | some e => rfl
+      | none =>
+          cases hb : (n.name == "array1d") with
+          | true => simp [declSlotDom, declSlot, hb, Except.map]
+          | false =>
+              simp only [declSlotDom, declSlot, hb, Bool.false_eq_true, if_false]
+              cases ty with
+              | par t =>
+                  cases t <;>
+                    simp [varDomainDom, varDomain, VarDomain.values, enumSlot,
+                          Dom.enum_ofList, Except.map, Option.map]
+              | intRange lo hi =>
+                  simp [varDomainDom, varDomain, VarDomain.values, enumSlot,
+                        Dom.enum_ofIntRange, Except.map, Option.map]
+              | intSet xs =>
+                  simp [varDomainDom, varDomain, VarDomain.values, enumSlot,
+                        Dom.enum_ofList, Except.map, Option.map]
+              | setOfIntRange lo hi =>
+                  simp [varDomainDom, varDomain, Except.map, Option.map]
+              | setOfIntSet xs =>
+                  simp [varDomainDom, varDomain, Except.map, Option.map]
+  | array ty n anns value => rfl
+
+/-- Every slot produced by `declSlotDom` is in canonical (`Dom.ofList`)
+    normal form. -/
+theorem declSlotDom_canonical (d : VarDeclItem)
+    {o : Option (String × Dom)} (h : declSlotDom d = .ok o) :
+    Option.map canonSlot o = o := by
+  cases d with
+  | basic ty n anns init =>
+      cases init with
+      | some e =>
+          simp [declSlotDom] at h
+          subst h
+          rfl
+      | none =>
+          cases hb : (n.name == "array1d") with
+          | true => simp [declSlotDom, hb] at h
+          | false =>
+              simp only [declSlotDom, hb, Bool.false_eq_true, if_false] at h
+              cases ty with
+              | par t =>
+                  cases t with
+                  | bool =>
+                      simp [varDomainDom] at h
+                      subst h
+                      simp [canonSlot]
+                  | int => simp [varDomainDom] at h
+                  | setOfInt => simp [varDomainDom] at h
+              | intRange lo hi =>
+                  simp [varDomainDom] at h
+                  subst h
+                  simp [canonSlot, Dom.enum_ofIntRange, Dom.ofIntRange_eq]
+              | intSet xs =>
+                  simp [varDomainDom] at h
+                  subst h
+                  simp [canonSlot]
+              | setOfIntRange lo hi => simp [varDomainDom] at h
+              | setOfIntSet xs => simp [varDomainDom] at h
+  | array ty n anns value =>
+      simp [declSlotDom] at h
+      subst h
+      rfl
+
+/-- `declSlotsDom` reproduces the legacy slot list under `enumSlot`. -/
+theorem declSlotsDom_eq (ds : List VarDeclItem) :
+    (declSlotsDom ds).map (List.map enumSlot) = declSlots ds := by
+  induction ds with
+  | nil => rfl
+  | cons d rest ih =>
+      unfold declSlotsDom declSlots
+      cases hd : declSlotDom d with
+      | error e =>
+          have h := declSlotDom_eq d
+          rw [hd] at h
+          simp only [Except.map] at h
+          rw [← h]
+          rfl
+      | ok o =>
+          have h := declSlotDom_eq d
+          rw [hd] at h
+          cases o with
+          | none =>
+              simp only [hd] at h ⊢
+              simp only [Option.map, Except.map] at h
+              rw [← h]
+              exact ih
+          | some p =>
+              simp only [hd] at h ⊢
+              simp only [Option.map, Except.map] at h
+              rw [← h]
+              simp only [Except.map]
+              cases hr : declSlotsDom rest with
+              | error e =>
+                  rw [hr] at ih
+                  simp only [Except.map] at ih
+                  rw [← ih]
+              | ok slots =>
+                  rw [hr] at ih
+                  simp only [Except.map] at ih
+                  rw [← ih]
+                  simp only [Except.map, List.map_cons]
+                  try rfl
+
+/-- Every slot list produced by `declSlotsDom` is canonical. -/
+theorem declSlotsDom_canonical (ds : List VarDeclItem)
+    {slots : List (String × Dom)} (h : declSlotsDom ds = .ok slots) :
+    slots.map canonSlot = slots := by
+  induction ds generalizing slots with
+  | nil =>
+      simp [declSlotsDom] at h
+      subst h
+      rfl
+  | cons d rest ih =>
+      unfold declSlotsDom at h
+      cases hd : declSlotDom d with
+      | error e => simp [hd, Except.map] at h
+      | ok o =>
+          cases o with
+          | none =>
+              simp only [hd] at h ⊢
+              exact ih h
+          | some p =>
+              simp only [hd] at h ⊢
+              cases hr : declSlotsDom rest with
+              | error e => simp [hr, Except.map] at h
+              | ok rs =>
+                  simp only [hr, Except.map, Except.ok.injEq] at h
+                  subst h
+                  simp only [List.map_cons]
+                  rw [ih hr]
+                  have hp := declSlotDom_canonical d hd
+                  have hp' : canonSlot p = p := by
+                    have hsome : some (canonSlot p) = some p := by
+                      simpa using hp
+                    exact Option.some.inj hsome
+                  rw [hp']
+
 /-- The number of complete assignments of a list of domains (the
     number of search leaves). -/
 def leavesProduct : List (List Value) → Nat
@@ -197,6 +481,24 @@ def leavesProduct : List (List Value) → Nat
     assignment). -/
 def slotsChecked (m : Model) : Except String (List (String × List Value)) :=
   declSlots m.variables
+
+/-- Fast twin of `slotsChecked`: the same slots in declaration order,
+    with every domain built directly as a compact `Dom`. -/
+def slotsCheckedDom (m : Model) : Except String (List (String × Dom)) :=
+  declSlotsDom m.variables
+
+/-- **Slot extraction agreement (S6)**: enumerating each compact slot
+    domain reproduces exactly the legacy `List Value` slot list,
+    including the same rejection reason on failure. -/
+theorem slotsCheckedDom_eq (m : Model) :
+    (slotsCheckedDom m).map (List.map enumSlot) = slotsChecked m :=
+  declSlotsDom_eq m.variables
+
+/-- Every slot list produced by `slotsCheckedDom` is canonical. -/
+theorem slotsCheckedDom_canonical (m : Model)
+    {slots : List (String × Dom)} (h : slotsCheckedDom m = .ok slots) :
+    slots.map canonSlot = slots :=
+  declSlotsDom_canonical m.variables h
 
 /-- **The search slots of a model**: for each initializer-free basic
     variable, its name and its finite candidate values, in

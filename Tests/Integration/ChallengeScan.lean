@@ -38,7 +38,7 @@ def scanOne (full opt : Bool) (path : String) : IO Unit := do
         | .ok _ => IO.println s!"DIAG\t{path}\tcompiles-as-satisfy"
         | .error e2 => IO.println s!"DIAG\t{path}\t{e2}"
         if arraysOkB ms then
-          let n := normalizeModel ms
+          let n := normalizeFull ms
           match slotsChecked n with
           | .error e4 => IO.println s!"SLOTERR\t{path}\t{e4}"
           | .ok slots =>

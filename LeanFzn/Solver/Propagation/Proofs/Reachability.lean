@@ -34,7 +34,8 @@ Purpose:
     resolution ready).
 
   `Search`-level proof composes.
--/import LeanFzn.Solver.Chronological.Search
+-/
+import LeanFzn.Solver.Reference.Engine
 import LeanFzn.Solver.Propagation.Encoding
 import LeanFzn.Solver.Propagation.Proofs.Engine
 import LeanFzn.Solver.Propagation.Proofs.Analyze
@@ -57,7 +58,7 @@ values (domains only shrink or Boolean-pin), so for problems whose
 initial domains are all int/bool-typed the invariant is permanent. -/
 
 /-- Every value in any slot domain of `doms` has an integer view. -/
-def IntViewedDoms (doms : List (List Value)) : Prop :=
+def IntViewedDoms (doms : List Domain) : Prop :=
   ∀ d ∈ doms, ∀ v ∈ d, Value.intView v ≠ none
 
 /-- The problem's domains are int/bool-typed throughout. -/

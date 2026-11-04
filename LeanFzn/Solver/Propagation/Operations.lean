@@ -113,6 +113,10 @@ structure Propagator where
   watches : List Atom
   run : State → PropagationResult
 
+/-- Beta-reduction of the `run` projection of a literal propagator. -/
+@[simp] theorem Propagator.run_mk {w : List Atom} {r : State → PropagationResult} :
+    ({ watches := w, run := r } : Propagator).run = r := rfl
+
 /-- Initial LCG state. -/
 def initialState (problem : Problem Constraint Objective) : State :=
   { domains := problem.domains
@@ -122,5 +126,95 @@ def initialState (problem : Problem Constraint Objective) : State :=
     learned := []
     queue := []
     conflict := none }
+
+/-- Structural membership of an integer in the `Value.intView` image of a
+domain: integers as themselves and Booleans as 0/1.  This is *not*
+`Dom.memBool d (.int i)`: on a Boolean-valued domain, `i = 0`/`i = 1` must
+match `.bool false`/`.bool true`. -/
+def memIntViewB (d : Dom) (i : Int) : Bool :=
+  match d.rep with
+  | .small true _ bits =>
+      (i == 0 && bits.toNat.testBit 0) || (i == 1 && bits.toNat.testBit 1)
+  | .small false off bits =>
+      decide (off ≤ i) && decide (i - off < (64 : Int)) &&
+        bits.toNat.testBit (i - off).toNat
+  | .holes lo hi hs =>
+      decide (lo ≤ i) && decide (i ≤ hi) && !(Dom.memHoles hs i)
+  | .general vs => vs.any fun v => Value.intView v == some i
+
+private theorem filterMap_intView_map_int (L : List Int) :
+    (L.map Value.int).filterMap Value.intView = L := by
+  induction L with
+  | nil => rfl
+  | cons x xs ih =>
+      change x :: (List.map Value.int xs).filterMap Value.intView = x :: xs
+      rw [ih]
+
+/-- Exactness of `memIntViewB` against the `Value.intView` image.  Stated
+here (next to the definition) so the runtime pool cache below the explained
+propagation layer can use it; `ExplainedPropagation.memIntViewB_iff` is the
+same statement kept at its historical site. -/
+theorem memIntViewB_iff_intView (d : Dom) (i : Int) :
+    memIntViewB d i = true ↔ i ∈ (Dom.enum d).filterMap Value.intView := by
+  cases d with
+  | mk rep =>
+    cases rep with
+    | small isBool off bits =>
+      cases isBool with
+      | true =>
+          show ((i == 0 && bits.toNat.testBit 0) ||
+              (i == 1 && bits.toNat.testBit 1)) = true ↔
+            i ∈ (Dom.smallBools bits).filterMap Value.intView
+          rw [List.mem_filterMap, Bool.or_eq_true]
+          constructor
+          · rintro (h | h)
+            · rw [Bool.and_eq_true, beq_iff_eq] at h
+              obtain ⟨hi0, hb0⟩ := h
+              refine ⟨.bool false, ?_, ?_⟩
+              · rw [Dom.mem_smallBools_bool]; simpa using hb0
+              · rw [hi0]; rfl
+            · rw [Bool.and_eq_true, beq_iff_eq] at h
+              obtain ⟨hi1, hb1⟩ := h
+              refine ⟨.bool true, ?_, ?_⟩
+              · rw [Dom.mem_smallBools_bool]; simpa using hb1
+              · rw [hi1]; rfl
+          · rintro ⟨v, hv, hiv⟩
+            rw [Dom.mem_smallBools] at hv
+            obtain ⟨b, rfl, hb⟩ := hv
+            cases b with
+            | false =>
+                simp only [Value.intView, Bool.false_eq_true, if_false,
+                  Option.some.injEq] at hiv
+                rw [← hiv]
+                have hb' : bits.toNat.testBit 0 = true := by simpa using hb
+                simp [hb']
+            | true =>
+                simp only [Value.intView, if_true, Option.some.injEq] at hiv
+                rw [← hiv]
+                have hb' : bits.toNat.testBit 1 = true := by simpa using hb
+                simp [hb']
+      | false =>
+          show (decide (off ≤ i) && decide (i - off < (64 : Int)) &&
+              bits.toNat.testBit (i - off).toNat) = true ↔
+            i ∈ ((Dom.smallInts off bits).map Value.int).filterMap Value.intView
+          rw [filterMap_intView_map_int, Dom.mem_smallInts_int]
+          rw [Bool.and_eq_true, Bool.and_eq_true, decide_eq_true_eq, decide_eq_true_eq]
+          simp [and_assoc]
+    | holes lo hi hs =>
+      show (decide (lo ≤ i) && decide (i ≤ hi) && !(Dom.memHoles hs i)) = true ↔
+        i ∈ ((Dom.holesInts lo hi hs).map Value.int).filterMap Value.intView
+      rw [filterMap_intView_map_int, Dom.mem_holesInts]
+      rw [Bool.and_eq_true, Bool.and_eq_true, decide_eq_true_eq, decide_eq_true_eq]
+      rw [Bool.not_eq_true', Dom.memHoles_eq_false]
+      simp [and_assoc]
+    | general vs =>
+      show (vs.any fun v => Value.intView v == some i) = true ↔
+        i ∈ vs.filterMap Value.intView
+      rw [List.any_eq_true, List.mem_filterMap]
+      constructor
+      · rintro ⟨v, hv, he⟩
+        exact ⟨v, hv, beq_iff_eq.mp he⟩
+      · rintro ⟨v, hv, he⟩
+        exact ⟨v, hv, beq_iff_eq.mpr he⟩
 
 end LeanFzn.Solver.Propagation

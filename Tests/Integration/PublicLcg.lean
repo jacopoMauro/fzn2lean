@@ -9,8 +9,9 @@ Dependencies: CertifiedSolve supplies the public entry; LcgPhaseObserved has
 a proved verdict projection to the production kernel. No bounded driver.
 DAG: public integration and observer -> this test leaf -> PublicLcgRunner.
 -/
-import LeanFzn.Integration.CertifiedSolve
-import LeanFzn.Solver.UIP.Proofs.LcgPhaseObserved
+import LeanFzn.Legacy.Integration.CertifiedSolve
+import LeanFzn.Legacy.Solver.UIP.Proofs.LcgPhaseObserved
+import LeanFzn.Legacy.Solver.UIP.Proofs.FrameLive
 
 namespace PublicLcgFixtures
 open LeanFzn LeanFzn.Semantics LeanFzn.Compiler LeanFzn.Integration
@@ -34,14 +35,27 @@ def boolPigeon3 : String :=
    constraint bool_not(a, b);\nconstraint bool_not(a, c);\n\
    constraint bool_not(b, c);\nsolve satisfy;\n"
 
-def observe (p : CompiledProblem DomConstraint) :
+/-- The mixed route gate's `gateOk` conjunct supplies the kernel frame gate. -/
+theorem frameGate_of_routeGate {p : CompiledProblem DomConstraint}
+    (h : lcgRouteGateMixed p = true) :
+    ∀ {original : List LeanFzn.Solver.Propagation.Clause}
+      {props : List LeanFzn.Solver.Propagation.Propagator}
+      {cfg : SchedulerConfig (lcgLeaf p)},
+      SupportedReach p.domains original props cfg → FrameNonempty cfg :=
+  lcgFrameGate_of_routeGate h
+
+def observe (p : CompiledProblem DomConstraint)
+    (hroute : lcgRouteGateMixed p = true) :
     DriverResult (lcgLeaf p) × LcgPhaseObserved.Observations :=
   LcgPhaseObserved.solve (leaf := lcgLeaf p) p.domains
     (LeanFzn.Compiler.seedClauses p.constraints) (lcgProps p) (lcgSeedEntailed p)
+    (frameGate_of_routeGate hroute)
 
-theorem observe_eq (p : CompiledProblem DomConstraint) :
-    (observe p).1 = lcgRun p :=
-  (LcgPhaseObserved.solve_fst _ _ _ _).trans (lcgRun_eq_solve p).symm
+theorem observe_eq (p : CompiledProblem DomConstraint)
+    (hroute : lcgRouteGateMixed p = true) :
+    (observe p hroute).1 = lcgRun p (frameGate_of_routeGate hroute) :=
+  (LcgPhaseObserved.solve_fst _ _ _ _ _).trans
+    (lcgRun_eq_solve p (frameGate_of_routeGate hroute)).symm
 
 /-- One fixture with its route and observation expectations: the public
 route must take the LCG branch (`routed`), and when routed the observed
@@ -77,8 +91,8 @@ def runOne (f : Fixture) : IO (Bool × LcgPhaseObserved.Observations) := do
         | .unknown => false
       let mut obs : LcgPhaseObserved.Observations := {}
       let mut same := true
-      if lcgRouteGateMixed p then
-        let observed ← IO.lazyPure fun _ => observe p
+      if hroute : lcgRouteGateMixed p = true then
+        let observed ← IO.lazyPure fun _ => observe p hroute
         obs := observed.2
         same := match observed.1, compiledResult with
           | .sat a, .sat b => a == b

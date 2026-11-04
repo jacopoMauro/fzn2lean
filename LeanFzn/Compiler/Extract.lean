@@ -461,6 +461,25 @@ def extractConstraint (names : List String) (c : ConstraintItem) : Option DomCon
               some (.minGen (is.map DomIntArg.slot) (.slot k))
           | _, _ => none
       | _ => none
+  -- C0 set membership: `set_in(x, S)` / `set_in_reif(x, S, r)` with a
+  -- CONSTANT set (a literal set, or a parameter resolved by the
+  -- compiler layer; the extraction layer takes only the literal
+  -- form).  Both are leaf-enforced constraints carrying the set as a
+  -- payload.
+  | "set_in" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.set s))] =>
+          match nameIndex names x.name with
+          | some i => some (.setInSlot i s.denote)
+          | none => none
+      | _ => none
+  | "set_in_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.set s)), .basic (.ident r)] =>
+          match nameIndex names x.name, nameIndex names r.name with
+          | some i, some k => some (.setInReifSlot i s.denote k)
+          | _, _ => none
+      | _ => none
   | _ => none
 
 /-! ## The extracted list -/
@@ -584,6 +603,16 @@ theorem fullInterp_of_extracted_arith (n : String)
       ∨ n = "array_int_minimum") :
     fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
   rcases hn with rfl | rfl | rfl | rfl
+  all_goals
+    simp only [fullInterp]
+    rw [if_neg (by decide)]
+
+/-- The same bridge for the C0 set-membership family (`set_in`,
+    `set_in_reif`). -/
+theorem fullInterp_of_extracted_setIn (n : String)
+    (hn : n = "set_in" ∨ n = "set_in_reif") :
+    fullInterp (Ident.mk n) = stdInterp (Ident.mk n) := by
+  rcases hn with rfl | rfl
   all_goals
     simp only [fullInterp]
     rw [if_neg (by decide)]
@@ -1770,6 +1799,78 @@ theorem holds_array_var_bool_element {store : Store} {c : ConstraintItem}
     (Or.inr (Or.inr rfl))] at h1
   exact ⟨vs, vx, vy, hvs, hsx, hsy, h1⟩
 
+/-- Inversion of `Holds` for `set_in(x, S)` with a literal set: the
+    store reads an integer that the denoted set contains. -/
+theorem holds_set_in {store : Store} {c : ConstraintItem}
+    {x : Ident} {s : SetLiteral}
+    (hname : c.name.name = "set_in")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.set s))])
+    (h : c.Holds fullInterp store) :
+    ∃ p : Int, store x = some (.int p) ∧ s.denote.Contains p := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  have hxy : ∃ vx, store x = some vx ∧
+      args = [vx, (BasicLiteral.set s).denote] := by
+    rw [hargs] at hmap
+    simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval] at hmap
+    cases hsx : store x with
+    | none => rw [hsx] at hmap; simp at hmap
+    | some vx =>
+        rw [hsx] at hmap
+        exact ⟨vx, rfl, by simpa using hmap.symm⟩
+  obtain ⟨vx, hsx, hargsv⟩ := hxy
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "set_in") [vx, Value.setOfInt s.denote] :=
+    interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_setIn "set_in" (Or.inl rfl)] at h1
+  cases vx with
+  | int p => exact ⟨p, hsx, h1⟩
+  | bool w => exact absurd h1 (by simp [stdInterp])
+  | setOfInt w => exact absurd h1 (by simp [stdInterp])
+  | array w => exact absurd h1 (by simp [stdInterp])
+
+/-- Inversion of `Holds` for `set_in_reif(x, S, r)` with a literal
+    set: the store reads an integer, a Boolean, and the reified
+    truth-value agreement `R ↔ x ∈ S`. -/
+theorem holds_set_in_reif {store : Store} {c : ConstraintItem}
+    {x r : Ident} {s : SetLiteral}
+    (hname : c.name.name = "set_in_reif")
+    (hargs : c.args = [Expr.basic (.ident x), Expr.basic (.lit (.set s)),
+        Expr.basic (.ident r)])
+    (h : c.Holds fullInterp store) :
+    ∃ (p : Int) (rb : Bool),
+      store x = some (.int p) ∧ store r = some (.bool rb) ∧
+        (rb = true ↔ s.denote.Contains p) := by
+  obtain ⟨args, hmap, hinterp⟩ := h
+  have hxy : ∃ vx vr, store x = some vx ∧ store r = some vr ∧
+      args = [vx, (BasicLiteral.set s).denote, vr] := by
+    rw [hargs] at hmap
+    simp only [List.mapM_cons, List.mapM_nil, Expr.eval, BasicExpr.eval] at hmap
+    cases hsx : store x with
+    | none => rw [hsx] at hmap; simp at hmap
+    | some vx =>
+        rw [hsx] at hmap
+        cases hsr : store r with
+        | none => rw [hsr] at hmap; simp at hmap
+        | some vr =>
+            rw [hsr] at hmap
+            exact ⟨vx, vr, rfl, rfl, by simpa using hmap.symm⟩
+  obtain ⟨vx, vr, hsx, hsr, hargsv⟩ := hxy
+  subst hargsv
+  have h1 : fullInterp (Ident.mk "set_in_reif")
+      [vx, Value.setOfInt s.denote, vr] := interp_of_hname hname hinterp
+  rw [fullInterp_of_extracted_setIn "set_in_reif" (Or.inr rfl)] at h1
+  cases vx with
+  | int p =>
+      cases vr with
+      | bool rb =>
+          exact ⟨p, rb, hsx, hsr, (reif_disj_iff (s.denote.Contains p) rb).mp h1⟩
+      | int w => exact absurd h1 (by simp [stdInterp])
+      | setOfInt w => exact absurd h1 (by simp [stdInterp])
+      | array w => exact absurd h1 (by simp [stdInterp])
+  | bool w => exact absurd h1 (by simp [stdInterp])
+  | setOfInt w => exact absurd h1 (by simp [stdInterp])
+  | array w => exact absurd h1 (by simp [stdInterp])
+
 end HoldsBridge
 
 /-- The evaluated values of a coefficient array that produced
@@ -2403,7 +2504,15 @@ theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
     (∃ x elems is k, c.name.name = "array_int_minimum" ∧
         c.args = [.basic (.ident x), .array elems] ∧
         nameIndex names x.name = some k ∧ linIndices names elems = some is ∧
-        dc = .minGen (is.map DomIntArg.slot) (.slot k)) := by
+        dc = .minGen (is.map DomIntArg.slot) (.slot k)) ∨
+    (∃ x s i, c.name.name = "set_in" ∧
+        c.args = [.basic (.ident x), .basic (.lit (.set s))] ∧
+        nameIndex names x.name = some i ∧ dc = .setInSlot i s.denote) ∨
+    (∃ x s r i k, c.name.name = "set_in_reif" ∧
+        c.args = [.basic (.ident x), .basic (.lit (.set s)),
+          Expr.basic (.ident r)] ∧
+        nameIndex names x.name = some i ∧ nameIndex names r.name = some k ∧
+        dc = .setInReifSlot i s.denote k) := by
   rw [extractConstraint] at hdc
   split at hdc
   case h_1 heqname =>
@@ -2898,11 +3007,45 @@ theorem extractConstraint_inv {names : List String} {c : ConstraintItem}
         apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
         apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
         apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
-        exact ⟨x, elems, is, k, heqname, heqargs, hk, his,
+        exact Or.inl ⟨x, elems, is, k, heqname, heqargs, hk, his,
           by simpa using hdc.symm⟩
       case h_2 => exact absurd hdc (by simp)
     case h_2 => exact absurd hdc (by simp)
-  case h_34 => exact absurd hdc (by simp)
+  case h_34 heqname =>
+    split at hdc
+    case h_1 x s heqargs =>
+      split at hdc
+      case h_1 i hxi =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr
+        exact Or.inl ⟨x, s, i, heqname, heqargs, hxi, by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_35 heqname =>
+    split at hdc
+    case h_1 x s r heqargs =>
+      split at hdc
+      case h_1 i k hxi hri =>
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr; apply Or.inr
+        apply Or.inr; apply Or.inr
+        exact ⟨x, s, r, i, k, heqname, heqargs, hxi, hri, by simpa using hdc.symm⟩
+      case h_2 => exact absurd hdc (by simp)
+    case h_2 => exact absurd hdc (by simp)
+  case h_36 => exact absurd hdc (by simp)
 
 /-- **Per-constraint extraction soundness**: if the model constraint
     `c` holds in `store` (under `fullInterp`, the interpretation the
@@ -2969,7 +3112,9 @@ theorem extractConstraint_holds {names : List String} {c : ConstraintItem}
     ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
     ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
     ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩ |
-    ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩
+    ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩ |
+    ⟨x, s, i, hname, hargs, hxi, hdc'⟩ |
+    ⟨x, s, r, i, k, hname, hargs, hxi, hrk, hdc'⟩
   · -- int_eq on two slots
     subst hdc'
     obtain ⟨vx, vy, hsx, hsy, heq⟩ := holds_int_eq_slot hname hargs hh
@@ -4066,5 +4211,28 @@ theorem extractConstraint_holds {names : List String} {c : ConstraintItem}
     show minValue (is.map (fun i => a[i]!)) = some m
     rw [← hvs_eq]
     exact hmin
+  · -- set_in on a slot and a literal set
+    subst hdc'
+    obtain ⟨p, hsx, hmem⟩ := holds_set_in hname hargs hh
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    rw [hnamei] at hsni
+    have hvx : vxi = .int p := Option.some.inj (hsni.symm.trans hsx)
+    exact ⟨p, hvx ▸ hai, hmem⟩
+  · -- set_in_reif on a slot, a literal set, and a reif slot
+    subst hdc'
+    obtain ⟨p, rb, hsx, hsr, hriff⟩ := holds_set_in_reif hname hargs hh
+    obtain ⟨hxlt, hxget⟩ := nameIndex_some names x.name i hxi
+    obtain ⟨hrlt, hrget⟩ := nameIndex_some names r.name k hrk
+    obtain ⟨vxi, hai, hsni⟩ := hvals i hxlt
+    obtain ⟨vrk, har, hsnr⟩ := hvals k hrlt
+    have hnamei : names[i]! = x.name := getElem_of_getElem? hxlt hxget
+    have hnamer : names[k]! = r.name := getElem_of_getElem? hrlt hrget
+    rw [hnamei] at hsni
+    rw [hnamer] at hsnr
+    have hvx : vxi = .int p := Option.some.inj (hsni.symm.trans hsx)
+    have hvr : vrk = .bool rb := Option.some.inj (hsnr.symm.trans hsr)
+    exact ⟨p, rb, hvx ▸ hai, hvr ▸ har, hriff⟩
 
 end LeanFzn.Compiler

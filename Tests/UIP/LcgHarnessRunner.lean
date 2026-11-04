@@ -8,9 +8,18 @@ FlatZinc SOURCE STRING parsed by the real parser and compiled by the real
 compiler (so SAT witnesses go through the verified Checker); the T1 family
 battery (hand-built `Problem` records) is added for oracle-checked coverage.
 
+B1 (two-track tracker): every `c-sem` observation is additionally classified
+against the dispatcher (`coverless` / `notSelected` / `selected`) and checked
+against the domain-based falsification the dispatcher actually uses; the
+negative controls in `LcgHarness.negativeControlResults` gate the run. The
+fixtures `Tests/UIP/LcgHarnessFixtures/cex_*.fzn` are run with `--fixtures`
+(no battery registration; the directory is the convention). Observation
+counters (`kinds`) are unchanged; the B1 numbers are reported separately.
+
 Exit code: 0 iff no instance has a wrong verdict, a rejected witness, or
 exceeded the bound; 1 otherwise (invariant violations are reported separately,
-they do not change the exit code - they are observations).
+they do not change the exit code - they are observations; a failed B1 negative
+control is a tracker self-check failure and does exit 1).
 -/
 
 import Tests.UIP.LcgHarnessBattery
@@ -38,6 +47,11 @@ structure FuzzAgg where
   invSem : Nat := 0
   invExact : Nat := 0
   kinds : Array Nat := #[0,0,0,0,0,0,0,0,0,0]
+  -- B1 two-track classification of the `c-sem` observations (kinds[5])
+  cSemCoverless : Nat := 0
+  cSemNotSelected : Nat := 0
+  cSemSelected : Nat := 0
+  cSemDomFail : Nat := 0
   maxLvl : Nat := 0
   maxJump : Nat := 0
   skipJumps : Nat := 0
@@ -150,6 +164,10 @@ def runFuzz (opts : Opts) (count seed : Nat) : IO UInt32 := do
                  invExact := g.invExact + o.nA.1 + o.nB.1 + o.nC.1 + o.nD.1,
                  kinds := #[g.kinds[0]! + o.nA.1, g.kinds[1]! + o.nA.2, g.kinds[2]! + o.nB.1, g.kinds[3]! + o.nB.2,
                             g.kinds[4]! + o.nC.1, g.kinds[5]! + o.nC.2, g.kinds[6]! + o.nD.1, g.kinds[7]! + o.nD.2, g.kinds[8]! + o.nE, g.kinds[9]! + o.nF],
+                 cSemCoverless := g.cSemCoverless + o.nCDead,
+                 cSemNotSelected := g.cSemNotSelected + o.nCNotSel,
+                 cSemSelected := g.cSemSelected + o.nCSel,
+                 cSemDomFail := g.cSemDomFail + o.nCDom,
                  maxLvl := max g.maxLvl o.maxLevel,
                  maxJump := max g.maxJump (o.jumpDists.foldl max 0),
                  skipJumps := g.skipJumps + (o.jumpDists.filter (· > 1)).size,
@@ -177,11 +195,21 @@ def runFuzz (opts : Opts) (count seed : Nat) : IO UInt32 := do
   IO.println s!"  analysis=none causes: {g.causes.toList}"
   IO.println s!"  invariant violations (config counts) exact={g.invExact} semantic={g.invSem}; total instrumented ms={g.ms}"
   IO.println s!"  per-invariant config counts (a-exact,a-sem,b-exact,b-sem,c-exact,c-sem,d-exact,d-sem,e-entailed,f-align) = {g.kinds.toList}"
+  IO.println s!"  B1 c-sem two-track: trail-only semantic observations={g.kinds[5]!} classified coverless(no implied dispatch, frameLiveB=false)={g.cSemCoverless} notSelected(live, dispatcher takes another event)={g.cSemNotSelected} selected(live, clause IS the recorded reason)={g.cSemSelected}; dispatcher-domain falsification failures={g.cSemDomFail}"
+  IO.println s!"  B1 negative controls: {(LcgHarness.negativeControlResults.filter (·.2)).length}/{LcgHarness.negativeControlResults.length} behaved as required (invalid reasons rejected, valid ones accepted)"
   return (if g.bad == 0 then 0 else 1)
 
 def main (args : List String) : IO UInt32 := do
   let args' := args
   let opts := parseArgs args' {}
+  -- B1 tracker self-check (once, before any instance): the two-track checks
+  -- must reject every intentionally invalid control reason, or the run's
+  -- tracker evidence is vacuous and must not be trusted.
+  if !LcgHarness.negativeControlsPass then
+    for (n, ok) in LcgHarness.negativeControlResults do
+      if !ok then IO.eprintln s!"B1 NEGATIVE CONTROL FAILED: {n}"
+    IO.eprintln "B1 NEGATIVE CONTROLS FAILED: the tracker is vacuous; observations are not trustworthy"
+    return 1
   match args' with
   | "--fuzz" :: cnt :: sd :: rest =>
       return (← runFuzz (parseArgs rest {}) (cnt.toNat?.getD 100) (sd.toNat?.getD 1))

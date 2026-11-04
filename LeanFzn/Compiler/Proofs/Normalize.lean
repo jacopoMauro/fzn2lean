@@ -19,6 +19,7 @@ Dependencies:
 
 import LeanFzn.Compiler.Normalize
 import LeanFzn.Compiler.Proofs.Exact
+import LeanFzn.Compiler.Proofs.SetIn
 open LeanFzn.Compiler.Domains
 
 namespace LeanFzn.Compiler
@@ -1017,15 +1018,40 @@ theorem parDeclValue_value {d : ParDeclItem} {v : Value}
 
 /-! ## The array front end is exact -/
 
+theorem vars_basic_of_normalizeFull {m : Model}
+    {problem : CompiledProblem DomConstraint}
+    (hc : compileModel (normalizeFull m) = .ok problem) :
+    ∀ d ∈ (normalizeModel m).variables,
+      ∃ (ty : BasicVarType) (n : Ident) (anns : List Annotation),
+        d = .basic ty n anns none := by
+  have hvars := compileModel_vars_basic hc
+  intro d hd
+  have hd' : restrictVarDecl (normalizeModel m) d ∈
+      (normalizeFull m).variables := by
+    simp only [normalizeFull, restrictSetInModel]
+    exact List.mem_map.mpr ⟨d, hd, rfl⟩
+  obtain ⟨ty, n, anns, hrest⟩ := hvars _ hd'
+  cases d with
+  | array ty0 n0 anns0 es =>
+      have hb : isBasicVar (.array ty0 n0 anns0 es) = true :=
+        (List.mem_filter.mp hd).2
+      simp [isBasicVar] at hb
+  | basic ty0 n0 anns0 init =>
+      cases init with
+      | none => exact ⟨ty0, n0, anns0, rfl⟩
+      | some e =>
+          simp only [restrictVarDecl] at hrest
+          simp at hrest
+
 theorem compileFull_inv {m : Model}
     {problem : CompiledProblem DomConstraint}
     (hc : compileModelFull m = .ok problem) :
-    arraysOkB m = true ∧ ∃ p0, compileModel (normalizeModel m) = .ok p0 ∧
+    arraysOkB m = true ∧ ∃ p0, compileModel (normalizeFull m) = .ok p0 ∧
       problem = relabel m p0 := by
   unfold compileModelFull at hc
   split at hc
   · rename_i h
-    cases hcm : compileModel (normalizeModel m) with
+    cases hcm : compileModel (normalizeFull m) with
     | error e => rw [hcm] at hc; cases hc
     | ok p =>
         rw [hcm] at hc
@@ -1082,9 +1108,12 @@ theorem compileFull_covers_agree {m : Model}
         problem.toStore a n = store n := by
   obtain ⟨hgate, p0, hcn, rfl⟩ := compileFull_inv hc
   have hnu : NamesNodup m := hwf.valueNamesUnique
-  have hvars := compileModel_vars_basic hcn
-  have hsolve := compileModel_solve_satisfy hcn
-  have hwfn := wf_normalize hwf hgate hvars hsolve
+  have hvars0 := vars_basic_of_normalizeFull hcn
+  have hsolve0 : ∃ anns, (normalizeModel m).solve = .satisfy anns := by
+    simpa [normalizeFull, restrictSetInModel] using
+      compileModel_solve_satisfy hcn
+  have hwfn := wf_normalize hwf hgate hvars0 hsolve0
+  have hwfr := wf_restrict hwfn hsolve0
   obtain ⟨hcons0, hvar0, hinit0⟩ := hsat
   have hs : BasicRead m store := fun ty n anns hd => by
     simpa using hvar0 _ hd
@@ -1106,20 +1135,35 @@ theorem compileFull_covers_agree {m : Model}
       have hwv := forall2_semEq_scalar hF (fun v hv => (hP v hv).2)
       subst hwv
       exact ⟨_, hws, hvs⟩
-  have hcov := compile_covers_agree (m := normalizeModel m) hcn hwfn (store := store)
-    (by
-      intro c' hc'
-      obtain ⟨c, hcm, rfl⟩ := List.mem_map.mp hc'
-      exact (holds_inline hfaith _ c).mpr (hcons0 c hcm))
-    (by
-      intro d hd
-      obtain ⟨ty, n, anns, rfl⟩ := hvars d hd
-      have hdm : (VarDeclItem.basic ty n anns none) ∈ m.variables :=
-        (List.mem_filter.mp hd).1
-      simpa using hvar0 _ hdm)
+  have hcons_n : ∀ c ∈ (normalizeModel m).constraints,
+      c.Holds fullInterp store := by
+    intro c' hc'
+    obtain ⟨c, hcm, rfl⟩ := List.mem_map.mp hc'
+    exact (holds_inline hfaith _ c).mpr (hcons0 c hcm)
+  have hvars_n : ∀ d ∈ (normalizeModel m).variables, match d with
+      | .basic ty n _ _ => ∃ v, store n = some v ∧ ty.contains v
+      | .array ty n _ _ => ∃ vs, store n = some (.array vs) ∧
+          vs.length = ty.idx.length ∧ ∀ v ∈ vs, ty.elem.contains v := by
+    intro d hd
+    obtain ⟨ty, n, anns, rfl⟩ := hvars0 d hd
+    have hdm : (VarDeclItem.basic ty n anns none) ∈ m.variables :=
+      (List.mem_filter.mp hd).1
+    simpa using hvar0 _ hdm
+  obtain ⟨hcons_r, hvars_r⟩ := restrictSetIn_covers hcons_n hvars_n
+  have hvars_r' : ∀ d ∈ (normalizeFull m).variables, match d with
+      | .basic ty n _ _ => ∃ v, store n = some v ∧ ty.contains v
+      | .array _ _ _ _ => False := by
+    intro d hd
+    obtain ⟨ty, n, anns, heq⟩ := compileModel_vars_basic hcn d hd
+    subst heq
+    simpa using hvars_r _ hd
+  have hcov := compile_covers_agree (m := normalizeFull m) hcn hwfr
+      (store := store) hcons_r hvars_r'
     (by
       intro d hd v hv
-      have hdm : d ∈ m.parameters := (List.mem_filter.mp hd).1
+      have hd' : d ∈ (normalizeModel m).parameters := by
+        simpa [normalizeFull, restrictSetInModel] using hd
+      have hdm : d ∈ m.parameters := (List.mem_filter.mp hd').1
       have := hparam d hdm
       rw [parDeclValue_value hv] at this
       exact this)
@@ -1127,11 +1171,15 @@ theorem compileFull_covers_agree {m : Model}
   refine ⟨a, h1, h2, ?_⟩
   intro ty n anns hd
   have hnone := lookup_arrayDefs_none hnu (x := n) (Or.inr ⟨_, hd, rfl, rfl⟩)
-  have hdn : (VarDeclItem.basic ty n anns none) ∈ (normalizeModel m).variables :=
-    List.mem_filter.mpr ⟨hd, rfl⟩
+  have hdn : (VarDeclItem.basic
+      (restrictVarType (normalizeModel m) n.name ty) n anns none) ∈
+      (normalizeFull m).variables := by
+    simp only [normalizeFull, restrictSetInModel]
+    exact List.mem_map.mpr ⟨.basic ty n anns none,
+      List.mem_filter.mpr ⟨hd, rfl⟩, by simp [restrictVarDecl]⟩
   show fullStore (arrayDefs m) (p0.toStore a) n = store n
   rw [fullStore_of_none hnone]
-  exact h3 ty n anns hdn
+  exact h3 (restrictVarType (normalizeModel m) n.name ty) n anns hdn
 
 theorem compileFull_covers {m : Model}
     {problem : CompiledProblem DomConstraint}
@@ -1160,15 +1208,27 @@ theorem compileFull_exact {m : Model}
       LeanFzn.Semantics.ParamHonest m (problem.toStore a) := by
   obtain ⟨hgate, p0, hcn, rfl⟩ := compileFull_inv hc
   have hnu : NamesNodup m := hwf.valueNamesUnique
-  have hvars := compileModel_vars_basic hcn
-  have hsolve := compileModel_solve_satisfy hcn
-  have hwfn := wf_normalize hwf hgate hvars hsolve
-  obtain ⟨hex1, hex2⟩ := compile_exact (m := normalizeModel m) hcn hwfn hmem hacc
+  have hvars0 := vars_basic_of_normalizeFull hcn
+  have hsolve0 : ∃ anns, (normalizeModel m).solve = .satisfy anns := by
+    simpa [normalizeFull, restrictSetInModel] using
+      compileModel_solve_satisfy hcn
+  have hwfn := wf_normalize hwf hgate hvars0 hsolve0
+  have hwfr := wf_restrict hwfn hsolve0
+  obtain ⟨hex1, hex2⟩ := compile_exact (m := normalizeFull m) hcn hwfr hmem hacc
+  have hex2v : ∀ d ∈ (normalizeFull m).variables, match d with
+      | .basic ty n _ _ => ∃ v, (p0.toStore a) n = some v ∧ ty.contains v
+      | .array ty n _ _ => ∃ vs, (p0.toStore a) n = some (.array vs) ∧
+          vs.length = ty.idx.length ∧ ∀ v ∈ vs, ty.elem.contains v := by
+    intro d hd
+    obtain ⟨ty, n, anns, heq⟩ := compileModel_vars_basic hcn d hd
+    subst heq
+    simpa using hex2 _ hd
+  obtain ⟨hex1n, hex2n⟩ := restrictSetIn_exact hex1 hex2v
   have hs : BasicRead m (p0.toStore a) := by
     intro ty n anns hd
     have hdn : (VarDeclItem.basic ty n anns none) ∈ (normalizeModel m).variables :=
       List.mem_filter.mpr ⟨hd, rfl⟩
-    simpa using hex2 _ hdn
+    simpa using hex2n _ hdn
   have hfull := faithful_full hgate hs
   show SatisfiesDyn fullInterp m (fullStore (arrayDefs m) (p0.toStore a)) ∧
     LeanFzn.Semantics.ParamHonest m (fullStore (arrayDefs m) (p0.toStore a))
@@ -1177,7 +1237,7 @@ theorem compileFull_exact {m : Model}
     intro c hcm
     have hc' : inlineConstraint (arrayDefs m) c ∈ (normalizeModel m).constraints :=
       List.mem_map.mpr ⟨c, hcm, rfl⟩
-    have h1 := hex1 _ hc'
+    have h1 := hex1n _ hc'
     have h2 := (holds_full_iff (defs := arrayDefs m)
       (inline_identFree hgate hcm)).mpr h1
     exact (holds_inline hfull _ c).mp h2
@@ -1187,11 +1247,11 @@ theorem compileFull_exact {m : Model}
     | basic ty n anns v =>
         have hdn : (VarDeclItem.basic ty n anns v) ∈ (normalizeModel m).variables :=
           List.mem_filter.mpr ⟨hd, rfl⟩
-        obtain ⟨ty', n', anns', heq⟩ := hvars _ hdn
+        obtain ⟨ty', n', anns', heq⟩ := hvars0 _ hdn
         cases heq
         have hnone := lookup_arrayDefs_none hnu
           (x := n) (Or.inr ⟨_, hd, rfl, rfl⟩)
-        have := hex2 _ hdn
+        have := hex2n _ hdn
         simp only at this ⊢
         rw [fullStore_of_none hnone]
         exact this
@@ -1207,7 +1267,7 @@ theorem compileFull_exact {m : Model}
     | basic ty n anns v =>
         have hdn : (VarDeclItem.basic ty n anns v) ∈ (normalizeModel m).variables :=
           List.mem_filter.mpr ⟨hd, rfl⟩
-        obtain ⟨ty', n', anns', heq⟩ := hvars _ hdn
+        obtain ⟨ty', n', anns', heq⟩ := hvars0 _ hdn
         cases heq
         exact trivial
     | array ty n anns es =>
@@ -1229,7 +1289,10 @@ theorem compileFull_exact {m : Model}
     | basic t n l =>
         have hdn : (ParDeclItem.basic t n l) ∈ (normalizeModel m).parameters :=
           List.mem_filter.mpr ⟨hd, rfl⟩
-        have hscal := compileModel_params_scalar hcn
+        have hscal : (normalizeModel m).parameters.filter
+            (fun d => parDeclValue d = none) = [] := by
+          simpa [normalizeFull, restrictSetInModel] using
+            compileModel_params_scalar hcn
         obtain ⟨v, hv⟩ : ∃ v, parDeclValue (ParDeclItem.basic t n l) = some v := by
           cases hpv : parDeclValue (ParDeclItem.basic t n l) with
           | some v => exact ⟨v, rfl⟩
@@ -1242,7 +1305,7 @@ theorem compileFull_exact {m : Model}
               cases this
         have hnone := lookup_arrayDefs_none hnu
           (x := n) (Or.inl ⟨_, hd, rfl, rfl⟩)
-        have h1 := toStore_scalar_param hcn hwfn (a := a) hdn hv
+        have h1 := toStore_scalar_param hcn hwfr (a := a) hdn hv
         simp only [ParDeclItem.name] at h1
         show fullStore (arrayDefs m) (p0.toStore a) n = some (ParDeclItem.value _)
         rw [fullStore_of_none hnone, h1, parDeclValue_value hv]

@@ -4,8 +4,8 @@ Dependencies: LcgOptimize provides the solver interface; the parser and objectiv
 turn source fixtures into the same finite problems checked by the independent enumeration oracle.
 DAG: integration leaves -> this executable test leaf.
 -/
-import LeanFzn.Integration.LcgOptimize
-import LeanFzn.Integration.LcgSeed
+import LeanFzn.Legacy.Integration.LcgOptimize
+import LeanFzn.Legacy.Integration.LcgSeed
 import LeanFzn.Parser.Parser
 
 namespace Tests.Integration.LcgOptimize
@@ -75,20 +75,22 @@ private def directed : List (String × String) := [
   ("fallback times", "var 0..3: x; var 0..3: y; var 0..9: z; constraint int_times(x,y,z); solve maximize z;"),
   ("boolean fallback", "var bool: b; var bool: c; var 0..1: x; constraint bool_not(b,c); solve maximize x;")]
 
-/-- The reuse-evidence instance: a linear program with NO `bool_clause`
-    constraint, so `seedClauses p.constraints` is empty and every clause the
-    seeded driver carries between rounds is genuinely LEARNED. The kernel
-    learns on its first round, so the second solve starts with a nonempty
-    database. -/
+/-- The reuse-evidence instance: a multiplication circuit with NO
+    `bool_clause` constraint, so `seedClauses p.constraints` is empty and every
+    clause the seeded driver carries between rounds is genuinely LEARNED.
+    `int_times` has no propagating explanation arm, so the kernel reaches leaf
+    conflicts and learns conflict clauses there. This matters after PLAN P2b:
+    propagator deductions are trail-only and no longer seed later rounds, so a
+    conflict-learning fixture is the one that still exercises DB reuse. -/
 private def reuseSrc : String :=
-  "var 0..4: x; var 0..4: y; constraint int_lin_le([-1,-1],[x,y],-4); solve minimize y;"
+  "var 1..2: x; var 1..2: y; var 0..4: z; constraint int_times(x,y,z); solve maximize z;"
 
 /-- PLAN B2 reuse evidence: runs the seeded driver on the reuse instance,
     PRINTS the seed size of every round (the number of learned clauses handed
-    to each solve), and asserts that the seed of the first re-solve is
-    nonempty (`seedCounts[1] > 0`). The optimum is certified equal to the
-    plain LCG run, the chronological run and the exhaustive oracle, and every
-    emitted solution is checker-accepted. -/
+    to each solve), and asserts that at least one re-solve is seeded
+    (`seedCounts.drop 1` contains a positive entry). The optimum is certified
+    equal to the plain LCG run, the chronological run and the exhaustive
+    oracle, and every emitted solution is checker-accepted. -/
 private def reuseCase : IO Bool := do
   match Parser.parseModel reuseSrc with
   | .error e => IO.eprintln s!"FAIL reuse: parse {e}"; return false
@@ -105,12 +107,13 @@ private def reuseCase : IO Bool := do
           let cv := cr.sols.getLast?.map Prod.snd
           let accepted := sr.1.sols.all (fun s => accepts p s.1 &&
             decide (s.1 ∈ allAssigns p.domains) && s.1[spec.slot]? == some (.int s.2))
+          let seeded := (sr.2.drop 1).any (fun n => n > 0)
           IO.println s!"reuse: seed sizes per round = {sr.2}"
-          IO.println s!"reuse: seed of the first re-solve = {sr.2[1]?.getD 0} learned clauses"
+          IO.println s!"reuse: first re-solve seed = {sr.2[1]?.getD 0}, seeded re-solve exists = {seeded}"
           IO.println s!"reuse: no bool_clause seed in this instance: {(seedClauses p.constraints).isEmpty}"
           let ok := (seedClauses p.constraints).isEmpty &&
             sr.1.complete && accepted && sv == opt && pv == opt && cv == opt &&
-            sr.2.length == sr.1.sols.length + 1 && sr.2[1]?.getD 0 > 0
+            sr.2.length == sr.1.sols.length + 1 && sr.2.head? == some 0 && seeded
           if !ok then
             IO.eprintln s!"FAIL reuse: seeds {sr.2}, seeded {sv}, plain {pv}, chrono {cv}, oracle {opt}, complete {sr.1.complete}"
           return ok

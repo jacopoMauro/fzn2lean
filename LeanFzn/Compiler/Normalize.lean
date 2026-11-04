@@ -8,7 +8,11 @@ Purpose:
   aliases of declared scalar variables
   (`array [1..n] of var int: x :: output_array(..) = [v1,..,vn];`).
   `compileModel` handles scalar declarations only; this module reduces
-  the array declarations to that fragment by SOURCE-LEVEL INLINING:
+  the array declarations to that fragment by SOURCE-LEVEL INLINING.
+  It also runs the constant-set membership domain restriction
+  (`SetIn.restrictSetInModel`) before compilation, so `set_in` over a
+  plain declared scalar is a domain restriction rather than a leaf
+  constraint.  The array part:
 
   * `arrayDefs m` lists, for every array declaration of `m`, the
     element expressions the array denotes (a parameter array: its
@@ -30,13 +34,16 @@ Purpose:
   must not be reused as element or explicit-array identifiers.
 
   `compileModel` and all its theorems are UNCHANGED; the correctness
-  theorems for `compileModelFull` are in `Proofs/Normalize`.
+  theorems for `compileModelFull` are in `Proofs/Normalize` (array
+  inlining) and `Proofs/SetIn` (the constant-set domain restriction).
 
 Dependencies:
   - LeanFzn.Compiler.Compile: `compileModel`, `CompiledProblem`.
+  - LeanFzn.Compiler.SetIn: the constant-set domain restriction.
 -/
 
 import LeanFzn.Compiler.Compile
+import LeanFzn.Compiler.SetIn
 
 namespace LeanFzn.Compiler
 open LeanFzn.Solver.Propagation.DomainFiltering
@@ -80,10 +87,16 @@ def inlineConstraint (defs : List (Ident × List BasicExpr))
 /-- The model without its array declarations, constraint array names
     inlined. -/
 def normalizeModel (m : Model) : Model :=
+  let defs := arrayDefs m
   { m with
     parameters := m.parameters.filter (fun d => !isArrayPar d)
     variables := m.variables.filter isBasicVar
-    constraints := m.constraints.map (inlineConstraint (arrayDefs m)) }
+    constraints := m.constraints.map (inlineConstraint defs) }
+
+/-- The full source normalization: array inlining, then the
+    constant-set membership domain restriction. -/
+def normalizeFull (m : Model) : Model :=
+  restrictSetInModel (normalizeModel m)
 
 /-- A variable-array element is acceptable: a literal of the array's
     base type, or the name of a declared initializer-free scalar
@@ -119,10 +132,14 @@ def explicitOkB (defs : List (Ident × List BasicExpr)) : Expr → Bool
       | _ => true)
   | _ => true
 
-/-- The array gate. -/
+/-- The array gate.  The array-definition table is computed ONCE per
+    model: the previous body recomputed it at every constraint (the
+    partial application `explicitOkB (arrayDefs m)` was rebuilt inside
+    the `List.all` lambda), which dominated the 1HZ5 compile time. -/
 def arraysOkB (m : Model) : Bool :=
-  m.variables.all (varArrayOkB m (arrayDefs m)) &&
-  m.constraints.all (fun c => c.args.all (explicitOkB (arrayDefs m)))
+  let defs := arrayDefs m
+  m.variables.all (varArrayOkB m defs) &&
+  m.constraints.all (fun c => c.args.all (explicitOkB defs))
 
 /-- The value of an array name under a store: its elements evaluated. -/
 def arrayValue (defs : List (Ident × List BasicExpr)) (s : Store)
@@ -141,17 +158,19 @@ def fullStore (defs : List (Ident × List BasicExpr)) (s : Store) : Store :=
 /-- Re-attach the original model and the array-extended store. -/
 def relabel (m : Model) (p : CompiledProblem DomConstraint) :
     CompiledProblem DomConstraint :=
+  let defs := arrayDefs m
   { p with
     source := m
-    toStore := (fun a => fullStore (arrayDefs m) (p.toStore a)) }
+    toStore := (fun a => fullStore defs (p.toStore a)) }
 
-/-- Compile a model with parameter arrays and variable-array aliases:
-    `compileModel` on the normalized model, with the original model as
-    `source` and the array-extended `toStore`. -/
+/-- Compile a model with parameter arrays, variable-array aliases and
+    constant-set membership: `compileModel` on the fully normalized
+    model, with the original model as `source` and the array-extended
+    `toStore`. -/
 def compileModelFull (m : Model) :
     Except String (CompiledProblem DomConstraint) :=
   if arraysOkB m then
-    match compileModel (normalizeModel m) with
+    match compileModel (normalizeFull m) with
     | .error e => .error e
     | .ok p => .ok (relabel m p)
   else .error "unsupported array declaration or array argument"

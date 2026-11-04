@@ -45,7 +45,7 @@ Dependencies: `LeanFzn.Solver` (the reference route and the oracle consumer),
 
 import LeanFzn.Solver
 import Tests.UIP.OracleFixtures
-import LeanFzn.Integration.CertifiedSolve
+import LeanFzn.Legacy.Integration.CertifiedSolve
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 

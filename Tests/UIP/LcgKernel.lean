@@ -5,22 +5,28 @@ Dependencies: LcgPhaseKernel supplies solve; LcgCompiledKit constructs the
 semantic kit from executable problem gates; Enumerate supplies only Cartesian
 assignment enumeration. This test leaf feeds LcgKernelRunner.
 -/
-import LeanFzn.Solver.UIP.Proofs.LcgPhaseKernel
-import LeanFzn.Solver.UIP.Proofs.LcgCompiledKit
+import LeanFzn.Legacy.Solver.UIP.Proofs.LcgPhaseKernel
+import LeanFzn.Legacy.Solver.UIP.Proofs.LcgCompiledKit
 import LeanFzn.Solver.Core.Enumerate
+import LeanFzn.Legacy.Solver.Chronological.Search
+import LeanFzn.Legacy.Solver.UIP.Proofs.FrameLive
 
 namespace LcgKernelFixtures
 open LeanFzn.Semantics LeanFzn.Solver.Core LeanFzn.Solver.Propagation
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Solver.Chronological
 open LeanFzn.Solver.UIP LeanFzn.Solver.UIP.C3b LeanFzn.Solver.UIP.LcgRunGood
+open LeanFzn.Solver.UIP.FrameLive
+
+/-- Plain value-list slots as compact domains. -/
+def Ds (vss : List (List Value)) : List Domain := vss.map Dom.ofList
 
 def satProblem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := ["x", "y"], domains := [[.int 0, .int 1], [.int 0, .int 1]],
+  { names := ["x", "y"], domains := Ds [[.int 0, .int 1], [.int 0, .int 1]],
     constraints := [.neSlot 0 1], clauses := [], objective := () }
 
 def unsatProblem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
   { names := ["x", "y", "z"],
-    domains := [[.int 0, .int 1], [.int 0, .int 1], [.int 0, .int 1]],
+    domains := Ds [[.int 0, .int 1], [.int 0, .int 1], [.int 0, .int 1]],
     constraints := [.neSlot 0 1, .neSlot 0 2, .neSlot 1 2],
     clauses := [], objective := () }
 
@@ -53,11 +59,13 @@ theorem unsatOracleCount : (oracle unsatProblem).length = 0 := rfl
 
 def satResult : DriverResult (leaf satProblem) :=
   LcgPhaseKernel.solve satProblem.domains satProblem.clauses (props satProblem)
-    (fun _ hc => by cases hc)
+    (fun _ hc => absurd hc (List.not_mem_nil))
+    (frameNonempty_of_supportedRun (leaf := leaf satProblem) (by decide))
 
 def unsatResult : DriverResult (leaf unsatProblem) :=
   LcgPhaseKernel.solve unsatProblem.domains unsatProblem.clauses (props unsatProblem)
-    (fun _ hc => by cases hc)
+    (fun _ hc => absurd hc (List.not_mem_nil))
+    (frameNonempty_of_supportedRun (leaf := leaf unsatProblem) (by decide))
 
 /-- SAT must return a leaf-accepted member of the enumerated solution set;
 UNSAT must agree with the empty enumerated set. No step bound is used. -/
@@ -70,7 +78,7 @@ def agrees (p : LeanFzn.Solver.Propagation.Problem DomConstraint Unit) (r : Driv
 /-- PLAN L3: all-slot `minPair` (rides `propMin`/`propMax`), SAT. -/
 def minPair_satProblem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
   { names := ["x", "y", "z"],
-    domains := [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2], [.int 2]],
+    domains := Ds [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2], [.int 2]],
     constraints := [.minPair (.slot 0) (.slot 1) (.slot 2)], clauses := [], objective := () }
 
 theorem minPair_satInput : CompiledInput (leaf minPair_satProblem) minPair_satProblem := ⟨rfl, rfl, rfl⟩
@@ -81,12 +89,13 @@ theorem minPair_satKit : LcgKit (leaf minPair_satProblem) minPair_satProblem.dom
 
 def minPair_satResult : DriverResult (leaf minPair_satProblem) :=
   LcgPhaseKernel.solve minPair_satProblem.domains minPair_satProblem.clauses (props minPair_satProblem)
-    (fun _ hc => by cases hc)
+    (fun _ hc => absurd hc (List.not_mem_nil))
+    (frameNonempty_of_supportedRun (leaf := leaf minPair_satProblem) (by decide))
 
 /-- PLAN L3: all-slot `minPair` (rides `propMin`/`propMax`), UNSAT. -/
 def minPair_unsatProblem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
   { names := ["x", "y", "z"],
-    domains := [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2], [.int 3]],
+    domains := Ds [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2], [.int 3]],
     constraints := [.minPair (.slot 0) (.slot 1) (.slot 2)], clauses := [], objective := () }
 
 theorem minPair_unsatInput : CompiledInput (leaf minPair_unsatProblem) minPair_unsatProblem := ⟨rfl, rfl, rfl⟩
@@ -97,12 +106,13 @@ theorem minPair_unsatKit : LcgKit (leaf minPair_unsatProblem) minPair_unsatProbl
 
 def minPair_unsatResult : DriverResult (leaf minPair_unsatProblem) :=
   LcgPhaseKernel.solve minPair_unsatProblem.domains minPair_unsatProblem.clauses (props minPair_unsatProblem)
-    (fun _ hc => by cases hc)
+    (fun _ hc => absurd hc (List.not_mem_nil))
+    (frameNonempty_of_supportedRun (leaf := leaf minPair_unsatProblem) (by decide))
 
 /-- PLAN L3: all-slot `maxPair` (rides `propMin`/`propMax`), SAT. -/
 def maxPair_satProblem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
   { names := ["x", "y", "z"],
-    domains := [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2], [.int 0]],
+    domains := Ds [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2], [.int 0]],
     constraints := [.maxPair (.slot 0) (.slot 1) (.slot 2)], clauses := [], objective := () }
 
 theorem maxPair_satInput : CompiledInput (leaf maxPair_satProblem) maxPair_satProblem := ⟨rfl, rfl, rfl⟩
@@ -113,12 +123,13 @@ theorem maxPair_satKit : LcgKit (leaf maxPair_satProblem) maxPair_satProblem.dom
 
 def maxPair_satResult : DriverResult (leaf maxPair_satProblem) :=
   LcgPhaseKernel.solve maxPair_satProblem.domains maxPair_satProblem.clauses (props maxPair_satProblem)
-    (fun _ hc => by cases hc)
+    (fun _ hc => absurd hc (List.not_mem_nil))
+    (frameNonempty_of_supportedRun (leaf := leaf maxPair_satProblem) (by decide))
 
 /-- PLAN L3: all-slot `maxPair` (rides `propMin`/`propMax`), UNSAT. -/
 def maxPair_unsatProblem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
   { names := ["x", "y", "z"],
-    domains := [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2], [.int 3]],
+    domains := Ds [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2], [.int 3]],
     constraints := [.maxPair (.slot 0) (.slot 1) (.slot 2)], clauses := [], objective := () }
 
 theorem maxPair_unsatInput : CompiledInput (leaf maxPair_unsatProblem) maxPair_unsatProblem := ⟨rfl, rfl, rfl⟩
@@ -129,7 +140,8 @@ theorem maxPair_unsatKit : LcgKit (leaf maxPair_unsatProblem) maxPair_unsatProbl
 
 def maxPair_unsatResult : DriverResult (leaf maxPair_unsatProblem) :=
   LcgPhaseKernel.solve maxPair_unsatProblem.domains maxPair_unsatProblem.clauses (props maxPair_unsatProblem)
-    (fun _ hc => by cases hc)
+    (fun _ hc => absurd hc (List.not_mem_nil))
+    (frameNonempty_of_supportedRun (leaf := leaf maxPair_unsatProblem) (by decide))
 
 def main : IO UInt32 := do
   let satRun ← IO.lazyPure fun _ => satResult

@@ -30,7 +30,13 @@ theorem auxShapeOf_timesRK_name {c : ConstraintItem} {x y : Ident} {k : Int}
   rw [auxShapeOf, hargs] at h
   split at h
   next heq1 => exact heq1
-  all_goals exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The timesKR shape's name inversion. -/
 theorem auxShapeOf_timesKR_name {c : ConstraintItem} {x y : Ident} {k : Int}
@@ -41,7 +47,13 @@ theorem auxShapeOf_timesKR_name {c : ConstraintItem} {x y : Ident} {k : Int}
   rw [auxShapeOf, hargs] at h
   split at h
   next heq1 => exact heq1
-  all_goals exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The timesKR' shape's name inversion. -/
 theorem auxShapeOf_timesKR'_name {c : ConstraintItem} {x y : Ident} {k : Int}
@@ -52,7 +64,13 @@ theorem auxShapeOf_timesKR'_name {c : ConstraintItem} {x y : Ident} {k : Int}
   rw [auxShapeOf, hargs] at h
   split at h
   next heq1 => exact heq1
-  all_goals exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The timesRKK shape's name inversion. -/
 theorem auxShapeOf_timesRKK_name {c : ConstraintItem} {x : Ident} {k k' : Int}
@@ -63,7 +81,13 @@ theorem auxShapeOf_timesRKK_name {c : ConstraintItem} {x : Ident} {k k' : Int}
   rw [auxShapeOf, hargs] at h
   split at h
   next heq1 => exact heq1
-  all_goals exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The timesKRR shape's name inversion. -/
 theorem auxShapeOf_timesKRR_name {c : ConstraintItem} {x : Ident} {k k' : Int}
@@ -74,7 +98,13 @@ theorem auxShapeOf_timesKRR_name {c : ConstraintItem} {x : Ident} {k k' : Int}
   rw [auxShapeOf, hargs] at h
   split at h
   next heq1 => exact heq1
-  all_goals exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The timesKKR shape's name inversion. -/
 theorem auxShapeOf_timesKKR_name {c : ConstraintItem} {x : Ident} {k k' : Int}
@@ -85,7 +115,13 @@ theorem auxShapeOf_timesKKR_name {c : ConstraintItem} {x : Ident} {k k' : Int}
   rw [auxShapeOf, hargs] at h
   split at h
   next heq1 => exact heq1
-  all_goals exact absurd h (by simp)
+  all_goals
+    first
+      | exact absurd h (by simp)
+      | (exfalso
+         rcases elemAuxShapeOf_mem h with
+           ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+         all_goals (cases hh))
 
 /-- The andTrue shape's name inversion. -/
 theorem auxShapeOf_andTrue_name {c : ConstraintItem} {x y : Ident}
@@ -98,6 +134,10 @@ theorem auxShapeOf_andTrue_name {c : ConstraintItem} {x y : Ident}
   all_goals first
     | next heq1 => exact heq1
     | exact absurd h (by simp)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The andFalse shape's name inversion. -/
 theorem auxShapeOf_andFalse_name {c : ConstraintItem} {x y : Ident}
@@ -110,6 +150,10 @@ theorem auxShapeOf_andFalse_name {c : ConstraintItem} {x y : Ident}
   all_goals first
     | next heq1 => exact heq1
     | exact absurd h (by simp)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The orTrue shape's name inversion. -/
 theorem auxShapeOf_orTrue_name {c : ConstraintItem} {x y : Ident}
@@ -122,6 +166,10 @@ theorem auxShapeOf_orTrue_name {c : ConstraintItem} {x y : Ident}
   all_goals first
     | next heq1 => exact heq1
     | exact absurd h (by simp)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The orFalse shape's name inversion. -/
 theorem auxShapeOf_orFalse_name {c : ConstraintItem} {x y : Ident}
@@ -134,6 +182,10 @@ theorem auxShapeOf_orFalse_name {c : ConstraintItem} {x y : Ident}
   all_goals first
     | next heq1 => exact heq1
     | exact absurd h (by simp)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 
 /-- The successful compile of a 3-identifier `int_times` piece gives
@@ -240,7 +292,11 @@ theorem compileConstraint_int_times3_inv {env : Store} {names : List String}
       -- array_int_maximum: name mismatch
       ⟨-, -, -, -, hname, -, -, -, -⟩ |
       -- array_int_minimum: name mismatch
-      ⟨-, -, -, -, hname, -, -, -, -⟩
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- set_in: name mismatch
+      ⟨-, -, -, hname, -, -, -⟩ |
+      -- set_in_reif: name mismatch
+      ⟨-, -, -, -, -, hname, -, -, -, -⟩
     all_goals
       first
         | (simp only [Ident.mk] at hname; exact absurd hname (by decide))
@@ -437,7 +493,11 @@ theorem compileConstraint_int_ne2_inv {env : Store} {names : List String}
       -- array_int_maximum: name mismatch
       ⟨-, -, -, -, hname, -, -, -, -⟩ |
       -- array_int_minimum: name mismatch
-      ⟨-, -, -, -, hname, -, -, -, -⟩
+      ⟨-, -, -, -, hname, -, -, -, -⟩ |
+      -- set_in: name mismatch
+      ⟨-, -, -, hname, -, -, -⟩ |
+      -- set_in_reif: name mismatch
+      ⟨-, -, -, -, -, hname, -, -, -, -⟩
     · exact absurd hname (by simp)
     · exact absurd hname (by simp)
     · exact absurd hname (by simp)
@@ -454,6 +514,8 @@ theorem compileConstraint_int_ne2_inv {env : Store} {names : List String}
       · rw [← hxi]
       · rw [← hyi]
       · exact hcdc.symm.trans h'
+    · exact absurd hname (by simp)
+    · exact absurd hname (by simp)
     · exact absurd hname (by simp)
     · exact absurd hname (by simp)
     · exact absurd hname (by simp)
@@ -945,6 +1007,10 @@ theorem auxShapeOf_eqReifRK_inv {c : ConstraintItem} {x r : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The eqReifKR shape's name and argument inversion. -/
 theorem auxShapeOf_eqReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
@@ -960,6 +1026,10 @@ theorem auxShapeOf_eqReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The leReifRK shape's name and argument inversion. -/
 theorem auxShapeOf_leReifRK_inv {c : ConstraintItem} {x r : Ident} {k : Int}
@@ -975,6 +1045,10 @@ theorem auxShapeOf_leReifRK_inv {c : ConstraintItem} {x r : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The leReifKR shape's name and argument inversion. -/
 theorem auxShapeOf_leReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
@@ -990,6 +1064,10 @@ theorem auxShapeOf_leReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The neReifRK shape's name and argument inversion. -/
 theorem auxShapeOf_neReifRK_inv {c : ConstraintItem} {x r : Ident} {k : Int}
@@ -1005,6 +1083,10 @@ theorem auxShapeOf_neReifRK_inv {c : ConstraintItem} {x r : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The neReifKR shape's name and argument inversion. -/
 theorem auxShapeOf_neReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
@@ -1020,6 +1102,10 @@ theorem auxShapeOf_neReifKR_inv {c : ConstraintItem} {x r : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The minRK shape's name and argument inversion. -/
 theorem auxShapeOf_minRK_inv {c : ConstraintItem} {x z : Ident} {k : Int}
@@ -1035,6 +1121,10 @@ theorem auxShapeOf_minRK_inv {c : ConstraintItem} {x z : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The minKR shape's name and argument inversion. -/
 theorem auxShapeOf_minKR_inv {c : ConstraintItem} {x z : Ident} {k : Int}
@@ -1050,6 +1140,10 @@ theorem auxShapeOf_minKR_inv {c : ConstraintItem} {x z : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The maxRK shape's name and argument inversion. -/
 theorem auxShapeOf_maxRK_inv {c : ConstraintItem} {x z : Ident} {k : Int}
@@ -1065,6 +1159,10 @@ theorem auxShapeOf_maxRK_inv {c : ConstraintItem} {x z : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The maxKR shape's name and argument inversion. -/
 theorem auxShapeOf_maxKR_inv {c : ConstraintItem} {x z : Ident} {k : Int}
@@ -1080,6 +1178,10 @@ theorem auxShapeOf_maxKR_inv {c : ConstraintItem} {x z : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The minRRK shape's name and argument inversion (PLAN C9 remainder:
     the LITERAL is the RESULT operand). -/
@@ -1096,6 +1198,10 @@ theorem auxShapeOf_minRRK_inv {c : ConstraintItem} {x y : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The maxRRK shape's name and argument inversion (PLAN C9 remainder:
     the LITERAL is the RESULT operand). -/
@@ -1112,6 +1218,10 @@ theorem auxShapeOf_maxRRK_inv {c : ConstraintItem} {x y : Ident} {k : Int}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- Argument evaluation of `[ident x, ident y, int literal k]` (the
     PLAN C9 remainder literal-RESULT shapes). -/
@@ -1269,6 +1379,10 @@ theorem auxShapeOf_minGen2_inv {c : ConstraintItem} {e1 e2 r : Ident}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- The maxGen2 shape's name and argument inversion (PLAN C9
     remainder: the two-element `array_int_maximum` chain). -/
@@ -1287,6 +1401,10 @@ theorem auxShapeOf_maxGen2_inv {c : ConstraintItem} {e1 e2 r : Ident}
        exact ⟨‹_›, ‹_›⟩)
     | (exfalso; simp at h)
     | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
 
 /-- Argument evaluation of `[ident r, [ident e₁, ident e₂]]` (the
     two-element array shapes): the reads of `r`, `e₁` and `e₂` exist
@@ -1384,5 +1502,90 @@ theorem array_int_minimum_rewrite_gap :
       | [.int a, .int b, .int c] => c = min a b
       | _ => False)
     simp
+
+/-! ### The Boolean XOR channel (PLAN C0) -/
+
+/-- The xorSlots shape's name and argument inversion (PLAN C0: the
+    three-slot `bool_xor` channel `z = (x ^^ y)`). -/
+theorem auxShapeOf_xorSlots_inv {c : ConstraintItem} {x y z : Ident}
+    (h : auxShapeOf c = some (AuxShape.xorSlots x y z)) :
+    c.name.name = "bool_xor" ∧
+      c.args = [.basic (.ident x), .basic (.ident y), .basic (.ident z)] := by
+  rw [auxShapeOf] at h
+  split at h
+  all_goals (try split at h)
+  all_goals first
+    | (injection h with h1
+       injection h1 with h3 h4 h5
+       subst h3 h4 h5
+       exact ⟨‹_›, ‹_›⟩)
+    | (exfalso; simp at h)
+    | (exfalso; cases h)
+    | (exfalso
+       rcases elemAuxShapeOf_mem h with
+         ⟨_, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩ | ⟨_, _, _, hh⟩
+       all_goals (cases hh))
+
+/-- The successful compile of a `bool_clause([..], [..])` piece gives
+    the clause's positive/negative slot positions and the
+    `boolClauseSlot` form (the extraction arm's inversion; the
+    fallback gates never fire for `bool_clause`). -/
+theorem compileConstraint_bool_clause_inv {env : Store}
+    {names : List String} {es1 es2 : ArrayLiteral} {dc : DomConstraint}
+    (hcc : compileConstraint env names
+        { name := Ident.mk "bool_clause"
+        , args := [.array es1, .array es2]
+        , anns := [] } = .ok dc) :
+    ∃ ps ns, linIndices names es1 = some ps ∧
+      linIndices names es2 = some ns ∧ dc = .boolClauseSlot ps ns := by
+  unfold compileConstraint at hcc
+  split at hcc
+  · -- the extraction arm
+    rename_i dc' hres
+    cases h1 : linIndices names es1 with
+    | none =>
+        have hred : extractConstraint names
+            { name := Ident.mk "bool_clause"
+            , args := [.array es1, .array es2], anns := [] } = none := by
+          simp only [extractConstraint, h1]
+        rw [hred] at hres
+        exact absurd hres (by simp)
+    | some ps =>
+        cases h2 : linIndices names es2 with
+        | none =>
+            have hred : extractConstraint names
+                { name := Ident.mk "bool_clause"
+                , args := [.array es1, .array es2], anns := [] } = none := by
+              simp only [extractConstraint, h1, h2]
+            rw [hred] at hres
+            exact absurd hres (by simp)
+        | some ns =>
+            have hred : extractConstraint names
+                { name := Ident.mk "bool_clause"
+                , args := [.array es1, .array es2], anns := [] }
+                = some (.boolClauseSlot ps ns) := by
+              simp only [extractConstraint, h1, h2]
+            rw [hred] at hres
+            exact ⟨ps, ns, rfl, rfl,
+              (Except.ok.inj hcc).symm.trans (Option.some.inj hres).symm⟩
+  · -- the fallback arm: every gate is false for `bool_clause`
+    rw [if_neg (fun hc =>
+          absurd (hc.1 : ("bool_clause" : String) = "int_plus") (by decide)),
+      if_neg (fun hc =>
+          absurd (hc.1 : ("bool_clause" : String) = "int_le") (by decide)),
+      if_neg (fun hc =>
+          absurd (hc.1 : ("bool_clause" : String) = "int_lt") (by decide)),
+      if_neg (fun hc =>
+          absurd (hc.1 : ("bool_clause" : String) = "int_gt") (by decide)),
+      if_neg (fun hc =>
+          absurd (hc.1 : ("bool_clause" : String) = "int_ge") (by decide)),
+      if_neg (fun hc =>
+          absurd (hc.1 : ("bool_clause" : String) = "bool_not") (by decide)),
+      if_neg (fun hc =>
+          absurd (hc.1 : ("bool_clause" : String) = "bool_and") (by decide)),
+      if_neg (fun hc =>
+          absurd (hc.1 : ("bool_clause" : String) = "bool_or") (by decide))]
+      at hcc
+    exact absurd hcc (by simp)
 
 end LeanFzn.Compiler

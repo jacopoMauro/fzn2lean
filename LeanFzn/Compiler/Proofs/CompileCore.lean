@@ -1228,7 +1228,9 @@ theorem extractConstraint_holds_converse {m : Model}
     ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
     ⟨a₀, a₁, a₂, o₀, o₁, o₂, hname, hargs, ho₀, ho₁, ho₂, hdc'⟩ |
     ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩ |
-    ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩
+    ⟨x, elems, is, k, hname, hargs, hk, his, hdc'⟩ |
+    ⟨x, s, i, hname, hargs, hxi, hdc'⟩ |
+    ⟨x, s, r, i, k, hname, hargs, hxi, hrk, hdc'⟩
   · -- int_eq(x, y): the dedicated reads lemma
     subst hdc'
     have hmemx : Expr.basic (.ident x) ∈ c.args := by
@@ -1900,6 +1902,66 @@ theorem extractConstraint_holds_converse {m : Model}
         | _ => False)
       rw [hm]
       exact hmin'
+  · -- set_in(x, S): the slot reads an integer in the set
+    subst hdc'
+    obtain ⟨p, haip, hmem⟩ := hsat
+    have hxA : i < (slots.map Prod.fst).length :=
+      (nameIndex_some (slots.map Prod.fst) x.name i hxi).1
+    have hlen : (slots.map Prod.fst).length = slots.length := by simp
+    have ha5 : i < a.length := by omega
+    have hread : a[i]! = .int p := by
+      rw [List.getElem!_eq_getElem?_getD]
+      rw [haip]
+      exact Option.getD_some
+    refine ⟨[a[i]!, (BasicLiteral.set s).denote], ?_, ?_⟩
+    · rw [hargs]
+      show (do
+          let v1 ← (assemble m slots dcs).toStore a x
+          let v2 ← pure ((BasicLiteral.set s).denote)
+          pure [v1, v2]) = _
+      rw [toStore_read (m := m) hnu hxi halt]
+      rfl
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, (BasicLiteral.set s).denote] with
+        | [Value.int a', Value.setOfInt sv] => sv.Contains a'
+        | _ => False)
+      rw [hread]
+      exact hmem
+  · -- set_in_reif(x, S, r): the reified truth-value agreement
+    subst hdc'
+    obtain ⟨p, rb, haip, harb, hriff⟩ := hsat
+    have hxA : i < (slots.map Prod.fst).length :=
+      (nameIndex_some (slots.map Prod.fst) x.name i hxi).1
+    have hxA2 : k < (slots.map Prod.fst).length :=
+      (nameIndex_some (slots.map Prod.fst) r.name k hrk).1
+    have hlen : (slots.map Prod.fst).length = slots.length := by simp
+    have ha5 : i < a.length := by omega
+    have ha6 : k < a.length := by omega
+    have hread : a[i]! = .int p := by
+      rw [List.getElem!_eq_getElem?_getD]
+      rw [haip]
+      exact Option.getD_some
+    have hreadr : a[k]! = .bool rb := by
+      rw [List.getElem!_eq_getElem?_getD]
+      rw [harb]
+      exact Option.getD_some
+    refine ⟨[a[i]!, (BasicLiteral.set s).denote, a[k]!], ?_, ?_⟩
+    · rw [hargs]
+      show (do
+          let v1 ← (assemble m slots dcs).toStore a x
+          let v2 ← pure ((BasicLiteral.set s).denote)
+          let v3 ← (assemble m slots dcs).toStore a r
+          pure [v1, v2, v3]) = _
+      rw [toStore_read (m := m) hnu hxi halt]
+      rw [toStore_read (m := m) hnu hrk halt]
+      rfl
+    · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
+      show (match [a[i]!, (BasicLiteral.set s).denote, a[k]!] with
+        | [Value.int a', Value.setOfInt sv, Value.bool rb'] =>
+            (rb' = true ∧ sv.Contains a') ∨ (rb' = false ∧ ¬ sv.Contains a')
+        | _ => False)
+      rw [hread, hreadr]
+      exact (reif_disj_iff (s.denote.Contains p) rb).mpr hriff
 
 
 /-! ## The slot/typing chain (the int-reads premises) -/
@@ -2299,7 +2361,8 @@ theorem fits_mem_allAssigns : ∀ (doms : List (List Value))
                 rw [ha]
                 exact hval
               have hval2 := hmem (slot + 1) value hread
-              rw [show (d :: rest).getD (slot + 1) [] = rest.getD slot []
+              rw [show (d :: rest).getD (slot + 1) DomainLike.empty
+                  = rest.getD slot DomainLike.empty
                 from rfl] at hval2
               exact hval2
           have hrec : xs ∈ allAssigns rest := ih xs hrest

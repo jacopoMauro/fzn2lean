@@ -33,7 +33,7 @@ inductive Value where
   | int (value : Int)
   | setOfInt (value : IntSetValue)
   | array (value : List Value)
-  deriving Repr, Inhabited
+  deriving Repr, Inhabited, BEq
 
 def IntSetValue.Contains (s : IntSetValue) (x : Int) : Prop :=
   match s with

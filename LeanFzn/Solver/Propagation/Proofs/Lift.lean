@@ -140,7 +140,7 @@ the direction the `Represents`-preservation needs (the direction
 
 /-- THE FIRING LEMMA: a fitting assignment satisfying the narrowing
     literal fits the narrowed domains. -/
-theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
+theorem firing {doms : List Domain} {l : Literal} {a : Assignment}
     (hfit : a.Fits doms)
     (hin : l.atom.slot < a.length)
     (hsat : l.eval a = some true) :
@@ -161,17 +161,16 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           | false =>
               -- keep p > k
               show value ∈ (updateSlot doms s
-                (fun d => domFilterInt (fun p => decide (p > k)) d)).getD s []
+                (fun d => domFilterInt (fun p => decide (p > k)) d)).getD s Dom.empty
               refine mem_updateSlot_of_mem doms s _ value (by
                 rw [show (doms.length : Nat) = a.length from hfitlen.symm]; exact hin) ?_
-              rw [domFilterInt, List.mem_filter]
-              refine ⟨hfitmem s value hv, ?_⟩
+              refine mem_domFilterInt_of_mem_of_keep (hfitmem s value hv) ?_
               -- value passes the > k test: derive from hsat. The slot's
               -- value in `a` IS `value` (same slot, fits) and the
               -- satisfied literal's eval equation unfolds to the slot
               -- int view > k; since a[s] = value, that int view is
               -- value's.
-              have hslotmem : value ∈ doms.getD s [] := hfitmem s value hv
+              have hslotmem : value ∈ doms.getD s Dom.empty := hfitmem s value hv
               -- eval of negLe s k on a:
               have hsat' : (negLe s k).eval a = some true := hsat
               rw [eval_negLe_iff] at hsat'
@@ -222,11 +221,10 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           | true =>
               -- keep p ≤ k
               show value ∈ (updateSlot doms s
-                (fun d => domFilterInt (fun p => decide (p ≤ k)) d)).getD s []
+                (fun d => domFilterInt (fun p => decide (p ≤ k)) d)).getD s Dom.empty
               refine mem_updateSlot_of_mem doms s _ value (by
                 rw [show (doms.length : Nat) = a.length from hfitlen.symm]; exact hin) ?_
-              rw [domFilterInt, List.mem_filter]
-              refine ⟨hfitmem s value hv, ?_⟩
+              refine mem_domFilterInt_of_mem_of_keep (hfitmem s value hv) ?_
               have hsat' : (posLe s k).eval a = some true := hsat
               rw [eval_posLe_iff] at hsat'
               obtain ⟨i, hi, hik⟩ := hsat'
@@ -271,11 +269,10 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           | true =>
               -- keep p ≠ k: the surviving values' views differ from k
               show value ∈ (updateSlot doms s
-                (fun d => domFilterInt (fun p => decide (p ≠ k)) d)).getD s []
+                (fun d => domFilterInt (fun p => decide (p ≠ k)) d)).getD s Dom.empty
               refine mem_updateSlot_of_mem doms s _ value (by
                 rw [show (doms.length : Nat) = a.length from hfitlen.symm]; exact hin) ?_
-              rw [domFilterInt, List.mem_filter]
-              refine ⟨hfitmem s value hv, ?_⟩
+              refine mem_domFilterInt_of_mem_of_keep (hfitmem s value hv) ?_
               have hsat' : (posNe s k).eval a = some true := hsat
               rw [eval_posNe_iff] at hsat'
               obtain ⟨i, hi, hik⟩ := hsat'
@@ -316,11 +313,10 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           | false =>
               -- keep p = k: the slot's view IS k (negNe true)
               show value ∈ (updateSlot doms s
-                (fun d => domFilterInt (fun p => decide (p = k)) d)).getD s []
+                (fun d => domFilterInt (fun p => decide (p = k)) d)).getD s Dom.empty
               refine mem_updateSlot_of_mem doms s _ value (by
                 rw [show (doms.length : Nat) = a.length from hfitlen.symm]; exact hin) ?_
-              rw [domFilterInt, List.mem_filter]
-              refine ⟨hfitmem s value hv, ?_⟩
+              refine mem_domFilterInt_of_mem_of_keep (hfitmem s value hv) ?_
               have hsat' : (negNe s k).eval a = some true := hsat
               rw [eval_negNe_iff] at hsat'
               obtain ⟨i, hi, hik⟩ := hsat'
@@ -365,7 +361,7 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           -- membership needs value to BE the forced Boolean, which the
           -- satisfied literal pins exactly
           show value ∈ (updateSlot doms s
-            (fun d => d.filter (fun v => v.eqB (.bool (if pos then b else !b))))).getD s []
+            (fun d => d.filter (fun v => v.eqB (.bool (if pos then b else !b))))).getD s Dom.empty
           refine mem_updateSlot_of_mem doms s _ value (by
             rw [show (doms.length : Nat) = a.length from hfitlen.symm]; exact hin) ?_
           have key : value ∈ [Value.bool (if pos then b else !b)] := by
@@ -410,7 +406,7 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
                 rw [hv']
                 exact List.mem_cons_self ..
           have key' : value = Value.bool (if pos then b else !b) := List.mem_singleton.mp key
-          refine List.mem_filter.mpr ⟨hfitmem s value hv, ?_⟩
+          refine Dom.mem_filter.mpr ⟨hfitmem s value hv, ?_⟩
           rw [key']
           cases (if pos then b else !b) <;> rfl
 
@@ -423,14 +419,14 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           cases pos with
           | false =>
               show value ∈ (updateSlot doms s'
-                (fun d => domFilterInt (fun q => decide (q > k)) d)).getD slot []
+                (fun d => domFilterInt (fun q => decide (q > k)) d)).getD slot Dom.empty
               rw [updateSlot_getD_ne doms s'
                 (fun d => domFilterInt (fun q => decide (q > k)) d) slot
                 (fun hcon => hsl hcon)]
               exact hfitmem slot value hv
           | true =>
               show value ∈ (updateSlot doms s'
-                (fun d => domFilterInt (fun q => decide (q ≤ k)) d)).getD slot []
+                (fun d => domFilterInt (fun q => decide (q ≤ k)) d)).getD slot Dom.empty
               rw [updateSlot_getD_ne doms s'
                 (fun d => domFilterInt (fun q => decide (q ≤ k)) d) slot
                 (fun hcon => hsl hcon)]
@@ -439,21 +435,21 @@ theorem firing {doms : List (List Value)} {l : Literal} {a : Assignment}
           cases pos with
           | false =>
               show value ∈ (updateSlot doms s'
-                (fun d => domFilterInt (fun q => decide (q = k)) d)).getD slot []
+                (fun d => domFilterInt (fun q => decide (q = k)) d)).getD slot Dom.empty
               rw [updateSlot_getD_ne doms s'
                 (fun d => domFilterInt (fun q => decide (q = k)) d) slot
                 (fun hcon => hsl hcon)]
               exact hfitmem slot value hv
           | true =>
               show value ∈ (updateSlot doms s'
-                (fun d => domFilterInt (fun q => decide (q ≠ k)) d)).getD slot []
+                (fun d => domFilterInt (fun q => decide (q ≠ k)) d)).getD slot Dom.empty
               rw [updateSlot_getD_ne doms s'
                 (fun d => domFilterInt (fun q => decide (q ≠ k)) d) slot
                 (fun hcon => hsl hcon)]
               exact hfitmem slot value hv
       | boolEq s' b =>
           show value ∈ (updateSlot doms s'
-            (fun d => d.filter (fun v => v.eqB (.bool (if pos then b else !b))))).getD slot []
+            (fun d => d.filter (fun v => v.eqB (.bool (if pos then b else !b))))).getD slot Dom.empty
           rw [updateSlot_getD_ne doms s'
             (fun d => d.filter (fun v => v.eqB (.bool (if pos then b else !b)))) slot
             (fun hcon => hsl hcon)]

@@ -2158,14 +2158,14 @@ theorem a2_foldmax_mem : ∀ (ls : List Int) (acc : Option Int) (m : Int),
 
 /-- `domMaxI d = some mx` is attained: some value of `d` has integer
     view `mx`. -/
-theorem a2_domMaxI_attained {d : List Value} {mx : Int}
+theorem a2_domMaxI_attained {d : Domain} {mx : Int}
     (h : domMaxI d = some mx) :
     ∃ v ∈ d, Value.intView v = some mx := by
   unfold domMaxI at h
   obtain hm | hnone := a2_foldmax_mem (domInts d) none mx h
-  · have hmem : mx ∈ d.filterMap Value.intView := hm
-    obtain ⟨v, hvm, hvv⟩ := List.mem_filterMap.mp hmem
-    exact ⟨v, hvm, hvv⟩
+  · unfold domInts at hm
+    obtain ⟨v, hvm, hvv⟩ := List.mem_filterMap.mp hm
+    exact ⟨v, (DomainLike.mem_iff d v).mpr hvm, hvv⟩
   · exact absurd hnone (by simp)
 
 /-- The `domMinI` fold's result is a member of the scanned list. -/
@@ -2207,28 +2207,28 @@ theorem a2_foldmin_mem : ∀ (ls : List Int) (acc : Option Int) (m : Int),
               exact Or.inl (by rw [hacc]; exact List.mem_cons_self)
 
 /-- `domMinI d = some mn` is attained dually. -/
-theorem a2_domMinI_attained {d : List Value} {mn : Int}
+theorem a2_domMinI_attained {d : Domain} {mn : Int}
     (h : domMinI d = some mn) :
     ∃ v ∈ d, Value.intView v = some mn := by
   unfold domMinI at h
   obtain hm | hnone := a2_foldmin_mem (domInts d) none mn h
-  · have hmem : mn ∈ d.filterMap Value.intView := hm
-    obtain ⟨v, hvm, hvv⟩ := List.mem_filterMap.mp hmem
-    exact ⟨v, hvm, hvv⟩
+  · unfold domInts at hm
+    obtain ⟨v, hvm, hvv⟩ := List.mem_filterMap.mp hm
+    exact ⟨v, (DomainLike.mem_iff d v).mpr hvm, hvv⟩
   · exact absurd hnone (by simp)
 
 /-! ## Helper 2: the posLe fold bound (the Q invariant) -/
 
 /-- The Q invariant: a slot domain is at most singleton (Boolean pin)
     or all its integer views are bounded by `k`. -/
-def A2Q (k : Int) (d : List Value) : Prop :=
+def A2Q (k : Int) (d : Domain) : Prop :=
   d.length ≤ 1 ∨ (∀ v ∈ d, ∀ i, Value.intView v = some i → i ≤ k)
 
 /-- Past-the-end update: reading the updated slot at an index past the
     domain list's length gives the default (empty). -/
-theorem a2_updateSlot_getD_nil (doms : List (List Value)) (s : Nat)
-    (f : List Value → List Value) (hge : doms.length ≤ s) :
-    (updateSlot doms s f).getD s [] = [] := by
+theorem a2_updateSlot_getD_nil (doms : List Domain) (s : Nat)
+    (f : Domain → Domain) (hge : doms.length ≤ s) :
+    (updateSlot doms s f).getD s Dom.empty = Dom.empty := by
   have hlen : (updateSlot doms s f).length = doms.length :=
     updateSlot_length doms s f
   exact getD_nil_of_ge (updateSlot doms s f) s (by rw [hlen]; exact hge)
@@ -2236,10 +2236,10 @@ theorem a2_updateSlot_getD_nil (doms : List (List Value)) (s : Nat)
 /-- Each `domOfLit` step preserves Q on any slot: the intLe arms
     filter (a subset of the old slot, and length-bounded), the boolEq
     arm pins to a singleton, and other slots are untouched. -/
-theorem a2_Q_step : ∀ (doms : List (List Value)) (l : Literal)
+theorem a2_Q_step : ∀ (doms : List Domain) (l : Literal)
     (s : Nat) (k : Int),
-    A2Q k (doms.getD s []) →
-    A2Q k ((domOfLit doms l).getD s []) := by
+    A2Q k (doms.getD s Dom.empty) →
+    A2Q k ((domOfLit doms l).getD s Dom.empty) := by
   intro doms l s k h
   match hl : l with
   | ⟨.intLe s' k', positive⟩ =>
@@ -2254,22 +2254,10 @@ theorem a2_Q_step : ∀ (doms : List (List Value)) (l : Literal)
             by_cases hin : s' < doms.length
             · rw [updateSlot_getD_eq doms s' _ hin]
               rcases h with h1 | h2
-              · refine Or.inl ?_
-                rw [domFilterInt]
-                calc (List.filter (fun v =>
-                    match v with
-                    | Value.int i => decide (i ≤ k')
-                    | Value.bool b => decide ((if b = true then 1 else 0) ≤ k')
-                    | x => true) (doms.getD s' [])).length
-                    ≤ (doms.getD s' []).length :=
-                      List.length_filter_le _ _
-                  _ ≤ 1 := h1
+              · exact Or.inl (domFilterInt_le_one h1)
               · refine Or.inr ?_
                 intro v hv i hvi
-                have hmem : v ∈ domFilterInt (fun p => decide (p ≤ k'))
-                    (doms.getD s' []) := hv
-                rw [domFilterInt, List.mem_filter] at hmem
-                exact h2 v hmem.1 i hvi
+                exact h2 v (mem_domFilterInt hv) i hvi
             · rw [a2_updateSlot_getD_nil doms s' _
                 (Nat.le_of_not_gt (fun hlt => hin hlt))]
               exact Or.inl (by simp)
@@ -2285,22 +2273,10 @@ theorem a2_Q_step : ∀ (doms : List (List Value)) (l : Literal)
             by_cases hin : s' < doms.length
             · rw [updateSlot_getD_eq doms s' _ hin]
               rcases h with h1 | h2
-              · refine Or.inl ?_
-                rw [domFilterInt]
-                calc (List.filter (fun v =>
-                    match v with
-                    | Value.int i => decide (i > k')
-                    | Value.bool b => decide ((if b = true then 1 else 0) > k')
-                    | x => true) (doms.getD s' [])).length
-                    ≤ (doms.getD s' []).length :=
-                      List.length_filter_le _ _
-                  _ ≤ 1 := h1
+              · exact Or.inl (domFilterInt_le_one h1)
               · refine Or.inr ?_
                 intro v hv i hvi
-                have hmem : v ∈ domFilterInt (fun p => decide (p > k'))
-                    (doms.getD s' []) := hv
-                rw [domFilterInt, List.mem_filter] at hmem
-                exact h2 v hmem.1 i hvi
+                exact h2 v (mem_domFilterInt hv) i hvi
             · rw [a2_updateSlot_getD_nil doms s' _
                 (Nat.le_of_not_gt (fun hlt => hin hlt))]
               exact Or.inl (by simp)
@@ -2316,10 +2292,10 @@ theorem a2_Q_step : ∀ (doms : List (List Value)) (l : Literal)
         by_cases hin : s' < doms.length
         · rw [updateSlot_getD_eq doms s' _ hin]
           rcases h with h1 | h2
-          · exact Or.inl (Nat.le_trans (List.length_filter_le _ _) h1)
+          · exact Or.inl (Nat.le_trans (Dom.length_filter_le _ _) h1)
           · refine Or.inr ?_
             intro v hv i hvi
-            exact h2 v (List.mem_filter.mp hv).1 i hvi
+            exact h2 v (mem_filter_iff.mp hv).1 i hvi
         · rw [a2_updateSlot_getD_nil doms s' _
             (Nat.le_of_not_gt (fun hlt => hin hlt))]
           exact Or.inl (by simp)
@@ -2337,22 +2313,10 @@ theorem a2_Q_step : ∀ (doms : List (List Value)) (l : Literal)
             by_cases hin : s' < doms.length
             · rw [updateSlot_getD_eq doms s' _ hin]
               rcases h with h1 | h2
-              · refine Or.inl ?_
-                rw [domFilterInt]
-                calc (List.filter (fun v =>
-                    match v with
-                    | Value.int i => decide (i ≠ k')
-                    | Value.bool b => decide ((if b = true then 1 else 0) ≠ k')
-                    | x => true) (doms.getD s' [])).length
-                    ≤ (doms.getD s' []).length :=
-                      List.length_filter_le _ _
-                  _ ≤ 1 := h1
+              · exact Or.inl (domFilterInt_le_one h1)
               · refine Or.inr ?_
                 intro v hv i hvi
-                have hmem : v ∈ domFilterInt (fun p => decide (p ≠ k'))
-                    (doms.getD s' []) := hv
-                rw [domFilterInt, List.mem_filter] at hmem
-                exact h2 v hmem.1 i hvi
+                exact h2 v (mem_domFilterInt hv) i hvi
             · rw [a2_updateSlot_getD_nil doms s' _
                 (Nat.le_of_not_gt (fun hlt => hin hlt))]
               exact Or.inl (by simp)
@@ -2368,22 +2332,10 @@ theorem a2_Q_step : ∀ (doms : List (List Value)) (l : Literal)
             by_cases hin : s' < doms.length
             · rw [updateSlot_getD_eq doms s' _ hin]
               rcases h with h1 | h2
-              · refine Or.inl ?_
-                rw [domFilterInt]
-                calc (List.filter (fun v =>
-                    match v with
-                    | Value.int i => decide (i = k')
-                    | Value.bool b => decide ((if b = true then 1 else 0) = k')
-                    | x => true) (doms.getD s' [])).length
-                    ≤ (doms.getD s' []).length :=
-                      List.length_filter_le _ _
-                  _ ≤ 1 := h1
+              · exact Or.inl (domFilterInt_le_one h1)
               · refine Or.inr ?_
                 intro v hv i hvi
-                have hmem : v ∈ domFilterInt (fun p => decide (p = k'))
-                    (doms.getD s' []) := hv
-                rw [domFilterInt, List.mem_filter] at hmem
-                exact h2 v hmem.1 i hvi
+                exact h2 v (mem_domFilterInt hv) i hvi
             · rw [a2_updateSlot_getD_nil doms s' _
                 (Nat.le_of_not_gt (fun hlt => hin hlt))]
               exact Or.inl (by simp)
@@ -2391,10 +2343,10 @@ theorem a2_Q_step : ∀ (doms : List (List Value)) (l : Literal)
             exact h
 
 /-- Q is preserved across a whole fold (iterated `a2_Q_step`). -/
-theorem a2_Q_fold : ∀ (tr : List TrailEntry) (doms : List (List Value))
+theorem a2_Q_fold : ∀ (tr : List TrailEntry) (doms : List Domain)
     (s : Nat) (k : Int),
-    A2Q k (doms.getD s []) →
-    A2Q k ((tr.foldl (fun acc e => domOfLit acc e.literal) doms).getD s []) := by
+    A2Q k (doms.getD s Dom.empty) →
+    A2Q k ((tr.foldl (fun acc e => domOfLit acc e.literal) doms).getD s Dom.empty) := by
   intro tr
   induction tr with
   | nil => intro doms s k h; exact h
@@ -2405,8 +2357,8 @@ theorem a2_Q_fold : ∀ (tr : List TrailEntry) (doms : List (List Value))
 
 /-- The Q-establishing step: filtering the slot at `posLe s k` makes
     every integer view of the slot bounded by `k`. -/
-theorem a2_Q_posLe (doms : List (List Value)) (s : Nat) (k : Int) :
-    A2Q k ((domOfLit doms (posLe s k)).getD s []) := by
+theorem a2_Q_posLe (doms : List Domain) (s : Nat) (k : Int) :
+    A2Q k ((domOfLit doms (posLe s k)).getD s Dom.empty) := by
   have hd : domOfLit doms (posLe s k) =
       updateSlot doms s (fun d =>
         domFilterInt (fun p => decide (p ≤ k)) d) := rfl
@@ -2415,21 +2367,20 @@ theorem a2_Q_posLe (doms : List (List Value)) (s : Nat) (k : Int) :
   · rw [updateSlot_getD_eq doms s _ hin]
     refine Or.inr ?_
     intro v hv i hvi
-    have hmem : v ∈ domFilterInt (fun p => decide (p ≤ k))
-        (doms.getD s []) := hv
-    rw [domFilterInt, List.mem_filter] at hmem
+    have hkeep : domFilterIntKeep (fun p => decide (p ≤ k)) v = true :=
+      domFilterInt_keep hv
     cases v with
     | int p =>
         rw [show Value.intView (Value.int p) = some p from rfl] at hvi
         rw [Option.some.injEq] at hvi
         subst hvi
-        exact of_decide_eq_true hmem.2
+        simpa [domFilterIntKeep] using of_decide_eq_true hkeep
     | bool b =>
         rw [show Value.intView (Value.bool b) =
           some (if b then 1 else 0) from rfl] at hvi
         rw [Option.some.injEq] at hvi
         subst hvi
-        exact of_decide_eq_true hmem.2
+        simpa [domFilterIntKeep] using of_decide_eq_true hkeep
     | setOfInt x => exact absurd hvi (by simp [Value.intView])
     | array x => exact absurd hvi (by simp [Value.intView])
   · rw [a2_updateSlot_getD_nil doms s _
@@ -2440,9 +2391,9 @@ theorem a2_Q_posLe (doms : List (List Value)) (s : Nat) (k : Int) :
     folded slot is Q at `k` — at most singleton, or every integer view
     bounded by `k`. -/
 theorem a2_fold_posLe_Q : ∀ (tr : List TrailEntry)
-    (doms : List (List Value)) (s : Nat) (k : Int),
+    (doms : List Domain) (s : Nat) (k : Int),
     (∃ e ∈ tr, e.literal = posLe s k) →
-    A2Q k ((tr.foldl (fun acc e => domOfLit acc e.literal) doms).getD s []) := by
+    A2Q k ((tr.foldl (fun acc e => domOfLit acc e.literal) doms).getD s Dom.empty) := by
   intro tr
   induction tr with
   | nil => intro doms s k hmem; exact absurd hmem (by simp)
@@ -2470,16 +2421,16 @@ theorem a2_fold_posLe_Q : ∀ (tr : List TrailEntry)
 theorem a2_decideLiteral_spec : ∀ (st : State) (hl : Literal),
     decideLiteral st = some hl →
     ∃ s mn mx,
-      domMinI (st.domains.getD s []) = some mn ∧
-      domMaxI (st.domains.getD s []) = some mx ∧
+      domMinI (st.domains.getD s Dom.empty) = some mn ∧
+      domMaxI (st.domains.getD s Dom.empty) = some mx ∧
       mn < mx ∧ hl = negLe s ((mn + mx) / 2) := by
   intro st hl hq
   unfold decideLiteral at hq
-  have main : ∀ (s : Nat) (doms : List (List Value)) (l : Literal),
+  have main : ∀ (s : Nat) (doms : List Domain) (l : Literal),
       decideLiteral.go s doms = some l →
       ∃ s2 mn mx,
-        domMinI (doms.getD s2 []) = some mn ∧
-        domMaxI (doms.getD s2 []) = some mx ∧
+        domMinI (doms.getD s2 Dom.empty) = some mn ∧
+        domMaxI (doms.getD s2 Dom.empty) = some mx ∧
         mn < mx ∧ l = negLe (s + s2) ((mn + mx) / 2) := by
     intro s doms
     induction doms generalizing s with
@@ -2493,9 +2444,9 @@ theorem a2_decideLiteral_spec : ∀ (st : State) (hl : Literal),
             obtain ⟨s2, mn, mx, hm2, hx2, hlt, hl2⟩ :=
               ih (s + 1) l h
             refine ⟨s2 + 1, mn, mx, ?_, ?_, hlt, ?_⟩
-            · show domMinI ((d :: rest).getD (s2 + 1) []) = some mn
+            · show domMinI ((d :: rest).getD (s2 + 1) Dom.empty) = some mn
               rw [List.getD_cons_succ]; exact hm2
-            · show domMaxI ((d :: rest).getD (s2 + 1) []) = some mx
+            · show domMaxI ((d :: rest).getD (s2 + 1) Dom.empty) = some mx
               rw [List.getD_cons_succ]; exact hx2
             · show l = negLe (s + (s2 + 1)) ((mn + mx) / 2)
               rw [show s + (s2 + 1) = (s + 1) + s2 from by omega]
@@ -2507,9 +2458,9 @@ theorem a2_decideLiteral_spec : ∀ (st : State) (hl : Literal),
                 obtain ⟨s2, mn, mx, hm2, hx2, hlt, hl2⟩ :=
                   ih (s + 1) l h
                 refine ⟨s2 + 1, mn, mx, ?_, ?_, hlt, ?_⟩
-                · show domMinI ((d :: rest).getD (s2 + 1) []) = some mn
+                · show domMinI ((d :: rest).getD (s2 + 1) Dom.empty) = some mn
                   rw [List.getD_cons_succ]; exact hm2
-                · show domMaxI ((d :: rest).getD (s2 + 1) []) = some mx
+                · show domMaxI ((d :: rest).getD (s2 + 1) Dom.empty) = some mx
                   rw [List.getD_cons_succ]; exact hx2
                 · show l = negLe (s + (s2 + 1)) ((mn + mx) / 2)
                   rw [show s + (s2 + 1) = (s + 1) + s2 from by omega]
@@ -2527,9 +2478,9 @@ theorem a2_decideLiteral_spec : ∀ (st : State) (hl : Literal),
                   obtain ⟨s2, mn, mx, hm2, hx2, hlt, hl2⟩ :=
                     ih (s + 1) l h
                   refine ⟨s2 + 1, mn, mx, ?_, ?_, hlt, ?_⟩
-                  · show domMinI ((d :: rest).getD (s2 + 1) []) = some mn
+                  · show domMinI ((d :: rest).getD (s2 + 1) Dom.empty) = some mn
                     rw [List.getD_cons_succ]; exact hm2
-                  · show domMaxI ((d :: rest).getD (s2 + 1) []) = some mx
+                  · show domMaxI ((d :: rest).getD (s2 + 1) Dom.empty) = some mx
                     rw [List.getD_cons_succ]; exact hx2
                   · show l = negLe (s + (s2 + 1)) ((mn + mx) / 2)
                     rw [show s + (s2 + 1) = (s + 1) + s2 from by omega]
@@ -2543,47 +2494,29 @@ theorem a2_decideLiteral_spec : ∀ (st : State) (hl : Literal),
 /-- A slot with at most one value cannot carry distinct integer
     extrema: both are `some` only when equal (or `none` when the
     integer view is empty). -/
-theorem a2_singleton_extrema {d : List Value} {mn mx : Int}
+theorem a2_singleton_extrema {d : Domain} {mn mx : Int}
     (hlen : d.length ≤ 1)
     (hmn : domMinI d = some mn) (hmx : domMaxI d = some mx) :
     mn = mx := by
-  cases hd : d with
-  | nil =>
-      rw [hd] at hmn
-      exact absurd hmn (by
-        intro hc
-        have hdi : domMinI [] = none := rfl
-        rw [hdi] at hc
-        exact absurd hc (by simp))
-  | cons v rest =>
-      cases hrest : rest with
-      | nil =>
-          rw [hd, hrest] at hmn hmx
-          cases v with
-          | int i =>
-              rw [show domMinI [Value.int i] = some i from rfl] at hmn
-              rw [show domMaxI [Value.int i] = some i from rfl] at hmx
-              rw [Option.some.injEq] at hmn hmx
-              omega
-          | bool b =>
-              rw [show domMinI [Value.bool b] =
-                some (if b then 1 else 0) from rfl] at hmn
-              rw [show domMaxI [Value.bool b] =
-                some (if b then 1 else 0) from rfl] at hmx
-              rw [Option.some.injEq] at hmn hmx
-              cases b <;> simp_all
-          | setOfInt x =>
-              rw [show domMinI [Value.setOfInt x] = none from rfl] at hmn
-              exact absurd hmn (by simp)
-          | array x =>
-              rw [show domMinI [Value.array x] = none from rfl] at hmn
-              exact absurd hmn (by simp)
-      | cons w rest2 =>
-          exfalso
-          have hge : d.length ≥ 2 := by
-            rw [hd, hrest]
-            simp
-          omega
+  have hdi : (domInts d).length ≤ 1 := by
+    unfold domInts
+    rw [domElems_eq_enum]
+    refine Nat.le_trans (List.length_filterMap_le _ _) ?_
+    rw [Dom.length_eq_enum] at hlen
+    exact hlen
+  match hdi' : domInts d with
+  | [] =>
+      rw [domMinI_of_nil hdi'] at hmn
+      simp at hmn
+  | [i] =>
+      rw [domMinI_of_single hdi'] at hmn
+      rw [domMaxI_of_single hdi'] at hmx
+      rw [Option.some.injEq] at hmn hmx
+      omega
+  | i :: j :: rest =>
+      exfalso
+      rw [hdi'] at hdi
+      simp at hdi
 
 /-! ## Helper 5: the opposing-branch exclusion -/
 
@@ -2626,7 +2559,7 @@ theorem a2_decide_not_opposing {problem : LeanFzn.Solver.Propagation.Problem Con
       -- the coherence fold: the current slot is the trail fold
       have hfold : A2Q ((mn + mx) / 2)
           ((st1.trail.foldl (fun acc e => domOfLit acc e.literal)
-            problem.domains).getD s []) :=
+            problem.domains).getD s Dom.empty) :=
         a2_fold_posLe_Q st1.trail problem.domains s ((mn + mx) / 2)
           ⟨e, hem, hentry⟩
       rw [← hcoh] at hfold
@@ -3067,7 +3000,7 @@ theorem fold_enqueue_trailDistinct : ∀ (ls : List Literal) (st : State),
         exact trailDistinct_append h hnotmem
 
 /-- Front-door helper: the root facts are normalized literals. -/
-theorem rootFacts_norm : ∀ (s : Nat) (ds : List (List Value))
+theorem rootFacts_norm : ∀ (s : Nat) (ds : List Domain)
     (l : Literal), l ∈ rootFacts.go s ds → l = l.norm := by
   intro s ds
   induction ds generalizing s with
@@ -5018,7 +4951,7 @@ theorem go_unsat_entry_invariant
           rename_i an heq
           -- the propagated state's WellFormed (for the level bound)
           have foldlen : ∀ (tr : List TrailEntry)
-              (doms : List (List Value)),
+              (doms : List Domain),
               (tr.foldl (fun acc e =>
                 domOfLit acc e.literal) doms).length
                 = doms.length := by

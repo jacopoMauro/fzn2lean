@@ -33,8 +33,8 @@ Run compiled:  .lake/build/bin/tests_dbscan --battery
                .lake/build/bin/tests_dbscan --files FILE...
 -/
 import Tests.UIP.LcgHarnessBattery
-import LeanFzn.Integration.Lcg
-import LeanFzn.Solver.UIP.Proofs.SchedulerStepSched
+import LeanFzn.Legacy.Integration.Lcg
+import LeanFzn.Legacy.Solver.UIP.Proofs.SchedulerStepSched
 open LeanFzn.Solver.Propagation LeanFzn.Compiler LeanFzn.Integration
 open LeanFzn.Solver.UIP LeanFzn.Solver.UIP.C3b LeanFzn.Solver.Core LeanFzn
 
@@ -58,6 +58,10 @@ structure DbStat where
   dbTotal : Nat := 0        -- Σ db size over active steps
   maxDb : Nat := 0
   slotsTotal : Nat := 0     -- Σ `Frame.domains` length over active steps
+  qRuns : Nat := 0          -- E1 queue twin: propagator runs the early-exit scan performs
+  qSkips : Nat := 0         -- E1 queue twin: dirty units reused via the quiet certificate
+  qReplays : Nat := 0       -- E1 queue twin: clean units replayed from their records
+  qSteps : Nat := 0         -- E1 queue twin: steps whose queued prompt scanned
   deriving Repr
 
 def DbStat.add (a b : DbStat) : DbStat :=
@@ -68,7 +72,9 @@ def DbStat.add (a b : DbStat) : DbStat :=
     cConflict := a.cConflict + b.cConflict, cUnit := a.cUnit + b.cUnit,
     cSkip := a.cSkip + b.cSkip, litTotal := a.litTotal + b.litTotal,
     dbTotal := a.dbTotal + b.dbTotal, maxDb := max a.maxDb b.maxDb,
-    slotsTotal := a.slotsTotal + b.slotsTotal }
+    slotsTotal := a.slotsTotal + b.slotsTotal,
+    qRuns := a.qRuns + b.qRuns, qSkips := a.qSkips + b.qSkips,
+    qReplays := a.qReplays + b.qReplays, qSteps := a.qSteps + b.qSteps }
 
 /-- Classify + count every clause of the db the way `scanDatabase` does (the
 counts are of the REAL work; the recursion short-circuits only at the same
@@ -97,15 +103,71 @@ structure Samples where
   jumpPerf : List Nat := []
   deciding : List Nat := []
 
-/-- Pure bounded walk (counts only, no clocks) — the battery mode. -/
+/-- The per-unit counting mirror of the certified early-exit scan: walks the
+real propagator list with the real queue state and counts (runs, certificate
+skips, record replays) up to the reference early exit. TEST-ONLY. -/
+def queueScanCount (f : BranchFrame) (i : Nat) :
+    List Propagator → List (Option (BranchFrame × PropagationResult)) → List Nat →
+      Nat × Nat × Nat
+  | [], _, _ => (0, 0, 0)
+  | p :: ps, s :: ss, pend =>
+      let dirty := pend.contains i
+      let cert := match s with
+        | some (fr, _) => quietB p fr f
+        | none => false
+      let runIt := dirty && !cert
+      let skipIt := dirty && cert
+      let replays := !dirty
+      let stop := match queueUnitResult f i p s pend with
+        | .stable => false
+        | .conflict _ => true
+        | .implied l _ => productive l f
+      if stop then
+        (if runIt then 1 else 0, if skipIt then 1 else 0, if replays then 1 else 0)
+      else
+        let cnt := queueScanCount f (i + 1) ps ss pend
+        (cnt.1 + (if runIt then 1 else 0), cnt.2.1 + (if skipIt then 1 else 0),
+          cnt.2.2 + (if replays then 1 else 0))
+  | _, _, _ => (0, 0, 0)
+
+/-- E1 queue twin for one step (TEST-ONLY): thread an INDEPENDENT queue whose
+sync frame advances at every DB-stable viewed active step and count the
+certified early-exit scan's runs, certificate skips and record replays. This
+measures the queue's run efficiency on every eligible step, independent of
+which prompt the runtime policy picked. -/
+def queueTwinStep {leaf : Assignment → Bool} (cfg : SchedulerConfig leaf)
+    (q : WorkQueue) (qframe : BranchFrame) :
+    Nat × Nat × Nat × Nat × WorkQueue × BranchFrame :=
+  if cfg.conflict.isNone && cfg.status == .active then
+    match scanDatabaseFast cfg.original cfg.branch.frame cfg.branch.learned with
+    | .stable =>
+        if frameViewedB cfg.branch.frame then
+          let q1 := q.enqueueEvents cfg.props qframe cfg.branch.frame
+          let c := queueScanCount cfg.branch.frame 0 cfg.props q1.seen q1.pending
+          let q2 := (q1.scanQueue cfg.props cfg.branch.frame).2
+          (c.1, c.2.1, c.2.2, 1, q2, cfg.branch.frame)
+        else (0, 0, 0, 0, q, qframe)
+    | _ => (0, 0, 0, 0, q, qframe)
+  else (0, 0, 0, 0, q, qframe)
+
+/-- Pure bounded walk (counts only, no clocks) — the battery mode. The E1
+queue twin threads the certified queued prompt's sync+drain on the side and
+counts the propagator runs it WOULD perform at each active step (the real
+route is the watch-stamp scan; the twin needs no clock and no extra scan
+beyond the certified DB probe, `scanDatabaseFast`). -/
 partial def walkPure {leaf : Assignment → Bool} (fuel : Nat) (cfg : SchedulerConfig leaf)
-    (sched : PropScheduler) (acc : DbStat) (s : Samples) :
+    (sched : PropScheduler) (twinQ : WorkQueue) (twinFrame : BranchFrame)
+    (acc : DbStat) (s : Samples) :
     DbStat × Samples × Option (DriverResult leaf) :=
   match fuel with
   | 0 => (acc, s, none)
   | fuel + 1 =>
     let pr := phaseNextSched cfg sched
     let acc := { acc with steps := acc.steps + 1 }
+    let qt := queueTwinStep cfg twinQ twinFrame
+    let acc := { acc with qRuns := acc.qRuns + qt.1, qSkips := acc.qSkips + qt.2.1, qReplays := acc.qReplays + qt.2.2.1, qSteps := acc.qSteps + qt.2.2.2.1 }
+    let twinQ := qt.2.2.2.2.1
+    let twinFrame := qt.2.2.2.2.2
     let acc :=
       match pr.1 with
       | .propagate _ => { acc with propagates := acc.propagates + 1 }
@@ -126,7 +188,7 @@ partial def walkPure {leaf : Assignment → Bool} (fuel : Nat) (cfg : SchedulerC
     | .unsat => (acc, s, some .unsat)
     | _ =>
       match pr.1.successor with
-      | some n => walkPure fuel n pr.2 acc s
+      | some n => walkPure fuel n pr.2 twinQ twinFrame acc s
       | none => (acc, s, none)
 
 /-- The timed sub-phases of one ACTIVE step: the database scan chain
@@ -285,6 +347,8 @@ structure BatTotal where
   instances : Nat := 0
   baseNs : Nat := 0
   schedNs : Nat := 0
+  noWatchNs : Nat := 0
+  noWatchDisagree : Nat := 0
   steps : Nat := 0
   visited : Nat := 0
   cUnit : Nat := 0
@@ -294,7 +358,39 @@ structure BatTotal where
   disagree : Nat := 0
   sat : Nat := 0
   unsat : Nat := 0
+  qRuns : Nat := 0
+  qSkips : Nat := 0
+  qReplays : Nat := 0
+  qSteps : Nat := 0
+  qFullRuns : Nat := 0      -- Σ over queue-twin steps of props.length (the full scan's runs)
+  qPropagates : Nat := 0
+  watched : Nat := 0        -- Σ over instances of props with a declared footprint
+  props : Nat := 0          -- Σ over instances of props.length
   deriving Repr
+
+/-- The same propagator list with every declared watch footprint stripped:
+the scheduled scan then refuses every table entry (the pre-watch-footprint
+behaviour of the unwatched families), giving a same-binary ablation of the
+watch-footprint extension. -/
+def stripWatches (props : List Propagator) : List Propagator :=
+  props.map fun p => { p with watches := [] }
+
+/-- Stripped lists are vacuously locally sound (no member declares a footprint). -/
+theorem stripWatches_local (props : List Propagator) : PropLocal (stripWatches props) := by
+  intro p hp hne
+  obtain ⟨q, _, rfl⟩ := List.mem_map.mp hp
+  simp at hne
+
+/-- The scheduled entry over the stripped (no-footprint) propagator list. -/
+def lcgRunSchedNoWatch (p : LeanFzn.Compiler.CompiledProblem
+    LeanFzn.Solver.Propagation.DomainFiltering.DomConstraint)
+    (hroute : lcgRouteGateMixed p = true) :
+    DriverResult (LeanFzn.Integration.lcgLeaf p) :=
+  let props := stripWatches (LeanFzn.Integration.lcgProps p)
+  solve_sched p.domains (LeanFzn.Compiler.seedClauses p.constraints) props
+    (LeanFzn.Integration.lcgSeedEntailed p) (PropScheduler.init props)
+    (stripWatches_local (LeanFzn.Integration.lcgProps p))
+    (PropSchedulerOK.init props) (LcgHarness.frameGate_of_routeGate hroute)
 
 def runBatteryOne (reps fuel : Nat) (name src : String) (t : BatTotal) : IO BatTotal := do
   match LcgHarness.ofSource name src with
@@ -303,23 +399,32 @@ def runBatteryOne (reps fuel : Nat) (name src : String) (t : BatTotal) : IO BatT
     match inst.compiled with
     | none => return t
     | some p =>
-      if !lcgRouteGateMixed p then
+      if hroute : lcgRouteGateMixed p = true then
+        let leaf := lcgLeaf p
+        let (baseNs, r0) ← bestNs reps
+          (fun _ => LcgPhaseKernel.solve p.domains (seedClauses p.constraints) (lcgProps p)
+            (lcgSeedEntailed p) (LcgHarness.frameGate_of_routeGate hroute))
+          (.sat [] : DriverResult leaf)
+        let (schedNs, r1) ← bestNs reps (fun _ => lcgRunSched p (LcgHarness.frameGate_of_routeGate hroute)) (.sat [] : DriverResult leaf)
+        let (noWatchNs, r2) ← bestNs reps
+          (fun _ => lcgRunSchedNoWatch p hroute) (.sat [] : DriverResult leaf)
+        let dis2 := if verdictTag r1 == verdictTag r2 then 0 else 1
+        if dis2 == 1 then
+          IO.eprintln s!"{name}: WATCH-ABLATION VERDICT MISMATCH sched={verdictTag r1} noWatch={verdictTag r2}"
+        let cfg : SchedulerConfig leaf :=
+          SchedulerConfig.init p.domains (seedClauses p.constraints) (lcgProps p)
+        let (st, _, _) ← IO.lazyPure (fun _ => walkPure fuel cfg (PropScheduler.init (lcgProps p))
+          (PropScheduler.init (lcgProps p)).work (PropScheduler.init (lcgProps p)).qframe {} {})
+        let dis := if verdictTag r0 == verdictTag r1 then 0 else 1
+        if dis == 1 then
+          IO.eprintln s!"{name}: VERDICT MISMATCH base={verdictTag r0} sched={verdictTag r1}"
+        let wc := (lcgProps p).foldl (fun a q => if q.watches.isEmpty then a else a + 1) 0
+        IO.println s!"{name} base={baseNs / 1000}us sched={schedNs / 1000}us watched={wc}/{(lcgProps p).length} steps={st.steps} \
+visited={st.visited} unit={st.cUnit} skip={st.cSkip} conflict={st.cConflict} maxDb={st.maxDb}"
+        return { t with instances := t.instances + 1, baseNs := t.baseNs + baseNs, schedNs := t.schedNs + schedNs, noWatchNs := t.noWatchNs + noWatchNs, noWatchDisagree := t.noWatchDisagree + dis2, steps := t.steps + st.steps, visited := t.visited + st.visited, cUnit := t.cUnit + st.cUnit, cSkip := t.cSkip + st.cSkip, cConflict := t.cConflict + st.cConflict, litTotal := t.litTotal + st.litTotal, disagree := t.disagree + dis, sat := t.sat + (if verdictTag r1 == 1 then 1 else 0), unsat := t.unsat + (if verdictTag r1 == 2 then 1 else 0), qRuns := t.qRuns + st.qRuns, qSkips := t.qSkips + st.qSkips, qReplays := t.qReplays + st.qReplays, qSteps := t.qSteps + st.qSteps, watched := t.watched + wc, props := t.props + (lcgProps p).length, qFullRuns := t.qFullRuns + st.qSteps * (lcgProps p).length, qPropagates := t.qPropagates + st.propagates }
+      else
         IO.println s!"{name}: NOT ROUTED (gate off)"
         return t
-      let leaf := lcgLeaf p
-      let (baseNs, r0) ← bestNs reps
-        (fun _ => LcgPhaseKernel.solve p.domains (seedClauses p.constraints) (lcgProps p)
-          (lcgSeedEntailed p)) (.sat [] : DriverResult leaf)
-      let (schedNs, r1) ← bestNs reps (fun _ => lcgRunSched p) (.sat [] : DriverResult leaf)
-      let cfg : SchedulerConfig leaf :=
-        SchedulerConfig.init p.domains (seedClauses p.constraints) (lcgProps p)
-      let (st, _, _) ← IO.lazyPure (fun _ => walkPure fuel cfg (PropScheduler.init (lcgProps p)) {} {})
-      let dis := if verdictTag r0 == verdictTag r1 then 0 else 1
-      if dis == 1 then
-        IO.eprintln s!"{name}: VERDICT MISMATCH base={verdictTag r0} sched={verdictTag r1}"
-      IO.println s!"{name} base={baseNs / 1000}us sched={schedNs / 1000}us steps={st.steps} \
-visited={st.visited} unit={st.cUnit} skip={st.cSkip} conflict={st.cConflict} maxDb={st.maxDb}"
-      return { t with instances := t.instances + 1, baseNs := t.baseNs + baseNs, schedNs := t.schedNs + schedNs, steps := t.steps + st.steps, visited := t.visited + st.visited, cUnit := t.cUnit + st.cUnit, cSkip := t.cSkip + st.cSkip, cConflict := t.cConflict + st.cConflict, litTotal := t.litTotal + st.litTotal, disagree := t.disagree + dis, sat := t.sat + (if verdictTag r1 == 1 then 1 else 0), unsat := t.unsat + (if verdictTag r1 == 2 then 1 else 0) }
 
 def run (args : List String) : IO UInt32 := do
   match args with
@@ -343,8 +448,16 @@ def run (args : List String) : IO UInt32 := do
 disagreeVerdicts={t.disagree} wallMs={t1 - t0}"
     IO.println s!"BATTERY baseMs={t.baseNs / 1000000} schedMs={t.schedNs / 1000000} \
 ratio={(t.baseNs * 100) / (t.schedNs + 1)}% (base/sched, >100 = sched faster, reps={reps})"
+    IO.println s!"BATTERY noWatchMs={t.noWatchNs / 1000000} \
+watchGain={(t.noWatchNs * 100) / (t.schedNs + 1)}% (noWatch/sched, >100 = watches faster) \
+noWatchVerdictDisagreements={t.noWatchDisagree}"
     IO.println s!"BATTERY steps={t.steps} visited={t.visited} unit={t.cUnit} skip={t.cSkip} \
 conflict={t.cConflict} litTotal={t.litTotal}"
+    IO.println s!"WATCHRATIO watched={t.watched}/{t.props}"
+    IO.println s!"E1QUEUE (twin, test-only) qRuns={t.qRuns} qSkips={t.qSkips} qReplays={t.qReplays} \
+qSteps={t.qSteps} fullScanRunsAtSameSteps={t.qFullRuns} productiveDeductions={t.qPropagates} \
+qRunsPerDeduction={if t.qPropagates == 0 then 0 else t.qRuns / t.qPropagates} \
+(compare with the stamp twin's schedVisits in Tests/E1/SchedCounts.lean)"
     return 0
 
 end Tests.E1.DbScan

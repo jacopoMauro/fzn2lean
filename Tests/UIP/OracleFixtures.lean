@@ -1,4 +1,4 @@
-import LeanFzn.Integration.Chronological
+import LeanFzn.Legacy.Integration.Chronological
 /-
 File: Tests/UIP/OracleFixtures.lean
 comparisons)
@@ -47,7 +47,15 @@ Dependencies: LeanFzn.Solver (the umbrella: the reference driver, the analyzer,
 the C1 scheduler records, the A2 closure and the certified verdict theorems).
 -/
 
-import LeanFzn.Solver
+import LeanFzn.Legacy.Solver.Propagation
+import LeanFzn.Legacy.Solver.Chronological
+import LeanFzn.Legacy.Solver.Reference
+import LeanFzn.Legacy.Solver.UIP.SchedulerState
+import LeanFzn.Legacy.Solver.UIP.SchedulerStep
+import LeanFzn.Legacy.Solver.UIP.AnalysisEvents
+import LeanFzn.Legacy.Solver.Propagation.ExplainedPropagation
+import LeanFzn.Legacy.Solver.Propagation.BackjumpFrontier
+import LeanFzn.Solver.Core.Enumerate
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 
@@ -55,6 +63,15 @@ open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Semant
 open LeanFzn LeanFzn.Solver LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Integration LeanFzn.Solver.Core
 
 namespace T1Oracle
+
+/-- A plain value-list box as compact domains. -/
+def Ds (vss : List (List Value)) : List Domain := vss.map Dom.ofList
+
+/-- Port helper for the pre-M2 `(remaining, chosen)` fixture frames: rebuild the
+sparse `BranchFrame` through the positional bridge (chosen prefix becomes
+singleton domains, decision order `List.range prefix.length`). -/
+def legacyFrame (slots : List (List Value)) (chosen : Assignment) : BranchFrame :=
+  SparseFrame.ofPrefixFrame (Ds slots, chosen)
 
 /-! ## 0. Runtime-check vocabulary (same style as the existing suites) -/
 
@@ -336,40 +353,40 @@ def referenceAgreesB (problem : LeanFzn.Solver.Propagation.Problem DomConstraint
 
 /-- Two int slots, `x ≠ y` (SAT; two oracle solutions). -/
 def famTwoNeInt : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.int 0, .int 1], [.int 0, .int 1]],
+  { names := [], domains := Ds [[.int 0, .int 1], [.int 0, .int 1]],
     constraints := [.neSlot 0 1], objective := (), clauses := [] }
 
 /-- Two singleton int slots, `x ≠ y` (UNSAT at the root). -/
 def famNeUnsat : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.int 1], [.int 1]],
+  { names := [], domains := Ds [[.int 1], [.int 1]],
     constraints := [.neSlot 0 1], objective := (), clauses := [] }
 
 /-- Two Boolean slots, `y = ¬x` (SAT; Boolean values, two oracle solutions). -/
 def famBoolNot : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.bool true, .bool false], [.bool true, .bool false]],
+  { names := [], domains := Ds [[.bool true, .bool false], [.bool true, .bool false]],
     constraints := [.boolNotSlot 0 1], objective := (), clauses := [] }
 
 /-- Negative bounds: `x ≤ y` over `{-3,2} × {-2,1}` (SAT; two solutions). -/
 def famNegBounds : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.int (-3), .int 2], [.int (-2), .int 1]],
+  { names := [], domains := Ds [[.int (-3), .int 2], [.int (-2), .int 1]],
     constraints := [.leSlot 0 1], objective := (), clauses := [] }
 
 /-- Sparse domains `{0,2,5} × {5}` with `y ≤ x` (SAT; exactly one solution,
 `(5,5)`, which only the sparse reading admits). -/
 def famSparse : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.int 0, .int 2, .int 5], [.int 5]],
+  { names := [], domains := Ds [[.int 0, .int 2, .int 5], [.int 5]],
     constraints := [.leSlot 1 0], objective := (), clauses := [] }
 
 /-- Root UNSAT: `x = y` over `{3} × {1}` conflicts at level 0. -/
 def famRootUnsat : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.int 3], [.int 1]],
+  { names := [], domains := Ds [[.int 3], [.int 1]],
     constraints := [.eqSlot 0 1], objective := (), clauses := [] }
 
 /-- A six-literal clause over two 3-valued slots
 (`x > 0 ∨ x > 1 ∨ x > 2 ∨ y > 0 ∨ y > 1 ∨ y > 2`, i.e. `x ≥ 1 ∨ y ≥ 1`):
 the long-clause scan case of the executable reference (SAT; 8 solutions). -/
 def famLongClause : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2]],
+  { names := [], domains := Ds [[.int 0, .int 1, .int 2], [.int 0, .int 1, .int 2]],
     constraints := [], objective := (),
     clauses := [[negLe 0 0, negLe 0 1, negLe 0 2, negLe 1 0, negLe 1 1, negLe 1 2]] }
 
@@ -457,7 +474,7 @@ def mTrail : List TrailEntry :=
 /-- The original box of the analyzer fixtures (R1a: the LCG analyzer reads
 it for the root drop): five integer slots with domain `0..12`. -/
 def oOrig : List Domain :=
-  List.replicate 5 ((List.range 13).map fun k => Value.int (Int.ofNat k))
+  List.replicate 5 (Dom.ofList ((List.range 13).map fun k => Value.int (Int.ofNat k)))
 
 /-- The multi-resolution conflict clause. -/
 def mConflict : Clause := [negLe 1 7, negLe 2 9, negLe 4 2]
@@ -567,7 +584,7 @@ evaluating the leaf at that solution, the first by a real proof. -/
 
 /-- The `x ≠ y` problem behind the counterexample. -/
 def xyProblem : LeanFzn.Solver.Propagation.Problem DomConstraint Unit :=
-  { names := [], domains := [[.bool true, .bool false], [.bool true, .bool false]],
+  { names := [], domains := Ds [[.bool true, .bool false], [.bool true, .bool false]],
     constraints := [.neSlot 0 1], objective := (), clauses := [] }
 
 /-- The counterexample leaf predicate: the compiled `x ≠ y` leaf the
@@ -583,7 +600,7 @@ def xyDecision : TrailEntry := mkDec (posBool 0 false) 1
 
 /-- The decided child frame: slot 0 pinned to `false`, remaining slots still
 full (the decision lives in the prefix, so `fullDomains` reads it). -/
-def xyFrame : BranchFrame := ([[.bool true, .bool false]], [.bool false])
+def xyFrame : BranchFrame := legacyFrame [[.bool true, .bool false]] [.bool false]
 
 /-- The branch state: the decision on the trail and the entailed clause in
 the global database. -/
@@ -598,7 +615,7 @@ example : (explainedDeduction [] [] xyState).map (fun d => d.literal)
 example : (explainedDeduction [] [] xyState).map (fun d => d.reason)
     = some xyClause := rfl
 example : (explainedDeduction [] [] xyState).map (fun d => d.frame)
-    = some ([[.bool true]], [.bool false]) := rfl
+    = some (legacyFrame [[.bool true]] [.bool false]) := rfl
 
 -- GLOBAL FALSITY of the pivot: `x = true, y = false` is an `x ≠ y` solution
 -- at which `y = true` is false.
@@ -649,7 +666,7 @@ theorem xy_pivot_branch_relative :
 /-! ### 5.1 Propagation after an assertion -/
 
 /-- The pre-assertion box: two slots, both `{0,1}`. -/
-def paFrame : BranchFrame := ([[.int 0, .int 1], [.int 0, .int 1]], [])
+def paFrame : BranchFrame := legacyFrame [[.int 0, .int 1], [.int 0, .int 1]] []
 
 /-- The state after the assertion `x0 = 0` has been enqueued, its reason
 recorded, and the assertion narrowing applied — the shape
@@ -659,13 +676,13 @@ the assertion's filter of the pre-assertion box (checked below), and the
 database's second clause `[x0 ≠ 0, x1 ≤ 0]` becomes unit only because the
 assertion removed `0` from slot 0. -/
 def paState : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 0], [.int 0, .int 1]], []),
+  { frame := legacyFrame [[.int 0], [.int 0, .int 1]] [],
     trail := [mkImp (negNe 0 0) 1 [negNe 0 0]], level := 1,
     learned := [[negNe 0 0], [posNe 0 0, posLe 1 0]] }
 
 -- The narrowed frame is exactly the assertion's filter of the pre-box.
 example : filterFrame (negNe 0 0) paFrame
-    = some ([[.int 0], [.int 0, .int 1]], []) := rfl
+    = some (legacyFrame [[.int 0], [.int 0, .int 1]] []) := rfl
 
 -- Propagation resumes: the assertion made `x0 ≠ 0` impossible, so the
 -- surviving unit `x1 ≤ 0` is selected and narrows slot 1.
@@ -675,7 +692,7 @@ example : (explainedDeduction [] [] paState).map (fun d => d.literal)
 example : (explainedDeduction [] [] paState).map (fun d => d.reason)
     = some [posNe 0 0, posLe 1 0] := rfl
 example : (explainedDeduction [] [] paState).map (fun d => d.frame)
-    = some ([[.int 0], [.int 0]], []) := rfl
+    = some (legacyFrame [[.int 0], [.int 0]] []) := rfl
 example : explainedStep [] [] paState
     = .narrow (posLe 1 0) [posNe 0 0, posLe 1 0] [] := rfl
 
@@ -683,13 +700,13 @@ example : explainedStep [] [] paState
 
 /-- A database unit `x0 ≠ 0` on the box `{0,1}`. -/
 def dupState : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 0, .int 1]], []), trail := [], level := 0,
+  { frame := legacyFrame [[.int 0, .int 1]] [], trail := [], level := 0,
     learned := [[posNe 0 0]] }
 
 /-- The successor after the unit was consumed: `0` removed, one entry
 recorded. -/
 def dupState2 : BranchState (fun _ : Assignment => true) :=
-  narrowState dupState ([[.int 1]], []) (posNe 0 0) [posNe 0 0] []
+  narrowState dupState (legacyFrame [[.int 1]] []) (posNe 0 0) [posNe 0 0] []
 
 -- The first dispatch is productive; the re-dispatch of the SAME deduction is
 -- skipped (non-productive and already recorded), so the closure would stop.
@@ -697,7 +714,7 @@ example : (explainedDeduction [] [] dupState).isSome = true := rfl
 example : (explainedDeduction [] [] dupState).map (fun d => d.literal)
     = some (posNe 0 0) := rfl
 example : (explainedDeduction [] [] dupState).map (fun d => d.frame)
-    = some ([[.int 1]], []) := rfl
+    = some (legacyFrame [[.int 1]] []) := rfl
 example : explainedDeduction [] [] dupState2 = none := rfl
 example : TrailRedundant dupState2.trail (posNe 0 0) = true := rfl
 
@@ -708,7 +725,7 @@ admits `{0,1,2}`: the database unit `x0 = 1` is productive (it would remove
 two values) but its normalized literal is already recorded, so the
 duplicate-safe policy skips it (`.stable`, no entry). -/
 def redState : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 0, .int 1, .int 2]], []), trail := [mkDec (negNe 0 1) 1],
+  { frame := legacyFrame [[.int 0, .int 1, .int 2]] [], trail := [mkDec (negNe 0 1) 1],
     level := 1, learned := [[negNe 0 1]] }
 
 example : productive (negNe 0 1) redState.frame = true := rfl
@@ -718,20 +735,20 @@ example : explainedDeduction [] [] redState = none := rfl
 
 /-- A root scheduler configuration over a two-value box. -/
 def rootCfg : SchedulerConfig (fun _ : Assignment => true) :=
-  SchedulerConfig.init (leaf := fun _ => true) [[.int 0, .int 1]] [] []
+  SchedulerConfig.init (leaf := fun _ => true) (Ds [[.int 0, .int 1]]) [] []
 
 -- FORCED decisions: pinning a singleton head domain is not counted as a
 -- decision (`vs.isEmpty` ⇒ 0), while a genuine branch counts one.
-example : (stepDecide rootCfg (.int 0) [] [] (negNe 0 0)).stats.decisions = 0 := rfl
-example : (stepDecide rootCfg (.int 0) [.int 1] [] (negNe 0 0)).stats.decisions = 1 := rfl
-example : (stepDecide rootCfg (.int 0) [] [] (negNe 0 0)).branch.level = 1 := rfl
+example : (stepDecide rootCfg 0 (.int 0) Dom.empty (negNe 0 0)).stats.decisions = 0 := rfl
+example : (stepDecide rootCfg 0 (.int 0) (Dom.ofList [.int 1]) (negNe 0 0)).stats.decisions = 1 := rfl
+example : (stepDecide rootCfg 0 (.int 0) Dom.empty (negNe 0 0)).branch.level = 1 := rfl
 
 /-! ### 5.4 Restored exhaustion -/
 
 /-- A configuration whose permanent log holds one prefix region. -/
 def exCfg : SchedulerConfig (fun _ : Assignment => true) :=
-  { orig := [[.int 1, .int 0]], original := [], props := [],
-    branch := { frame := ([[.int 1, .int 0]], []), trail := [], level := 0,
+  { orig := Ds [[.int 1, .int 0]], original := [], props := [],
+    branch := { frame := legacyFrame [[.int 1, .int 0]] [], trail := [], level := 0,
                 learned := [] },
     checkpoints := [], pending := [],
     log := ({} : ExhaustionLog).register
@@ -739,7 +756,7 @@ def exCfg : SchedulerConfig (fun _ : Assignment => true) :=
 
 /-- The plan's checkpoint state (level 0). -/
 def exCpState : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 1, .int 0]], []), trail := [], level := 0, learned := [] }
+  { frame := legacyFrame [[.int 1, .int 0]] [], trail := [], level := 0, learned := [] }
 
 /-- A level-0 plan asserting `x0 = 1`. -/
 def exPlan : BackjumpPlan (fun _ : Assignment => true) :=
@@ -752,7 +769,7 @@ def exEv : ConflictEvidence :=
 
 /-- The restored/narrowed state of the jump. -/
 def exRestored : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 1]], [.int 0]), trail := [], level := 0, learned := [] }
+  { frame := legacyFrame [[.int 1]] [.int 0], trail := [], level := 0, learned := [] }
 
 -- The jump leaves the permanent log untouched: the registered region still
 -- answers, and the §2.7 counters are recorded at the site.
@@ -806,7 +823,7 @@ example : ConflictShape.ofConflict 3 [posLe 0 1] = .analyzable := rfl
 /-- A branch whose learned unit clause is already fully falsified by the
 frame. -/
 def deadState : BranchState (fun _ : Assignment => true) :=
-  { frame := ([[.int 5]], []), trail := [], level := 0, learned := [[posLe 0 0]] }
+  { frame := legacyFrame [[.int 5]] [], trail := [], level := 0, learned := [[posLe 0 0]] }
 
 -- The exclusion carries an EMPTY local explanation (`scanDatabase`'s
 -- `.conflict []`), never a claim about the whole problem.
@@ -843,9 +860,10 @@ def sparseTrail : List TrailEntry :=
 -- Sparse-domain singleton collapse: `{0,2,5}` minus `0` and `2` justifies
 -- the lower bound `5`, while the empty trail justifies no bound at all.
 example : removedValues sparseTrail 0 = [0, 2] := rfl
-example : derivedLowerWitnesses sparseTrail 0 [.int 0, .int 2, .int 5] 5 = [] := rfl
-example : derivedLowerWitnesses sparseTrail 0 [.int 0, .int 2, .int 5] 2 = [] := rfl
-example : derivedLowerWitnesses ([] : List TrailEntry) 0 [.int 0, .int 2, .int 5] 2
+example : derivedLowerWitnesses sparseTrail 0 (Dom.ofList [.int 0, .int 2, .int 5]) 5 = [] := rfl
+example : derivedLowerWitnesses sparseTrail 0 (Dom.ofList [.int 0, .int 2, .int 5]) 2 = [] := rfl
+example : derivedLowerWitnesses ([] : List TrailEntry) 0
+    (Dom.ofList [.int 0, .int 2, .int 5]) 2
     = [0] := rfl
 
 /-! ## 6. PENDING D1-activation expectations (INTERFACES §2.7)
@@ -964,8 +982,8 @@ def checkRedundantDecision : Bool :=
 
 /-- Forced singleton pins are not counted as decisions. -/
 def checkForcedDecisionAccounting : Bool :=
-  (stepDecide rootCfg (.int 0) [] [] (negNe 0 0)).stats.decisions == 0 &&
-  (stepDecide rootCfg (.int 0) [.int 1] [] (negNe 0 0)).stats.decisions == 1
+  (stepDecide rootCfg 0 (.int 0) Dom.empty (negNe 0 0)).stats.decisions == 0 &&
+  (stepDecide rootCfg 0 (.int 0) (Dom.ofList [.int 1]) (negNe 0 0)).stats.decisions == 1
 
 /-- The jump keeps the permanent exhaustion log and records its counters. -/
 def checkRestoredExhaustion : Bool :=
@@ -1002,8 +1020,8 @@ def checkNegativeBounds : Bool :=
 /-- Sparse domains collapse exactly as the removal facts justify. -/
 def checkSparseDomains : Bool :=
   decide (removedValues sparseTrail 0 = [0, 2]) &&
-  decide (derivedLowerWitnesses sparseTrail 0 [.int 0, .int 2, .int 5] 5 = []) &&
-  decide (derivedLowerWitnesses [] 0 [.int 0, .int 2, .int 5] 2 = [0])
+  decide (derivedLowerWitnesses sparseTrail 0 (Dom.ofList [.int 0, .int 2, .int 5]) 5 = []) &&
+  decide (derivedLowerWitnesses [] 0 (Dom.ofList [.int 0, .int 2, .int 5]) 2 = [0])
 
 /-- The P1.1 counterexample: the deduction is selected, its pivot is FALSE
 at the global solution, and the witness solution is a genuine `x ≠ y`. -/

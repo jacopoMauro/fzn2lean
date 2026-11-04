@@ -270,4 +270,98 @@ theorem compileOpt_optimal {m : Model} {p : CompiledProblem DomConstraint}
       have := (key other hs hph i' j (by rw [hsolve]; exact hi') (by rw [hsolve]; exact hj))
       exact (this.2 (hdir ▸ rfl))
 
+/-- **Optimality from a checked source store (PLAN F6 T1).**  The second half
+of `compileOpt_optimal` with the accepted compiled assignment replaced by the
+checker's source store: if the store attains the objective value `v` and no
+accepted compiled assignment satisfies the strict improving bound `v`, then
+the store is a source-level optimal solution. -/
+theorem compileOpt_optimal_of_bound {m : Model} {p : CompiledProblem DomConstraint}
+    {spec : ObjectiveSpec} (hc : compileModelOpt m = .ok (p, spec))
+    (hwf : WellFormed fullSig m) {store : Store}
+    (hsat : Satisfies fullSig fullInterp m store)
+    (hpar : LeanFzn.Semantics.ParamHonest m store) {v : Int}
+    (hobj : m.solve.objective store = some v)
+    (hnone : ∀ b ∈ allAssigns p.domains,
+      accepts (p.addConstraint (spec.improveBound v)) b = false) :
+    IsSolution fullSig fullInterp m store := by
+  obtain ⟨p0, hp0, rfl, hobjOf, hok, hslot⟩ := compileOpt_inv hc
+  obtain ⟨ty, anns, hd, hty⟩ := objVarOkB_decl hok
+  have hwf' := wf_satisfyPart hwf
+  -- any competing store is covered by an accepted assignment reading its
+  -- objective at the slot
+  have hbound : ∀ other : Store, Satisfies fullSig fullInterp m other →
+      LeanFzn.Semantics.ParamHonest m other → ∀ j,
+      m.solve.objective other = some j →
+      ∃ b ∈ allAssigns p0.domains, accepts p0 b = true ∧
+        b[spec.slot]? = some (.int j) := by
+    intro other hs hph j hj
+    obtain ⟨b, hb1, hb2, hb3⟩ := compileOpt_covers hc hwf hs.2 hph
+    refine ⟨b, hb1, hb2, ?_⟩
+    have hx : p0.toStore b spec.var = other spec.var := hb3
+    rw [optToStore_slot hp0 hwf' (m := satisfyPart m) hd hslot b] at hx
+    rw [objective_of_ident hobjOf] at hj
+    cases hr : other spec.var with
+    | none => rw [hr] at hj; simp at hj
+    | some w =>
+        rw [hr] at hj hx
+        cases w with
+        | int k => simp at hj; rw [hj] at hx; exact hx
+        | _ => simp at hj
+  refine ⟨hsat, hpar, ?_, ?_⟩
+  · unfold ObjectiveAttained
+    split
+    · trivial
+    · exact ⟨v, hobj⟩
+    · exact ⟨v, hobj⟩
+  · unfold IsOptimal
+    have key : ∀ other : Store, Satisfies fullSig fullInterp m other →
+        LeanFzn.Semantics.ParamHonest m other → ∀ i' j,
+        m.solve.objective store = some i' →
+        m.solve.objective other = some j →
+        (spec.dir = .minimize → i' ≤ j) ∧ (spec.dir = .maximize → j ≤ i') := by
+      intro other hs hph i' j hi' hj
+      have hi'v : i' = v := by rw [hobj] at hi'; exact (Option.some.inj hi').symm
+      rw [hi'v]
+      obtain ⟨b, hb1, hb2, hb3⟩ := hbound other hs hph j hj
+      have hn : accepts (p0.addConstraint (spec.improveBound v)) b = false :=
+        hnone b hb1
+      constructor
+      · intro hdir
+        refine Classical.byContradiction fun hlt => ?_
+        have hlt' : j ≤ v - 1 := by omega
+        have hsat : (spec.improveBound v).satisfiedB b = true := by
+          rw [DomConstraint.satisfiedB_iff]
+          simp only [ObjectiveSpec.improveBound, hdir, DomConstraint.SatisfiedBy]
+          exact ⟨j, hb3, hlt'⟩
+        have : accepts (p0.addConstraint (spec.improveBound v)) b = true := by
+          simp only [accepts, CompiledProblem.addConstraint, List.all_append,
+            List.all_cons, List.all_nil, Bool.and_true, Bool.and_eq_true]
+          exact ⟨hb2, hsat⟩
+        rw [hn] at this
+        exact Bool.false_ne_true this
+      · intro hdir
+        refine Classical.byContradiction fun hlt => ?_
+        have hlt' : v + 1 ≤ j := by omega
+        have hsat : (spec.improveBound v).satisfiedB b = true := by
+          rw [DomConstraint.satisfiedB_iff]
+          simp only [ObjectiveSpec.improveBound, hdir, DomConstraint.SatisfiedBy]
+          exact ⟨j, hb3, hlt'⟩
+        have : accepts (p0.addConstraint (spec.improveBound v)) b = true := by
+          simp only [accepts, CompiledProblem.addConstraint, List.all_append,
+            List.all_cons, List.all_nil, Bool.and_true, Bool.and_eq_true]
+          exact ⟨hb2, hsat⟩
+        rw [hn] at this
+        exact Bool.false_ne_true this
+    rcases objectiveOf_cases hobjOf with ⟨anns', hsolve, hdir⟩ | ⟨anns', hsolve, hdir⟩
+    · rw [hsolve] at hobj ⊢
+      intro other i' j hs hph hi' hj
+      have := (key other hs hph i' j (by rw [hsolve]; exact hi')
+        (by rw [hsolve]; exact hj))
+      exact (this.1 (hdir ▸ rfl))
+    · rw [hsolve] at hobj ⊢
+      intro other i' j hs hph hi' hj
+      have := (key other hs hph i' j (by rw [hsolve]; exact hi')
+        (by rw [hsolve]; exact hj))
+      exact (this.2 (hdir ▸ rfl))
+
 end LeanFzn.Compiler

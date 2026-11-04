@@ -1,32 +1,17 @@
 /-
-File: LeanFzn/Cli/Main.lean
-
-Purpose:
-  CLI entry point (`leanfzn`) exposing the verified front door
-  (`check`) and the certified LCG LeanFzn.Solver (`solve`).
-
-Dependencies:
-  LeanFzn (FznCheck.checkModelSolution, wellFormedFastB),
-  LeanFzn.Integration.CertifiedSolve (solveCertified, emitCertifiedSolution).
-
-Why:
-  The executable's two faces are model/solution validation for
-  `check`, and the certified sat/unsat verdicts of `solve` (source
-  level SAT/UNSAT theorems: `solveCertified_sat_correct` /
-  `solveCertified_unsat_correct`), with emitted solution text.
-
-DAG:
-  LeanFzn + LeanFzn/Compiler/Cli -> Main -> leanfzn executable
+Purpose: Public parser/checker CLI and Core-only solver command.
+Dependencies: Parser, runtime Checker, common flags and Integration.Public.Driver.
+DAG: shared language tools + Core public API -> Cli.Main -> leanfzn.
+The list-based solver is isolated under Legacy and is never dispatched here.
 -/
 
-import LeanFzn.Integration.LcgOptimize
 import LeanFzn.Parser.Parser
-import LeanFzn.Checker.Check
-import LeanFzn.Integration.CertifiedSolve
-import LeanFzn.Integration.Optimize
+import LeanFzn.Checker.Runtime.Check
+import LeanFzn.Integration.Config.Parse
+import LeanFzn.Integration.Public.Driver
 
 namespace LeanFzn.Cli
-open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
+open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 
 
 open LeanFzn
@@ -34,7 +19,7 @@ open LeanFzn
 /-- The one-line usage summary, printed on argument-level errors. -/
 private def usageString : String :=
   "usage: leanfzn [FILE|-] | leanfzn check MODEL.fzn SOLUTION.txt | \
-  leanfzn solve [--certified] FILE|-"
+  leanfzn solve [OPTIONS] FILE|-"
 
 private def readFileArg (path : String) : IO (Except String String) := do
   try
@@ -140,125 +125,26 @@ private def runCheck (modelPath solPath : String) : IO UInt32 := do
         IO.println (if n == 1 then "solution accepted" else s!"all {n} solutions accepted")
         return 0
 
-/-! ## The `solve` subcommand
+/-! ## The Core-only `solve` command
 
-Runs `LeanFzn.Integration.solveCertified`: compile the finite int/bool fragment and
-propagate and learn clauses before splitting its explicit pending frontier.
-Both SAT and parameter-honest
-UNSAT have kernel-checked source-level proofs. The traversal is FUEL-FREE:
-termination is kernel-checked by the frontier-cost measure, so an accepted
-finite model always receives a verdict — there is no search budget and
-no fuel-exhaustion `unknown` outcome.
-
-`--certified` is a temporary accepted alias (the command is
-certified with or without it); it exists to keep old invocations
-working and will be removed in a later release.  No other LeanFzn.Solver
-flags are accepted.
-
-A `sat` text is printed exactly as the verified emitter produced it
-(it ends with the `----------` separator, the FlatZinc convention).
-Exit codes:
-
-* `0` — a solution was found (SAT soundness:
-  `solveCertified_sat_correct`, multi-value domains included);
-* `1` — unsatisfiable: `=====UNSATISFIABLE=====` on stdout (the
-  FlatZinc convention; multi-value domains included);
-* `2` — not well-formed: no verdict (a statically malformed
-  model), reason on stderr; also usage/IO/parse errors;
-* `3` — unsupported: model outside the certified gate (empty or
-  non-int/bool-viewed domains, or compilation failure), reason on
-  stderr.
+Satisfaction, linear optimization and seeded optimization use only the array
+engine. A Core give-up is explicit unknown/incomplete (exit 4), retaining
+already streamed incumbents. Completion markers require certified completion.
+Kernel-only options and `--engine=kernel` are usage errors; no option silently
+selects another engine. The preserved old API lives in LeanFzn/Legacy.
 -/
 
-/-- Parse the `solve` argument list: the optional `--certified` alias
-    plus the source argument (file, `-`, or stdin via absence). -/
-private def parseSolveFlags (args : List String) :
-    Except String (List String) :=
-  let rec go : List String → Except String (List String)
-    | [] => .ok []
-    | "--certified" :: rest => go rest
-    | arg :: rest =>
-        if arg.startsWith "--" then
-          .error s!"unknown option '{arg}'"
-        else
-          match go rest with
-          | .ok srcArgs => .ok (arg :: srcArgs)
-          | .error e => .error e
-  go args
-
-/-- Optimization models: certified branch-and-bound over the certified
-    chronological solver, streamed (`optimizeStream`, theorem
-    `optimizeStream_eq` ties its emissions to the pure run's
-    solutions).  Each improving solution is printed followed by
-    `----------` as soon as it is found; `==========` follows once the
-    last improving bound is certified infeasible (optimality, theorem
-    `optimizeCertified_optimal`); a model with no solution prints
-    `=====UNSATISFIABLE=====` (`optimizeCertified_unsat`).  Exit codes as
-    for satisfy models; 3 if the run could not complete. -/
-private def runOptimize (model : Model) : IO UInt32 := do
-  match ← LeanFzn.Integration.optimizeStream LeanFzn.Integration.lcgSolver model
-      (fun store => do
-        IO.println (LeanFzn.Integration.emitCertifiedSolution model store)
-        -- PLAN E3: FLUSH after every improving solution. Without it the
-        -- stdout buffer is lost when the process is killed (e.g. by
-        -- `timeout`), so no `----------` is ever visible before the kill
-        -- (the E3 check failed with 0 lines on a 5 s-killed run).
-        (← IO.getStdout).flush) with
-  | .error reason =>
-      IO.eprintln s!"leanfzn: {reason}"
-      return 3
-  | .ok summary =>
-      let run := summary.run
-      if run.complete then
-        if run.sols.isEmpty then
-          IO.println "=====UNSATISFIABLE====="
-          return 1
-        else
-          IO.println LeanFzn.Integration.optimumMarker
-          return 0
-      else
-        IO.eprintln "leanfzn: optimization incomplete: the model is outside the certified gate"
-        return 3
-
-/-- The `solve` subcommand: parse the model, run the certified front
-    door, and report the verdict. -/
 private def runSolve (args : List String) : IO UInt32 := do
-  match parseSolveFlags args with
+  match LeanFzn.Core.parseSolveFlags args with
   | .error e =>
       IO.eprintln s!"leanfzn: {e}"
       return 2
-  | .ok srcArgs =>
+  | .ok (o, srcArgs) =>
       match ← parseModelSource srcArgs with
       | .error e =>
           IO.eprintln s!"leanfzn: {e}"
           return 2
-      | .ok model =>
-          if LeanFzn.Checker.wellFormedFastB model then
-           match model.solve with
-           | .minimize _ _ => runOptimize model
-           | .maximize _ _ => runOptimize model
-           | .satisfy _ =>
-            match LeanFzn.Integration.solveCertified model with
-            | .sat store =>
-                -- emit the satisfying assignment as a solution text
-                let text := LeanFzn.Integration.emitCertifiedSolution model store
-                IO.println text
-                return 0
-            | .unsat =>
-                IO.println "=====UNSATISFIABLE====="
-                return 1
-            | .unknown reason =>
-                -- FUEL-FREE: unreachable on the active path (the
-                -- traversal terminates by the kernel-checked
-                -- measure); retained only for the result type.
-                IO.eprintln s!"leanfzn: internal: {reason}"
-                return 2
-            | .unsupported reason =>
-                IO.eprintln s!"leanfzn: {reason}"
-                return 3
-          else
-            IO.eprintln "leanfzn: model is not well-formed"
-            return 2
+      | .ok model => LeanFzn.Core.runModel o model
 
 def main (args : List String) : IO UInt32 := do
   match args with
