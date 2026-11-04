@@ -1139,7 +1139,7 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 -- certify the scheduled route — now the PUBLIC route `lcgRun` — against the
 -- baseline kernel alone (the `solveCompiledLcg*` statements are unchanged).
 -- Measured: 1.32x FASTER than the baseline on the 43-instance battery with
--- 84% of propagator runs eliminated (Tests/E1/SchedCounts).
+-- 84% of propagator runs eliminated (retired SchedCounts diagnostic).
 #print axioms LeanFzn.Solver.Propagation.PropSchedulerOK.init
 #print axioms LeanFzn.Solver.Propagation.TableOK.of_props_eq
 #print axioms LeanFzn.Solver.Propagation.PropLocal.of_props_eq

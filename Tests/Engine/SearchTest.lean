@@ -6,10 +6,10 @@ Run with:
 
 The checks are executable observations on small compiled problems; the
 contractual guarantees are the theorems `coreSolve_sat`, `coreSolve_unsat`,
-`search_sat`/`search_unsat`, and the `solveSearchConfigCore_*` seam
-theorems.
+`search_sat`/`search_unsat`. Public adapter behavior is checked separately in
+`Tests/Integration/Public/Runtime.lean`.
 -/
-import LeanFzn.Legacy.Integration.CoreSolve
+import LeanFzn.Engine.Search
 
 open LeanFzn LeanFzn.Compiler LeanFzn.Semantics LeanFzn.Solver.Core
 open LeanFzn.Solver.Propagation
@@ -66,12 +66,6 @@ def verdictName : CoreResult → String
   | .unsat => "unsat"
   | .gaveUp => "gaveUp"
 
-def sameResult : SearchResult → SearchResult → Bool
-  | .sat a, .sat b => a == b
-  | .unsat, .unsat => true
-  | .unknown, .unknown => true
-  | _, _ => false
-
 /-- Check that a Core SAT answer is a member of the box and is accepted. -/
 def checkSatAnswer (label : String) (p : CompiledProblem DomConstraint)
     (a : List Value) : IO Unit := do
@@ -115,27 +109,6 @@ def run : IO UInt32 := do
   match coreSolveFull malformedProblem config coreFuel with
   | (.gaveUp, _) => pure ()
   | (r, _) => fail s!"malformed: unexpected verdict {verdictName r}"
-
-  -- 6a. The seam agrees with Core when Core decides SAT.
-  let satCore := coreSolve satProblem config coreFuel
-  let satSeam := solveSearchConfigCore satProblem config
-  check "seam: SAT verdict agrees with core"
-    (match satCore, satSeam with
-     | .sat a, .sat b => (allAssigns satProblem.domains).contains b &&
-         accepts satProblem b && a == b
-     | _, _ => false)
-  -- 6b. The seam agrees with Core when Core decides UNSAT.
-  check "seam: UNSAT verdict agrees with core"
-    (match coreSolve rootUnsatProblem config coreFuel, solveSearchConfigCore rootUnsatProblem config with
-     | .unsat, .unsat => true
-     | _, _ => false)
-  -- 6c. On a Core give-up the seam is exactly the kernel fallback.
-  check "seam: gaveUp falls back to kernel"
-    (match coreSolve malformedProblem config coreFuel with
-     | .gaveUp =>
-         sameResult (solveSearchConfigCore malformedProblem config)
-           (solveSearchConfig malformedProblem config)
-     | _ => false)
 
   IO.println "SearchTest: OK"
   return 0

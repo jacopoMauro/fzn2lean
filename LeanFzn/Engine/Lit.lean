@@ -13,7 +13,7 @@ Purpose:
   table invariant `LitTable.TableWF` ties `lits` to `lookup`; it is a
   runtime/completeness invariant, never a soundness obligation.
 
-  Soundness contract (docs/N0-core-design.md §4, invariant E): every
+  Soundness contract: every
   `EClause` stored or used as a reason is entailed by the compiled
   problem.  This file proves the contract's reusable consequences:
   resolution (`resolve_entailed`), refutation by an entailed empty clause

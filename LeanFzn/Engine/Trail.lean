@@ -12,7 +12,7 @@ changed.
 The linearity rule is respected: every operation threads the state and
 returns it; no copy of `doms`/`trail` is retained.  The transient reason
 store `st.reasons` is append-only for the lifetime of one solve and is
-**not** truncated by `backjump` (R6(a) in `docs/N0-core-design.md` §15):
+**not** truncated by `backjump`:
 reason ids are allocated in propagator-batch order, not trail order, so a
 surviving entry can reference a larger id than a popped one.
 
@@ -131,7 +131,7 @@ namespace LeanFzn.Engine
 
 The change lists are strictly increasing positions.  Sorting is a
 representation invariant used by the binary search; it carries no
-soundness obligation (`docs/N0-core-design.md` §7). -/
+soundness obligation. -/
 
 /-- A strictly increasing array of naturals. -/
 def SortedList (a : Array Nat) : Prop := a.toList.Pairwise (· < ·)
@@ -511,7 +511,7 @@ theorem _root_.Array.getD_push_eq {α : Type} (a : Array α) (v d : α) :
 
 `TrailInv` collects the trail/level/change-index shape facts later modules
 consume.  It is a representation invariant only: a violation can cost speed
-or force `gaveUp`, never a wrong claim (`docs/N0-core-design.md` §4).
+or force `gaveUp`, never a wrong claim.
 
 * `levelStart[0] = 0` and `levelStart.size = level + 1`;
 * `levelStart` is strictly increasing and bounded by the trail size;

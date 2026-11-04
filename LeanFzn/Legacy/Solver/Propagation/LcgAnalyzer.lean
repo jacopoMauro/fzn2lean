@@ -3,7 +3,7 @@ File: LeanFzn/Solver/Propagation/LcgAnalyzer.lean
 
 Purpose (PLAN task R1a): the EXECUTABLE LCG first-UIP analyzer the
 scheduler runs (`analyzeAtAllowance`, `ConflictResolution.lean`), with the
-three R0 analyzer repairs ported from the prototype `Tests/UIP/LcgProto.lean`:
+three R0 analyzer repairs ported from the prototype `Tests/Legacy/Solver/UIP/LcgProto.lean`:
 
   root   a working-clause literal that is false under the ORIGINAL domains
          (`litFalseAtRoot`) is dropped like a level-0 falsifier;

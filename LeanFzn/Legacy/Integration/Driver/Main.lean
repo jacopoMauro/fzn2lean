@@ -329,8 +329,7 @@ private def runPortfolioModel (o : SearchConfig) (model : Model) : IO UInt32 := 
 incumbent immediately, before the next probe, so an externally killed process
 still prints the certified incumbents it found; the process prints no marker
 until the run returns complete.  A missing root-bound fallback is the complete
-linear route and is emitted when that run returns (adapter note
-`docs/F4-bisect-design.md` §7–§8). -/
+linear route and is emitted when that run returns. -/
 private def runBisectModel (o : SearchConfig) (model : Model) : IO UInt32 := do
   match ← optimizeBisectStream o model (emitOptimizationSolution model) with
   | .error reason =>

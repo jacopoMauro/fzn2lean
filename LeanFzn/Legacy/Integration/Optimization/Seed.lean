@@ -59,8 +59,7 @@ structure SeedDb (orig : List Domain) where
   aligned : DatabaseAligned orig clauses
   /-- the previous round's incumbent, carried for a future solution-guided
       value presentation (`--val=incumbent`).  The F4 configured seeded entry
-      runs one fixed presentation and does not consult it yet (the exact gap
-      in `docs/F4-seeded-adapter.md`); it is heuristic metadata and never
+      runs one fixed presentation and does not consult it; it is heuristic metadata and never
       consulted by any soundness or coverage proof. -/
   prev : Option (List Value) := none
 

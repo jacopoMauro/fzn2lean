@@ -253,7 +253,7 @@ exactly assignments covered by the frame, and its soundness under the
 site's deadness evidence `∀ a, leaf a = true → FrameCovers f a → False`
 is `DeadRegion.byFrame_sound`. The region stays computable, so
 `stableStep`/`conflictStep`/`backjumpStep`/`schedulerNext` remain
-computable and `Tests.UIP.OracleFixtures` still compiles its `main`. -/
+computable and `Tests.Legacy.Solver.UIP.OracleFixtures` still compiles its `main`. -/
 def branchRegion (cfg : SchedulerConfig leaf) : DeadRegion :=
   DeadRegion.byFrame cfg.branch.frame
 

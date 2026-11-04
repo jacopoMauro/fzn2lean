@@ -24,7 +24,7 @@ with initializers — including every array variable, which the grammar
 pins to `= <array-literal>` — are never searched: the solution
 checker's store completion (`LeanFzn.Checker.Solution.completedStore`)
 derives their values from the initializers, exactly as it does for a
-LeanFzn.Solver-produced solution string (see `Tests/Gecode.lean`, whose alias
+LeanFzn.Solver-produced solution string (see `Tests/Semantics/Gecode.lean`, whose alias
 arrays `ab = [b1, b2, ...]` are completed from the scalars).
 
 The extraction is faithful to the checker's domain semantics:

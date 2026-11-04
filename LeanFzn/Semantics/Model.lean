@@ -291,7 +291,7 @@ structure WellFormed (sig : SigEnv) (m : Model) : Prop where
 A boolean-valued function `wellFormedB` mirroring `WellFormed`, proved
 equivalent to it by `wellFormedB_iff`.  All comparisons go through
 `decide`, so the checker computes on parsed models; the tests in
-`Tests/WellFormed.lean` run it. -/
+`Tests/Semantics/WellFormed.lean` run it. -/
 
 /-- Boolean identifier membership, comparing names. -/
 def memIdentB (x : Ident) : List Ident → Bool

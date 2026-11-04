@@ -18,10 +18,9 @@ arguments the F2/F3 linear driver already honours:
 
 `--val=incumbent` is the one documented gap: the presentation depends on the
 previous round's incumbent, while the seeded driver keeps one fixed box.  The
-seeded entry therefore uses the first-round (activity) presentation for it;
-see `docs/F4-seeded-adapter.md`.
+seeded entry therefore uses the first-round (activity) presentation for it.
 
-Claim discipline (PLAN §2.1): every emitted solution comes from a certified
+Claim discipline: every emitted solution comes from a certified
 SAT result of the current bounded problem (`optimizeStreamSeedConfig_eq` and
 `optimizeSeedConfig_solution_sound`); `run.complete = true` means the strict
 improving bound of the last printed solution was certified infeasible

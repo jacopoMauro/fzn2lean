@@ -121,7 +121,7 @@ its start. The threaded form (`nextPruningEventQueuedSched`, proved by
 `scanQueue_event_eq`/`scanQueue_OK`) plus the `queuePolicy` switch is on the
 PUBLIC route (`schedulerNextSchedActive` -> `promptOf`).
 
-MEASURED (this session, same tree, alternating runs; `Tests/E1/DbScanCounts`):
+MEASURED (this session, same tree, alternating runs; `Tests/Legacy/Benchmarks/DbScanCounts`):
 * 43-instance battery: **147 ms queued vs 222-226 ms stamp** (the `sched`
   best-window totals, reps=3), and the independent queue twin performs
   **10,533 propagator runs vs the stamp twin's 10,733** on the same 2,167

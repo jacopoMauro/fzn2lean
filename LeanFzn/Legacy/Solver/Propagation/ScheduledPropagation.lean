@@ -43,7 +43,7 @@ History: P1 keyed the table by the CONTENT of the watched slots. P2 replaces
 the hot-path content compare (`stampEqB`, O(domain size) per watched slot)
 by the per-slot version compare (`stampNatEqB` on `watchVersions`, O(1) per
 watched slot). The content-projection functions remain for the legacy
-counting twin (`Tests/E1/SchedCounts.lean`); the wired path uses
+counting twin (the retired SchedCounts diagnostic); the wired path uses
 `watchVersions`. The version vector and the changed-slot extraction are
 restated locally (`SchedVersions`, `frameChanged`) instead of importing
 `SlotVersions`, which sits ABOVE this module (`ScheduledFamilies ->
@@ -831,7 +831,7 @@ certified equivalence below is unaffected) and the liveness gates are the
 certified ones; only the propagator scan is scheduled. The watched-scan
 candidate (PLAN K3) was measured a NO-GO on the K3 panel, so the default keeps
 `scanDatabaseFast`; the test-only twin used for that measurement lives in
-`Tests/E1/HeurTiming.lean`. -/
+`Tests/Legacy/Benchmarks/HeurTiming.lean`. -/
 def nextPruningEventSched (original : List Clause) (props : List Propagator)
     (sched : PropScheduler) (f : BranchFrame) (db : List Clause) :
     PruningEvent × PropScheduler :=

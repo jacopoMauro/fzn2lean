@@ -2,8 +2,7 @@
 
 Updated 2026-11-04 for the Core-only public API. Actual imports and
 `lakefile.toml` are authoritative. [README.md](README.md) describes commands;
-[PLAN.md](PLAN.md) records the ordered Core performance work;
-[audits/history/](audits/history/) preserves superseded plans and measurements.
+[PLAN.md](PLAN.md) records the ordered Core performance work.
 
 ## Public dependency graph
 
@@ -162,10 +161,32 @@ No list-based completeness fallback is used to hide missing Core coverage now.
 
 ## Validation and maintenance
 
+`Tests/` mirrors `LeanFzn/`: Parser, Semantics, Checker, Compiler, Engine and
+Integration. Engine propagator tests are under `Tests/Engine/Props/`; public
+optimizer/driver tests are under `Tests/Integration/Public/`. `Tests/Cli/`
+contains subprocess CLI tests, `Tests/Architecture/` checks import boundaries,
+and `Tests/Audits/` checks benchmark result classification. Shared FlatZinc
+regressions live in `Tests/Fixtures/Solver/`.
+
+The source audit masks nested comments and strings before rejecting active
+`sorry`, `admit` or user axiom declarations, avoiding the old CI grep's false
+positives on documentation.
+
+Historical integration and list-solver tests live under
+`Tests/Legacy/{Integration,Solver/Chronological,Solver/Propagation,Solver/UIP}`.
+Retained old profiling tools live in `Tests/Legacy/Benchmarks/`. The differential
+comparison tool is `Tests/Legacy/Integration/CoreDifferential.lean` because it
+deliberately imports both engines. Native executable target names remain stable.
+
+The Lake `Tests` library contains current tests only; `Tests.Legacy` is explicit.
+The boundary audit also checks test imports, preventing current tests from
+depending on Legacy directly or through historical test helpers. Details and
+commands are in [Tests/README.md](Tests/README.md).
+
 `tests_core_only` checks Core defaults, option rejection, SAT/UNSAT,
 unknown on sparse domains/zero fuel, linear and seeded min/max, clause reuse,
 independent checker acceptance and retention of a streamed incumbent when a
-later round is incomplete. `audits/test_core_only_cli.py` checks exit codes,
+later round is incomplete. `Tests/Cli/test_solve.py` checks exit codes,
 markers, statistics and witness text. `Tests/Architecture/test_boundaries.py`
 regresses nested-comment import scanning, strings, missing modules and cycles.
 
@@ -184,10 +205,7 @@ incomplete-with-incumbent (exit 4) are separate outcomes, while false terminal
 markers are errors. The quick gate requires every case either to complete
 correctly or match its explicit incomplete allowance, with every witness checked.
 
-The Core-only acceptance gate passed on 2026-11-04 (`tmp/gates/core-only-accept-20261104T081225Z/`):
-52 runnable executables; a 52-instance battery and 45-instance cross-check;
-all 3,331 theorem axiom profiles; Core/legacy differential checks; 453 modules
-with no import cycles or production Legacy imports; 3,000 harness fuzz instances
-with zero wrong/bound/witness failures; five CLI regression tests and ten import/
-outcome regression tests. The quick suite reports 10 completed cases plus the
-one explicitly allowed unknown, with all eight witness checks accepted.
+Current validation results and the next performance tasks are recorded in
+[PLAN.md](PLAN.md). Gate logs and generated benchmark reports belong under
+ignored `tmp/`; input manifests, regression fixtures and audit programs remain
+in the repository.

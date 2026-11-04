@@ -7,7 +7,7 @@ Purpose:
   definitions (the N0 design freeze).  All soundness statements live in
   the later `LeanFzn.Engine.*` modules and are stated against `EClause`.
 
-Design note: docs/N0-core-design.md (frozen 2026-10-30).
+Architecture: see code-structure.md; actual types and imports are authoritative.
 
 Dependencies:
   - LeanFzn.Compiler.Compile: `CompiledProblem`, `DomConstraint`,
@@ -204,7 +204,7 @@ structure StoredClause (p : CompiledProblem DomConstraint) (T : LitTable) where
 `clauses` is the slot array (holes are `deleted`); `watch[i]` is the list
 of clause ids currently watching packed literal index `i`; `free` lists
 reusable deleted slots; `live` is the number of non-deleted clauses.
-The watch scheme is frozen in docs/N0-core-design.md §5. -/
+Watch preservation is proved in Engine.Clauses. -/
 structure ClauseDB (p : CompiledProblem DomConstraint) (T : LitTable) where
   clauses : Array (StoredClause p T) := #[]
   watch : Array (Array Nat) := #[]
@@ -228,7 +228,7 @@ structure EngineStats where
 /-- The complete mutable engine state.  `p` and `T` are fixed for the
 lifetime of a `coreSolve` call; `table` is the live append-only intern
 table.  The state is threaded linearly: no operation copies `doms` or
-`trail` (see the linearity rule in docs/N0-core-design.md). -/
+`trail`. -/
 structure EngineState (p : CompiledProblem DomConstraint) (T : LitTable) where
   /-- Live append-only literal intern table. -/
   table : LitTable
@@ -272,8 +272,8 @@ structure EngineState (p : CompiledProblem DomConstraint) (T : LitTable) where
 
 /-! ## Verdicts -/
 
-/-- Core's verdict.  `gaveUp` makes no claim; the public seam falls back
-to the kernel. -/
+/-- Core's verdict. `gaveUp` makes no claim; the public API reports unknown
+or incomplete optimization without a fallback. -/
 inductive CoreResult where
   | sat (a : List Value)
   | unsat

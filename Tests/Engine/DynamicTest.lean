@@ -9,7 +9,6 @@ The synthetic instances are evaluated in-process through the certified
 `coreSolve` entry; the checks are deterministic (no wall-clock caps).
 Benchmark strength is measured by the matrix runner, not by this test.
 -/
-import LeanFzn.Legacy.Integration.CoreSolve
 import LeanFzn.Engine.Search
 
 open LeanFzn LeanFzn.Compiler LeanFzn.Semantics LeanFzn.Solver.Core

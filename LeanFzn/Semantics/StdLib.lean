@@ -33,7 +33,7 @@ below.
 Interpretations are written to be decidable wherever practical: computable
 Boolean helpers (`Value.eqB`, `valuesAllDifferent`, `dotProduct`, …) are
 used instead of quantifiers over infinite domains, so the tests in
-`Tests/StdLib.lean` can evaluate them with `decide`.
+`Tests/Semantics/StdLib.lean` can evaluate them with `decide`.
 
 The set predicates whose meaning is inherently extensional (`set_eq`,
 `set_subset`, `set_union`, `set_intersect`, `set_diff`, the set

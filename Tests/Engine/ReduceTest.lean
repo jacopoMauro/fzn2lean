@@ -6,7 +6,7 @@ schedule, and small end-to-end runs with reduction forced on.
 Run with:
   lake env lean --run Tests/Engine/ReduceTest.lean
 -/
-import LeanFzn.Legacy.Integration.CoreSolve
+import LeanFzn.Engine.Search
 
 open LeanFzn LeanFzn.Compiler LeanFzn.Semantics LeanFzn.Solver.Core
 open LeanFzn.Solver.Propagation

@@ -21,10 +21,9 @@ Purpose (PLAN F5): the BUDGETED, RESTARTED and PORTFOLIO seeded optimizer.
   that may claim optimality/UNSAT.  `portfolioRun_inv` proves soundness,
   strict improvement, final-bound and final-claim facts.
 
-Claim discipline (PLAN §2.1): an exhausted probe makes NO claim; only the
-final complete route sets `PortfolioRun.complete`.  The adapter note
-`docs/F5-budget-adapter.md` records the exact CLI mapping and the gaps (no
-trail-reset diversification until F6/F7, deterministic probe overhead).
+Claim discipline: an exhausted probe makes no claim; only the final complete
+route sets `PortfolioRun.complete`. These historical budget/portfolio adapters
+are not part of the public Core-only CLI.
 
 DAG: LcgSeedBudget + OptimizeSeed + LcgSeedConfig -> this file -> CLI adapter.
 NO `sorry`, NO custom axiom.

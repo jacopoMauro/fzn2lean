@@ -35,7 +35,7 @@ REGION COMPUTABILITY NOTE (C1 report item; RESOLVED by the C2b-int
 repair). The classical frame region `DeadRegion.ofFrame`
 (`{ mem := fun a => decide (FrameCovers f a) }` under
 `Classical.propDecidable`) is not computable: the runtime registration
-sites must stay computable because `Tests.UIP.OracleFixtures` evaluates
+sites must stay computable because `Tests.Legacy.Solver.UIP.OracleFixtures` evaluates
 `conflictStep` in its compiled `main`. This module now ALSO provides
 `DeadRegion.byFrame`, a COMPUTABLE frame region: its membership runs the
 in-cone structural equality `valueEqBLocal`/`valuesEqBLocal` over the
@@ -354,7 +354,7 @@ theorem DeadRegion.byAllTrue_sound {leaf : Assignment → Bool}
 
 `DeadRegion.ofFrame` decides `FrameCovers` classically and is therefore
 usable in proofs only. The runtime registration sites must stay
-COMPUTABLE (`Tests.UIP.OracleFixtures` evaluates `conflictStep` in its
+COMPUTABLE (`Tests.Legacy.Solver.UIP.OracleFixtures` evaluates `conflictStep` in its
 compiled `main`), so this section supplies a computable membership test
 with a self-contained in-cone soundness proof. -/
 

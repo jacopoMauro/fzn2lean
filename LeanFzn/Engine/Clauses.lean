@@ -2,7 +2,7 @@
 File: LeanFzn/Engine/Clauses.lean
 
 N5: the two-watched-literal clause database, canonicalisation, and reason
-lookup.  The watch scheme is frozen in `docs/N0-core-design.md` §5.
+lookup.  The watch scheme is specified by the invariants in this module.
 
 This module owns:
 

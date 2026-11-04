@@ -422,7 +422,7 @@ the results of the two static gates (`firstUnsupported`,
 so a batch of solution checks skips name dispatch and gate re-scans.
 The dynamic store construction (`completedBox`) is per solution, as it
 must be.  The prepared path returns exactly the `checkModelSolution`
-outcome on every input (`Tests/Fast.lean` cross-checks both doors).
+outcome on every input (`Tests/Checker/Fast.lean` cross-checks both doors).
 
 The store layer follows the incremental-store design (construction per
 leaf): the parameter map and the initializer-dependency *plan* are

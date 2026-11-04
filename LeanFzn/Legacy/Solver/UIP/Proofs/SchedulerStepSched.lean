@@ -175,7 +175,7 @@ theorem nextPruningEventSched_OK {original : List Clause} {props : List Propagat
 /-- The runtime policy bound: the queued prompt's per-step extraction is
 O(frame mass); above this mass the watch-stamp scan is preferred. Both are
 proved equal to the certified event, so this is a pure performance knob
-(tuned by `Tests/E1/DbScanCounts`). -/
+(tuned by `Tests/Legacy/Benchmarks/DbScanCounts`). -/
 def queueMassLimit : Nat := 4096
 
 /-- Unit-count cutoff for the queue policy. The stamp path's per-unit

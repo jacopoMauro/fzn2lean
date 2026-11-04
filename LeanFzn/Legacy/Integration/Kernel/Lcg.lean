@@ -147,7 +147,7 @@ transition and its table off a single `nextPruningEventSched`; the terminal
 continuation re-reads that same event), and the stamp test is a first-order
 recursion — so the measured effect on the P1 battery is a WIN: 84% of
 propagator runs eliminated and ~1.32x faster than the certified baseline
-(`Tests/E1/SchedCounts.lean`, 43 instances, reps=3: 14.8s vs 19.5s). It IS
+(the retired SchedCounts diagnostic, 43 instances, reps=3: 14.8s vs 19.5s). It IS
 the public route (`lcgRun`), certified against the baseline kernel by
 `lcgRunSched_eq_solve` alone. -/
 def lcgRunSched (p : CompiledProblem DomConstraint)

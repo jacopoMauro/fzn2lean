@@ -6,8 +6,8 @@ of the learned-database scan chain `scanDatabase` -> `clauseRemaining` ->
 `literalImpossible`, with the slot index hoisted out of the per-literal loop
 and a per-slot possibility summary deciding the common literal shapes in O(1).
 
-Measured hot spots (E1 instrumentation, `Tests/E1/ScanCounts.lean` +
-`Tests/E1/DbScanCounts.lean`): the chain is the single largest component of
+Measured hot spots (E1 instrumentation, the retired ScanCounts diagnostic +
+`Tests/Legacy/Benchmarks/DbScanCounts.lean`): the chain is the single largest component of
 the step cost (~51% of the estimated per-step time on the harness battery).
 The cost is per LITERAL of every VISITED clause of the learned database:
 

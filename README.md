@@ -81,7 +81,7 @@ The accepted constraint families are `int_eq`, `int_ne`, `int_le`, `int_lt`,
 `int_plus`, `int_times`, `int_min`, `int_max`, `array_int_minimum`, `array_int_maximum`
 (including supported literal-operand shapes), `int_abs`, `int_div`, `int_mod`,
 `int_lin_eq`, `int_lin_le`, `int_lin_ne`, `bool_not`, `bool_and`, `bool_or`,
-`bool_eq`, `bool2int`, `bool_clause`, `array_bool_and`, `array_int_element`,
+`bool_eq`, `bool_xor`, `bool2int`, `bool_clause`, `array_bool_and`, `array_int_element`,
 `array_var_int_element`, `array_var_bool_element`, the reified forms
 `int_eq_reif`, `int_le_reif`, `int_ne_reif`, `int_lin_eq_reif`,
 `int_lin_le_reif`, `int_lin_ne_reif`, and `all_different`. Constant-set `set_in` and supported `set_in_reif`
@@ -113,7 +113,7 @@ integer literal in its place is accepted.
 | General parameter expressions | Literal integer/Boolean arrays and supported constant-set membership forms are supported; arbitrary expression evaluation remains outside compilation. |
 | Predicate declaration items | The compiler rejects predicate items and translates only its built-in constraint families. |
 | Empty variable domains | The public solver gate requires every domain to be nonempty. It does not currently turn an empty domain into a certified UNSAT result. |
-| `bool_xor`, general set constraints and other globals | Only implemented argument patterns and constraint translations have a certified solver route. Constant-set membership is supported; set-valued search slots are not. |
+| General set constraints and other globals | Only implemented argument patterns and constraint translations have a certified solver route. Constant-set membership is supported; set-valued search slots are not. |
 | Propagation strength | Core registers dedicated propagators for selected arithmetic, linear, order, Boolean and element shapes, with a generic checking propagator for remaining shapes. A compiled constraint may therefore be checked without strong domain pruning. |
 | Other argument forms of the listed predicates | Compilation only covers specific argument patterns; the predicate name alone does not guarantee acceptance. |
 
@@ -250,7 +250,10 @@ flushed immediately; external timeouts can therefore retain partial progress.
 ## Tests and audits
 
 The ordered solver performance tasks and current status are in
-[PLAN.md](PLAN.md). Superseded plans are kept in [audits/history/](audits/history/).
+[PLAN.md](PLAN.md). [Tests/README.md](Tests/README.md) maps test suites to the
+source components. Current tests build with `lake build Tests`; historical
+solver tests are isolated under `Tests/Legacy` and build with
+`lake build Tests.Legacy`.
 
 For a focused parser/checker check:
 
