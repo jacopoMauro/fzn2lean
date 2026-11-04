@@ -114,7 +114,7 @@ integer literal in its place is accepted.
 | Predicate declaration items | The compiler rejects predicate items and translates only its built-in constraint families. |
 | Empty variable domains | The public solver gate requires every domain to be nonempty. It does not currently turn an empty domain into a certified UNSAT result. |
 | `bool_xor`, general set constraints and other globals | Only implemented argument patterns and constraint translations have a certified solver route. Constant-set membership is supported; set-valued search slots are not. |
-| Propagation strength | Core registers dedicated propagators for selected arithmetic, linear, order, Boolean and element shapes, with a generic checking propagator for remaining shapes. The kernel has its own explained-propagator registration. Compilation support does not imply equally strong propagation in both engines. |
+| Propagation strength | Core registers dedicated propagators for selected arithmetic, linear, order, Boolean and element shapes, with a generic checking propagator for remaining shapes. A compiled constraint may therefore be checked without strong domain pruning. |
 | Other argument forms of the listed predicates | Compilation only covers specific argument patterns; the predicate name alone does not guarantee acceptance. |
 
 For parsed, well-formed models outside this fragment, `solve` reports an
@@ -248,6 +248,9 @@ SAT output ends with `----------`; UNSAT is printed as
 flushed immediately; external timeouts can therefore retain partial progress.
 
 ## Tests and audits
+
+The ordered solver performance tasks and current status are in
+[PLAN.md](PLAN.md). Superseded plans are kept in [audits/history/](audits/history/).
 
 For a focused parser/checker check:
 

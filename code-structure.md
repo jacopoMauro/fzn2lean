@@ -2,7 +2,8 @@
 
 Updated 2026-11-04 for the Core-only public API. Actual imports and
 `lakefile.toml` are authoritative. [README.md](README.md) describes commands;
-[PLAN.md](PLAN.md) records the active work and historical measurements.
+[PLAN.md](PLAN.md) records the ordered Core performance work;
+[audits/history/](audits/history/) preserves superseded plans and measurements.
 
 ## Public dependency graph
 
@@ -171,10 +172,10 @@ regresses nested-comment import scanning, strings, missing modules and cycles.
 The full gate builds public and Legacy code explicitly, runs the registered
 executables and both regression suites, audits theorem axioms and imports,
 compares Core against the explicit legacy development oracle, fuzzes 3,000
-instances and runs the short performance suite. The old 2026-11-03 gate and
-PLAN benchmark tables describe the earlier combined route. They do not measure
-Core-only decision coverage. Record any new measurements with their own source
-snapshot and budget.
+instances and runs the quick performance suite. Historical gate and benchmark
+records describe their source snapshots; they do not establish current Core-only
+decision coverage. Record new measurements with their own source snapshot and
+budget, following the ordered actions in [PLAN.md](PLAN.md).
 
 Benchmark reports distinguish completed mathematical agreement from explicit
 migration allowances. The known UNSAT nonunit-jump fixture currently returns
