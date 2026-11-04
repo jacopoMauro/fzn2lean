@@ -1,5 +1,9 @@
 # LeanFzn — verified FlatZinc tools in Lean 4
 
+**This project is heavily LLM-generated.** Large language models (LLMs) have
+been used extensively to develop the implementation, Lean proofs, and
+documentation.
+
 LeanFzn provides a parser, a solution checker and a certified finite-domain
 solver for FlatZinc. Shared formal semantics connect parsed models, checked
 solutions and solver results.
@@ -11,18 +15,16 @@ solutions and solver results.
 - **Core solver:** certified array-based finite-domain search with propagation,
   learned clauses, conflict analysis, backjumping and branch-and-bound.
 
-The public `solve` command runs **Core only**. Its default CLI search is
-`--var=act --val=min`. If Core gives up, satisfaction reports unknown and
+By default, the public `solve` command prioritizes variables using
+conflict-driven activity and tries each selected variable's smallest remaining
+allowed value first (`--var=act --val=min`). These options control search order;
+minimization or maximization is specified by the model's `solve` item.
+
+If Core gives up, satisfaction reports unknown and
 optimization reports incomplete, both with exit code 4. Already streamed
 incumbents remain valid; no UNSAT or optimality marker is emitted for an
 incomplete run. Options Core does not implement are usage errors, with no
 implicit engine switching.
-
-The old list-based solver and its fallback adapters are preserved under
-[LeanFzn/Legacy/](LeanFzn/Legacy/README.md) for explicit development use and
-historical certified theorems. They are not imported by the public CLI or Core
-API. Shared domain/constraint semantics and compiler proof foundations remain
-outside Legacy. See [PLAN.md](PLAN.md) for the active work and historical runs.
 
 The language reference is **MiniZinc 2.10.0**, pinned to commit
 `c9f9b649b2a251a40aa427a84d7cce73a8807fea`. See the
@@ -58,8 +60,7 @@ that satisfying store to the values written in the solution and the model's
 parameters. The executable fast entry is proved equivalent to the verified
 entry by `checkModelSolutionFast_eq`.
 
-Supported predicates have executable interpretations proved equivalent to their
-declarative meanings. The checker covers standard arithmetic, Boolean and set
+The checker covers standard arithmetic, Boolean and set
 predicates and supported global constraints. Unknown or unsupported predicates
 produce an explicit unsupported outcome. The predicate definitions and coverage
 lists live in `LeanFzn.Semantics` and `LeanFzn.Checker.Globals`.
@@ -116,8 +117,6 @@ integer literal in its place is accepted.
 | Propagation strength | Core registers dedicated propagators for selected arithmetic, linear, order, Boolean and element shapes, with a generic checking propagator for remaining shapes. The kernel has its own explained-propagator registration. Compilation support does not imply equally strong propagation in both engines. |
 | Other argument forms of the listed predicates | Compilation only covers specific argument patterns; the predicate name alone does not guarantee acceptance. |
 
-These are limits of the current compiler and certified Core implementation;
-changing the search policy does not by itself remove them.
 For parsed, well-formed models outside this fragment, `solve` reports an
 unsupported reason and exits with code 3. Syntax outside the parser's language,
 such as floating-point declarations, instead produces a parse error (exit 2).
@@ -129,19 +128,10 @@ UNSAT from an entailed empty clause. A failed domain conversion, exhausted
 search fuel or internal analysis give-up returns unknown; it never invokes
 the old solver.
 
-Linear and seeded optimization retain solution soundness, strict improvement,
-and optimality/UNSAT guarantees **when `run.complete = true`**. There is no
-unconditional completion guarantee in the new public API. The shared
-`PartialCertSolver` interface supplies SAT/UNSAT soundness without assuming
-that every search decides. Its adapter uses the generic optimizer's false
-completeness gate explicitly; the optimizer still runs and preserves partial
-progress. The old completion theorems are unchanged in Legacy and apply only
-to their preserved legacy definitions.
-
+New optimization solutions are always valid and strictly improving. A completed run additionally proves that its final solution is optimal, or that the model is unsatisfiable if no solution was found. Core may stop incomplete, leaving the best solution found without an optimality guarantee.
 For example, `var {0,1000000}: x; solve satisfy;` currently passes compilation
 but Core cannot convert that wide sparse domain. The public command returns
-unknown (exit 4). Improving this Core coverage is future work; there is no
-hidden fallback masking it. Certification supplies correctness guarantees for
+unknown (exit 4). Certification supplies correctness guarantees for
 returned claims, not practical running-time or decision-coverage guarantees.
 
 ## Repository structure
@@ -174,20 +164,14 @@ FlatZinc -> Parser -> Compiler -> Engine.Search / Engine.Incremental
                                       |
                        Integration.Public.Driver -> Cli.Main
 
-shared generic optimization ----^       no path to Legacy/
 ```
-
-Read `Engine/Types` for `EClause` and engine state; `Dom`/`Proofs/Dom` for domain
-operations and laws; `Clauses`, `Prop`, `Props/` and `Queue/Run` for propagation;
-`Analyze`, `Reduce` and `Search` for learning, policies and search. Seeded
-optimization carries the certified clause database across stronger bounds via
-`Engine/Incremental` and `Integration/Public/Seed`.
 
 Proofs are separated in Parser, Checker, Compiler and Engine's queue/domain
 layers. Certified propagator constructors keep the entailment lemmas needed to
 construct their outputs nearby. Other Engine and shared Semantics modules still
-combine definitions and proofs. The legacy solver's proofs live with its
-preserved implementation. [code-structure.md](code-structure.md) gives the DAG
+combine definitions and proofs.
+
+[code-structure.md](code-structure.md) gives the DAG
 and canonical reading paths.
 
 ## Building and running
@@ -213,35 +197,44 @@ lake env leanfzn check model.fzn solution.txt
 
 # Solve a supported satisfaction model.
 lake env leanfzn solve model.fzn
-lake env leanfzn solve --certified model.fzn
 ```
 
-`--certified` is an alias for the same certified solve command. Solve input
-can be a file, `-`, or stdin when the file argument is omitted.
+Solve input can be a file, `-`, or stdin when the file argument is omitted.
 
 #### Search options
 
-The no-flag CLI path selects Core with `--var=act --val=min`. The record and
-`default` preset retain `minc/act`; explicit variable/value policies and presets
-suppress the CLI default override.
+With no search flags, the solver uses `--var=act --val=min`. The options below
+control variable selection, value selection, optimization and restarts.
 
-| Option | Public Core-only status |
+| Option | What it does |
 | --- | --- |
-| `--engine=core` | Accepted; Core is the sole public engine. `kernel` is rejected. |
-| `--var=minc\|annot\|act\|domwdeg` | Implemented. `obj` is legacy-only and rejected. |
-| `--val=act\|min\|max\|median\|annot\|incumbent` | Implemented; seeded optimization rejects `incumbent`. |
-| `--opt=linear\|seeded` | Implemented; both preserve incumbents on give-up. `bisect` is rejected. |
-| `--restart=none\|luby\|geom`, `--restart-base=N` | Native Core restart schedules; restarting requires a positive base. |
-| `--strategy=default\|annot` | Accepted. Other presets must satisfy the Core compatibility checks. |
-| `--stats` | Core counters and completion/give-up status on stderr. Unavailable counters are `-`. |
-| `--time-limit`, `--portfolio`, `--primal`, legacy `--heur-*` toggles | Not implemented by Core; rejected rather than routed to Legacy. |
-| `--prop`, `--presolve`, `--seed` | Only `prop=auto` and `presolve=none` are supported; randomized seeds are rejected. |
+| `--engine=core` | Use the array-based Core solver, which is already the default. |
+| `--var=minc` | Choose an unfixed variable with the fewest remaining allowed values. |
+| `--var=annot` | Prioritize variables using the model's search annotation groups; break equal priorities by smallest remaining domain. |
+| `--var=act` | Prioritize variables involved in learned conflicts, using scores that decay over time. Break equal scores by smallest remaining domain. |
+| `--var=domwdeg` | Use conflict activity with larger score increases for variables whose current domains are smaller. |
+| `--val=min` | Try the selected variable's smallest remaining allowed value first. For Booleans, try `false` first. |
+| `--val=max` | Try its largest remaining allowed value first. For Booleans, try `true` first. |
+| `--val=median` | Try an allowed integer near the midpoint of the remaining lower and upper bounds; fall back to the minimum if none is found nearby. |
+| `--val=act` | With `--var=act` or `domwdeg`, reuse the last saved value if it is still allowed; otherwise try the minimum. With other variable policies, try the minimum. |
+| `--val=annot` | Follow supported integer-value ordering annotations in the model. Split annotations are approximated by choosing the minimum or maximum. |
+| `--val=incumbent` | During linear optimization, try each variable's value from the previous solution first, falling back to the minimum when needed. Use with `--opt=linear`. |
+| `--opt=linear` | Find a solution, require a strictly better objective, and repeat until the improving bound is proved infeasible or Core stops incomplete. This is the default optimization mode. |
+| `--opt=seeded` | Perform the same improving-bound search while retaining certified learned clauses between optimization rounds. |
+| `--restart=none` | Keep searching without scheduled restarts. This is the default. |
+| `--restart=luby` | Restart at conflict thresholds determined by the Luby sequence, returning to root decisions while retaining learned clauses. |
+| `--restart=geom` | Restart at geometrically increasing conflict thresholds, doubling the threshold after each restart while retaining learned clauses. |
+| `--restart-base=N` | Set the base conflict threshold for `luby` or `geom` restarts. The default is `100`; `N` must be positive when restarts are enabled. |
+| `--strategy=default` | Select a preset with `--var=minc --val=act`, linear optimization and no scheduled restarts. |
+| `--strategy=annot` | Select both `--var=annot` and `--val=annot` to use the model's search annotations. |
+| `--prop=auto` | Use Core's automatic event-driven propagation scheduling. This is the default. |
+| `--presolve=none` | Skip a separate presolve phase. Normal Core propagation still runs during search. This is the default. |
+| `--stats` | Print search counters and completion/give-up status to stderr. Counters that are unavailable are shown as `-`. |
 
-[Config/Parse.lean](LeanFzn/Integration/Config/Parse.lean) contains the public
-`parseCoreSolveFlags`; a historical compatibility parser remains available to
-explicit legacy APIs. [Public/Driver.lean](LeanFzn/Integration/Public/Driver.lean)
-also validates programmatic calls. Unsupported or incompatible options fail
-before loading the model. The public parser never selects the legacy engine.
+Presets are applied first; explicit flags override their settings. Without a
+preset, setting only `--var` leaves the value policy at `act`, while setting only
+`--val` leaves the variable policy at `minc`. Set both flags to choose the pair
+explicitly.
 
 | Command | Exit codes |
 | --- | --- |
@@ -285,34 +278,3 @@ The axiom audit rejects missing profiles, `sorryAx` and axioms outside the
 standard allowlist (`propext`, `Classical.choice`, `Quot.sound`). The boundary
 audit checks component dependencies and import cycles; it does not replace
 Lean compilation or prove behavioral equivalence.
-
-The 2026-11-03 full gate validated the earlier combined Core/kernel route.
-Its 51 executables, 3,308 axiom profiles and 3,000 fuzz cases are historical
-results, not a new Core-only performance baseline. The Core-only migration adds
-`tests_core_only`, `audits/test_core_only_cli.py`, and architecture scanner
-regressions under `Tests/Architecture/`. They cover explicit give-up, rejection
-of legacy-only options, incumbent retention, min/max optimization, clause reuse,
-checked witnesses and absence of Legacy imports from production.
-The existing 200-case CLI optimization fuzz now verifies partial outcomes as
-well as completed optima: the current fixed-seed run completes 186 cases and
-reports 14 incomplete cases, with all 673 checks passing. Directed completion
-cases still require completion, and a fixed-seed coverage floor prevents an
-all-unknown regression from passing.
-The quick suite likewise retains the known UNSAT `nonunit_jump` fixture while
-reporting its current unknown outcome separately. Only that explicitly marked
-migration case may remain incomplete; mathematical expectations are preserved,
-and unexpected incomplete cases or invalid witnesses fail the gate.
-
-
-The Core-only acceptance gate passed on 2026-11-04 (`tmp/gates/core-only-accept-20261104T081225Z/`):
-52 runnable executables; a 52-instance battery and 45-instance cross-check;
-all 3,331 theorem axiom profiles; Core/legacy differential checks; 453 modules
-with no import cycles or production Legacy imports; 3,000 harness fuzz instances
-with zero wrong/bound/witness failures; five CLI regression tests and ten import/
-outcome regression tests. The quick suite reports 10 completed cases plus the
-one explicitly allowed unknown, with all eight witness checks accepted.
-
-For selective performance measurements, use
-`python3 audits/benchmark_performance.py` (default: 2 seconds per case,
-60 seconds total). Follow [PLAN.md](PLAN.md) for campaign budgets and
-[audits/README.md](audits/README.md) for reproducibility requirements.

@@ -6,6 +6,14 @@ The full history of earlier rounds (findings, refuted statements, merged
 tasks) is archived in `docs/PLAN-history-2026-10-15.md`; read it only when a
 task points there.
 
+## CLI cleanup 2026-11-04
+
+Removed the redundant `--certified` flag from the shared option parser and
+README. Solver correctness guarantees apply without a flag. Both public and
+legacy parsers now reject it as an unknown option; the CLI exits with code 2.
+Parser and CLI regressions cover the removal. No performance measurements were
+changed for this cleanup.
+
 ## Audit cleanup 2026-10-17
 
 `audits/README.md` describes the retained tools and measurement provenance.

@@ -146,9 +146,6 @@ private def applyFlag (seen : List String) (c : SearchConfig) (arg : String) :
     return some ({ c with seed := some seed }, seen)
   else if arg == "--stats" then
     return some ({ c with stats := true }, seen)
-  else if arg == "--certified" then
-    -- accepted legacy alias; the command is certified with or without it
-    return some (c, seen)
   else if arg == "--heur-obj-prio" then
     return some ({ c with objPrio := true }, seen)
   else if arg == "--heur-obj-bias" then

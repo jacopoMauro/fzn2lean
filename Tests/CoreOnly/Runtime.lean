@@ -58,6 +58,10 @@ def main : IO UInt32 := do
   match LeanFzn.Core.parseSolveFlags [] with
   | .error e => throw (IO.userError e)
   | .ok (o, _) => expect "Core act/min default" (o.engine == .core && o.var == .act && o.val == .min)
+  expect "removed certified option is unknown"
+    (match LeanFzn.Core.parseSolveFlags ["--certified"] with
+     | .error msg => msg == "unknown option '--certified'"
+     | .ok _ => false)
   for args in [["--engine=kernel"], ["--time-limit=10"], ["--var=obj"],
       ["--opt=bisect"], ["--primal=dive"], ["--heur-act"],
       ["--portfolio=opt-fast:1,opt-fast"], ["--opt=seeded", "--val=incumbent"]] do
