@@ -29,6 +29,17 @@ def read (a : List Value) : DomIntArg → Value
   | .slot i => a[i]!
   | .lit k => .int k
 
+/-- Array-assignment read: identical to `read`, with O(1) slot lookup. -/
+def readA (a : Array Value) : DomIntArg → Value
+  | .slot i => a[i]!
+  | .lit k => .int k
+
+/-- `readA` on the array mirror is `read` on the list. -/
+theorem readA_toArray_eq (a : List Value) :
+    readA a.toArray = read a := by
+  funext x
+  cases x <;> simp [readA, read]
+
 /-- The slot positions an operand names. -/
 def slots : DomIntArg → List Nat
   | .slot i => [i]
@@ -221,10 +232,17 @@ inductive DomConstraint where
       style: `R ↔ x ∈ S`, the set again a constant payload).
       Leaf-enforced, like `setInSlot`. -/
   | setInReifSlot (i : Nat) (s : IntSetValue) (r : Nat)
+  deriving DecidableEq, Repr
 
 /-- The read of slot `i` is the Boolean `b` (false when the slot is
     absent or holds a non-Boolean value). -/
 def slotIsBoolB (a : List Value) (i : Nat) (b : Bool) : Bool :=
+  match a[i]? with
+  | some v => v.eqB (.bool b)
+  | none => false
+
+/-- Array-assignment variant of `slotIsBoolB`. -/
+def slotIsBoolBA (a : Array Value) (i : Nat) (b : Bool) : Bool :=
   match a[i]? with
   | some v => v.eqB (.bool b)
   | none => false
@@ -536,6 +554,204 @@ def DomConstraint.satisfiedB (c : DomConstraint) (a : List Value) : Bool :=
       match a[i]?, a[r]? with
       | some (.int p), some (.bool rb) => decide (rb = decide (s.Contains p))
       | _, _ => false
+
+/-- Array-assignment twin of `satisfiedB`: slot reads are `O(1)` instead of
+    `List` walks.  Used at the search leaf and by `acceptsFast`. -/
+def DomConstraint.satisfiedBA (c : DomConstraint) (a : Array Value) : Bool :=
+  match c with
+  | .eqSlot i j =>
+      match a[i]?, a[j]? with
+      | some x, some y => x.eqB y
+      | _, _ => false
+  | .neSlot i j =>
+      match a[i]?, a[j]? with
+      | some x, some y => !x.eqB y
+      | _, _ => false
+  | .leSlot i j =>
+      match a[i]?, a[j]? with
+      | some x, some y => intLEB x y
+      | _, _ => false
+  | .constEq i v =>
+      match a[i]? with
+      | some x => x.eqB v
+      | none => false
+  | .plusSlot i j k =>
+      match a[i]?, a[j]?, a[k]? with
+      | some (.int p), some (.int q), some (.int r) => decide (p + q = r)
+      | _, _, _ => false
+  | .leConstHi i c =>
+      match a[i]? with
+      | some (.int p) => decide (p ≤ c)
+      | _ => false
+  | .leConstLo i c =>
+      match a[i]? with
+      | some (.int p) => decide (c ≤ p)
+      | _ => false
+  | .allDiff is => valuesAllDifferent (is.map (fun i => a[i]!))
+  | .timesSlot i j k =>
+      match a[i]?, a[j]?, a[k]? with
+      | some (.int p), some (.int q), some (.int r) => decide (p * q = r)
+      | _, _, _ => false
+  | .minSlot i j k =>
+      match a[i]?, a[j]?, a[k]? with
+      | some (.int p), some (.int q), some (.int r) => decide (min p q = r)
+      | _, _, _ => false
+  | .maxSlot i j k =>
+      match a[i]?, a[j]?, a[k]? with
+      | some (.int p), some (.int q), some (.int r) => decide (max p q = r)
+      | _, _, _ => false
+  | .absSlot i k =>
+      match a[i]?, a[k]? with
+      | some (.int p), some (.int r) => decide (absValue p = r)
+      | _, _ => false
+  | .linEq coeffs is b =>
+      match dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) with
+      | some d => decide (d = b)
+      | none => false
+  | .linLe coeffs is b =>
+      dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b
+  | .linNe coeffs is b =>
+      dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b
+  | .ltSlot i j =>
+      match a[i]?, a[j]? with
+      | some (.int p), some (.int q) => decide (p < q)
+      | _, _ => false
+  | .ltConstHi i c =>
+      match a[i]? with
+      | some (.int p) => decide (p < c)
+      | _ => false
+  | .ltConstLo i c =>
+      match a[i]? with
+      | some (.int p) => decide (c < p)
+      | _ => false
+  | .boolNotSlot i j =>
+      match a[i]?, a[j]? with
+      | some (.bool p), some (.bool q) => decide (q = !p)
+      | _, _ => false
+  | .boolAndSlot i j k =>
+      match a[i]?, a[j]?, a[k]? with
+      | some (.bool p), some (.bool q), some (.bool r) =>
+          decide ((p && q) = r)
+      | _, _, _ => false
+  | .boolOrSlot i j k =>
+      match a[i]?, a[j]?, a[k]? with
+      | some (.bool p), some (.bool q), some (.bool r) =>
+          decide ((p || q) = r)
+      | _, _, _ => false
+  | .boolClauseSlot ps ns =>
+      (ps.any (fun i => slotIsBoolBA a i true)) ||
+      (ns.any (fun j => slotIsBoolBA a j false))
+  | .arrayBoolAndSlot is k =>
+      match a[k]? with
+      | some (.bool b) => decide (b = is.all (fun i => slotIsBoolBA a i true))
+      | _ => false
+  | .bool2intSlot i k =>
+      match a[i]?, a[k]? with
+      | some (.bool b), some (.int p) => decide (p = (if b then 1 else 0))
+      | _, _ => false
+  | .boolEqSlot i j =>
+      match a[i]?, a[j]? with
+      | some (.bool p), some (.bool q) => decide (p = q)
+      | _, _ => false
+  | .arrayIntElementSlot xs i k =>
+      match a[i]?, a[k]? with
+      | some (.int idx), some (.int e) =>
+          match valuesGet1 (xs.map Value.int) idx with
+          | some v => v.eqB (.int e)
+          | none => false
+      | _, _ => false
+  | .arrayVarIntElementSlot is i k =>
+      match a[i]?, a[k]? with
+      | some (.int idx), some (.int e) =>
+          is.all (fun j => (a[j]?).isSome) &&
+            (match valuesGet1 (is.map (fun j => a[j]!)) idx with
+             | some v => v.eqB (.int e)
+             | none => false)
+      | _, _ => false
+  | .arrayVarBoolElementSlot is i k =>
+      match a[i]?, a[k]? with
+      | some (.int idx), some (.bool e) =>
+          is.all (fun j => (a[j]?).isSome) &&
+            (match valuesGet1 (is.map (fun j => a[j]!)) idx with
+             | some v => v.eqB (.bool e)
+             | none => false)
+      | _, _ => false
+  | .eqReifSlot i j r =>
+      match a[i]?, a[j]?, a[r]? with
+      | some (.int p), some (.int q), some (.bool rb) =>
+          decide (rb = decide (p = q))
+      | _, _, _ => false
+  | .leReifSlot i j r =>
+      match a[i]?, a[j]?, a[r]? with
+      | some (.int p), some (.int q), some (.bool rb) =>
+          decide (rb = decide (p ≤ q))
+      | _, _, _ => false
+  | .neReifSlot i j r =>
+      match a[i]?, a[j]?, a[r]? with
+      | some (.int p), some (.int q), some (.bool rb) =>
+          decide (rb = decide (p ≠ q))
+      | _, _, _ => false
+  | .linEqReif coeffs is b r =>
+      match a[r]? with
+      | some (.bool rb) =>
+          decide (rb = (match dotProduct (intVals coeffs)
+              (is.map (fun i => a[i]!)) with
+            | some d => decide (d = b)
+            | none => false))
+      | _ => false
+  | .linLeReif coeffs is b r =>
+      match a[r]? with
+      | some (.bool rb) =>
+          decide (rb = dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b)
+      | _ => false
+  | .linNeReif coeffs is b r =>
+      match a[r]? with
+      | some (.bool rb) =>
+          decide (rb = dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b)
+      | _ => false
+  | .maxGen os r =>
+      match DomIntArg.readA a r with
+      | .int m => decide (maxValue (os.map (DomIntArg.readA a)) = some m)
+      | _ => false
+  | .minGen os r =>
+      match DomIntArg.readA a r with
+      | .int m => decide (minValue (os.map (DomIntArg.readA a)) = some m)
+      | _ => false
+  | .divGen o₁ o₂ r =>
+      match DomIntArg.readA a o₁, DomIntArg.readA a o₂ with
+      | .int p, .int q =>
+          decide (q ≠ 0) && (DomIntArg.readA a r).eqB (.int (Int.tdiv p q))
+      | _, _ => false
+  | .modGen o₁ o₂ r =>
+      match DomIntArg.readA a o₁, DomIntArg.readA a o₂ with
+      | .int p, .int q =>
+          decide (q ≠ 0) && (DomIntArg.readA a r).eqB (.int (Int.tmod p q))
+      | _, _ => false
+  | .minPair o₀ o₁ r =>
+      match DomIntArg.readA a o₀, DomIntArg.readA a o₁ with
+      | .int p, .int q => (DomIntArg.readA a r).eqB (.int (min p q))
+      | _, _ => false
+  | .maxPair o₀ o₁ r =>
+      match DomIntArg.readA a o₀, DomIntArg.readA a o₁ with
+      | .int p, .int q => (DomIntArg.readA a r).eqB (.int (max p q))
+      | _, _ => false
+  | .setInSlot i s =>
+      match a[i]? with
+      | some (.int p) => decide (s.Contains p)
+      | _ => false
+  | .setInReifSlot i s r =>
+      match a[i]?, a[r]? with
+      | some (.int p), some (.bool rb) => decide (rb = decide (s.Contains p))
+      | _, _ => false
+
+/-- The array twin agrees with `satisfiedB` on the list assignment. -/
+theorem DomConstraint.satisfiedBA_eq (c : DomConstraint) (a : List Value) :
+    c.satisfiedBA a.toArray = c.satisfiedB a := by
+  cases c <;>
+    simp [DomConstraint.satisfiedBA, DomConstraint.satisfiedB,
+      DomIntArg.readA, DomIntArg.read, DomIntArg.readA_toArray_eq,
+      slotIsBoolBA, slotIsBoolB] <;>
+    rfl
 
 /-- A `valuesGet1` read of an all-integer value list realizes the
     chosen element with `eqB` exactly when it IS that integer. -/

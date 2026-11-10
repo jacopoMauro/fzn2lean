@@ -25,7 +25,9 @@ def emptyDom : Domain := { rep := .general [] }
 
 def p : CompiledProblem DomConstraint :=
   { names := [], domains := [emptyDom], constraints := [], objective := (),
-    source := default, toStore := fun _ _ => none }
+    source := default, domainsArray := [emptyDom].toArray,
+    domainsArray_toList := List.toList_toArray,
+    toStore := fun _ _ => none }
 
 def T : LitTable := {}
 
@@ -62,7 +64,7 @@ def mkState (table : LitTable) (db : ClauseDB p T)
     queueHigh := #[]
     queueLow := #[]
     inQueue := ByteArray.empty
-    activity := Array.replicate 1 (0.0 : Float)
+    activity := ⟨Array.replicate 1 (0.0 : Float)⟩
     activityHeap := #[]
     phases := #[]
     restarts := 0
@@ -207,6 +209,14 @@ def main : IO UInt32 := do
   fails := fails + (← check "watch positions of e2 are 0,1"
     (db1.1.clauses[0]?.map (fun sc => (sc.w1, sc.w2)) == some (0, 1)))
 
+  -- Binary-clause direct path: falsifying one watch prunes the other
+  -- without a general replacement scan.
+  let propBin := db1.1.propagateLiteral p T #[dA] a
+  fails := fails + (← check "binary clause prunes the other watch"
+    (pruneHas propBin.2 b 0))
+  fails := fails + (← check "binary clause keeps both watch positions"
+    (propBin.1.clauses[0]?.map (fun sc => (sc.w1, sc.w2)) == some (0, 1)))
+
   -- Add a unit clause: it increments live but is not watched.
   let dbU := db1.1.add eUnit
   fails := fails + (← check "unit add id 1" (dbU.2 == 1))
@@ -318,6 +328,21 @@ def main : IO UInt32 := do
       stPre.table.lits.toList))
   fails := fails + (← check "canonClause result literals are well-formed"
     (canon.1.lits.all (fun q => canon.2.table.lits[q.idx]? == some q.lit)))
+
+  -- Hinted canonicalisation: validated indices are reused unchanged.
+  let stCanon := mkState canon.2.table db1.1 #[]
+  let canonAgain := canonClause stCanon canon.1
+  fails := fails + (← check "canonClause reuses valid intern hints"
+    (canonAgain.1.lits == canon.1.lits))
+  fails := fails + (← check "hint reuse does not grow the table"
+    (canonAgain.2.table.lits.size == stCanon.table.lits.size))
+  -- A stale hint falls back to the hash-map interner and appends.
+  let stale := mkClause #[pl 1 (litLe 0 4)]
+  let canonStale := canonClause stCanon stale
+  fails := fails + (← check "stale hint preserves the denotation"
+    (canonStale.1.lits.map PLit.decode == #[litLe 0 4]))
+  fails := fails + (← check "stale hint falls back to a fresh intern"
+    (canonStale.2.table.lits.size == stCanon.table.lits.size + 1))
 
   -- Reason lookup: learned, transient, decision, missing, and deleted.
   let dbR := db1.1

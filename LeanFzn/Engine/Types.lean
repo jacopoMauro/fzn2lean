@@ -60,6 +60,12 @@ The table is append-only: existing indices never change meaning. -/
 structure LitTable where
   lits : Array Literal := #[]
   lookup : Std.HashMap Literal Nat := ∅
+  /-- Negation-index cache (D3): `neg[i] = j + 1` records that literal index
+  `j` carries the negation of literal index `i`; `0` means "not cached yet".
+  Every fresh literal pushes a `0`, so `neg.size = lits.size`.  The cache is
+  filled by `internNeg` (called from `insertPending`) and is only a lookup
+  hint: `lits` and `lookup` remain authoritative. -/
+  neg : Array Nat := #[]
 
 /-- The literal denoted by a packed literal.  Decoding reads the
 denotation carried by `PLit` (see the `PLit` docstring), so this is
@@ -86,6 +92,9 @@ def LitTable.WF (T : LitTable) (l : PLit) : Prop :=
   denotes `.int (lo + 64*w + k)`; no set bit means empty.
 * `boundsHoles lo hi holes`: `[lo, hi]` minus the sorted, strictly
   increasing holes (all inside the interval).
+* `sparse values`: the sorted, strictly increasing listed integers.  This
+  represents wide sparse enumerations without allocating storage
+  proportional to their span.
 
 N3 owns the operations and the denotation lemma against the compiled
 `Dom`; this module freezes only the representation. -/
@@ -94,6 +103,7 @@ inductive DomC where
   | bounds (lo hi : Int)
   | bitset (lo : Int) (words : Array UInt64)
   | boundsHoles (lo hi : Int) (holes : Array Int)
+  | sparse (values : Array Int)
   deriving Repr, DecidableEq, BEq, Inhabited
 
 /-! ## Trail -/
@@ -198,6 +208,10 @@ structure StoredClause (p : CompiledProblem DomConstraint) (T : LitTable) where
   clauses carry `0`.  N13 uses it only to choose deletion candidates; no
   soundness argument reads it. -/
   lbd : Nat := 0
+  /-- Set when the clause propagates or conflicts, i.e. when it participates
+  in conflict analysis.  Reduction protects recently used clauses for one
+  interval and clears the flag after each pass.  Policy data only. -/
+  used : Bool := false
 
 /-- Two-watched-literal clause database.
 
@@ -211,6 +225,14 @@ structure ClauseDB (p : CompiledProblem DomConstraint) (T : LitTable) where
   free : Array Nat := #[]
   live : Nat := 0
 
+/-- Every literal of every stored clause is well-formed in the live intern
+table.  Representation invariant used by the root clause-prune contract: the
+watch index of a clause literal identifies its denotation.  It is proof-only;
+no executable code reads it. -/
+def ClauseDB.LitsWF (S : LitTable) (db : ClauseDB p T) : Prop :=
+  ∀ (id : Nat) (sc : StoredClause p T), db.clauses[id]? = some sc →
+    ∀ l ∈ sc.e.lits.toList, S.WF l
+
 /-! ## Engine state and counters -/
 
 /-- `--stats` counters.  `wall` is measured by the driver, not stored
@@ -221,9 +243,45 @@ structure EngineStats where
   decisions : Nat := 0
   propagations : Nat := 0
   conflicts : Nat := 0
+  /-- Deepest decision level reached.  Diagnostic policy/statistics only;
+  no verdict or soundness proof reads it. -/
+  maxLevel : Nat := 0
   learned : Nat := 0
   gaveUp : Nat := 0
+  /-- Diagnostic cause of the first give-up.  This is a policy/statistics
+  field only: no decision or theorem reads it. -/
+  gaveUpCause : String := ""
+  /-- Diagnostic totals for learned-clause minimization: the size of the
+  item clause before minimization and the size of the stored clause after.
+  Policy/statistics only; no soundness argument reads them. -/
+  learnedLitsBefore : Nat := 0
+  learnedLitsAfter : Nat := 0
+  learnedUnits : Nat := 0
+  /-- Number of clause-database reduction runs.  Diagnostic policy data. -/
+  reductions : Nat := 0
+  /-- Live clauses retired by reduction.  Diagnostic policy data. -/
+  reducedClauses : Nat := 0
+  /-- Transient reason slots reclaimed by suffix trimming.  Diagnostic
+  policy data; no verdict reads it. -/
+  reasonsTrimmed : Nat := 0
   deriving Repr, DecidableEq, Inhabited
+
+/-- Add the counters of two engine runs.  The first nonempty give-up cause is
+kept: this is a diagnostic policy field only, never a verdict input. -/
+def EngineStats.add (a b : EngineStats) : EngineStats :=
+  { decisions := a.decisions + b.decisions
+    propagations := a.propagations + b.propagations
+    conflicts := a.conflicts + b.conflicts
+    maxLevel := max a.maxLevel b.maxLevel
+    learned := a.learned + b.learned
+    gaveUp := a.gaveUp + b.gaveUp
+    gaveUpCause := if a.gaveUpCause.isEmpty then b.gaveUpCause else a.gaveUpCause
+    learnedLitsBefore := a.learnedLitsBefore + b.learnedLitsBefore
+    learnedLitsAfter := a.learnedLitsAfter + b.learnedLitsAfter
+    learnedUnits := a.learnedUnits + b.learnedUnits
+    reductions := a.reductions + b.reductions
+    reducedClauses := a.reducedClauses + b.reducedClauses
+    reasonsTrimmed := a.reasonsTrimmed + b.reasonsTrimmed }
 
 /-- The complete mutable engine state.  `p` and `T` are fixed for the
 lifetime of a `coreSolve` call; `table` is the live append-only intern
@@ -246,6 +304,14 @@ structure EngineState (p : CompiledProblem DomConstraint) (T : LitTable) where
   db : ClauseDB p T
   /-- Transient propagator reasons (append-only between restarts). -/
   reasons : Array (EClause p T)
+  /-- Cached per-level reason bound.  `reasonCap[k]` is the largest `.reason`
+  id (plus one) named by trail entries through level `k`, so the current bound
+  is `reasonCap[level]` instead of a whole-trail fold.  The empty array means
+  "no cache": `reasonBound` then falls back to the fold, which keeps test and
+  other hand-built states correct.  Runtime states maintain the cache through
+  `trailPush`, `newLevel` and `backjump`; `TrailInv.reasonCap_exact` records
+  the agreement with the fold. -/
+  reasonCap : Array Nat := #[]
   /-- Registered propagators. -/
   props : Array (PropV2 p T)
   /-- Subscription lists indexed by `slot * 3 + EventKind.toNat`. -/
@@ -256,17 +322,28 @@ structure EngineState (p : CompiledProblem DomConstraint) (T : LitTable) where
   queueLow : Array PropId
   /-- `inQueue[p] = 0` absent, `1` high priority, `2` low priority. -/
   inQueue : ByteArray
-  /-- VSIDS-style activity per slot. -/
-  activity : Array Float
+  /-- VSIDS-style activity per slot, stored unboxed in a `FloatArray`. -/
+  activity : FloatArray
+  /-- Current bump increment.  The increment grows geometrically instead of
+  decaying every stored score; `1 / activityDecay` per analysed conflict. -/
+  activityInc : Float := 1.0
   /-- Activity max-heap of slot indices. -/
   activityHeap : Array Slot
   /-- Saved phase per slot. -/
   phases : Array Value
   /-- Restart counter. -/
   restarts : Nat
+  /-- Value of `stats.conflicts` at the last restart.  Restart scheduling
+  compares the conflicts since this point with the next sequence term. -/
+  lastRestartConflict : Nat := 0
   /-- Next `stats.learned` count at which N13 clause-database reduction
   runs; the schedule doubles it after each reduction. -/
   nextReduce : Nat := 2000
+  /-- Conflict-weighted degree per slot (P5.2).  A policy score only: it is
+  read by `selectSlot` under `--var=wdeg` and never feeds a verdict.  It is
+  initialised to `doms.size` zeroes and grows only through conflict
+  explanations; it is not trailed, so a backjump keeps the guidance. -/
+  slotWeight : Array Nat := #[]
   /-- Counters. -/
   stats : EngineStats
 

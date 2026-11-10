@@ -95,7 +95,7 @@ theorem insertPending_domsWF {st : EngineState p T} (h : DomsWF st) (item : Pend
           propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
       let st3 : EngineState p T := trailPush st2 e
       let st4 : EngineState p T := emitSlot st3 slot d d'
-      change DomsWF (canonLit st4 l.negate).2
+      change DomsWF (canonNegLit st4 l).2
       have h1 : DomsWF st1 := DomsWF.congr h (canonLit_doms st item.lit)
       have hdWF : d.WF := by
         by_cases hslot : slot < st1.doms.size
@@ -116,7 +116,7 @@ theorem insertPending_domsWF {st : EngineState p T} (h : DomsWF st) (item : Pend
         DomsWF.congr h2 (by simp [st3, trailPush])
       have h4 : DomsWF st4 :=
         DomsWF.congr h3 (emitSlot_doms st3 slot d d')
-      exact DomsWF.congr h4 (canonLit_doms st4 l.negate)
+      exact DomsWF.congr h4 (canonNegLit_doms st4 l)
 
 theorem ensureInQueue_levelStart (st : EngineState p T) (n : Nat) :
     (ensureInQueue st n).levelStart = st.levelStart := by
@@ -217,15 +217,15 @@ theorem insertPending_trailInv {st : EngineState p T} (h : TrailInv st) (item : 
   unfold insertPending
   dsimp only
   split
-  · exact TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl)
+  · exact TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl) (by rfl)
   · split
-    · exact TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl)
+    · exact TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl) (by rfl)
     · exact TrailInv.congr h (by simp [canonLit]) (by simp [canonLit])
-        (by simp [canonLit]) (by simp [canonLit])
+        (by simp [canonLit]) (by simp [canonLit]) (by simp [canonLit])
   · split
     · split
-      · exact TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl)
-      · exact TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl)
+      · exact TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl) (by rfl)
+      · exact TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl) (by rfl)
     · rename_i hz
       let st1 : EngineState p T := (canonLit st item.lit).2
       let l : PLit := (canonLit st item.lit).1
@@ -239,18 +239,18 @@ theorem insertPending_trailInv {st : EngineState p T} (h : TrailInv st) (item : 
           propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
       let st3 : EngineState p T := trailPush st2 e
       let st4 : EngineState p T := emitSlot st3 slot d d'
-      change TrailInv (canonLit st4 l.negate).2
+      change TrailInv (canonNegLit st4 l).2
       have h1 : TrailInv st1 :=
-        TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl)
+        TrailInv.congr h (by rfl) (by rfl) (by rfl) (by rfl) (by rfl)
       have h2 : TrailInv st2 :=
-        TrailInv.congr h1 (by rfl) (by rfl) (by rfl) (by rfl)
+        TrailInv.congr h1 (by rfl) (by rfl) (by rfl) (by rfl) (by rfl)
       have h3 : TrailInv st3 :=
         trailPush_trailInv h2 (e := e) (by simp [e, st2])
       have h4 : TrailInv st4 :=
         TrailInv.congr h3 (emitSlot_trail st3 slot d d')
           (emitSlot_levelStart st3 slot d d') (emitSlot_level st3 slot d d')
-          (emitSlot_changeIndex st3 slot d d')
-      exact TrailInv.congr h4 (by rfl) (by rfl) (by rfl) (by rfl)
+          (emitSlot_changeIndex st3 slot d d') (emitSlot_reasonCap st3 slot d d')
+      exact TrailInv.congr h4 (by rfl) (by rfl) (by rfl) (by rfl) (by simp [canonNegLit])
 
 theorem List.foldl_domStep_WF {tr : Array Entry} (l : List Nat) {d : DomC} (hd : d.WF) :
     (l.foldl (domStep tr) d).WF := by
@@ -289,11 +289,12 @@ theorem HistInv.congr {init : Array DomC} {st st' : EngineState p T} (h : HistIn
     (hd : st'.doms = st.doms) (htr : st'.trail = st.trail)
     (hcl : ∀ s, st'.changeList s = st.changeList s)
     (hci : st'.changeIndex = st.changeIndex)
-    (hls : st'.levelStart = st.levelStart) (hl : st'.level = st.level) :
+    (hls : st'.levelStart = st.levelStart) (hl : st'.level = st.level)
+    (hrc : st'.reasonCap = st.reasonCap) :
     HistInv init st' := by
   obtain ⟨hsh, hti⟩ := h
   exact ⟨SlotHistory.congr hsh hd htr hcl,
-    TrailInv.congr hti htr hls hl hci⟩
+    TrailInv.congr hti htr hls hl hci hrc⟩
 
 theorem insertPending_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv init st)
     (item : Pending) : HistInv init (insertPending st item).1 := by
@@ -305,14 +306,14 @@ theorem canonLit_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv
   obtain ⟨hsh, hti⟩ := h
   exact ⟨SlotHistory.congr hsh (canonLit_doms st l) (canonLit_trail st l)
       (fun s => canonLit_changeList st l s),
-    TrailInv.congr hti (canonLit_trail st l) rfl rfl rfl⟩
+    TrailInv.congr hti (canonLit_trail st l) rfl rfl rfl (by rfl)⟩
 
 theorem canonClause_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv init st)
     (c : EClause p T) : HistInv init (canonClause st c).2 := by
   obtain ⟨hsh, hti⟩ := h
   exact ⟨SlotHistory.congr hsh (canonClause_doms st c) (canonClause_trail st c)
       (fun s => canonClause_changeList st c s),
-    TrailInv.congr hti (canonClause_trail st c) rfl rfl rfl⟩
+    TrailInv.congr hti (canonClause_trail st c) rfl rfl rfl (by rfl)⟩
 
 theorem setInQueue_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv init st)
     (id : Nat) (v : UInt8) : HistInv init (setInQueue st id v) := by
@@ -320,7 +321,8 @@ theorem setInQueue_histInv {init : Array DomC} {st : EngineState p T} (h : HistI
   exact ⟨SlotHistory.congr hsh (setInQueue_doms st id v) (setInQueue_trail st id v)
       (by intro s; rw [EngineState.changeList, setInQueue_changeIndex]; rfl),
     TrailInv.congr hti (setInQueue_trail st id v) (setInQueue_levelStart st id v)
-      (setInQueue_level st id v) (setInQueue_changeIndex st id v)⟩
+      (setInQueue_level st id v) (setInQueue_changeIndex st id v)
+      (setInQueue_reasonCap st id v)⟩
 
 theorem pushPropPrunes_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv init st)
     (pending : Array Pending) (ps : Array (PLit × EClause p T)) :
@@ -350,6 +352,7 @@ theorem pushPropPrunes_histInv {init : Array DomC} {st : EngineState p T} (h : H
       · rfl
       · rfl
       · intro s; rfl
+      · rfl
       · rfl
       · rfl
       · rfl
@@ -396,6 +399,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
         · rfl
         · rfl
         · rfl
+        · rfl
       simpa [drain, hback, hins, hprop, hf, pending1, st2] using ih h2
   | case6 st pending f item hback st1 failed hf nl db st2 ec id ec1 st3 hcanon hins hprop =>
       intro h
@@ -405,6 +409,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
         · rfl
         · rfl
         · intro s; rfl
+        · rfl
         · rfl
         · rfl
         · rfl
@@ -423,6 +428,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
         · rfl
         · rfl
         · rfl
+        · rfl
       simpa [drain, hback, hins, hprop, hf, pending1, st2] using ih h2
   | case8 st pending f hback hq id st1 hprops ih =>
       intro h
@@ -433,6 +439,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -449,6 +456,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       simp only [st1, id] at hprops hrun ⊢
       simpa [drain, hback, hq, hprops, hrun, st1, id] using ih h1
@@ -461,6 +469,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -480,6 +489,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       have h2 : HistInv init st2 := by
         have := pushPropPrunes_histInv h1 pending ps
@@ -495,6 +505,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -514,6 +525,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       simp only [st1, id] at hprops ⊢
       simpa [drain, hback, hq, hql, hprops, st1, id] using ih h1
@@ -528,6 +540,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       simp only [st1, id] at hprops hrun ⊢
       simpa [drain, hback, hq, hql, hprops, hrun, st1, id] using ih h1
@@ -540,6 +553,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -559,6 +573,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       have h2 : HistInv init st2 := by
         have := pushPropPrunes_histInv h1 pending ps
@@ -574,6 +589,7 @@ theorem drain_histInv {init : Array DomC} {st : EngineState p T} (h : HistInv in
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -677,11 +693,12 @@ theorem Good.congr {init : Array DomC} {st st' : EngineState p T} (h : Good init
     (hd : st'.doms = st.doms) (htr : st'.trail = st.trail)
     (hcl : ∀ s, st'.changeList s = st.changeList s)
     (hci : st'.changeIndex = st.changeIndex)
-    (hls : st'.levelStart = st.levelStart) (hl : st'.level = st.level) :
+    (hls : st'.levelStart = st.levelStart) (hl : st'.level = st.level)
+    (hrc : st'.reasonCap = st.reasonCap) :
     Good init st' := by
   obtain ⟨hsh, hti, hdw⟩ := h
   exact ⟨SlotHistory.congr hsh hd htr hcl,
-    TrailInv.congr hti htr hls hl hci, DomsWF.congr hdw hd⟩
+    TrailInv.congr hti htr hls hl hci hrc, DomsWF.congr hdw hd⟩
 
 theorem insertPending_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
     (item : Pending) : Good init (insertPending st item).1 := by
@@ -720,6 +737,7 @@ theorem pushPropPrunes_good {init : Array DomC} {st : EngineState p T} (h : Good
       · rfl
       · rfl
       · rfl
+      · rfl
   have gen : ∀ (l : List (PLit × EClause p T)) (st : EngineState p T)
       (pend : Array Pending) (failed : Bool),
       Good init st → Good init (l.foldl f (st, pend, failed)).1 := by
@@ -745,6 +763,7 @@ theorem canonLit_good {init : Array DomC} {st : EngineState p T} (h : Good init 
   · rfl
   · rfl
   · rfl
+  · rfl
 
 theorem canonClause_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
     (c : EClause p T) : Good init (canonClause st c).2 := by
@@ -752,6 +771,7 @@ theorem canonClause_good {init : Array DomC} {st : EngineState p T} (h : Good in
   · exact canonClause_doms st c
   · exact canonClause_trail st c
   · intro s; exact canonClause_changeList st c s
+  · rfl
   · rfl
   · rfl
   · rfl
@@ -765,6 +785,7 @@ theorem setInQueue_good {init : Array DomC} {st : EngineState p T} (h : Good ini
   · exact setInQueue_changeIndex st id v
   · exact setInQueue_levelStart st id v
   · exact setInQueue_level st id v
+  · exact setInQueue_reasonCap st id v
 
 theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
     (pending : Array Pending) (f : Nat) :
@@ -797,6 +818,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
         · rfl
         · rfl
         · rfl
+        · rfl
       simpa [drain, hback, hins, hprop, hf, pending1, st2] using ih h2
   | case6 st pending f item hback st1 failed hf nl db st2 ec id ec1 st3 hcanon hins hprop =>
       intro h
@@ -806,6 +828,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
         · rfl
         · rfl
         · intro s; rfl
+        · rfl
         · rfl
         · rfl
         · rfl
@@ -824,6 +847,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
         · rfl
         · rfl
         · rfl
+        · rfl
       simpa [drain, hback, hins, hprop, hf, pending1, st2] using ih h2
   | case8 st pending f hback hq id st1 hprops ih =>
       intro h
@@ -834,6 +858,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -850,6 +875,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       simp only [st1, id] at hprops hrun ⊢
       simpa [drain, hback, hq, hprops, hrun, st1, id] using ih h1
@@ -862,6 +888,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -881,6 +908,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       have h2 : Good init st2 := by
         have := pushPropPrunes_good h1 pending ps
@@ -896,6 +924,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -915,6 +944,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       simp only [st1, id] at hprops ⊢
       simpa [drain, hback, hq, hql, hprops, st1, id] using ih h1
@@ -929,6 +959,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       simp only [st1, id] at hprops hrun ⊢
       simpa [drain, hback, hq, hql, hprops, hrun, st1, id] using ih h1
@@ -941,6 +972,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -960,6 +992,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · intro s; rfl
           · rfl
           · rfl
+          · rfl
           · rfl) id 0
       have h2 : Good init st2 := by
         have := pushPropPrunes_good h1 pending ps
@@ -975,6 +1008,7 @@ theorem drain_good {init : Array DomC} {st : EngineState p T} (h : Good init st)
           · rfl
           · rfl
           · intro s; rfl
+          · rfl
           · rfl
           · rfl
           · rfl) id 0
@@ -1196,6 +1230,36 @@ theorem canonLit_changeIndex (st : EngineState p T) (l : PLit) :
   unfold canonLit
   rfl
 
+theorem canonNegLit_props (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.props = st.props := by
+  unfold canonNegLit
+  rfl
+
+theorem canonNegLit_subs (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.subs = st.subs := by
+  unfold canonNegLit
+  rfl
+
+theorem canonNegLit_reasons (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.reasons = st.reasons := by
+  unfold canonNegLit
+  rfl
+
+theorem canonNegLit_db (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.db = st.db := by
+  unfold canonNegLit
+  rfl
+
+theorem canonNegLit_level (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.level = st.level := by
+  unfold canonNegLit
+  rfl
+
+theorem canonNegLit_levelStart (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.levelStart = st.levelStart := by
+  unfold canonNegLit
+  rfl
+
 theorem canonClause_props (st : EngineState p T) (c : EClause p T) :
     (canonClause st c).2.props = st.props := by
   unfold canonClause
@@ -1355,6 +1419,165 @@ theorem ensureSubs_changeIndex (st : EngineState p T) (n : Nat) :
     (ensureSubs st n).changeIndex = st.changeIndex := by
   unfold ensureSubs
   split <;> rfl
+
+theorem ensureSubs_reasonCap (st : EngineState p T) (n : Nat) :
+    (ensureSubs st n).reasonCap = st.reasonCap := by
+  unfold ensureSubs
+  split <;> rfl
+
+/-- A step that only rewrites `subs` preserves the history. -/
+theorem ensureSubs_histInv {init : Array DomC} {st : EngineState p T}
+    (h : HistInv init st) (n : Nat) : HistInv init (ensureSubs st n) := by
+  apply HistInv.congr h
+  · exact ensureSubs_doms st n
+  · exact ensureSubs_trail st n
+  · intro s
+    simp only [EngineState.changeList, ensureSubs_changeIndex st n]
+  · exact ensureSubs_changeIndex st n
+  · exact ensureSubs_levelStart st n
+  · exact ensureSubs_level st n
+  · exact ensureSubs_reasonCap st n
+
+theorem list_foldl_histInv {α : Type} {init : Array DomC}
+    (l : List α) (f : EngineState p T → α → EngineState p T)
+    (hf : ∀ st a, HistInv init st → HistInv init (f st a)) :
+    ∀ st, HistInv init st → HistInv init (l.foldl f st) := by
+  intro st h
+  induction l generalizing st with
+  | nil => exact h
+  | cons a rest ih => exact ih (f st a) (hf st a h)
+
+theorem array_foldl_histInv {α : Type} {init : Array DomC}
+    (l : Array α) (f : EngineState p T → α → EngineState p T)
+    (hf : ∀ st a, HistInv init st → HistInv init (f st a)) :
+    ∀ st, HistInv init st → HistInv init (l.foldl f st) := by
+  intro st h
+  rw [← Array.foldl_toList]
+  exact list_foldl_histInv l.toList f hf st h
+
+/-- Propagator registration only grows `subs`, so it preserves the history. -/
+theorem registerProps_go_histInv {init : Array DomC} {st : EngineState p T}
+    (h : HistInv init st) (n id : Nat) :
+    HistInv init (registerProps.go n id st) := by
+  let P : Nat → Prop := fun k => ∀ (id : Nat) (st : EngineState p T),
+    n - id = k → HistInv init st → HistInv init (registerProps.go n id st)
+  have aux : ∀ k, P k := by
+    intro k
+    induction k using Nat.strongRecOn with
+    | ind k ih =>
+      intro id st hk hh
+      rw [registerProps.go.eq_def]
+      by_cases hid : id < n
+      · simp only [dif_pos hid]
+        cases hpr : st.props[id]? with
+        | none => simpa only [hpr] using hh
+        | some pr =>
+          simp only [hpr]
+          apply ih (n - (id + 1)) (by omega) (id + 1) _ rfl
+          apply array_foldl_histInv
+          · intro st' x hx
+            rcases x with ⟨sv, k'⟩
+            dsimp only
+            apply HistInv.congr hx
+            · simp only [ensureSubs_doms]
+            · simp only [ensureSubs_trail]
+            · intro s
+              simp only [EngineState.changeList, ensureSubs_changeIndex]
+            · simp only [ensureSubs_changeIndex]
+            · simp only [ensureSubs_levelStart]
+            · simp only [ensureSubs_level]
+            · simp only [ensureSubs_reasonCap]
+          · exact hh
+      · simp only [dif_neg hid]
+        exact hh
+  exact aux (n - id) id st rfl h
+
+theorem registerProps_histInv {init : Array DomC} {st : EngineState p T}
+    (h : HistInv init st) : HistInv init (registerProps st) :=
+  registerProps_go_histInv h st.props.size 0
+
+theorem array_foldl_doms {α : Type} (l : Array α)
+    (f : EngineState p T → α → EngineState p T)
+    (hf : ∀ st a, (f st a).doms = st.doms) :
+    ∀ st, (l.foldl f st).doms = st.doms := by
+  intro st
+  rw [← Array.foldl_toList]
+  exact list_foldl_doms l.toList f hf st
+
+theorem registerProps_go_doms (n id : Nat) (st : EngineState p T) :
+    (registerProps.go n id st).doms = st.doms := by
+  let P : Nat → Prop := fun k => ∀ (id : Nat) (st : EngineState p T),
+    n - id = k → (registerProps.go n id st).doms = st.doms
+  have aux : ∀ k, P k := by
+    intro k
+    induction k using Nat.strongRecOn with
+    | ind k ih =>
+      intro id st hk
+      rw [registerProps.go.eq_def]
+      by_cases hid : id < n
+      · simp only [dif_pos hid]
+        cases hpr : st.props[id]? with
+        | none => simp only [hpr]
+        | some pr =>
+          simp only [hpr]
+          rw [ih (n - (id + 1)) (by omega) (id + 1) _ rfl]
+          apply array_foldl_doms
+          intro st' x
+          rcases x with ⟨sv, k'⟩
+          dsimp only
+          simp only [ensureSubs_doms]
+      · simp only [dif_neg hid]
+  exact aux (n - id) id st rfl
+
+theorem registerProps_go_props (n id : Nat) (st : EngineState p T) :
+    (registerProps.go n id st).props = st.props := by
+  let P : Nat → Prop := fun k => ∀ (id : Nat) (st : EngineState p T),
+    n - id = k → (registerProps.go n id st).props = st.props
+  have aux : ∀ k, P k := by
+    intro k
+    induction k using Nat.strongRecOn with
+    | ind k ih =>
+      intro id st hk
+      rw [registerProps.go.eq_def]
+      by_cases hid : id < n
+      · simp only [dif_pos hid]
+        cases hpr : st.props[id]? with
+        | none => simp only [hpr]
+        | some pr =>
+          simp only [hpr]
+          rw [ih (n - (id + 1)) (by omega) (id + 1) _ rfl]
+          rw [← Array.foldl_toList]
+          exact list_foldl_props _ _ (fun st' x => by
+            rcases x with ⟨sv, k'⟩
+            dsimp only
+            simp only [ensureSubs_props]) _
+      · simp only [dif_neg hid]
+  exact aux (n - id) id st rfl
+
+theorem registerProps_props (st : EngineState p T) :
+    (registerProps st).props = st.props :=
+  registerProps_go_props st.props.size 0 st
+
+theorem registerProps_doms (st : EngineState p T) :
+    (registerProps st).doms = st.doms :=
+  registerProps_go_doms st.props.size 0 st
+
+theorem enqueueProp_histInv {init : Array DomC} {st : EngineState p T}
+    (h : HistInv init st) (id : Nat) : HistInv init (enqueueProp st id) := by
+  apply HistInv.congr h
+  · exact enqueueProp_doms st id
+  · exact enqueueProp_trail st id
+  · intro s
+    simp only [EngineState.changeList, enqueueProp_changeIndex st id]
+  · exact enqueueProp_changeIndex st id
+  · exact enqueueProp_levelStart st id
+  · exact enqueueProp_level st id
+  · exact enqueueProp_reasonCap st id
+
+theorem range_enqueueProp_histInv {init : Array DomC} {st : EngineState p T}
+    (h : HistInv init st) (n : Nat) :
+    HistInv init ((List.range n).foldl (fun st i => enqueueProp st i) st) :=
+  list_foldl_histInv _ _ (fun st i hh => enqueueProp_histInv hh i) st h
 
 theorem ensureInQueue_props (st : EngineState p T) (n : Nat) :
     (ensureInQueue st n).props = st.props := by

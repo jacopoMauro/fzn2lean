@@ -192,6 +192,22 @@ theorem canonLit_changeList (st : EngineState p T) (l : PLit) (s : Slot) :
   unfold canonLit EngineState.changeList
   rfl
 
+/-- `canonNegLit` changes only the intern table. -/
+theorem canonNegLit_doms (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.doms = st.doms := by
+  unfold canonNegLit
+  rfl
+
+theorem canonNegLit_trail (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.trail = st.trail := by
+  unfold canonNegLit
+  rfl
+
+theorem canonNegLit_changeList (st : EngineState p T) (l : PLit) (s : Slot) :
+    (canonNegLit st l).2.changeList s = st.changeList s := by
+  unfold canonNegLit EngineState.changeList
+  rfl
+
 /-- `canonClause` changes only the intern table. -/
 theorem canonClause_doms (st : EngineState p T) (c : EClause p T) :
     (canonClause st c).2.doms = st.doms := by
@@ -238,6 +254,11 @@ theorem ensureInQueue_changeIndex (st : EngineState p T) (n : Nat) :
   unfold ensureInQueue
   rfl
 
+theorem ensureInQueue_reasonCap (st : EngineState p T) (n : Nat) :
+    (ensureInQueue st n).reasonCap = st.reasonCap := by
+  unfold ensureInQueue
+  rfl
+
 /-- `setInQueue` changes only `inQueue`. -/
 theorem setInQueue_doms (st : EngineState p T) (id : Nat) (v : UInt8) :
     (setInQueue st id v).doms = st.doms := by
@@ -251,6 +272,11 @@ theorem setInQueue_trail (st : EngineState p T) (id : Nat) (v : UInt8) :
 
 theorem setInQueue_changeIndex (st : EngineState p T) (id : Nat) (v : UInt8) :
     (setInQueue st id v).changeIndex = st.changeIndex := by
+  unfold setInQueue
+  split <;> simp
+
+theorem setInQueue_reasonCap (st : EngineState p T) (id : Nat) (v : UInt8) :
+    (setInQueue st id v).reasonCap = st.reasonCap := by
   unfold setInQueue
   split <;> simp
 
@@ -285,6 +311,16 @@ theorem enqueueProp_changeIndex (st : EngineState p T) (id : Nat) :
     · simp [ensureInQueue_changeIndex]
   · rfl
 
+theorem enqueueProp_reasonCap (st : EngineState p T) (id : Nat) :
+    (enqueueProp st id).reasonCap = st.reasonCap := by
+  unfold enqueueProp
+  split
+  · dsimp only
+    split
+    · split <;> simp [ensureInQueue_reasonCap]
+    · simp [ensureInQueue_reasonCap]
+  · rfl
+
 /-- Folding a state-preserving function preserves a projection. -/
 theorem list_foldl_doms {α : Type} (l : List α)
     (f : EngineState p T → α → EngineState p T)
@@ -306,6 +342,14 @@ theorem list_foldl_changeIndex {α : Type} (l : List α)
     (f : EngineState p T → α → EngineState p T)
     (hf : ∀ st a, (f st a).changeIndex = st.changeIndex) (st : EngineState p T) :
     (l.foldl f st).changeIndex = st.changeIndex := by
+  induction l generalizing st with
+  | nil => rfl
+  | cons x xs ih => rw [List.foldl_cons, ih, hf]
+
+theorem list_foldl_reasonCap {α : Type} (l : List α)
+    (f : EngineState p T → α → EngineState p T)
+    (hf : ∀ st a, (f st a).reasonCap = st.reasonCap) (st : EngineState p T) :
+    (l.foldl f st).reasonCap = st.reasonCap := by
   induction l generalizing st with
   | nil => rfl
   | cons x xs ih => rw [List.foldl_cons, ih, hf]
@@ -338,6 +382,15 @@ theorem enqueueSubs_changeIndex (st : EngineState p T) (s : Slot) (k : EventKind
     exact list_foldl_changeIndex _ _ (fun st id => enqueueProp_changeIndex st id) st
   · rfl
 
+theorem enqueueSubs_reasonCap (st : EngineState p T) (s : Slot) (k : EventKind) :
+    (enqueueSubs st s k).reasonCap = st.reasonCap := by
+  unfold enqueueSubs
+  dsimp only
+  split
+  · rw [← Array.foldl_toList]
+    exact list_foldl_reasonCap _ _ (fun st id => enqueueProp_reasonCap st id) st
+  · rfl
+
 /-- `emitSlot` changes neither the domains, the trail, nor the change index. -/
 theorem emitSlot_doms (st : EngineState p T) (s : Slot) (old new : DomC) :
     (emitSlot st s old new).doms = st.doms := by
@@ -368,6 +421,16 @@ theorem emitSlot_changeIndex (st : EngineState p T) (s : Slot) (old new : DomC) 
     split
     · split <;> simp [enqueueSubs_changeIndex]
     · split <;> simp [enqueueSubs_changeIndex]
+
+theorem emitSlot_reasonCap (st : EngineState p T) (s : Slot) (old new : DomC) :
+    (emitSlot st s old new).reasonCap = st.reasonCap := by
+  unfold emitSlot
+  split
+  · rfl
+  · dsimp only
+    split
+    · split <;> simp [enqueueSubs_reasonCap]
+    · split <;> simp [enqueueSubs_reasonCap]
 
 theorem emitSlot_changeList (st : EngineState p T) (s : Slot) (old new : DomC) (t : Slot) :
     (emitSlot st s old new).changeList t = st.changeList t := by
@@ -567,16 +630,21 @@ theorem DomC.empty_applyLit_isEmpty (l : Literal) :
 
 theorem TrailInv.congr {st st' : EngineState p T} (h : TrailInv st)
     (htr : st'.trail = st.trail) (hls : st'.levelStart = st.levelStart)
-    (hl : st'.level = st.level) (hci : st'.changeIndex = st.changeIndex) : TrailInv st' := by
+    (hl : st'.level = st.level) (hci : st'.changeIndex = st.changeIndex)
+    (hrc : st'.reasonCap = st.reasonCap) : TrailInv st' := by
   constructor
   · rw [hls]; exact h.levelStart_zero
   · rw [hls, hl]; exact h.levelStart_size
-  · rw [hls]; exact h.levelStart_strict
+  · rw [hls]; exact h.levelStart_sorted
   · intro i hi; rw [hls] at hi; rw [hls, htr]; exact h.levelStart_le_trail i hi
   · intro i e he; rw [htr] at he; rw [hls]; exact h.entry_level i e he
   · intro i e he; rw [htr] at he; rw [hls]; exact h.entry_levelStart_le i e he
   · intro s; simp only [EngineState.changeList, hci]; exact h.changeIndex_sorted s
   · intro s p; simp only [EngineState.changeList, hci, htr]; exact h.changeIndex_mem s p
+  · rw [hrc, hl]; exact h.reasonCap_size
+  · intro k hk
+    rw [hrc, htr, hls]
+    exact h.reasonCap_exact k (by simpa [hrc] using hk)
 
 theorem insertPending_slotHistory {init : Array DomC} {st : EngineState p T}
     (h : SlotHistory init st) (ht : TrailInv st) (item : Pending) :
@@ -612,13 +680,13 @@ theorem insertPending_slotHistory {init : Array DomC} {st : EngineState p T}
           propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
       let st3 : EngineState p T := trailPush st2 e
       let st4 : EngineState p T := emitSlot st3 slot d d'
-      change SlotHistory init (canonLit st4 l.negate).2
+      change SlotHistory init (canonNegLit st4 l).2
       have h1 : SlotHistory init st1 :=
         SlotHistory.congr h (canonLit_doms st item.lit) (canonLit_trail st item.lit)
           (fun s => canonLit_changeList st item.lit s)
       have ht1 : TrailInv st1 :=
         TrailInv.congr ht (by simp [st1, canonLit]) (by simp [st1, canonLit])
-          (by simp [st1, canonLit]) (by simp [st1, canonLit])
+          (by simp [st1, canonLit]) (by simp [st1, canonLit]) (by simp [st1, canonLit])
       have hd'f : d'.isEmpty = false := by
         have hfalse : ¬ (d'.isEmpty = true) := hz
         cases hb : d'.isEmpty with
@@ -662,8 +730,8 @@ theorem insertPending_slotHistory {init : Array DomC} {st : EngineState p T}
       have h4 : SlotHistory init st4 :=
         SlotHistory.congr h3 (emitSlot_doms st3 slot d d')
           (emitSlot_trail st3 slot d d') (fun s => emitSlot_changeList st3 slot d d' s)
-      exact SlotHistory.congr h4 (canonLit_doms st4 l.negate)
-        (canonLit_trail st4 l.negate) (fun s => canonLit_changeList st4 l.negate s)
+      exact SlotHistory.congr h4 (canonNegLit_doms st4 l)
+        (canonNegLit_trail st4 l) (fun s => canonNegLit_changeList st4 l s)
 
 theorem Array.size_filter_le {α : Type} (a : Array α) (p : α → Bool) :
     (a.filter p).size ≤ a.size := by

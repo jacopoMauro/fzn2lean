@@ -36,6 +36,8 @@ def mkProblem (ds : List Dom) (dcs : List DomConstraint) :
     constraints := dcs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- Pigeonhole `P` pigeons into `H` holes, as a Boolean clause problem.
@@ -110,42 +112,72 @@ def searchWithPhases (p : CompiledProblem DomConstraint) (o : SearchConfig)
     (fuel : Nat) (phases : Array Value) :
     Option (CoreResult × EngineState p emptyTable) :=
   let T : LitTable := emptyTable
-  match initState p T with
+  match hinit : initState p T with
   | none => none
-  | some st0 =>
+  | some stInit =>
       let prio := annotPrioArray p
       let orders := Engine.configOrders p o
-      let st0 := { st0 with phases := phases }
-      match addSeedClauses p T st0 with
+      let st0 : EngineState p T := { stInit with phases := phases }
+      let hroot0 : RootInv p T st0.doms st0 :=
+        (initState_rootInv hinit LitTable.inv_empty).congr rfl rfl
+          (fun s => rfl) rfl rfl rfl rfl rfl rfl
+      let hprops0 : PropsSound p T st0.props := initState_propsSound (st := stInit) hinit
+      match hsc : addSeedClauses p T st0 with
       | (st, some _) =>
+          have hroot1 : RootInv p T st.doms st := by
+            rw [show st = (addSeedClauses p T st0).1 by rw [hsc]]
+            exact (addSeedClauses_fst_rootInv hroot0).init_congr
+              (addSeedClauses_fst_doms p T st0)
           some (.unsat, { st with
             stats := { st.stats with conflicts := st.stats.conflicts + 1 } })
       | (st, none) =>
+          have hst : st = (addSeedClauses p T st0).1 := by rw [hsc]
+          have hroot1 : RootInv p T st.doms st := by
+            rw [hst]
+            exact (addSeedClauses_fst_rootInv hroot0).init_congr
+              (addSeedClauses_fst_doms p T st0)
+          have hprops1 : PropsSound p T st.props := by
+            rw [hst]
+            exact hprops0.congr (addSeedClauses_fst_props p T st0)
           match st.db.emptyConflict? with
           | some _ => some (.unsat, st)
           | none =>
-              let (db, out) := st.db.propagateUnits p T st.doms
-              match out with
+              let r := st.db.propagateUnits p T st.doms
+              let st2 : EngineState p T := { st with db := r.1 }
+              have hroot2 : RootInv p T st2.doms st2 := by
+                simpa only [st2, r] using propagateUnits_rootInv hroot1
+              have hprops2 : PropsSound p T st2.props := by
+                simpa only [st2, r] using hprops1
+              match hr : r.2 with
               | .none =>
-                  let st := { st with db := db }
-                  some (search p T st.doms o prio orders st #[] fuel)
+                  let hp : PendingRoot p st2 #[] := by
+                    intro h0 item hit
+                    simp at hit
+                  let out := search p T st2.doms o prio orders st2 #[]
+                    hroot2 hp hprops2 fuel
+                  some out.res
               | .prune ps =>
-                  let st := { st with db := db }
-                  some (search p T st.doms o prio orders st
-                    (pushClausePrunes #[] ps) fuel)
+                  let hp : PendingRoot p st2 (pushClausePrunes #[] ps) :=
+                    pushClausePrunes_pendingRoot_of_entailed
+                      (by intro h0 item hit; simp at hit)
+                      (fun h0 q id hq =>
+                        ClauseDB.propagateUnits_prunes_entailed st.db st.doms hr q id hq)
+                  let out := search p T st2.doms o prio orders st2
+                    (pushClausePrunes #[] ps) hroot2 hp hprops2 fuel
+                  some out.res
               | .conflict ec _ =>
-                  let a := analyze p T st.doms st ec fuel
-                  let st := { st with db := db }
+                  let a := analyze p T st2.doms st2 hroot2.conv hroot2.hist.1
+                    hroot2 ec fuel
                   if !a.ok then
-                    some (.gaveUp, { st with stats := { st.stats with gaveUp := 1 } })
+                    some (.gaveUp, { st2 with stats := { st2.stats with gaveUp := 1 } })
                   else
                     match a.learned with
                     | none =>
-                        some (.gaveUp, { st with stats := { st.stats with gaveUp := 1 } })
+                        some (.gaveUp, { st2 with stats := { st2.stats with gaveUp := 1 } })
                     | some lc =>
-                        if lc.lits.isEmpty then some (.unsat, st)
-                        else some (.gaveUp, { st with
-                          stats := { st.stats with gaveUp := 1 } })
+                        if lc.lits.isEmpty then some (.unsat, st2)
+                        else some (.gaveUp, { st2 with
+                          stats := { st2.stats with gaveUp := 1 } })
 
 def coreSolveState (p : CompiledProblem DomConstraint) (o : SearchConfig)
     (fuel : Nat) : Option (CoreResult × EngineState p emptyTable) :=
@@ -161,64 +193,82 @@ def activityChecks : IO Unit := do
       let st : EngineState conflictProblem emptyTable :=
         { st0 with
           doms := #[.bounds 0 1, .bounds 0 3, .bounds 0 9]
-          activity := #[0.0, 0.0, 0.0] }
+          activity := ⟨#[0.0, 0.0, 0.0]⟩ }
       let lits : Array PLit :=
         #[pLit (negNe 0 0), pLit (negNe 1 0), pLit (negNe 2 0)]
       let oAct := cfg .act .act
       let oDom := cfg .domwdeg .act
       let a := bumpActivity st oAct lits
       check "activity: act bumps every learned slot by 1"
-        (a.activity.getD 0 0 == 1.0 && a.activity.getD 1 0 == 1.0 &&
-         a.activity.getD 2 0 == 1.0)
+        ((a.activity.get? 0).getD 0 == 1.0 && (a.activity.get? 1).getD 0 == 1.0 &&
+         (a.activity.get? 2).getD 0 == 1.0)
       let d := bumpActivity st oDom lits
-      let d0 := d.activity.getD 0 0
-      let d1 := d.activity.getD 1 0
-      let d2 := d.activity.getD 2 0
+      let d0 := (d.activity.get? 0).getD 0
+      let d1 := (d.activity.get? 1).getD 0
+      let d2 := (d.activity.get? 2).getD 0
       check "activity: domwdeg weights by 1/|dom|"
         (0.4999 < d0 && d0 < 0.5001 &&
          0.2499 < d1 && d1 < 0.2501 &&
          0.0999 < d2 && d2 < 0.1001)
       let a2 := bumpActivity a oAct #[pLit (negNe 0 0)]
-      let a20 := a2.activity.getD 0 0
-      check "activity: decay 0.95 before the next bump"
-        (1.9499 < a20 && a20 < 1.9501)
+      let a20 := (a2.activity.get? 0).getD 0
+      check "activity: growing increment (1/0.95) on the next bump"
+        (2.0525 < a20 && a20 < 2.0528)
       let untouched := bumpActivityIf st (cfg .minc .act) lits
       check "activity: non-activity strategies leave the array untouched"
-        (untouched.activity.all fun x => x == 0.0)
+        (untouched.activity.data.all fun x => x == 0.0)
       -- Highest activity wins; ties fall back to the minc rule.
       let stSel : EngineState conflictProblem emptyTable :=
-        { st with activity := #[0.1, 2.0, 0.5] }
+        { st with activity := ⟨#[0.1, 2.0, 0.5]⟩ }
       check "selectSlot: act picks the highest activity"
         (selectSlot conflictProblem stSel oAct #[] == some 1)
       check "selectSlot: minc picks the smallest domain"
         (selectSlot conflictProblem stSel (cfg .minc .act) #[] == some 0)
       let stDom : EngineState conflictProblem emptyTable :=
-        { st with activity := #[0.1, 0.05, 0.2] }
+        { st with activity := ⟨#[0.1, 0.05, 0.2]⟩ }
       check "selectSlot: domwdeg reads the weighted scores"
         (selectSlot conflictProblem stDom oDom #[] == some 2)
       -- Cached tie-breaks: equal activity falls back to the smaller domain,
       -- equal activity and size keeps the lowest index; equal annotation
       -- priority follows the same two rules.
       let stTieAct : EngineState conflictProblem emptyTable :=
-        { st with activity := #[1.0, 1.0, 1.0] }
+        { st with activity := ⟨#[1.0, 1.0, 1.0]⟩ }
       check "selectSlot: act ties fall back to the smallest domain"
         (selectSlot conflictProblem stTieAct oAct #[] == some 0)
       let stTieSize : EngineState conflictProblem emptyTable :=
         { st with
           doms := #[.bounds 0 3, .bounds 0 3, .bounds 0 3]
-          activity := #[1.0, 1.0, 1.0] }
+          activity := ⟨#[1.0, 1.0, 1.0]⟩ }
       check "selectSlot: act ties keep the lowest index"
         (selectSlot conflictProblem stTieSize oAct #[] == some 0)
       let stTieUpdate : EngineState conflictProblem emptyTable :=
         { st with
           doms := #[.bounds 0 1, .bounds 0 9, .bounds 0 3]
-          activity := #[0.5, 2.0, 2.0] }
+          activity := ⟨#[0.5, 2.0, 2.0]⟩ }
       check "selectSlot: act tie uses the cached best size"
         (selectSlot conflictProblem stTieUpdate oAct #[] == some 2)
       let stTieDom : EngineState conflictProblem emptyTable :=
-        { st with activity := #[0.5, 0.5, 0.1] }
+        { st with activity := ⟨#[0.5, 0.5, 0.1]⟩ }
       check "selectSlot: domwdeg ties fall back to the smallest domain"
         (selectSlot conflictProblem stTieDom oDom #[] == some 0)
+      -- P5.2: conflict-weighted degree minimises size / (weight + 1).
+      let oWdeg := cfg .wdeg .act
+      let stW : EngineState conflictProblem emptyTable :=
+        { st with slotWeight := #[0, 3, 0] }
+      check "selectSlot: wdeg picks the highest weighted degree"
+        (selectSlot conflictProblem stW oWdeg #[] == some 1)
+      let stW0 : EngineState conflictProblem emptyTable :=
+        { st with slotWeight := #[0, 0, 0] }
+      check "selectSlot: wdeg with no conflict weights is minc"
+        (selectSlot conflictProblem stW0 oWdeg #[] == some 0)
+      let stWTie : EngineState conflictProblem emptyTable :=
+        { st with slotWeight := #[0, 0, 4] }
+      check "selectSlot: wdeg ties fall back to the smallest domain"
+        (selectSlot conflictProblem stWTie oWdeg #[] == some 0)
+      let bumped := bumpWeightLits stW0 #[pLit (negNe 0 0), pLit (negNe 2 0)]
+      check "wdeg: conflict explanations bump each mentioned slot"
+        ((bumped.slotWeight[0]?).getD 0 == 1 &&
+         (bumped.slotWeight[2]?).getD 0 == 1)
       let oAnnot := cfg .annot .act
       check "selectSlot: annot priority wins"
         (selectSlot conflictProblem st oAnnot #[0, 2, 1] == some 1)
@@ -237,7 +287,7 @@ def activityChecks : IO Unit := do
       let stSkip : EngineState conflictProblem emptyTable :=
         { st with
           doms := #[.bounds 0 0, .bounds 1 0, .bounds 0 3]
-          activity := #[100.0, 100.0, 1.0] }
+          activity := ⟨#[100.0, 100.0, 1.0]⟩ }
       check "selectSlot: never picks a fixed or empty slot"
         (selectSlot conflictProblem stSkip oAct #[] == some 2)
 
@@ -303,6 +353,24 @@ def restartChecks : IO Unit := do
     (restartThreshold (cfg .minc .act .luby 3) 0 == 3 &&
      restartThreshold (cfg .minc .act .luby 3) 2 == 6 &&
      restartThreshold (cfg .minc .act .luby 3) 6 == 12)
+  -- Q5: the schedule counts conflicts since the last restart, not the
+  -- cumulative conflict counter.  A cumulative check would fire in `stale`.
+  match initState conflictProblem emptyTable with
+  | none => fail "restart: entry rejected"
+  | some st0 =>
+      let stale : EngineState conflictProblem emptyTable :=
+        { st0 with
+          stats := { st0.stats with conflicts := 10 }
+          restarts := 0
+          lastRestartConflict := 9 }
+      check "restart: conflicts before the last restart do not trigger"
+        (restartDue (cfg .act .act .geom 5) stale == false)
+      let due : EngineState conflictProblem emptyTable :=
+        { stale with lastRestartConflict := 5 }
+      check "restart: the threshold is measured from the last restart"
+        (restartDue (cfg .act .act .geom 5) due == true)
+      check "restart: none never triggers"
+        (restartDue (cfg .act .act .none 5) due == false)
   match coreSolveFull (php 4 3) (cfg .act .act) 10000 with
   | (.unsat, base) =>
       match coreSolveState (php 4 3) (cfg .act .act .geom 2) 10000 with
@@ -341,6 +409,8 @@ def agreementChecks : IO Unit := do
     ("act/min", cfg .act .min),
     ("domwdeg/act", cfg .domwdeg .act),
     ("domwdeg/min", cfg .domwdeg .min),
+    ("wdeg/act", cfg .wdeg .act),
+    ("wdeg/min", cfg .wdeg .min),
     ("act/geom2", cfg .act .act .geom 2),
     ("act/luby2", cfg .act .act .luby 2)]
   for (name, p) in

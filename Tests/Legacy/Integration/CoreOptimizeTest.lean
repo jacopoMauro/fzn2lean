@@ -199,13 +199,16 @@ private def unsatCase (st : St) : IO St := do
               let st ← st.check s!"{label}: seam is UNSAT" okSeam
               fieldChecks st label p
 
-/-- A source model where the root bound round makes Core give up: `int_max`
-    plus `int_lin_ne` reaches a leaf whose fixed assignment violates the
-    linear disequality, and the raw Core run makes no claim.  The kernel
-    fallback decides the round and the emitted first incumbent is exactly
-    its SAT witness. -/
+/-- A source model where the root bound round makes Core give up: the
+    diagnostic conflict cap `{ conflictLimit := some 0 }` stops the raw Core
+    run before its first drain, so it makes no claim.  The kernel fallback
+    decides the round and the emitted first incumbent is exactly its SAT
+    witness.  Before the cap existed this case relied on the old Core search
+    giving up on the model spontaneously; the cap keeps the fallback path
+    deterministically exercised. -/
 private def fallbackCase (st : St) : IO St := do
   let label := "core-giveup-fallback"
+  let cfg : SearchConfig := { conflictLimit := some 0 }
   let src := "var 0..2: x; var 0..2: y; var 0..2: z; constraint int_max(x,y,z); constraint int_lin_ne([1,1],[y,z],0); solve maximize z;"
   match Parser.parseModel src with
   | .error e =>
@@ -217,12 +220,12 @@ private def fallbackCase (st : St) : IO St := do
           IO.eprintln s!"FAIL {label}: compile {e}"
           return { st with failed := st.failed + 1 }
       | .ok (p, spec) =>
-          match optimizeCore m with
+          match optimizeCore m cfg with
           | .error e =>
               IO.eprintln s!"FAIL {label}: optimizeCore {e}"
               return { st with failed := st.failed + 1 }
           | .ok (_, run) =>
-              let raw := coreSolve p ({} : SearchConfig) coreFuel
+              let raw := coreSolve p cfg coreFuel
               let kernelRoot := solveSearchConfigWith p ({} : SearchConfig) none
               let lcg := optLoop (lcgSolver ({} : SearchConfig)) p spec none
               let chron := optLoop chronSolver p spec none
@@ -238,7 +241,7 @@ private def fallbackCase (st : St) : IO St := do
               let okHead := match kernelRoot, run.sols.head? with
                 | .sat a, some s => s.1 == a
                 | _, _ => false
-              let S : CertSolver := coreSolver ({} : SearchConfig)
+              let S : CertSolver := coreSolver cfg
               let okWith := match kernelRoot with
                 | .sat a => sameVerdict (S.solveWith none p) (.sat a)
                 | .unsat => sameVerdict (S.solveWith none p) .unsat

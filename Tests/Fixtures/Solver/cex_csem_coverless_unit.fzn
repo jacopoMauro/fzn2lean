@@ -1,0 +1,32 @@
+% B1 fixture (fuzz seed 100207, delta-minimized): the representative class of
+% the 31 trail-only `c-sem` observations. UNSAT; verdict correct.
+%
+% At the last configuration the CURRENT frame is COVERLESS (slot v0's domain is
+% empty after the root assertion x0!=0). A multi-literal database clause
+%   [x2<=-1 | x2>0 | x1<=-1 | x1>0 | x0<=-2 | x0>-1]
+% is therefore vacuously UNIT in the frame (every non-pivot is domain-impossible
+% because an empty domain falsifies every literal), with pivot x2>0. The
+% trail-only semantic check (c-sem) flags the non-pivot x0>-1: no single earlier
+% trail entry implies its negation x0<=-1.
+%
+% B1 classification (harness `cSemClass` / `nextPruningEvent` liveness gate,
+% LeanFzn/Solver/Propagation/Pruning.lean:76-82): coverless=1, notSelected=0,
+% selected=0. A coverless frame has no represented solution, and
+% `nextPruningEvent` gates EVERY `.implied` event on `frameLiveB`, so no
+% database unit is dispatched and no reason is recorded at this configuration;
+% the observation is a harmless tracker limitation (the check's precondition
+% is broader than the dispatch's). The domain-based falsification the
+% dispatcher actually uses (`clauseRemaining`/`literalImpossible`) holds for
+% every flagged non-pivot by construction.
+%
+% Run: .lake/build/bin/tests_lcg_harness --only --no-chrono
+%        Tests/Fixtures/Solver/cex_csem_coverless_unit.fzn
+% Expected: c=(2, 1) and the B1 line "coverless=1 notSelected=0 selected=0".
+var -1..0: v0;
+var -1..0: v1;
+var 0..2: v2;
+constraint all_different([v2, v1, v0]);
+constraint int_times(v0, v2, v1);
+constraint int_ne(v1, v2);
+constraint int_min(v1, v2, v0);
+solve satisfy;

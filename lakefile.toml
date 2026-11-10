@@ -191,6 +191,38 @@ name = "tests_array_params"
 root = "Tests.Compiler.ArrayParams"
 
 [[lean_exe]]
+name = "tests_presolve"
+root = "Tests.Compiler.PreprocessTest"
+
+[[lean_exe]]
+name = "tests_literal_fold"
+root = "Tests.Compiler.LiteralFoldTest"
+
+[[lean_exe]]
+name = "tests_bounds"
+root = "Tests.Compiler.BoundsTest"
+
+[[lean_exe]]
+name = "tests_rank_circuit"
+root = "Tests.Compiler.RankCircuitTest"
+
+[[lean_exe]]
+name = "tests_set_expand"
+root = "Tests.Compiler.SetExpandTest"
+
+[[lean_exe]]
+name = "tests_set_shape"
+root = "Tests.Compiler.SetShapeTest"
+
+[[lean_exe]]
+name = "tests_set_emit"
+root = "Tests.Compiler.SetEmitTest"
+
+[[lean_exe]]
+name = "tests_lns"
+root = "Tests.Integration.Public.LnsTest"
+
+[[lean_exe]]
 name = "tests_optimize"
 root = "Tests.Legacy.Integration.Optimize"
 
@@ -259,6 +291,10 @@ name = "tests_engine_prop"
 root = "Tests.Engine.Props.PropTest"
 
 [[lean_exe]]
+name = "tests_engine_all_diff"
+root = "Tests.Engine.Props.AllDiffTest"
+
+[[lean_exe]]
 name = "tests_engine_queue"
 root = "Tests.Engine.QueueTest"
 
@@ -313,6 +349,10 @@ root = "Tests.Legacy.Integration.CoreOptimizeTest"
 [[lean_exe]]
 name = "tests_integration_core_seed"
 root = "Tests.Integration.Public.CoreSeedTest"
+
+[[lean_exe]]
+name = "tests_integration_portfolio"
+root = "Tests.Integration.Public.PortfolioTest"
 
 [[lean_exe]]
 name = "tests_core_only"

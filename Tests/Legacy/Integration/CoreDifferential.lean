@@ -45,6 +45,8 @@ def parseVar : String → Except String VarStrategy
   | "minc" => .ok .minc
   | "annot" => .ok .annot
   | "act" => .ok .act
+  | "domwdeg" => .ok .domwdeg
+  | "wdeg" => .ok .wdeg
   | "obj" => .ok .obj
   | s => .error s!"invalid --var={s}"
 

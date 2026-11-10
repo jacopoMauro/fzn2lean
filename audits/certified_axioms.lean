@@ -546,6 +546,32 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 #print axioms LeanFzn.Compiler.compileFull_exact
 #print axioms LeanFzn.Compiler.compileFull_covers
 #print axioms LeanFzn.Compiler.compileFull_covers_agree
+#print axioms LeanFzn.Compiler.compileFull_inv_wf
+#print axioms LeanFzn.Compiler.compileFull_covers_agree_setFree
+#print axioms LeanFzn.Compiler.setExpand_sound
+#print axioms LeanFzn.Compiler.setExpand_complete
+#print axioms LeanFzn.Compiler.wf_setExpand
+#print axioms LeanFzn.Compiler.SetExpansion.Inv.of_wellFormed
+-- S4/S5: certified set-shape pre-pass (member, card, union, set arrays).
+#print axioms LeanFzn.Compiler.shapeExpand_sound
+#print axioms LeanFzn.Compiler.shapeExpand_complete
+#print axioms LeanFzn.Compiler.wf_shapeExpand
+-- S6: certified set intersection and the linear-time lookup twins.
+#print axioms LeanFzn.Compiler.intersectRows_sound
+#print axioms LeanFzn.Compiler.rewriteIntersect_sound
+#print axioms LeanFzn.Compiler.rewriteConstraintFast_eq
+#print axioms LeanFzn.Compiler.expandVarDeclsAt_eq
+#print axioms LeanFzn.Compiler.setExpandModel_spec
+#print axioms LeanFzn.Compiler.setExpandModel_inv
+#print axioms LeanFzn.Compiler.shapeExpandConstraints_sound
+#print axioms LeanFzn.Compiler.shapeExpandConstraints_newHolds
+#print axioms LeanFzn.Compiler.rewriteArrayElem_sound
+#print axioms LeanFzn.Compiler.rewriteArrayElem_newHolds
+#print axioms LeanFzn.Compiler.rewriteArrayElem_wf
+#print axioms LeanFzn.Compiler.rewriteArrayElem_newChecked
+#print axioms LeanFzn.Compiler.arrayElemRows_spec
+#print axioms LeanFzn.Compiler.arrayElemRows_newHolds
+#print axioms LeanFzn.Compiler.arrayElemRows_newChecked
 -- PLAN §3.0 item 2: the constant-set membership domain restriction.
 #print axioms LeanFzn.Compiler.setInAccepts_eq
 #print axioms LeanFzn.Compiler.setInShape_inv
@@ -3457,7 +3483,7 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 #print axioms LeanFzn.Engine.addCItem_mem
 #print axioms LeanFzn.Engine.addCItem_explained
 #print axioms LeanFzn.Engine.addCItem_false
-#print axioms LeanFzn.Engine.initSlotOKB_spec
+#print axioms LeanFzn.Engine.initSlotRangeB_spec
 #print axioms LeanFzn.Engine.domFalseB_spec
 #print axioms LeanFzn.Engine.itemCheckB_spec
 #print axioms LeanFzn.Engine.atomKindOKB_spec
@@ -4233,8 +4259,6 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 #print axioms LeanFzn.Engine.arrayVarIntElementPropWith_prune_lit_none
 #print axioms LeanFzn.Engine.avieOut_eq_fix_of_index_bounds_none
 #print axioms LeanFzn.Engine.avieOut_eq_fix_of_result_bounds_none
-#print axioms LeanFzn.Engine.avieOut_eq_fix_of_table_false
-#print axioms LeanFzn.Engine.arrayVarIntElementPropWith_run_fix_of_malformed
 #print axioms LeanFzn.Engine.avbeFixedPrunes_mem
 #print axioms LeanFzn.Engine.avbeBadIndexPair?_mem
 #print axioms LeanFzn.Engine.avbeBadIndexPair?_cases

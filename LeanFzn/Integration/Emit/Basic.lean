@@ -31,15 +31,22 @@ open LeanFzn
 def emitInt (i : Int) : String :=
   toString i
 
+/-- The FlatZinc text of one integer set: an ascending, duplicate-free
+    enumeration `{...}`, with `{}` for the empty set. -/
+def emitSet (s : IntSetValue) : String :=
+  "{" ++ ", ".intercalate (IntSetValue.sortElems s |>.map emitInt) ++ "}"
+
 /-- The FlatZinc text of one scalar solution value: `true`/`false`
-    for Booleans, the decimal form for integers. Set and array values never
-    occur as slot values; the placeholders keep the function total. -/
+    for Booleans, the decimal form for integers, `{...}` for sets. An
+    array value never occurs as a slot value (arrays are emitted by
+    `emitDeclValue`); treating one as scalar is an internal error, not
+    output. -/
 def emitScalar : Value → String
   | .bool true => "true"
   | .bool false => "false"
   | .int i => emitInt i
-  | .setOfInt _ => "<unemittable set value>"
-  | .array _ => "<unemittable array value>"
+  | .setOfInt s => emitSet s
+  | .array _ => panic! "internal error: scalar emission of an array value"
 
 /-- One solution line `name = value;`. -/
 def emitEntry (name : String) (v : Value) : String :=

@@ -38,28 +38,33 @@ def Preset.toConfig : Preset → Option SearchConfig
   | .restarts => some
       { var := .annot, val := .incumbent, opt := .seeded, restart := .luby }
   | .lns => some
-      { var := .annot, val := .incumbent, opt := .seeded, primal := .lns }
+      { var := .annot, val := .incumbent, opt := .linear, primal := .lns }
   | .auto => none
 
 /-! ## Implementation gate -/
 
 /-- The option subset implemented by the array-based Core engine.  The Core
-    loop honours `--var=minc|annot|act|domwdeg`, every integer/Boolean value
+    loop honours `--var=minc|annot|act|domwdeg|wdeg`, every integer/Boolean value
     presentation in `--val=act|min|max|median|annot|incumbent` (the incumbent
-    route seeds the saved phases from the previous round under the linear
-    driver), the complete linear driver and the seeded driver (which carries
-    the learned clause database across objective-bound rounds).  Every other
+    route seeds the saved phases from the previous round under both the linear
+    and the seeded driver), the complete linear driver and the seeded driver
+    (which carries the learned clause database across objective-bound rounds).  Every other
     value is refused rather than silently degraded to a different policy in
     Core (the kernel route keeps its full option surface). -/
 def SearchConfig.checkCoreImplemented (c : SearchConfig) : Except String Unit := do
   if c.var == .obj then
     throw "option '--var=obj' is not supported by '--engine=core' yet"
-  if c.val == .incumbent && c.opt == .seeded then
-    throw "option '--val=incumbent' is not supported by '--engine=core --opt=seeded' yet (the seeded entry has no phase seed)"
   if c.opt == .bisect then
     throw "option '--opt=bisect' is not supported by '--engine=core' yet (only '--opt=linear|seeded' is wired)"
-  if c.primal != .none then
-    throw "option '--primal' is not supported by '--engine=core' yet"
+  if c.threads != 1 then
+    if c.opt != .linear then
+      throw "option '--threads' requires '--opt=linear' (the parallel portfolio is the linear complete driver)"
+    if c.primal != .none then
+      throw "option '--threads' cannot be combined with '--primal' (each portfolio worker is an ordinary complete run)"
+  if c.primal == .dive then
+    throw "option '--primal=dive' is not supported by '--engine=core' yet (only '--primal=lns' is wired)"
+  if c.primal == .lns && c.opt != .linear then
+    throw "option '--primal=lns' requires '--opt=linear' (the finalized neighborhood phase feeds the complete linear loop)"
   if c.portfolio.isSome then
     throw "option '--portfolio' is not supported by '--engine=core' yet"
   if c.timeLimit.isSome then
@@ -68,8 +73,10 @@ def SearchConfig.checkCoreImplemented (c : SearchConfig) : Except String Unit :=
     throw "option '--time-limit' is not supported by '--engine=core' yet"
   if c.seed.isSome then
     throw "option '--seed' is not supported by '--engine=core' yet"
-  if c.presolve != .none then
-    throw "option '--presolve' is not supported by '--engine=core' yet"
+  if c.presolve == .root then
+    throw "option '--presolve=root' is not supported by '--engine=core' yet"
+  if c.presolve == .dedup && c.opt == .seeded then
+    throw "option '--presolve=dedup' is not supported by '--engine=core --opt=seeded' yet (the seeded entry does not rebase carried clauses through a transformed problem)"
   if c.objPrio || c.objBias || c.actBump then
     throw "the legacy '--heur-*' toggles are not supported by '--engine=core' yet"
 
@@ -85,16 +92,17 @@ def SearchConfig.checkImplementedBase (c : SearchConfig) : Except String Unit :=
   | .minc => pure ()
   | .obj => pure ()
   | .annot => pure ()
-  | .act | .domwdeg =>
+  | .act | .domwdeg | .wdeg =>
       if c.engine == .core then pure ()
       else
-        throw "option '--var=act|domwdeg' is not implemented yet (F7 conflict-driven variable selection)"
+        throw "option '--var=act|domwdeg|wdeg' is not implemented yet (F7 conflict-driven variable selection)"
   match c.val with
   | .act => pure ()
   | .annot => pure ()
   | .min => pure ()
   | .max => pure ()
   | .median => pure ()
+  | .split => pure ()
   | .incumbent => pure ()
   match c.opt with
   | .linear => pure ()
@@ -118,10 +126,20 @@ def SearchConfig.checkImplementedBase (c : SearchConfig) : Except String Unit :=
     throw "option '--primal=dive|lns' cannot be combined with '--portfolio' (per-entry primal heuristics are not implemented)"
   if c.restart != .none && c.opt != .seeded && c.engine != .core then
     throw "option '--restart=luby|geom' requires '--opt=seeded' (the F5 restart driver is seeded)"
-  if c.restart == .none && c.restartBase != 100 then
+  if c.restart == .none && c.restartBase != 100 &&
+      (c.engine != .core || c.restartExplicit) then
     throw "option '--restart-base' requires '--restart=luby|geom'"
-  if c.restart != .none && c.restartBase == 0 then
+  if (c.restart != .none || (c.engine == .core && !c.restartExplicit)) &&
+      c.restartBase == 0 then
     throw "option '--restart-base' must be positive (it is a step budget)"
+  if c.conflictLimit.isSome && c.engine != .core then
+    throw "option '--conflict-limit' is only supported by '--engine=core' (it caps the Core conflict loop)"
+  if c.threads == 0 then
+    throw "option '--threads' must be positive (it is a worker count)"
+  if c.threads > 8 then
+    throw "option '--threads' is limited to 8 workers (one per core on the reference machine)"
+  if c.threads != 1 && c.engine != .core then
+    throw "option '--threads' is only supported by '--engine=core' (the parallel portfolio runs the Core driver)"
   if c.primal == .none && c.primalTime != 1000 then
     throw "option '--primal-time' requires '--primal=dive|lns'"
   if c.primal != .none && c.primalTime == 0 then
@@ -135,8 +153,7 @@ def SearchConfig.checkImplementedBase (c : SearchConfig) : Except String Unit :=
   match c.primal with
   | .none => pure ()
   | .dive => pure ()
-  | .lns =>
-      throw "option '--primal=lns' is not implemented yet (F6.2 LNS driver)"
+  | .lns => pure ()
   match c.prop with
   | .auto => pure ()
   | .queue =>
@@ -147,6 +164,10 @@ def SearchConfig.checkImplementedBase (c : SearchConfig) : Except String Unit :=
   | .none => pure ()
   | .root =>
       throw "option '--presolve=root' is not implemented yet (E2 root presolve)"
+  | .dedup =>
+      if c.engine == .core then pure ()
+      else
+        throw "option '--presolve=dedup' is implemented only for '--engine=core'"
   if c.seed.isSome then
     throw "option '--seed' is not implemented yet (F5/F6 randomized strategies)"
   if (c.var == .annot || c.val != .act) && c.objBias then

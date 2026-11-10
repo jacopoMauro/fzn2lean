@@ -83,7 +83,10 @@ source model and `toStore` are unchanged; only the per-slot enumeration order
 differs. -/
 def lcgConfigProblem (p : CompiledProblem DomConstraint) (o : SearchConfig) :
     CompiledProblem DomConstraint :=
-  { p with domains := lcgConfigDomains p o }
+  { p with
+    domains := lcgConfigDomains p o
+    domainsArray := (lcgConfigDomains p o).toArray
+    domainsArray_toList := List.toList_toArray (as := lcgConfigDomains p o) }
 
 @[simp] theorem lcgConfigProblem_domains (p : CompiledProblem DomConstraint)
     (o : SearchConfig) :

@@ -76,15 +76,17 @@ def generalCases : List (String × Dom) :=
     ("general bools", ⟨.general [.bool true, .bool false]⟩),
     ("general single int", ⟨.general [.int (-5)]⟩),
     ("general wide dense",
-      ⟨.general ((List.range 5000).map fun i => .int (Int.ofNat i))⟩) ]
+      ⟨.general ((List.range 5000).map fun i => .int (Int.ofNat i))⟩),
+    ("general wide sparse", ⟨.general [.int 0, .int 1000000]⟩),
+    ("general wide sparse negative",
+      ⟨.general [.int (-1000000000), .int 0, .int 1000000000]⟩) ]
 
 /-- Shapes that entry conversion is allowed to reject (`none` is a give-up). -/
 def giveUpCases : List (String × Dom) :=
   [ ("general empty", ⟨.general []⟩),
     ("general mixed", ⟨.general [.int 1, .bool true]⟩),
     ("general set head", ⟨.general [.setOfInt (.enumeration [1])]⟩),
-    ("general array head", ⟨.general [.array []]⟩),
-    ("general wide sparse", ⟨.general [.int 0, .int 100000]⟩) ]
+    ("general array head", ⟨.general [.array []]⟩) ]
 
 /-- Check conversion, membership, size and fixed-value consistency.  With
     `exactEnum = true`, the converted domain's enumeration must equal
@@ -138,6 +140,32 @@ def checkOps (label : String) (c : DomC) : IO Unit := do
       check s!"{label}: remove {repr v} at {repr w}"
         (r.mem w == (c.mem w && !(v == w)))
 
+/-- A wide enumeration converts to the span-independent `.sparse`
+    representation, and every operation keeps its denotation. -/
+def checkSparse (label : String) (vs : List Int) : IO Unit := do
+  let d : Dom := ⟨.general (vs.map Value.int)⟩
+  match DomC.ofDom? d with
+  | none => fail s!"{label}: sparse conversion rejected"
+  | some c =>
+      check s!"{label}: sparse representation"
+        (match c with | .sparse _ => true | _ => false)
+      check s!"{label}: size" (c.size == vs.eraseDups.length)
+      for x in vs ++ [0, 1, -1, 500000, 1000000, -1000000] do
+        check s!"{label}: mem {x}" (c.mem (.int x) == vs.contains x)
+      check s!"{label}: lo?" (c.lo? == minInt? vs)
+      check s!"{label}: hi?" (c.hi? == maxInt? vs)
+      check s!"{label}: non-singleton fixedValue" c.fixedValue.isNone
+      for k in [(-1000000), (-1), 0, 1, 500000, 1000000] do
+        for x in vs ++ [k - 1, k, k + 1] do
+          check s!"{label}: setLe {k} at {x}"
+            ((c.setLe k).mem (.int x) == (vs.contains x && decide (x ≤ k)))
+          check s!"{label}: setGe {k} at {x}"
+            ((c.setGe k).mem (.int x) == (vs.contains x && decide (k ≤ x)))
+      for x in vs ++ [0, 500000, 1000000] do
+        for v in vs do
+          check s!"{label}: remove {v} at {x}"
+            ((c.remove (.int v)).mem (.int x) == (vs.contains x && x != v))
+
 /-- A compiled problem carrying just the supplied domains. -/
 def mkProblem (ds : List Dom) : CompiledProblem DomConstraint :=
   { names := []
@@ -145,6 +173,8 @@ def mkProblem (ds : List Dom) : CompiledProblem DomConstraint :=
     constraints := []
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- Reference fit computed from the compiled denotation. -/
@@ -202,6 +232,9 @@ def run : IO UInt32 := do
     | none => fail s!"{label}: ofDom? returned none in checkOps"
   for (label, d) in giveUpCases do
     check s!"{label}: expected none" (DomC.ofDom? d).isNone
+  checkSparse "sparse pair" [0, 1000000]
+  checkSparse "sparse negative pair" [-1000000000, 0, 1000000000]
+  checkSparse "sparse three" [-5, 3, 999999]
   checkFits "fit" fitDomains fitAssignments
   checkFits "empty-fit" emptyFitDomains emptyFitAssignments
   IO.println "DomTest: OK"

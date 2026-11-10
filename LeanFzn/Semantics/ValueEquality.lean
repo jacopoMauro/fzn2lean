@@ -279,6 +279,12 @@ theorem value_eqB_leaf' (a b : Value) (h : a.eqB b = true) : a = b :=
 theorem value_eqB_iff {a b : Value} : a.eqB b = true ↔ a = b :=
   ⟨fun h => value_eqB_leaf' a b h, fun h => by rw [h]; exact value_eqB_refl b⟩
 
+/-- The executable `Value.eqB` gives the structural `DecidableEq` instance.
+    Keeping the decision on the fast path avoids a second recursive
+    equality implementation. -/
+instance : DecidableEq Value := fun a b =>
+  decidable_of_iff (a.eqB b = true) value_eqB_iff
+
 
 
 

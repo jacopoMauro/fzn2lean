@@ -54,6 +54,63 @@ def linExtractBoundsAux (doms : Array DomC) : List Nat → Option (List (Int × 
 def linExtractBounds (doms : Array DomC) (is : Array Nat) : Option (Array (Int × Int)) :=
   (linExtractBoundsAux doms is.toList).map fun bds => bds.toArray
 
+/-- Tail-recursive runtime builder for `linExtractBounds`: one pass over the
+slot array, pushing each bound pair onto an accumulator.  `@[csimp]` swaps it
+in for the compiled code only; the logical definition stays `linExtractBounds`. -/
+def linExtractBoundsGo (doms : Array DomC) (is : Array Nat) (i : Nat)
+    (acc : Array (Int × Int)) : Option (Array (Int × Int)) :=
+  if h : i < is.size then
+    match linBoundAt doms is[i] with
+    | some p => linExtractBoundsGo doms is (i + 1) (acc.push p)
+    | none => none
+  else some acc
+termination_by is.size - i
+decreasing_by omega
+
+def linExtractBoundsFast (doms : Array DomC) (is : Array Nat) :
+    Option (Array (Int × Int)) :=
+  linExtractBoundsGo doms is 0 #[]
+
+theorem linExtractBoundsGo_spec (doms : Array DomC) (is : Array Nat) :
+    ∀ (k i : Nat) (acc : Array (Int × Int)), is.size - i = k →
+      linExtractBoundsGo doms is i acc =
+        (linExtractBoundsAux doms (is.toList.drop i)).map
+          fun bds => acc ++ bds.toArray := by
+  intro k
+  induction k using Nat.strongRecOn with
+  | ind k ih =>
+    intro i acc hk
+    rw [linExtractBoundsGo.eq_def]
+    by_cases hi : i < is.size
+    · rw [dif_pos hi]
+      have hdrop : is.toList.drop i = is[i] :: is.toList.drop (i + 1) := by
+        rw [List.drop_eq_getElem_cons (by simpa using hi)]
+        simp
+      rw [hdrop, linExtractBoundsAux]
+      cases hb : linBoundAt doms is[i] with
+      | none => simp
+      | some p =>
+          simp only [Option.bind_some]
+          rw [ih (is.size - (i + 1)) (by omega) (i + 1) (acc.push p) rfl]
+          rw [Option.map_map]
+          congr 1
+          funext bds
+          simp only [Function.comp_apply]
+          apply Array.toList_inj.mp
+          rw [Array.toList_append, Array.toList_append, Array.toList_push,
+            List.toList_toArray, List.append_assoc, List.singleton_append]
+    · rw [dif_neg hi]
+      have hdrop : is.toList.drop i = [] :=
+        List.drop_eq_nil_of_le (by simpa using Nat.le_of_not_lt hi)
+      rw [hdrop]
+      simp [linExtractBoundsAux]
+
+@[csimp] theorem linExtractBounds_eq_fast : @linExtractBounds = @linExtractBoundsFast := by
+  funext doms is
+  unfold linExtractBounds linExtractBoundsFast
+  rw [linExtractBoundsGo_spec doms is (is.size - 0) 0 #[] rfl]
+  simp
+
 theorem linExtractBoundsAux_spec {doms : Array DomC} {slots : List Nat}
     {bds : List (Int × Int)} (h : linExtractBoundsAux doms slots = some bds) :
     bds.length = slots.length ∧
@@ -127,6 +184,51 @@ def linTermsAux : List Int → List Nat → List (Int × Int) → List LinTerm
 
 def linTerms (cs : Array Int) (slots : Array Nat) (bds : Array (Int × Int)) : List LinTerm :=
   linTermsAux cs.toList slots.toList bds.toList
+
+/-- One term at index `i`, as read by the runtime twin of `linTerms`. -/
+def linTermAt (cs : Array Int) (slots : Array Nat) (bds : Array (Int × Int)) (i : Nat) :
+    LinTerm :=
+  let c := cs.getD i 0
+  let s := slots.getD i 0
+  let p := bds.getD i (0, 0)
+  ⟨c, s, p.1, p.2⟩
+
+/-- Runtime twin of `linTerms`: one index range over the common prefix instead
+of three synchronized list recursions.  `@[csimp]` swaps it in for the
+compiled code only. -/
+def linTermsFast (cs : Array Int) (slots : Array Nat) (bds : Array (Int × Int)) :
+    List LinTerm :=
+  (List.range (min cs.size (min slots.size bds.size))).map (linTermAt cs slots bds)
+
+theorem linTermsAux_eq_range_map (cs : List Int) (slots : List Nat)
+    (bds : List (Int × Int)) :
+    linTermsAux cs slots bds =
+      (List.range (min cs.length (min slots.length bds.length))).map
+        fun i => ⟨cs.getD i 0, slots.getD i 0,
+          (bds.getD i (0, 0)).1, (bds.getD i (0, 0)).2⟩ := by
+  induction cs generalizing slots bds with
+  | nil => simp [linTermsAux]
+  | cons c cs ih =>
+      cases slots with
+      | nil => simp [linTermsAux]
+      | cons s ss =>
+          cases bds with
+          | nil => simp [linTermsAux]
+          | cons p bs =>
+              obtain ⟨lo, hi⟩ := p
+              simp only [linTermsAux, List.length_cons]
+              rw [show min (cs.length + 1) (min (ss.length + 1) (bs.length + 1))
+                    = min cs.length (min ss.length bs.length) + 1 by omega]
+              rw [ih ss bs, List.range_succ_eq_map, List.map_cons, List.map_map]
+              simp [List.getD_cons_succ]
+
+@[csimp] theorem linTerms_eq_fast : @linTerms = @linTermsFast := by
+  funext cs slots bds
+  unfold linTerms linTermsFast
+  rw [linTermsAux_eq_range_map]
+  congr 1
+  funext i
+  simp [linTermAt]
 
 theorem linTermsAux_getElem?_some {cs : List Int} {slots : List Nat}
     {bds : List (Int × Int)} :
@@ -475,6 +577,19 @@ theorem DomC.lo?_le_hi? (d : DomC) (hWF : d.WF) {lo hi : Int}
           have hspecLo := goHoleLo_some_spec bhi holes holes.size 0 blo lo (by omega) hlo
           have hmem : hi ∈ holes.toList := hspecLo.2 hi hspec.1 (by omega)
           exact hspec.2.2 hmem
+  | sparse values =>
+      rw [DomC.lo?.eq_5] at hlo
+      rw [DomC.hi?.eq_5] at hhi
+      have hmemlo : lo ∈ values.toList := by
+        obtain ⟨hpos, hx0⟩ := arrayHead?_eq_some hlo
+        rw [← hx0]
+        exact Array.mem_toList_iff.mpr
+          (Array.mem_of_getElem? (Array.getElem?_eq_getElem hpos))
+      have hm : (DomC.sparse values).mem (.int lo) = true := by
+        simp only [DomC.mem]
+        exact (memHoleRange_eq_true_iff hWF).mpr hmemlo
+      have hle := DomC.le_hi? (.sparse values) hWF hhi hm
+      simpa [iv, Value.intView] using hle
 
 theorem slotInt_eq_some_of_getElem!_int {a : Assignment} {s : Nat} {x : Int}
     (h : a[s]! = .int x) : slotInt a s = some x := by
@@ -721,13 +836,12 @@ def linPrunes (terms : List LinTerm) (b : Int) : List (Literal × Clause) :=
           else none
         else none
 
-/-- Runtime twin of `linPrunes`: one total instead of a per-term
-`linOtherMin` sum and O(1) term lookups, so a run is linear in the number
-of terms (plus the reasons it emits).  `@[csimp]` swaps it in for the
-compiled code only. -/
-def linPrunesFast (terms : List LinTerm) (b : Int) : List (Literal × Clause) :=
-  let arr := terms.toArray
-  let total := linTotalMin terms
+/-- Runtime twin of `linPrunes` parameterised by a precomputed term array
+and total, so callers can share both across several plans.  One total
+instead of a per-term `linOtherMin` sum and O(1) term lookups make a run
+linear in the number of terms (plus the reasons it emits). -/
+def linPrunesFastAt (terms : List LinTerm) (arr : Array LinTerm) (total : Int)
+    (b : Int) : List (Literal × Clause) :=
   (List.range terms.length).filterMap fun i =>
     match arr[i]? with
     | none => none
@@ -745,9 +859,14 @@ def linPrunesFast (terms : List LinTerm) (b : Int) : List (Literal × Clause) :=
           else none
         else none
 
+/-- Runtime twin of `linPrunes` (see `linPrunesFastAt`).  `@[csimp]` swaps it
+in for the compiled code only. -/
+def linPrunesFast (terms : List LinTerm) (b : Int) : List (Literal × Clause) :=
+  linPrunesFastAt terms terms.toArray (linTotalMin terms) b
+
 @[csimp] theorem linPrunes_eq_fast : @linPrunes = @linPrunesFast := by
   funext terms b
-  unfold linPrunes linPrunesFast
+  unfold linPrunes linPrunesFast linPrunesFastAt
   congr 1
   funext i
   simp only [List.getElem?_toArray]

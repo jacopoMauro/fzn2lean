@@ -1114,13 +1114,9 @@ theorem auxShape_pin_valued (sh : AuxShape) (v : Value)
       have hvv : Value.int k = v := (Option.some.inj h)
       exact Or.inl ⟨k, hvv.symm⟩
   | eqReifRK x r k =>
-      rw [AuxShape.pin] at h
-      have hvv : Value.int k = v := (Option.some.inj h)
-      exact Or.inl ⟨k, hvv.symm⟩
+      simp [AuxShape.pin] at h
   | eqReifKR x r k =>
-      rw [AuxShape.pin] at h
-      have hvv : Value.int k = v := (Option.some.inj h)
-      exact Or.inl ⟨k, hvv.symm⟩
+      simp [AuxShape.pin] at h
   | leReifRK x r k =>
       rw [AuxShape.pin] at h
       have hvv : Value.int k = v := (Option.some.inj h)

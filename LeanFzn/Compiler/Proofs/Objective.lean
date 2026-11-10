@@ -75,13 +75,25 @@ theorem optToStore_slot {m : Model} {p0 : CompiledProblem DomConstraint}
     (hc : compileModelFull m = .ok p0) (hwf : WellFormed fullSig m)
     {x : Ident} {ty : BasicVarType} {anns : List Annotation}
     (hd : (.basic ty x anns none : VarDeclItem) ∈ m.variables)
+    (hty : ty.base = .int)
     {i : Nat} (hi : nameIndex p0.names x.name = some i) (a : List Value) :
     p0.toStore a x = a[i]? := by
-  obtain ⟨hgate, p00, hcn, rfl⟩ := compileFull_inv hc
+  obtain ⟨sh, se, mb, p00, hsh, hse, hbm, hcn, rfl, _hwfsh, hinv, hwse, hwmb⟩ :=
+    compileFull_inv_wf hc hwf
   have hnu : NamesNodup m := hwf.valueNamesUnique
   have hnone := lookup_arrayDefs_none hnu (x := x) (Or.inr ⟨_, hd, rfl, rfl⟩)
-  show fullStore (arrayDefs m) (p00.toStore a) x = a[i]?
-  rw [fullStore_of_none hnone]
+  have hnot : x.name ∉ se.setNames := by
+    have hdn := normalizeFull_basic_decl (m := m) hd
+    have hdn' : (.basic (restrictVarType (foldLiteralsModel (fragmentModel
+        (normalizeModel m))) x.name ty) x anns none : VarDeclItem) ∈
+        sh.model.variables :=
+      shapeExpandModel_variables_mem hsh hdn
+    obtain ⟨ty', anns', hkept⟩ := SetExpansion.Inv.kept_basic_of_base_ne
+      (inv := hinv) (n := x) hdn' (by rw [restrictVarType_base, hty]; decide)
+    have := hinv.kept_name_not_set hkept
+    simpa [VarDeclItem.name] using this
+  show fullStore (arrayDefs m) (setStore se (p00.toStore a)) x = a[i]?
+  rw [fullStore_of_none hnone, SetExpansion.setStore_of_not_mem hnot]
   obtain ⟨_, slots, dcs, _, _, hasm⟩ := compileModel_ok_inv hcn
   have hi' : nameIndex (slots.map Prod.fst) x.name = some i := by
     have : p00.names = slots.map Prod.fst := by rw [hasm]; rfl
@@ -89,7 +101,7 @@ theorem optToStore_slot {m : Model} {p0 : CompiledProblem DomConstraint}
   rw [hasm]
   show (match nameIndex (slots.map Prod.fst) x.name with
     | some i => a[i]?
-    | none => parEnv (normalizeModel m) x) = a[i]?
+    | none => parEnv mb x) = a[i]?
   rw [hi']
 
 /-- Value shape: an `int`-based variable reads an `int`. -/
@@ -144,7 +156,7 @@ theorem compileOpt_exact {m : Model} {p : CompiledProblem DomConstraint}
   have hwf' := wf_satisfyPart hwf
   obtain ⟨hsat, hpar⟩ := compileFull_exact hp0 hwf' hmem hacc
   refine ⟨hsat, hpar, ?_⟩
-  have hts := optToStore_slot hp0 hwf' (m := satisfyPart m) hd hslot a
+  have hts := optToStore_slot hp0 hwf' (m := satisfyPart m) hd hty hslot a
   obtain ⟨v, hv, hcont⟩ : ∃ v, p0.toStore a spec.var = some v ∧ ty.contains v := by
     have := hsat.2.1 _ hd
     simpa using this
@@ -169,7 +181,15 @@ theorem compileOpt_covers {m : Model} {p : CompiledProblem DomConstraint}
   obtain ⟨ty, anns, hd, hty⟩ := objVarOkB_decl hok
   obtain ⟨a, h1, h2, h3⟩ := compileFull_covers_agree hp0 (wf_satisfyPart hwf)
     (m := satisfyPart m) hsat hparam
-  exact ⟨a, h1, h2, h3 ty spec.var anns hd⟩
+  obtain ⟨v, w, hv, hw, heq⟩ := h3 ty spec.var anns hd
+  obtain ⟨w', hw', hcont⟩ := hsat.2.1 (.basic ty spec.var anns none) hd
+  have hww : w' = w := Option.some.inj (hw'.symm.trans hw)
+  have hcont' : ty.contains w := hww ▸ hcont
+  obtain ⟨j, rfl⟩ := int_of_contains hty hcont'
+  have hv' : v = .int j := by cases v <;> simp_all [Value.SemEq]
+  refine ⟨a, h1, h2, ?_⟩
+  show p0.toStore a spec.var = store spec.var
+  rw [hv, hv', hw]
 
 /-- **(c) Optimality transfer.**  Let `a` be an accepted assignment with
     objective value `v` at the objective slot.  If no assignment of the
@@ -206,7 +226,7 @@ theorem compileOpt_optimal {m : Model} {p : CompiledProblem DomConstraint}
     obtain ⟨b, hb1, hb2, hb3⟩ := compileOpt_covers hc hwf hs.2 hph
     refine ⟨b, hb1, hb2, ?_⟩
     have hx : p0.toStore b spec.var = other spec.var := hb3
-    rw [optToStore_slot hp0 hwf' (m := satisfyPart m) hd hslot b] at hx
+    rw [optToStore_slot hp0 hwf' (m := satisfyPart m) hd hty hslot b] at hx
     rw [objective_of_ident hobj] at hj
     cases hr : other spec.var with
     | none => rw [hr] at hj; simp at hj
@@ -298,7 +318,7 @@ theorem compileOpt_optimal_of_bound {m : Model} {p : CompiledProblem DomConstrai
     obtain ⟨b, hb1, hb2, hb3⟩ := compileOpt_covers hc hwf hs.2 hph
     refine ⟨b, hb1, hb2, ?_⟩
     have hx : p0.toStore b spec.var = other spec.var := hb3
-    rw [optToStore_slot hp0 hwf' (m := satisfyPart m) hd hslot b] at hx
+    rw [optToStore_slot hp0 hwf' (m := satisfyPart m) hd hty hslot b] at hx
     rw [objective_of_ident hobjOf] at hj
     cases hr : other spec.var with
     | none => rw [hr] at hj; simp at hj

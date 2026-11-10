@@ -49,13 +49,15 @@ def mkProblem (ds : List Dom) (cs : List DomConstraint) : CompiledProblem DomCon
     constraints := cs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- The interval-with-no-holes source domain. -/
 def d (lo hi : Int) : Dom := ⟨.holes lo hi []⟩
 
 /-- The compact domain produced by converting `d lo hi`. -/
-def conv (lo hi : Int) : DomC := DomC.boundsHoles lo hi #[]
+def conv (lo hi : Int) : DomC := (DomC.ofDom? (d lo hi)).getD DomC.empty
 
 /-! ## Inspecting `PropOut` -/
 

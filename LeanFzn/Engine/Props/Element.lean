@@ -48,13 +48,47 @@ def intCandidatesAux (d : DomC) (lo : Int) : List Nat → List Int
         (lo + (n : Int)) :: intCandidatesAux d lo ns
       else intCandidatesAux d lo ns
 
-/-- Integer members of the hull of `d`, capped at 4097 values. -/
+/-- Set-bit scan of one 64-bit word: values `base + i` for the set bits
+`i`, accumulated in reverse order (newest first). -/
+def intCandidatesWordGo (base : Int) (w : UInt64) : Nat → Nat → List Int → List Int
+  | 0, _, acc => acc
+  | fuel + 1, i, acc =>
+      if (w &&& u64bit i) != 0 then
+        intCandidatesWordGo base w fuel (i + 1) ((base + (i : Int)) :: acc)
+      else intCandidatesWordGo base w fuel (i + 1) acc
+
+/-- Scan the words of a bit-set domain in ascending order, accumulating
+values in reverse order. -/
+def intCandidatesBitsetGo (base : Int) (words : Array UInt64) :
+    Nat → Nat → List Int → List Int
+  | 0, _, acc => acc
+  | fuel + 1, wi, acc =>
+      match words[wi]? with
+      | some w =>
+          intCandidatesBitsetGo base words fuel (wi + 1)
+            (intCandidatesWordGo (base + ((wi * 64 : Nat) : Int)) w 64 0 acc)
+      | none => acc
+
+/-- The integer members of a bit-set domain, in ascending order. -/
+def intCandidatesBitset (lo : Int) (words : Array UInt64) : List Int :=
+  (intCandidatesBitsetGo lo words words.size 0 []).reverse
+
+/-- Integer members of the hull of `d`, capped at 4097 values.  Bit-set
+domains walk their set bits directly; the other representations keep the
+hull scan. -/
 def intCandidates (d : DomC) : List Int :=
-  match d.lo?, d.hi? with
-  | some lo, some hi =>
-      if hi - lo + 1 > 4097 then []
-      else intCandidatesAux d lo (List.range (hi - lo + 1).toNat)
-  | _, _ => []
+  match d with
+  | .bitset lo words =>
+      match (DomC.bitset lo words).lo?, (DomC.bitset lo words).hi? with
+      | some a, some b =>
+          if b - a + 1 > 4097 then [] else intCandidatesBitset lo words
+      | _, _ => []
+  | _ =>
+      match d.lo?, d.hi? with
+      | some lo, some hi =>
+          if hi - lo + 1 > 4097 then []
+          else intCandidatesAux d lo (List.range (hi - lo + 1).toNat)
+      | _, _ => []
 
 theorem mem_intCandidatesAux {d : DomC} {lo : Int} {ns : List Nat} {v : Int}
     (h : v ∈ intCandidatesAux d lo ns) : d.mem (.int v) = true := by
@@ -68,19 +102,105 @@ theorem mem_intCandidatesAux {d : DomC} {lo : Int} {ns : List Nat} {v : Int}
         · exact ih htail
       · exact ih h
 
+theorem mem_intCandidatesWordGo {w : UInt64} {P : Int → Prop} {wbase : Int} :
+    ∀ (fuel i : Nat) (acc : List Int), i + fuel = 64 →
+      (∀ j, j < 64 → w.toNat.testBit j = true → P (wbase + (j : Int))) →
+      (∀ v ∈ acc, P v) →
+      ∀ v ∈ intCandidatesWordGo wbase w fuel i acc, P v := by
+  intro fuel
+  induction fuel with
+  | zero =>
+      intro i acc hinv hP hacc v hv
+      rw [intCandidatesWordGo.eq_1] at hv
+      exact hacc v hv
+  | succ fuel ih =>
+      intro i acc hinv hP hacc v hv
+      have hi : i < 64 := by omega
+      rw [intCandidatesWordGo.eq_2] at hv
+      by_cases hbit : (w &&& u64bit i) != 0
+      · rw [if_pos hbit] at hv
+        apply ih (i + 1) ((wbase + (i : Int)) :: acc) (by omega) hP ?_ v hv
+        intro u hu
+        rcases List.mem_cons.mp hu with rfl | hu
+        · exact hP i hi ((uint64_and_u64bit_ne_zero_iff w hi).mp hbit)
+        · exact hacc u hu
+      · rw [if_neg hbit] at hv
+        exact ih (i + 1) acc (by omega) hP hacc v hv
+
+/-- A set bit in a stored word is a member of the bit-set array. -/
+theorem bitsetMem_eq_true_of_getElem?_testBit {words : Array UInt64} {wi j : Nat}
+    {w : UInt64} (h : words[wi]? = some w) (hj : j < 64)
+    (hb : w.toNat.testBit j = true) :
+    bitsetMem words (wi * 64 + j) = true := by
+  rw [bitsetMem_eq_true_iff]
+  refine ⟨w, ?_, ?_⟩
+  · have hdiv : (wi * 64 + j) / 64 = wi := by
+      refine Nat.div_eq_of_lt_le ?_ ?_
+      · omega
+      · rw [Nat.succ_mul]
+        omega
+    rw [hdiv]
+    exact h
+  · have hmod : (wi * 64 + j) % 64 = j := by
+      rw [Nat.mul_add_mod_self_right, Nat.mod_eq_of_lt hj]
+    rw [hmod]
+    exact hb
+
+theorem mem_intCandidatesBitsetGo {base : Int} {words : Array UInt64} :
+    ∀ (fuel wi : Nat) (acc : List Int), wi + fuel ≤ words.size →
+      (∀ v ∈ acc, ∃ n : Nat, v = base + (n : Int) ∧ bitsetMem words n = true) →
+      ∀ v ∈ intCandidatesBitsetGo base words fuel wi acc,
+        ∃ n : Nat, v = base + (n : Int) ∧ bitsetMem words n = true := by
+  intro fuel
+  induction fuel with
+  | zero =>
+      intro wi acc hbound hacc v hv
+      rw [intCandidatesBitsetGo.eq_1] at hv
+      exact hacc v hv
+  | succ fuel ih =>
+      intro wi acc hbound hacc v hv
+      rw [intCandidatesBitsetGo.eq_2] at hv
+      split at hv
+      · rename_i w hw
+        apply ih (wi + 1) _ (by omega) ?_ v hv
+        intro u hu
+        refine mem_intCandidatesWordGo (P := fun u =>
+            ∃ n : Nat, u = base + (n : Int) ∧ bitsetMem words n = true)
+          (wbase := base + ((wi * 64 : Nat) : Int)) 64 0 acc (by omega) ?_ hacc u hu
+        intro j hj hbit
+        refine ⟨wi * 64 + j, ?_, ?_⟩
+        · push_cast
+          omega
+        · exact bitsetMem_eq_true_of_getElem?_testBit hw hj hbit
+      · exact hacc v hv
+
+theorem mem_intCandidatesBitset {lo : Int} {words : Array UInt64} {v : Int}
+    (h : v ∈ intCandidatesBitset lo words) :
+    (DomC.bitset lo words).mem (.int v) = true := by
+  unfold intCandidatesBitset at h
+  rw [List.mem_reverse] at h
+  obtain ⟨n, hv, hmem⟩ := mem_intCandidatesBitsetGo words.size 0 []
+    (by omega) (by intro u hu; simp at hu) v h
+  subst hv
+  have hsub : lo + (n : Int) - lo = (n : Int) := by omega
+  simp [DomC.mem, hsub, hmem]
+
 theorem mem_intCandidates {d : DomC} {v : Int}
     (h : v ∈ intCandidates d) : d.mem (.int v) = true := by
   unfold intCandidates at h
-  cases hlo : d.lo? with
-  | none => simp [hlo] at h
-  | some lo =>
-      cases hhi : d.hi? with
-      | none => simp [hlo, hhi] at h
-      | some hi =>
-          by_cases hcap : hi - lo + 1 > 4097
-          · simp [hlo, hhi, hcap] at h
-          · simp only [hlo, hhi, hcap, if_false] at h
-            exact mem_intCandidatesAux h
+  split at h
+  · split at h
+    · rename_i a b hlo hhi
+      split at h
+      · simp at h
+      · exact mem_intCandidatesBitset h
+    · simp at h
+  · split at h
+    · rename_i lo hi hlo hhi
+      split at h
+      · simp at h
+      · exact mem_intCandidatesAux h
+    · simp at h
 
 /-- Keep a prune batch only when it leaves at least one value in the
 domain being pruned. -/
@@ -422,6 +542,159 @@ def aiePrunePairs (di dk : DomC) (xs : List Int) (i k : Nat) :
   | some _ => []
   | none => aieBadIndexPrunes di dk xs i k ++ aieHullPrunes di dk xs i k
 
+/-! ### Wipeout conflicts for the constant-table element
+
+When every in-range index value still present in the index domain has a
+defined table entry outside the result domain, the element row is
+unsatisfiable on the current view.  The conflict clause is the
+disjunction of `k = T[j]` for the present index values `j` and `i = j`
+for the removed in-range values: the element row satisfies it for every
+accepted assignment, and every literal is false on the view. -/
+
+/-- The length bound of the wipeout scan.  Longer tables keep the no-op
+path: their conflict clauses are expensive to learn and are the ones
+observed to trigger late, non-asserting conflicts. -/
+def aieWipeoutMaxLen : Nat := 64
+
+/-- The guard of a genuine wipeout: every in-range index value still in
+the index domain has a defined table entry outside the result domain.
+Values outside `[1, length]` cannot satisfy the element and need no
+literal. -/
+def aieWipeoutOK (di dk : DomC) (xs : List Int) : Bool :=
+  decide (xs.length ≤ aieWipeoutMaxLen) &&
+    (List.range xs.length).all fun t =>
+      let j : Int := Int.ofNat t + 1
+      if di.memIntView j then
+        match valuesGet1 (xs.map Value.int) j with
+        | some (.int w) => !dk.memIntView w
+        | _ => false
+      else true
+
+/-- The wipeout conflict clause: for a present index value the result
+must equal its table entry; for a removed index value the index itself
+is excluded. -/
+def aieWipeoutClause (di dk : DomC) (xs : List Int) (i k : Nat) :
+    List Literal :=
+  (List.range xs.length).map fun t =>
+    let j : Int := Int.ofNat t + 1
+    if di.memIntView j then
+      match valuesGet1 (xs.map Value.int) j with
+      | some (.int w) => negNe k w
+      | _ => negNe i j
+    else negNe i j
+
+/-- A wipeout conflict when the guard holds; an empty clause is never
+emitted, so `.fix` is the conservative fallback. -/
+def aieWipeout (di dk : DomC) (xs : List Int) (i k : Nat) :
+    Option (List Literal) :=
+  if aieWipeoutOK di dk xs then
+    let ls := aieWipeoutClause di dk xs i k
+    if ls.isEmpty then none else some ls
+  else none
+
+/-- Bounds of a successful `valuesGet1` read: FlatZinc tables are
+1-based, so the index lies in `[1, length]`. -/
+theorem valuesGet1_some_bounds {xs : List Value} {i : Int} {v : Value}
+    (h : valuesGet1 xs i = some v) :
+    1 ≤ i ∧ i ≤ (xs.length : Int) := by
+  unfold valuesGet1 at h
+  split at h
+  · rename_i hpos
+    have hsome : xs[i.toNat - 1]? = some v := h
+    have hlt : i.toNat - 1 < xs.length :=
+      (List.getElem?_eq_some_iff.mp hsome).1
+    have hitoNat : (i.toNat : Int) = i := Int.toNat_of_nonneg (by omega)
+    omega
+  · cases h
+
+/-- Every in-range index value still present in `di` has a defined
+entry that is absent from `dk`, when the wipeout guard holds. -/
+theorem aieWipeoutOK_spec {di dk : DomC} {xs : List Int}
+    (h : aieWipeoutOK di dk xs = true) :
+    xs.length ≤ aieWipeoutMaxLen ∧
+      ∀ j : Int, 1 ≤ j → j ≤ (xs.length : Int) →
+        di.memIntView j = true →
+        ∃ w : Int, valuesGet1 (xs.map Value.int) j = some (.int w) ∧
+          dk.memIntView w = false := by
+  unfold aieWipeoutOK at h
+  rw [Bool.and_eq_true] at h
+  obtain ⟨hlen, hall⟩ := h
+  refine ⟨of_decide_eq_true hlen, ?_⟩
+  intro j hj1 hjn hmem
+  have htoNat : (j.toNat : Int) = j := Int.toNat_of_nonneg (by omega)
+  have ht : j.toNat - 1 < xs.length := by omega
+  have hj_eq : Int.ofNat (j.toNat - 1) + 1 = j := by
+    change ((j.toNat - 1 : Nat) : Int) + 1 = j
+    have hm : 1 ≤ j.toNat := by omega
+    rw [Int.ofNat_sub hm]
+    omega
+  have htj := List.all_eq_true.mp hall (j.toNat - 1)
+    (List.mem_range.mpr ht)
+  dsimp only at htj
+  rw [hj_eq, if_pos hmem] at htj
+  split at htj
+  · rename_i w hent
+    exact ⟨w, hent, by simpa using htj⟩
+  · simp at htj
+
+/-- A wipeout option exposes its guard and its clause. -/
+theorem aieWipeout_spec {di dk : DomC} {xs : List Int} {i k : Nat}
+    {ls : List Literal} (h : aieWipeout di dk xs i k = some ls) :
+    aieWipeoutOK di dk xs = true ∧
+      ls = aieWipeoutClause di dk xs i k := by
+  unfold aieWipeout at h
+  by_cases hOK : aieWipeoutOK di dk xs = true
+  · rw [if_pos hOK] at h
+    by_cases hemp : (aieWipeoutClause di dk xs i k).isEmpty = true
+    · rw [if_pos hemp] at h
+      simp at h
+    · rw [if_neg hemp] at h
+      refine ⟨hOK, ?_⟩
+      injection h with hls
+      exact hls.symm
+  · rw [if_neg hOK] at h
+    simp at h
+
+/-- A present index value contributes its result equality to the
+wipeout clause. -/
+theorem aieWipeoutClause_mem_of_mem {di dk : DomC} {xs : List Int}
+    {i k : Nat} {j w : Int} (hj1 : 1 ≤ j) (hjn : j ≤ (xs.length : Int))
+    (hmem : di.memIntView j = true)
+    (hent : valuesGet1 (xs.map Value.int) j = some (.int w)) :
+    negNe k w ∈ aieWipeoutClause di dk xs i k := by
+  unfold aieWipeoutClause
+  rw [List.mem_map]
+  refine ⟨j.toNat - 1, List.mem_range.mpr (by
+    have htoNat : (j.toNat : Int) = j := Int.toNat_of_nonneg (by omega)
+    omega), ?_⟩
+  have hj_eq : Int.ofNat (j.toNat - 1) + 1 = j := by
+    change ((j.toNat - 1 : Nat) : Int) + 1 = j
+    have hm : 1 ≤ j.toNat := by omega
+    rw [Int.ofNat_sub hm]
+    have htoNat : (j.toNat : Int) = j := Int.toNat_of_nonneg (by omega)
+    omega
+  simp only [hj_eq, hmem, hent, if_pos]
+
+/-- A removed index value contributes its own exclusion to the wipeout
+clause. -/
+theorem aieWipeoutClause_mem_of_not_mem {di dk : DomC} {xs : List Int}
+    {i k : Nat} {j : Int} (hj1 : 1 ≤ j) (hjn : j ≤ (xs.length : Int))
+    (hmem : di.memIntView j = false) :
+    negNe i j ∈ aieWipeoutClause di dk xs i k := by
+  unfold aieWipeoutClause
+  rw [List.mem_map]
+  refine ⟨j.toNat - 1, List.mem_range.mpr (by
+    have htoNat : (j.toNat : Int) = j := Int.toNat_of_nonneg (by omega)
+    omega), ?_⟩
+  have hj_eq : Int.ofNat (j.toNat - 1) + 1 = j := by
+    change ((j.toNat - 1 : Nat) : Int) + 1 = j
+    have hm : 1 ≤ j.toNat := by omega
+    rw [Int.ofNat_sub hm]
+    have htoNat : (j.toNat : Int) = j := Int.toNat_of_nonneg (by omega)
+    omega
+  simp only [hj_eq, hmem]
+  simp
+
 /-- The pure decision function. -/
 def aieOut (di dk : DomC) (xs : List Int) (i k : Nat) : AieOut :=
   match intPairBounds di dk with
@@ -443,7 +716,141 @@ def aieOut (di dk : DomC) (xs : List Int) (i k : Nat) : AieOut :=
             let ps := aieBadIndexPrunes di dk xs i k ++
               aieHullPrunes di dk xs i k
             if ps.isEmpty then .fix else .prune ps
-          else .fix
+          else
+            match aieWipeout di dk xs i k with
+            | some ls => .conflict ls
+            | none => .fix
+
+/-! ### Array-indexed runtime twins for the constant-table scan
+
+`valuesGet1` walks the table from the front, so calling it once per
+candidate index makes `aieOut` quadratic in the table width.  The twins
+below hoist `xs.map Value.int` to an `Array` once per propagator run and
+then use O(1) `Array` lookups.  They are installed only in compiled code
+by `@[csimp]`; every proof keeps using the list-based definitions. -/
+
+/-- `aieHasGood` with the hoisted table array. -/
+def aieHasGoodA (xa : Array Value) (di dk : DomC) : Bool :=
+  (intCandidates di).any fun v =>
+    match valuesGet1A xa v with
+    | some (.int w) => dk.memIntView w
+    | _ => false
+
+theorem aieHasGoodA_eq (xs : List Int) (di dk : DomC) :
+    aieHasGoodA (xs.map Value.int).toArray di dk = aieHasGood di dk xs := by
+  unfold aieHasGoodA aieHasGood
+  congr 1
+  funext v
+  rw [valuesGet1A_toArray]
+
+/-- `aieBadIndexPrunes` with the hoisted table array. -/
+def aieBadIndexPrunesA (xa : Array Value) (di dk : DomC) (i k : Nat) :
+    List (Literal × Clause) :=
+  (intCandidates di).filterMap fun v =>
+    match valuesGet1A xa v with
+    | none =>
+        if 1 < di.size then some (posNe i v, [posNe i v]) else none
+    | some (.int w) =>
+        if dk.memIntView w then none
+        else if 1 < di.size then some (posNe i v, [posNe i v, negNe k w])
+        else none
+    | some _ => none
+
+theorem aieBadIndexPrunesA_eq (xs : List Int) (di dk : DomC) (i k : Nat) :
+    aieBadIndexPrunesA (xs.map Value.int).toArray di dk i k =
+      aieBadIndexPrunes di dk xs i k := by
+  unfold aieBadIndexPrunesA aieBadIndexPrunes
+  congr 1
+  funext v
+  rw [valuesGet1A_toArray]
+
+/-- `aieWipeoutOK` with the hoisted table array. -/
+def aieWipeoutOKA (xa : Array Value) (xs : List Int) (di dk : DomC) : Bool :=
+  decide (xs.length ≤ aieWipeoutMaxLen) &&
+    (List.range xs.length).all fun t =>
+      let j : Int := Int.ofNat t + 1
+      if di.memIntView j then
+        match valuesGet1A xa j with
+        | some (.int w) => !dk.memIntView w
+        | _ => false
+      else true
+
+theorem aieWipeoutOKA_eq (xs : List Int) (di dk : DomC) :
+    aieWipeoutOKA (xs.map Value.int).toArray xs di dk =
+      aieWipeoutOK di dk xs := by
+  unfold aieWipeoutOKA aieWipeoutOK
+  simp only [valuesGet1A_toArray]
+
+/-- `aieWipeoutClause` with the hoisted table array. -/
+def aieWipeoutClauseA (xa : Array Value) (xs : List Int) (di dk : DomC)
+    (i k : Nat) : List Literal :=
+  (List.range xs.length).map fun t =>
+    let j : Int := Int.ofNat t + 1
+    if di.memIntView j then
+      match valuesGet1A xa j with
+      | some (.int w) => negNe k w
+      | _ => negNe i j
+    else negNe i j
+
+theorem aieWipeoutClauseA_eq (xs : List Int) (di dk : DomC) (i k : Nat) :
+    aieWipeoutClauseA (xs.map Value.int).toArray xs di dk i k =
+      aieWipeoutClause di dk xs i k := by
+  unfold aieWipeoutClauseA aieWipeoutClause
+  simp only [valuesGet1A_toArray]
+
+/-- `aieWipeout` with the hoisted table array. -/
+def aieWipeoutA (xa : Array Value) (xs : List Int) (di dk : DomC)
+    (i k : Nat) : Option (List Literal) :=
+  if aieWipeoutOKA xa xs di dk then
+    let ls := aieWipeoutClauseA xa xs di dk i k
+    if ls.isEmpty then none else some ls
+  else none
+
+theorem aieWipeoutA_eq (xs : List Int) (di dk : DomC) (i k : Nat) :
+    aieWipeoutA (xs.map Value.int).toArray xs di dk i k =
+      aieWipeout di dk xs i k := by
+  unfold aieWipeoutA aieWipeout
+  simp only [aieWipeoutOKA_eq, aieWipeoutClauseA_eq]
+
+/-- `aieOut` with the hoisted table array. -/
+def aieOutA (xa : Array Value) (xs : List Int) (di dk : DomC) (i k : Nat) : AieOut :=
+  match intPairBounds di dk with
+  | none => .fix
+  | some _ =>
+      match di.fixedValue with
+      | some (.int idx) =>
+          match valuesGet1A xa idx with
+          | none => .conflict [posNe i idx]
+          | some (.int v) =>
+              if dk.memIntView v then
+                let ps := aieFixedPrunes dk i k idx v
+                if ps.isEmpty then .fix else .prune ps
+              else .conflict [posNe i idx, negNe k v]
+          | some _ => .fix
+      | some _ => .fix
+      | none =>
+          if aieHasGoodA xa di dk then
+            let ps := aieBadIndexPrunesA xa di dk i k ++
+              aieHullPrunes di dk xs i k
+            if ps.isEmpty then .fix else .prune ps
+          else
+            match aieWipeoutA xa xs di dk i k with
+            | some ls => .conflict ls
+            | none => .fix
+
+theorem aieOutA_eq (xs : List Int) (di dk : DomC) (i k : Nat) :
+    aieOutA (xs.map Value.int).toArray xs di dk i k = aieOut di dk xs i k := by
+  unfold aieOutA aieOut
+  simp only [aieHasGoodA_eq, aieBadIndexPrunesA_eq, aieWipeoutA_eq,
+    valuesGet1A_toArray]
+
+/-- Runtime twin of `aieOut` used by compiled code only. -/
+def aieOutFast (di dk : DomC) (xs : List Int) (i k : Nat) : AieOut :=
+  aieOutA (xs.map Value.int).toArray xs di dk i k
+
+@[csimp] theorem aieOut_eq_fast : @aieOut = @aieOutFast := by
+  funext di dk xs i k
+  exact (aieOutA_eq xs di dk i k).symm
 
 /-! ### Entailment of the stage-1 clauses -/
 
@@ -454,6 +861,39 @@ theorem aie_satisfied_views {b : Assignment} {xs : List Int} {i k : Nat}
     ∃ idx e : Int, b[i]? = some (.int idx) ∧ b[k]? = some (.int e) ∧
       valuesGet1 (xs.map Value.int) idx = some (.int e) :=
   arrayIntElement_views h
+
+/-- The wipeout clause is entailed by the element row alone.  An
+accepted assignment reads an index in `[1, length]`; if that index is
+still present in `di` the clause contains its result equality, and if
+it was removed the clause contains its index exclusion. -/
+theorem aie_entailed_wipeout (p : CompiledProblem DomConstraint)
+    (xs : List Int) (i k : Nat)
+    (hmem : DomConstraint.arrayIntElementSlot xs i k ∈ p.constraints)
+    {di dk : DomC}
+    (hOK : aieWipeoutOK di dk xs = true) :
+    Entailed p (aieWipeoutClause di dk xs i k) := by
+  intro b _ hacc
+  have hs : (DomConstraint.arrayIntElementSlot xs i k).SatisfiedBy b :=
+    (DomConstraint.satisfiedB_iff _ _).mp (accepts_satisfiedB hacc hmem)
+  obtain ⟨idx, e, hi, hk, hent⟩ := aie_satisfied_views hs
+  obtain ⟨hidx1, hidxn⟩ := valuesGet1_some_bounds hent
+  have hidxn' : idx ≤ (xs.length : Int) := by simpa using hidxn
+  by_cases hmemd : di.memIntView idx = true
+  · obtain ⟨w, hw, -⟩ :=
+      (aieWipeoutOK_spec hOK).2 idx hidx1 hidxn' hmemd
+    have hwe : w = e := by
+      have hsome : some (Value.int w) = some (Value.int e) := by
+        rw [← hw, hent]
+      exact Value.int.inj (Option.some.inj hsome)
+    refine ⟨negNe k w,
+      aieWipeoutClause_mem_of_mem hidx1 hidxn' hmemd hw, ?_⟩
+    rw [eval_negNe_iff]
+    exact ⟨e, slotInt_of_int_read hk, hwe.symm⟩
+  · have hnot : di.memIntView idx = false := by simpa using hmemd
+    refine ⟨negNe i idx,
+      aieWipeoutClause_mem_of_not_mem hidx1 hidxn' hnot, ?_⟩
+    rw [eval_negNe_iff]
+    exact ⟨idx, slotInt_of_int_read hi, rfl⟩
 
 /-- The out-of-range unit clause is entailed. -/
 theorem aie_entailed_out (p : CompiledProblem DomConstraint)
@@ -858,7 +1298,8 @@ theorem aieOut_conflict_cases {di dk : DomC} {xs : List Int} {i k : Nat}
         valuesGet1 (xs.map Value.int) idx = none ∧ ls = [posNe i idx]) ∨
     (∃ idx v : Int, di.fixedValue = some (.int idx) ∧
         valuesGet1 (xs.map Value.int) idx = some (.int v) ∧
-        dk.memIntView v = false ∧ ls = [posNe i idx, negNe k v]) := by
+        dk.memIntView v = false ∧ ls = [posNe i idx, negNe k v]) ∨
+    (aieWipeout di dk xs i k = some ls) := by
   unfold aieOut at h
   split at h
   · cases h
@@ -878,7 +1319,8 @@ theorem aieOut_conflict_cases {di dk : DomC} {xs : List Int} {i k : Nat}
             rw [if_neg hgood] at hh
             injection hh with h
             exact h.symm
-          exact Or.inr ⟨idx, v, hfix, hent, by simpa using hgood, hls⟩
+          exact Or.inr (Or.inl ⟨idx, v, hfix, hent,
+            by simpa using hgood, hls⟩)
       · cases h
     · cases h
     · rename_i hfix
@@ -887,7 +1329,12 @@ theorem aieOut_conflict_cases {di dk : DomC} {xs : List Int} {i k : Nat}
             aieHullPrunes di dk xs i k).isEmpty = true
         · simp [hfix, hgood, hemp] at h
         · simp [hfix, hgood, hemp] at h
-      · simp [hfix, hgood] at h
+      · cases hw : aieWipeout di dk xs i k with
+        | none => simp [hfix, hgood, hw] at h
+        | some ls0 =>
+            have hls : ls0 = ls := by
+              simpa [hfix, hgood, hw] using h
+            exact Or.inr (Or.inr (by simpa [hls] using hw))
 
 theorem aieOut_prune_cases {di dk : DomC} {xs : List Int} {i k : Nat}
     {pairs : List (Literal × Clause)}
@@ -937,7 +1384,9 @@ theorem aieOut_prune_cases {di dk : DomC} {xs : List Int} {i k : Nat}
           rw [hpairs]
           unfold aiePrunePairs
           rw [hfix]
-      · simp [hfix, hgood] at h
+      · cases hw : aieWipeout di dk xs i k with
+        | none => simp [hfix, hgood, hw] at h
+        | some ls0 => simp [hfix, hgood, hw] at h
 
 /-! ### The stage-1 builder -/
 
@@ -955,9 +1404,12 @@ def arrayIntElementPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
       | .conflict ls =>
           .conflict (EClause.ofLiterals p T ls (by
             rcases aieOut_conflict_cases hout with
-              ⟨idx, hfix, hnone, rfl⟩ | ⟨idx, v, hfix, hent, hbad, rfl⟩
+              ⟨idx, hfix, hnone, rfl⟩ | ⟨idx, v, hfix, hent, hbad, rfl⟩ | hw
             · exact aie_entailed_out p xs i k hmem hnone
-            · exact aie_entailed_noSupp p xs i k hmem hent))
+            · exact aie_entailed_noSupp p xs i k hmem hent
+            · obtain ⟨hOK, hls⟩ := aieWipeout_spec hw
+              rw [hls]
+              exact aie_entailed_wipeout p xs i k hmem hOK))
       | .prune pairs =>
           .prune (mkElemPruneArray p T pairs
             (fun l reason hlr =>
@@ -980,7 +1432,11 @@ theorem arrayIntElementPropWith_run_conflict
         (view.doms.getD i DomC.empty).fixedValue = some (.int idx) ∧
         valuesGet1 (xs.map Value.int) idx = some (.int v) ∧
         (view.doms.getD k DomC.empty).memIntView v = false ∧
-        T.decodeClause ec.lits = [posNe i idx, negNe k v]) := by
+        T.decodeClause ec.lits = [posNe i idx, negNe k v]) ∨
+    (∃ ls : List Literal,
+        aieWipeout (view.doms.getD i DomC.empty)
+          (view.doms.getD k DomC.empty) xs i k = some ls ∧
+        T.decodeClause ec.lits = ls) := by
   unfold arrayIntElementPropWith at h
   simp only [arrayIntElementPropWith] at h
   split at h
@@ -989,9 +1445,11 @@ theorem arrayIntElementPropWith_run_conflict
     injection h with hec
     subst hec
     rcases aieOut_conflict_cases hout with
-      ⟨idx, hfix, hnone, rfl⟩ | ⟨idx, v, hfix, hent, hbad, rfl⟩
+      ⟨idx, hfix, hnone, rfl⟩ | ⟨idx, v, hfix, hent, hbad, rfl⟩ | hw
     · exact Or.inl ⟨idx, hfix, hnone, LitTable.decodeClause_map_pLit T _⟩
-    · exact Or.inr ⟨idx, v, hfix, hent, hbad, LitTable.decodeClause_map_pLit T _⟩
+    · exact Or.inr (Or.inl ⟨idx, v, hfix, hent, hbad,
+        LitTable.decodeClause_map_pLit T _⟩)
+    · exact Or.inr (Or.inr ⟨ls, hw, LitTable.decodeClause_map_pLit T _⟩)
   · cases h
 
 theorem arrayIntElementPropWith_run_prune
@@ -1034,11 +1492,16 @@ theorem arrayIntElementPropWith_conflict_entailed
     (h : (arrayIntElementPropWith p T xs i k hmem).run view = .conflict ec) :
     Entailed p (T.decodeClause ec.lits) := by
   rcases arrayIntElementPropWith_run_conflict p T xs i k hmem view h with
-    ⟨idx, hfix, hnone, hdec⟩ | ⟨idx, v, hfix, hent, hbad, hdec⟩
+    ⟨idx, hfix, hnone, hdec⟩ | ⟨idx, v, hfix, hent, hbad, hdec⟩ |
+      ⟨ls, hw, hdec⟩
   · rw [hdec]
     exact aie_entailed_out p xs i k hmem hnone
   · rw [hdec]
     exact aie_entailed_noSupp p xs i k hmem hent
+  · rw [hdec]
+    obtain ⟨hOK, hls⟩ := aieWipeout_spec hw
+    rw [hls]
+    exact aie_entailed_wipeout p xs i k hmem hOK
 
 theorem arrayIntElementPropWith_conflict_lits_false
     (p : CompiledProblem DomConstraint) (T : LitTable)
@@ -1052,7 +1515,8 @@ theorem arrayIntElementPropWith_conflict_lits_false
       (view.doms.getD l.atom.slot DomC.empty).evalLit l = some false := by
   have hWF' : ViewWF view #[i, k] := by simpa [dcSlotsFull] using hWF
   rcases arrayIntElementPropWith_run_conflict p T xs i k hmem view h with
-    ⟨idx, hfix, hnone, hdec⟩ | ⟨idx, v, hfix, hent, hbad, hdec⟩
+    ⟨idx, hfix, hnone, hdec⟩ | ⟨idx, v, hfix, hent, hbad, hdec⟩ |
+      ⟨ls, hw, hdec⟩
   · intro l hl
     rw [hdec] at hl
     rw [List.mem_singleton] at hl
@@ -1072,6 +1536,34 @@ theorem arrayIntElementPropWith_conflict_lits_false
         (DomC.fixedValue_sound _ hWFi hfix).1
       exact DomC.evalLit_posNe_of_fixed hfix hmem
     · exact DomC.evalLit_negNe_false_of_not_memIntView _ k hbad
+  · intro l hl
+    rw [hdec] at hl
+    obtain ⟨hOK, hls⟩ := aieWipeout_spec hw
+    rw [hls] at hl
+    unfold aieWipeoutClause at hl
+    rw [List.mem_map] at hl
+    obtain ⟨t, ht, rfl⟩ := hl
+    have ht' : t < xs.length := List.mem_range.mp ht
+    have hj1 : 1 ≤ (Int.ofNat t + 1 : Int) := by
+      change (1 : Int) ≤ (t : Int) + 1
+      omega
+    have hjn : (Int.ofNat t + 1 : Int) ≤ (xs.length : Int) := by
+      change (t : Int) + 1 ≤ (xs.length : Int)
+      have htI : (t : Int) < (xs.length : Int) := by exact_mod_cast ht'
+      omega
+    by_cases hmem : (view.doms.getD i DomC.empty).memIntView
+        (Int.ofNat t + 1) = true
+    · obtain ⟨w, hent, hbad⟩ :=
+        (aieWipeoutOK_spec hOK).2 (Int.ofNat t + 1) hj1 hjn hmem
+      simp only [hmem, if_true]
+      rw [hent]
+      exact DomC.evalLit_negNe_false_of_not_memIntView
+        (view.doms.getD k DomC.empty) k hbad
+    · have hnot : (view.doms.getD i DomC.empty).memIntView
+          (Int.ofNat t + 1) = false := by simpa using hmem
+      simp only [hnot, Bool.false_eq_true, if_false]
+      exact DomC.evalLit_negNe_false_of_not_memIntView
+        (view.doms.getD i DomC.empty) i hnot
 
 theorem arrayIntElementPropWith_prune_reason_entailed
     (p : CompiledProblem DomConstraint) (T : LitTable)
@@ -1292,10 +1784,8 @@ def aviePrunePairsOf (doms : Array DomC) (is : List Nat) (i k : Nat)
     (di dk : DomC) : List (Literal × Clause) :=
   match intBounds di, intBounds dk with
   | some (ilo, ihi), some (klo, khi) =>
-      if !avieTableOkB doms is then []
-      else
-        match di.fixedValue with
-        | some (.int idx) =>
+      match di.fixedValue with
+      | some (.int idx) =>
             match avieEntry is idx with
             | none => []
             | some j =>
@@ -1321,10 +1811,8 @@ def avieOutOf (doms : Array DomC) (is : List Nat) (i k : Nat)
     (di dk : DomC) : AvieOut :=
   match intBounds di, intBounds dk with
   | some (ilo, ihi), some (klo, khi) =>
-      if !avieTableOkB doms is then .fix
-      else
-        match di.fixedValue with
-        | some (.int idx) =>
+      match di.fixedValue with
+      | some (.int idx) =>
             match avieEntry is idx with
             | none => .conflict [posNe i idx]
             | some j =>
@@ -1350,6 +1838,302 @@ def avieOutOf (doms : Array DomC) (is : List Nat) (i k : Nat)
 /-- The pure stage-2 decision. -/
 def avieOut (doms : Array DomC) (is : List Nat) (i k : Nat) : AvieOut :=
   avieOutOf doms is i k (doms.getD i DomC.empty) (doms.getD k DomC.empty)
+
+/-! ### Array/runtime twins for the variable-table element
+
+`avieOutOf` indexes the slot list with `avieEntry` for every index
+candidate, recomputes the result-domain bounds for every candidate, and
+re-reads `fixedValue` of the selected slot and the result.  The twins
+below hoist the slot list to an `Array`, the result bounds, the result
+fixed value, and derive the selected slot's integer fixed value from its
+already computed hull bounds.  They are installed only in compiled code
+by `@[csimp]`; every proof keeps using the list-based definitions. -/
+
+/-- 1-based table lookup with the slot list hoisted to an array. -/
+def avieEntryA (isa : Array Nat) (idx : Int) : Option Nat :=
+  if 0 < idx then isa[idx.toNat - 1]? else none
+
+theorem avieEntryA_eq (is : List Nat) (idx : Int) :
+    avieEntryA is.toArray idx = avieEntry is idx := by
+  unfold avieEntryA avieEntry
+  rw [List.getElem?_toArray]
+
+/-- The integer value of a domain when its integer view is fixed,
+derived from already computed hull bounds and the domain kind. -/
+def intFixedOf (d : DomC) (b : Option (Int × Int)) : Option Int :=
+  match b with
+  | some (lo, hi) => if d.intKindB && lo == hi then some lo else none
+  | none => none
+
+/-- A Boolean domain is never fixed to an integer value. -/
+theorem bool_fixedValue_int_match_none (bits : UInt8) :
+    (match (DomC.bool bits).fixedValue with
+     | some (.int w) => some w
+     | _ => none) = none := by
+  simp only [DomC.fixedValue]
+  split
+  case h_1 heq => split at heq <;> simp at heq
+  case h_2 => simp
+
+theorem intFixedOf_intBounds_eq (d : DomC) :
+    intFixedOf d (intBounds d) =
+      (match d.fixedValue with
+       | some (.int w) => some w
+       | _ => none) := by
+  cases d with
+  | bool bits =>
+      simp only [intFixedOf, intBounds, DomC.intKindB]
+      split <;> simp [bool_fixedValue_int_match_none]
+  | bounds lo hi =>
+      by_cases h : hi < lo
+      · have hne : lo ≠ hi := by omega
+        simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB,
+          DomC.lo?, DomC.hi?, h, hne, beq_iff_eq]
+      · by_cases h2 : lo = hi <;>
+          simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB,
+            DomC.lo?, DomC.hi?, h, h2, beq_iff_eq]
+  | bitset lo words =>
+      cases hlo : DomC.lo? (.bitset lo words) with
+      | none =>
+          simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB, hlo]
+      | some a =>
+          cases hhi : DomC.hi? (.bitset lo words) with
+          | none =>
+              simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB, hlo, hhi]
+          | some b =>
+              by_cases hab : a = b <;>
+                simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB,
+                  hlo, hhi, hab, beq_iff_eq]
+  | boundsHoles lo hi holes =>
+      cases hlo : DomC.lo? (.boundsHoles lo hi holes) with
+      | none =>
+          simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB, hlo]
+      | some a =>
+          cases hhi : DomC.hi? (.boundsHoles lo hi holes) with
+          | none =>
+              simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB, hlo, hhi]
+          | some b =>
+              by_cases hab : a = b <;>
+                simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB,
+                  hlo, hhi, hab, beq_iff_eq]
+  | sparse values =>
+      cases hhead : arrayHead? values with
+      | none =>
+          simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB,
+            DomC.lo?, DomC.hi?, hhead]
+      | some a =>
+          cases hlast : arrayLast? values with
+          | none =>
+              simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB,
+                DomC.lo?, DomC.hi?, hhead, hlast]
+          | some b =>
+              by_cases hab : a = b <;>
+                simp [intFixedOf, intBounds, DomC.fixedValue, DomC.intKindB,
+                  DomC.lo?, DomC.hi?, hhead, hlast, hab, beq_iff_eq]
+
+theorem intFixedOf_some (d : DomC) {lo hi : Int}
+    (hb : intBounds d = some (lo, hi)) :
+    intFixedOf d (some (lo, hi)) =
+      (match d.fixedValue with
+       | some (.int w) => some w
+       | _ => none) := by
+  unfold intFixedOf
+  rw [← hb]
+  exact intFixedOf_intBounds_eq d
+
+/-- The result-pinned unsupported-index pair with the result fixed value
+hoisted. -/
+def avieBadIndexPinValFA (i k j : Nat) (dk dj : DomC)
+    (fk : Option Value) (idx : Int) : Option (Literal × Clause) :=
+  match fk with
+  | some (.int w) =>
+      if dj.memIntView w then none
+      else some (posNe i idx, [posNe i idx, posNe k w, negNe j w])
+  | _ => none
+
+theorem avieBadIndexPinValFA_eq (i k j : Nat) (dk dj : DomC) (idx : Int) :
+    avieBadIndexPinValFA i k j dk dj dk.fixedValue idx =
+      avieBadIndexPinVal? i k j dk dj idx := by
+  unfold avieBadIndexPinValFA avieBadIndexPinVal?
+  rfl
+
+/-- `avieBadIndexPairOf?` with the result bounds and fixed value hoisted
+and the selected slot's fixed value derived from its hull bounds. -/
+def avieBadIndexPairOfFA (i k j : Nat) (dk dj : DomC)
+    (bk : Option (Int × Int)) (fk : Option Value) (idx : Int) :
+    Option (Literal × Clause) :=
+  match intBounds dj, bk with
+  | some (jlo, jhi), some (klo, khi) =>
+      if jhi < klo then
+        some (posNe i idx, [posNe i idx, negLe j jhi, posLe k (klo - 1)])
+      else if khi < jlo then
+        some (posNe i idx, [posNe i idx, negLe k khi, posLe j (jlo - 1)])
+      else
+        match intFixedOf dj (some (jlo, jhi)) with
+        | some w =>
+            if dk.memIntView w then none
+            else some (posNe i idx, [posNe i idx, posNe j w, negNe k w])
+        | none => avieBadIndexPinValFA i k j dk dj fk idx
+  | _, _ => none
+
+theorem avieBadIndexPairOfFA_eq (i k j : Nat) (dk dj : DomC) (idx : Int) :
+    avieBadIndexPairOfFA i k j dk dj (intBounds dk) dk.fixedValue idx =
+      avieBadIndexPairOf? i k j dk dj idx := by
+  unfold avieBadIndexPairOfFA avieBadIndexPairOf?
+  cases hdj : intBounds dj with
+  | none => rfl
+  | some p =>
+      obtain ⟨jlo, jhi⟩ := p
+      cases hdk : intBounds dk with
+      | none => rfl
+      | some q =>
+          obtain ⟨klo, khi⟩ := q
+          dsimp only
+          rw [intFixedOf_some dj hdj]
+          cases h : dj.fixedValue with
+          | none => rfl
+          | some v =>
+              cases v with
+              | bool b => rfl
+              | int w => rfl
+              | setOfInt s => rfl
+              | array xs => rfl
+
+/-- `avieBadIndexPair?` with the array table and hoisted result data. -/
+def avieBadIndexPairFA (doms : Array DomC) (isa : Array Nat) (i k : Nat)
+    (dk : DomC) (bk : Option (Int × Int)) (fk : Option Value) (idx : Int) :
+    Option (Literal × Clause) :=
+  match avieEntryA isa idx with
+  | none => some (posNe i idx, [posNe i idx])
+  | some j => avieBadIndexPairOfFA i k j dk (doms.getD j DomC.empty) bk fk idx
+
+theorem avieBadIndexPairFA_eq (doms : Array DomC) (is : List Nat)
+    (i k : Nat) (dk : DomC) (idx : Int) :
+    avieBadIndexPairFA doms is.toArray i k dk (intBounds dk) dk.fixedValue idx =
+      avieBadIndexPair? doms is i k dk idx := by
+  unfold avieBadIndexPairFA avieBadIndexPair?
+  rw [avieEntryA_eq]
+  cases h : avieEntry is idx with
+  | none => rfl
+  | some j =>
+      exact avieBadIndexPairOfFA_eq i k j dk (doms.getD j DomC.empty) idx
+
+/-- `avieIndexPrunes` with the array table and hoisted result data. -/
+def avieIndexPrunesFA (doms : Array DomC) (isa : Array Nat) (i k : Nat)
+    (di dk : DomC) (bk : Option (Int × Int)) (fk : Option Value) :
+    List (Literal × Clause) :=
+  (intCandidates di).filterMap fun idx =>
+    avieBadIndexPairFA doms isa i k dk bk fk idx
+
+theorem avieIndexPrunesFA_eq (doms : Array DomC) (is : List Nat)
+    (i k : Nat) (di dk : DomC) :
+    avieIndexPrunesFA doms is.toArray i k di dk (intBounds dk) dk.fixedValue =
+      avieIndexPrunes doms is i k di dk := by
+  unfold avieIndexPrunesFA avieIndexPrunes
+  congr 1
+  funext idx
+  exact avieBadIndexPairFA_eq doms is i k dk idx
+
+/-- `avieGeneralPrunes` with the array table and hoisted result data. -/
+def avieGeneralPrunesFA (doms : Array DomC) (isa : Array Nat) (is : List Nat)
+    (i k : Nat) (di dk : DomC) (bk : Option (Int × Int)) (fk : Option Value) :
+    List (Literal × Clause) :=
+  safePrunes di (avieIndexPrunesFA doms isa i k di dk bk fk) ++
+    safePrunes dk (avieNoSuppPrunes doms is k dk)
+
+theorem avieGeneralPrunesFA_eq (doms : Array DomC) (is : List Nat)
+    (i k : Nat) (di dk : DomC) :
+    avieGeneralPrunesFA doms is.toArray is i k di dk (intBounds dk) dk.fixedValue =
+      avieGeneralPrunes doms is i k di dk := by
+  unfold avieGeneralPrunesFA avieGeneralPrunes
+  rw [avieIndexPrunesFA_eq]
+
+/-- `aviePrunePairsOf` with the array table and hoisted bounds. -/
+def aviePrunePairsOfFA (doms : Array DomC) (isa : Array Nat) (is : List Nat)
+    (i k : Nat) (di dk : DomC) (fi : Option Value)
+    (bi bk : Option (Int × Int)) (fk : Option Value) :
+    List (Literal × Clause) :=
+  match bi, bk with
+  | some (_ilo, _ihi), some (klo, khi) =>
+      match fi with
+      | some (.int idx) =>
+            match avieEntryA isa idx with
+            | none => []
+            | some j =>
+                match intBounds (doms.getD j DomC.empty) with
+                | none => []
+                | some (jlo, jhi) =>
+                    if jhi < klo then []
+                    else if khi < jlo then []
+                    else avieFixedPrunes i k j idx
+                      (doms.getD j DomC.empty) dk
+        | some _ => []
+        | none => avieGeneralPrunesFA doms isa is i k di dk bk fk
+  | _, _ => []
+
+theorem aviePrunePairsOfFA_eq (doms : Array DomC) (is : List Nat)
+    (i k : Nat) (di dk : DomC) :
+    aviePrunePairsOfFA doms is.toArray is i k di dk di.fixedValue
+        (intBounds di) (intBounds dk) dk.fixedValue =
+      aviePrunePairsOf doms is i k di dk := by
+  unfold aviePrunePairsOfFA aviePrunePairsOf
+  simp only [avieEntryA_eq, avieGeneralPrunesFA_eq]
+
+/-- `avieOutOf` with the array table and hoisted bounds. -/
+def avieOutOfFA (doms : Array DomC) (isa : Array Nat) (is : List Nat) (i k : Nat)
+    (di dk : DomC) : AvieOut :=
+  let fi := di.fixedValue
+  let bi := intBounds di
+  let bk := intBounds dk
+  let fk := dk.fixedValue
+  match bi, bk with
+  | some (_ilo, _ihi), some (klo, khi) =>
+      match fi with
+      | some (.int idx) =>
+            match avieEntryA isa idx with
+            | none => .conflict [posNe i idx]
+            | some j =>
+                match intBounds (doms.getD j DomC.empty) with
+                | none => .fix
+                | some (jlo, jhi) =>
+                    if jhi < klo then
+                      .conflict [posNe i idx, negLe j jhi, posLe k (klo - 1)]
+                    else if khi < jlo then
+                      .conflict [posNe i idx, negLe k khi, posLe j (jlo - 1)]
+                    else
+                      match avieFixedConflict? doms i k idx j with
+                      | some ls => .conflict ls
+                      | none =>
+                          let ps := aviePrunePairsOfFA doms isa is i k di dk fi bi bk fk
+                          if ps.isEmpty then .fix else .prune ps
+        | some _ => .fix
+        | none =>
+            let ps := aviePrunePairsOfFA doms isa is i k di dk fi bi bk fk
+            if ps.isEmpty then .fix else .prune ps
+  | _, _ => .fix
+
+theorem avieOutOfFA_eq (doms : Array DomC) (is : List Nat) (i k : Nat)
+    (di dk : DomC) (hdi : di = doms.getD i DomC.empty)
+    (hdk : dk = doms.getD k DomC.empty) :
+    avieOutOfFA doms is.toArray is i k di dk = avieOutOf doms is i k di dk := by
+  subst hdi
+  subst hdk
+  unfold avieOutOfFA avieOutOf aviePrunePairs
+  simp only [avieEntryA_eq, aviePrunePairsOfFA_eq]
+
+/-- Runtime twin of `avieOut` used by compiled code only. -/
+def avieOutFast (doms : Array DomC) (is : List Nat) (i k : Nat) : AvieOut :=
+  avieOutOfFA doms is.toArray is i k (doms.getD i DomC.empty)
+    (doms.getD k DomC.empty)
+
+theorem avieOutFast_eq (doms : Array DomC) (is : List Nat) (i k : Nat) :
+    avieOutFast doms is i k = avieOut doms is i k := by
+  unfold avieOutFast avieOut
+  exact avieOutOfFA_eq doms is i k _ _ rfl rfl
+
+@[csimp] theorem avieOut_eq_fast : @avieOut = @avieOutFast := by
+  funext doms is i k
+  exact (avieOutFast_eq doms is i k).symm
 
 /-! ### Stage-2 membership lemmas for the pure prune lists -/
 
@@ -1643,41 +2427,38 @@ theorem aviePrunePairs_entailed (p : CompiledProblem DomConstraint)
   unfold aviePrunePairs aviePrunePairsOf at h
   split at h
   · rename_i ilo ihi klo khi hbi hbk
-    split at h
-    · simp at h
-    · rename_i htable
-      cases hfix : (doms.getD i DomC.empty).fixedValue with
-      | none =>
-          simp only [hfix] at h
-          obtain (⟨idx, hidx, hf⟩ |
-            ⟨w, hw, hfixk, hall, rfl, rfl⟩) := avieGeneralPrunes_mem hfix h
-          · exact avieBadIndexPair?_entailed p is i k hmem doms
-              (doms.getD k DomC.empty) hf
-          · exact avie_entailed_noSupp p is i k hmem
-      | some v =>
-          cases v with
-          | int idx =>
-              simp only [hfix] at h
-              cases he : avieEntry is idx with
-              | none =>
-                  simp only [he] at h
-                  simp at h
-              | some j =>
-                  simp only [he] at h
+    cases hfix : (doms.getD i DomC.empty).fixedValue with
+    | none =>
+        simp only [hfix] at h
+        obtain (⟨idx, hidx, hf⟩ |
+          ⟨w, hw, hfixk, hall, rfl, rfl⟩) := avieGeneralPrunes_mem hfix h
+        · exact avieBadIndexPair?_entailed p is i k hmem doms
+            (doms.getD k DomC.empty) hf
+        · exact avie_entailed_noSupp p is i k hmem
+    | some v =>
+        cases v with
+        | int idx =>
+            simp only [hfix] at h
+            cases he : avieEntry is idx with
+            | none =>
+                simp only [he] at h
+                simp at h
+            | some j =>
+                simp only [he] at h
+                split at h
+                · simp at h
+                · rename_i jlo jhi hbj
                   split at h
                   · simp at h
-                  · rename_i jlo jhi hbj
-                    split at h
+                  · split at h
                     · simp at h
-                    · split at h
-                      · simp at h
-                      · obtain (⟨_, w, hw, hbad, rfl, rfl⟩ |
-                          ⟨_, w, hw, hbad, rfl, rfl⟩) := avieFixedPrunes_mem h
-                        · exact avie_entailed_J p is i k hmem he
-                        · exact avie_entailed_K p is i k hmem he
-          | bool b => simp only [hfix] at h; simp at h
-          | setOfInt s => simp only [hfix] at h; simp at h
-          | array xs => simp only [hfix] at h; simp at h
+                    · obtain (⟨_, w, hw, hbad, rfl, rfl⟩ |
+                        ⟨_, w, hw, hbad, rfl, rfl⟩) := avieFixedPrunes_mem h
+                      · exact avie_entailed_J p is i k hmem he
+                      · exact avie_entailed_K p is i k hmem he
+        | bool b => simp only [hfix] at h; simp at h
+        | setOfInt s => simp only [hfix] at h; simp at h
+        | array xs => simp only [hfix] at h; simp at h
   · simp at h
 
 /-- Inversion of the fixed-index value conflict. -/
@@ -1729,95 +2510,108 @@ theorem aviePrunePairs_eval (p : CompiledProblem DomConstraint)
   split at h
   · rename_i ilo ihi klo khi hbi hbk
     split at h
-    · simp at h
-    · rename_i htable
+    · rename_i idx hfix
       split at h
-      · rename_i idx hfix
+      · simp at h
+      · rename_i j hent
         split at h
         · simp at h
-        · rename_i j hent
+        · rename_i jlo jhi hbj
           split at h
           · simp at h
-          · rename_i jlo jhi hbj
-            split at h
+          · split at h
             · simp at h
-            · split at h
-              · simp at h
-              · have hdi_mem : (view.doms.getD i DomC.empty).mem (.int idx) = true :=
-                  (DomC.fixedValue_sound _ hdi_wf hfix).1
-                have hipos : (view.doms.getD i DomC.empty).evalLit (posNe i idx) = some false :=
-                  DomC.evalLit_posNe_of_fixed hfix hdi_mem
-                have hdj_wf : (view.doms.getD j DomC.empty).WF :=
-                  hWF'.dom_wf (s := j) (by simp [avieEntry_mem hent])
-                rcases avieFixedPrunes_mem h with
-                  ⟨hfvj, w, hw, hbadk, rfl, rfl⟩ |
-                  ⟨hfvk, w, hw, hbadj, rfl, rfl⟩
-                · have hdjm : (view.doms.getD j DomC.empty).mem (.int w) = true :=
-                    mem_intCandidates hw
-                  have hjn : (view.doms.getD j DomC.empty).evalLit (posNe j w) = none := by
-                    have := DomC.evalLit_neLit_none_of_not_fixed
-                      (d := view.doms.getD j DomC.empty) (s := j) (v := .int w) hfvj hdjm
-                    simpa [neLit] using this
-                  refine ⟨hjn, ?_⟩
-                  intro q hq hne
-                  rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
-                  rcases hq with rfl | rfl | rfl
-                  · exact absurd rfl hne
-                  · simpa [posNe, Atom.slot] using hipos
-                  · simpa [negNe, Atom.slot] using
-                      DomC.evalLit_negNe_false_of_not_memIntView
-                        (view.doms.getD k DomC.empty) k hbadk
-                · have hdkm : (view.doms.getD k DomC.empty).mem (.int w) = true :=
-                    mem_intCandidates hw
-                  have hkn : (view.doms.getD k DomC.empty).evalLit (posNe k w) = none := by
-                    have := DomC.evalLit_neLit_none_of_not_fixed
-                      (d := view.doms.getD k DomC.empty) (s := k) (v := .int w) hfvk hdkm
-                    simpa [neLit] using this
-                  refine ⟨hkn, ?_⟩
-                  intro q hq hne
-                  rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
-                  rcases hq with rfl | rfl | rfl
-                  · exact absurd rfl hne
-                  · simpa [posNe, Atom.slot] using hipos
-                  · simpa [negNe, Atom.slot] using
-                      DomC.evalLit_negNe_false_of_not_memIntView
-                        (view.doms.getD j DomC.empty) j hbadj
-      · simp at h
-      · rename_i hfix
-        have hgen := avieGeneralPrunes_mem
-          (di := view.doms.getD i DomC.empty) hfix h
-        rcases hgen with
-          ⟨idx, hidx, hf⟩ |
-          ⟨w, hw, hfixk, hall, hll, hrr⟩
-        · have hdix : (view.doms.getD i DomC.empty).mem (.int idx) = true :=
-            mem_intCandidates hidx
-          have hipos : (view.doms.getD i DomC.empty).evalLit (posNe i idx) = none := by
-            have := DomC.evalLit_neLit_none_of_not_fixed
-              (d := view.doms.getD i DomC.empty) (s := i) (v := .int idx) hfix hdix
-            simpa [neLit] using this
-          unfold avieBadIndexPair? at hf
+            · have hdi_mem : (view.doms.getD i DomC.empty).mem (.int idx) = true :=
+                (DomC.fixedValue_sound _ hdi_wf hfix).1
+              have hipos : (view.doms.getD i DomC.empty).evalLit (posNe i idx) = some false :=
+                DomC.evalLit_posNe_of_fixed hfix hdi_mem
+              have hdj_wf : (view.doms.getD j DomC.empty).WF :=
+                hWF'.dom_wf (s := j) (by simp [avieEntry_mem hent])
+              rcases avieFixedPrunes_mem h with
+                ⟨hfvj, w, hw, hbadk, rfl, rfl⟩ |
+                ⟨hfvk, w, hw, hbadj, rfl, rfl⟩
+              · have hdjm : (view.doms.getD j DomC.empty).mem (.int w) = true :=
+                  mem_intCandidates hw
+                have hjn : (view.doms.getD j DomC.empty).evalLit (posNe j w) = none := by
+                  have := DomC.evalLit_neLit_none_of_not_fixed
+                    (d := view.doms.getD j DomC.empty) (s := j) (v := .int w) hfvj hdjm
+                  simpa [neLit] using this
+                refine ⟨hjn, ?_⟩
+                intro q hq hne
+                rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
+                rcases hq with rfl | rfl | rfl
+                · exact absurd rfl hne
+                · simpa [posNe, Atom.slot] using hipos
+                · simpa [negNe, Atom.slot] using
+                    DomC.evalLit_negNe_false_of_not_memIntView
+                      (view.doms.getD k DomC.empty) k hbadk
+              · have hdkm : (view.doms.getD k DomC.empty).mem (.int w) = true :=
+                  mem_intCandidates hw
+                have hkn : (view.doms.getD k DomC.empty).evalLit (posNe k w) = none := by
+                  have := DomC.evalLit_neLit_none_of_not_fixed
+                    (d := view.doms.getD k DomC.empty) (s := k) (v := .int w) hfvk hdkm
+                  simpa [neLit] using this
+                refine ⟨hkn, ?_⟩
+                intro q hq hne
+                rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
+                rcases hq with rfl | rfl | rfl
+                · exact absurd rfl hne
+                · simpa [posNe, Atom.slot] using hipos
+                · simpa [negNe, Atom.slot] using
+                    DomC.evalLit_negNe_false_of_not_memIntView
+                      (view.doms.getD j DomC.empty) j hbadj
+    · simp at h
+    · rename_i hfix
+      have hgen := avieGeneralPrunes_mem
+        (di := view.doms.getD i DomC.empty) hfix h
+      rcases hgen with
+        ⟨idx, hidx, hf⟩ |
+        ⟨w, hw, hfixk, hall, hll, hrr⟩
+      · have hdix : (view.doms.getD i DomC.empty).mem (.int idx) = true :=
+          mem_intCandidates hidx
+        have hipos : (view.doms.getD i DomC.empty).evalLit (posNe i idx) = none := by
+          have := DomC.evalLit_neLit_none_of_not_fixed
+            (d := view.doms.getD i DomC.empty) (s := i) (v := .int idx) hfix hdix
+          simpa [neLit] using this
+        unfold avieBadIndexPair? at hf
+        split at hf
+        · rename_i hnone
+          cases hf
+          refine ⟨hipos, ?_⟩
+          intro q hq hne
+          rw [List.mem_singleton] at hq
+          subst hq
+          exact absurd rfl hne
+        · rename_i j hent
+          have hdj_wf : (view.doms.getD j DomC.empty).WF :=
+            hWF'.dom_wf (s := j) (by simp [avieEntry_mem hent])
+          unfold avieBadIndexPairOf? at hf
           split at hf
-          · rename_i hnone
-            cases hf
-            refine ⟨hipos, ?_⟩
-            intro q hq hne
-            rw [List.mem_singleton] at hq
-            subst hq
-            exact absurd rfl hne
-          · rename_i j hent
-            have hdj_wf : (view.doms.getD j DomC.empty).WF :=
-              hWF'.dom_wf (s := j) (by simp [avieEntry_mem hent])
-            unfold avieBadIndexPairOf? at hf
+          · rename_i jlo jhi klo2 khi2 hbj hbk2
+            have hbj' := intBounds_some_iff.mp hbj
+            have hbk2' := intBounds_some_iff.mp hbk2
+            have hdjle : jlo ≤ jhi :=
+              DomC.lo?_le_hi? _ hdj_wf hbj'.1 hbj'.2
+            have hdkle : klo2 ≤ khi2 :=
+              DomC.lo?_le_hi? _ hdk_wf hbk2'.1 hbk2'.2
             split at hf
-            · rename_i jlo jhi klo2 khi2 hbj hbk2
-              have hbj' := intBounds_some_iff.mp hbj
-              have hbk2' := intBounds_some_iff.mp hbk2
-              have hdjle : jlo ≤ jhi :=
-                DomC.lo?_le_hi? _ hdj_wf hbj'.1 hbj'.2
-              have hdkle : klo2 ≤ khi2 :=
-                DomC.lo?_le_hi? _ hdk_wf hbk2'.1 hbk2'.2
-              split at hf
-              · rename_i hlt
+            · rename_i hlt
+              cases hf
+              refine ⟨hipos, ?_⟩
+              intro q hq hne
+              rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
+              rcases hq with rfl | rfl | rfl
+              · exact absurd rfl hne
+              · simpa [negLe, Atom.slot] using
+                  evalLit_negLe_false_of_hi_le
+                    (d := view.doms.getD j DomC.empty)
+                    hbj'.1 hbj'.2 (Int.le_refl jhi) (by omega)
+              · simpa [posLe, Atom.slot] using
+                  evalLit_posLe_false_of_lo_gt
+                    (d := view.doms.getD k DomC.empty)
+                    hbk2'.1 hbk2'.2 (by omega) (by omega)
+            · split at hf
+              · rename_i hlt2
                 cases hf
                 refine ⟨hipos, ?_⟩
                 intro q hq hne
@@ -1826,29 +2620,32 @@ theorem aviePrunePairs_eval (p : CompiledProblem DomConstraint)
                 · exact absurd rfl hne
                 · simpa [negLe, Atom.slot] using
                     evalLit_negLe_false_of_hi_le
-                      (d := view.doms.getD j DomC.empty)
-                      hbj'.1 hbj'.2 (Int.le_refl jhi) (by omega)
+                      (d := view.doms.getD k DomC.empty)
+                      hbk2'.1 hbk2'.2 (Int.le_refl khi2) (by omega)
                 · simpa [posLe, Atom.slot] using
                     evalLit_posLe_false_of_lo_gt
-                      (d := view.doms.getD k DomC.empty)
-                      hbk2'.1 hbk2'.2 (by omega) (by omega)
+                      (d := view.doms.getD j DomC.empty)
+                      hbj'.1 hbj'.2 (by omega) (by omega)
               · split at hf
-                · rename_i hlt2
-                  cases hf
-                  refine ⟨hipos, ?_⟩
-                  intro q hq hne
-                  rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
-                  rcases hq with rfl | rfl | rfl
-                  · exact absurd rfl hne
-                  · simpa [negLe, Atom.slot] using
-                      evalLit_negLe_false_of_hi_le
-                        (d := view.doms.getD k DomC.empty)
-                        hbk2'.1 hbk2'.2 (Int.le_refl khi2) (by omega)
-                  · simpa [posLe, Atom.slot] using
-                      evalLit_posLe_false_of_lo_gt
-                        (d := view.doms.getD j DomC.empty)
-                        hbj'.1 hbj'.2 (by omega) (by omega)
-                · split at hf
+                · rename_i w hfw
+                  split at hf
+                  · simp at hf
+                  · rename_i hbad
+                    cases hf
+                    refine ⟨hipos, ?_⟩
+                    intro q hq hne
+                    rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
+                    rcases hq with rfl | rfl | rfl
+                    · exact absurd rfl hne
+                    · have hmemw : (view.doms.getD j DomC.empty).mem (.int w) = true :=
+                        (DomC.fixedValue_sound _ hdj_wf hfw).1
+                      simpa [posNe, Atom.slot] using
+                        DomC.evalLit_posNe_of_fixed hfw hmemw
+                    · simpa [negNe, Atom.slot] using
+                        DomC.evalLit_negNe_false_of_not_memIntView
+                          (view.doms.getD k DomC.empty) k (by simpa using hbad)
+                · unfold avieBadIndexPinVal? at hf
+                  split at hf
                   · rename_i w hfw
                     split at hf
                     · simp at hf
@@ -1859,55 +2656,36 @@ theorem aviePrunePairs_eval (p : CompiledProblem DomConstraint)
                       rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
                       rcases hq with rfl | rfl | rfl
                       · exact absurd rfl hne
-                      · have hmemw : (view.doms.getD j DomC.empty).mem (.int w) = true :=
-                          (DomC.fixedValue_sound _ hdj_wf hfw).1
+                      · have hmemw : (view.doms.getD k DomC.empty).mem (.int w) = true :=
+                          (DomC.fixedValue_sound _ hdk_wf hfw).1
                         simpa [posNe, Atom.slot] using
                           DomC.evalLit_posNe_of_fixed hfw hmemw
                       · simpa [negNe, Atom.slot] using
                           DomC.evalLit_negNe_false_of_not_memIntView
-                            (view.doms.getD k DomC.empty) k (by simpa using hbad)
-                  · unfold avieBadIndexPinVal? at hf
-                    split at hf
-                    · rename_i w hfw
-                      split at hf
-                      · simp at hf
-                      · rename_i hbad
-                        cases hf
-                        refine ⟨hipos, ?_⟩
-                        intro q hq hne
-                        rw [List.mem_cons, List.mem_cons, List.mem_singleton] at hq
-                        rcases hq with rfl | rfl | rfl
-                        · exact absurd rfl hne
-                        · have hmemw : (view.doms.getD k DomC.empty).mem (.int w) = true :=
-                            (DomC.fixedValue_sound _ hdk_wf hfw).1
-                          simpa [posNe, Atom.slot] using
-                            DomC.evalLit_posNe_of_fixed hfw hmemw
-                        · simpa [negNe, Atom.slot] using
-                            DomC.evalLit_negNe_false_of_not_memIntView
-                              (view.doms.getD j DomC.empty) j (by simpa using hbad)
-                    · simp at hf
-            · simp at hf
-        · have hdkm : (view.doms.getD k DomC.empty).mem (.int w) = true :=
-            mem_intCandidates hw
-          have hkn : (view.doms.getD k DomC.empty).evalLit (posNe k w) = none := by
-            have := DomC.evalLit_neLit_none_of_not_fixed
-              (d := view.doms.getD k DomC.empty) (s := k) (v := .int w) hfixk hdkm
-            simpa [neLit] using this
-          subst hll
-          subst hrr
-          refine ⟨hkn, ?_⟩
-          intro q hq hne
-          rw [List.mem_cons] at hq
-          rcases hq with rfl | hq
-          · exact absurd rfl hne
-          · rw [List.mem_map] at hq
-            obtain ⟨j, hj, rfl⟩ := hq
-            have hallj := List.all_eq_true.mp hall j hj
-            have hbad : (view.doms.getD j DomC.empty).memIntView w = false := by
-              simpa using hallj
-            simpa [negNe, Atom.slot] using
-              DomC.evalLit_negNe_false_of_not_memIntView
-                (view.doms.getD j DomC.empty) j hbad
+                            (view.doms.getD j DomC.empty) j (by simpa using hbad)
+                  · simp at hf
+          · simp at hf
+      · have hdkm : (view.doms.getD k DomC.empty).mem (.int w) = true :=
+          mem_intCandidates hw
+        have hkn : (view.doms.getD k DomC.empty).evalLit (posNe k w) = none := by
+          have := DomC.evalLit_neLit_none_of_not_fixed
+            (d := view.doms.getD k DomC.empty) (s := k) (v := .int w) hfixk hdkm
+          simpa [neLit] using this
+        subst hll
+        subst hrr
+        refine ⟨hkn, ?_⟩
+        intro q hq hne
+        rw [List.mem_cons] at hq
+        rcases hq with rfl | hq
+        · exact absurd rfl hne
+        · rw [List.mem_map] at hq
+          obtain ⟨j, hj, rfl⟩ := hq
+          have hallj := List.all_eq_true.mp hall j hj
+          have hbad : (view.doms.getD j DomC.empty).memIntView w = false := by
+            simpa using hallj
+          simpa [negNe, Atom.slot] using
+            DomC.evalLit_negNe_false_of_not_memIntView
+              (view.doms.getD j DomC.empty) j hbad
   · simp at h
 
 /-- Inversion of the stage-2 conflict output. -/
@@ -1940,46 +2718,44 @@ theorem avieOut_conflict_cases {doms : Array DomC} {is : List Nat} {i k : Nat}
   split at h
   · rename_i ilo ihi klo khi hbi hbk
     split at h
-    · cases h
-    · split at h
-      · rename_i idx hfix
+    · rename_i idx hfix
+      split at h
+      · rename_i hnone
+        cases h
+        exact Or.inl ⟨idx, hfix, hnone, rfl⟩
+      · rename_i j hent
         split at h
-        · rename_i hnone
-          cases h
-          exact Or.inl ⟨idx, hfix, hnone, rfl⟩
-        · rename_i j hent
+        · cases h
+        · rename_i jlo jhi hbj
           split at h
-          · cases h
-          · rename_i jlo jhi hbj
-            split at h
-            · rename_i hlt
+          · rename_i hlt
+            cases h
+            exact Or.inr (Or.inl
+              ⟨idx, j, jlo, jhi, klo, khi, hfix, hent, hbj, hbk, hlt, rfl⟩)
+          · split at h
+            · rename_i hlt2
               cases h
-              exact Or.inr (Or.inl
-                ⟨idx, j, jlo, jhi, klo, khi, hfix, hent, hbj, hbk, hlt, rfl⟩)
+              exact Or.inr (Or.inr (Or.inl
+                ⟨idx, j, jlo, jhi, klo, khi, hfix, hent, hbj, hbk, hlt2, rfl⟩))
             · split at h
-              · rename_i hlt2
-                cases h
-                exact Or.inr (Or.inr (Or.inl
-                  ⟨idx, j, jlo, jhi, klo, khi, hfix, hent, hbj, hbk, hlt2, rfl⟩))
-              · split at h
-                · rename_i lsc hfc
-                  injection h with hls
-                  subst hls
-                  rcases avieFixedConflict?_cases hfc with
-                    ⟨w, hfw, hbad, rfl⟩ | ⟨w, hfw, hbad, rfl⟩
-                  · exact Or.inr (Or.inr (Or.inr
-                      ⟨idx, j, hfix, hent, Or.inl ⟨w, hfw, hbad, rfl⟩⟩))
-                  · exact Or.inr (Or.inr (Or.inr
-                      ⟨idx, j, hfix, hent, Or.inr ⟨w, hfw, hbad, rfl⟩⟩))
-                · dsimp only at h
-                  split at h
-                  · cases h
-                  · cases h
+              · rename_i lsc hfc
+                injection h with hls
+                subst hls
+                rcases avieFixedConflict?_cases hfc with
+                  ⟨w, hfw, hbad, rfl⟩ | ⟨w, hfw, hbad, rfl⟩
+                · exact Or.inr (Or.inr (Or.inr
+                    ⟨idx, j, hfix, hent, Or.inl ⟨w, hfw, hbad, rfl⟩⟩))
+                · exact Or.inr (Or.inr (Or.inr
+                    ⟨idx, j, hfix, hent, Or.inr ⟨w, hfw, hbad, rfl⟩⟩))
+              · dsimp only at h
+                split at h
+                · cases h
+                · cases h
+    · cases h
+    · dsimp only at h
+      split at h
       · cases h
-      · dsimp only at h
-        split at h
-        · cases h
-        · cases h
+      · cases h
   · cases h
 
 /-- Inversion of the stage-2 prune output. -/
@@ -1993,34 +2769,32 @@ theorem avieOut_prune_cases {doms : Array DomC} {is : List Nat} {i k : Nat}
   split at h
   · rename_i ilo ihi klo khi hbi hbk
     split at h
-    · cases h
-    · split at h
-      · rename_i idx hfix
+    · rename_i idx hfix
+      split at h
+      · cases h
+      · rename_i j hent
         split at h
         · cases h
-        · rename_i j hent
+        · rename_i jlo jhi hbj
           split at h
           · cases h
-          · rename_i jlo jhi hbj
-            split at h
+          · split at h
             · cases h
             · split at h
               · cases h
-              · split at h
-                · cases h
-                · dsimp only at h
-                  split at h
-                  · rename_i lsc hfc
-                    cases h
-                  · injection h with hp
-                    exact ⟨hp.symm, Or.inl ⟨idx, hfix⟩⟩
+              · dsimp only at h
+                split at h
+                · rename_i lsc hfc
+                  cases h
+                · injection h with hp
+                  exact ⟨hp.symm, Or.inl ⟨idx, hfix⟩⟩
+    · cases h
+    · rename_i hfix
+      dsimp only at h
+      split at h
       · cases h
-      · rename_i hfix
-        dsimp only at h
-        split at h
-        · cases h
-        · injection h with hp
-          exact ⟨hp.symm, Or.inr hfix⟩
+      · injection h with hp
+        exact ⟨hp.symm, Or.inr hfix⟩
   · cases h
 
 /-! ### The stage-2 builder -/
@@ -2337,44 +3111,6 @@ theorem avieOut_eq_fix_of_result_bounds_none {doms : Array DomC}
     simp at hbk
   · rfl
 
-theorem avieOut_eq_fix_of_table_false {doms : Array DomC}
-    {is : List Nat} {i k : Nat}
-    (h : avieTableOkB doms is = false) :
-    avieOut doms is i k = .fix := by
-  unfold avieOut avieOutOf
-  split
-  · split
-    · rfl
-    · rename_i hc
-      rw [h] at hc
-      simp at hc
-  · rfl
-
-/-- Malformed input for the stage-2 propagator: unusable index or result
-bounds, or an unusable array slot (missing, Boolean, or empty), all
-yield a no-op. -/
-theorem arrayVarIntElementPropWith_run_fix_of_malformed
-    (p : CompiledProblem DomConstraint) (T : LitTable)
-    (is : List Nat) (i k : Nat)
-    (hmem : DomConstraint.arrayVarIntElementSlot is i k ∈ p.constraints)
-    (view : EngineView)
-    (h : intBounds (view.doms.getD i DomC.empty) = none ∨
-      intBounds (view.doms.getD k DomC.empty) = none ∨
-      avieTableOkB view.doms is = false) :
-    (arrayVarIntElementPropWith p T is i k hmem).run view = .fix := by
-  have ha : avieOut view.doms is i k = .fix := by
-    rcases h with h | h | h
-    · exact avieOut_eq_fix_of_index_bounds_none h
-    · exact avieOut_eq_fix_of_result_bounds_none h
-    · exact avieOut_eq_fix_of_table_false h
-  simp only [arrayVarIntElementPropWith]
-  split
-  · rfl
-  · rename_i ls hout
-    exact absurd hout (by rw [ha]; simp)
-  · rename_i pairs hout
-    exact absurd hout (by rw [ha]; simp)
-
 /-! ## Stage 3: the variable-table Boolean element -/
 
 /-- A domain that is syntactically Boolean. -/
@@ -2477,6 +3213,129 @@ def avbeOut (doms : Array DomC) (is : List Nat) (i k : Nat) : AvbeOut :=
             let ps := avbePrunePairs doms is i k
             if ps.isEmpty then .fix else .prune ps
   | _, _ => .fix
+
+/-! ### Array/runtime twins for the Boolean-table element
+
+`avbeOut` and `avbePrunePairs` rescan the table `is` through `avieEntry`
+for every candidate index and recompute the guard on every call.  The twins
+hoist the table to an `Array`, the index/result bounds and fixed values, and
+the guard.  They are installed in compiled code only by `@[csimp]`; every
+proof keeps using the list-based definitions. -/
+
+/-- `avbeBadIndexPair?` with the table hoisted to an array. -/
+def avbeBadIndexPairFA (doms : Array DomC) (isa : Array Nat) (i k : Nat)
+    (idx : Int) : Option (Literal × Clause) :=
+  match avieEntryA isa idx with
+  | none => some (posNe i idx, [posNe i idx])
+  | some j =>
+      match (doms.getD k DomC.empty).fixedValue,
+            (doms.getD j DomC.empty).fixedValue with
+      | some (.bool v), some (.bool b) =>
+          if b == v then none
+          else some (posNe i idx, [posNe i idx, posBool k (!v), posBool j v])
+      | _, _ => none
+
+theorem avbeBadIndexPairFA_eq (doms : Array DomC) (is : List Nat) (i k : Nat)
+    (idx : Int) :
+    avbeBadIndexPairFA doms is.toArray i k idx =
+      avbeBadIndexPair? doms is i k idx := by
+  unfold avbeBadIndexPairFA avbeBadIndexPair?
+  rw [avieEntryA_eq]
+
+/-- `avbeIndexPrunes` with the table hoisted to an array. -/
+def avbeIndexPrunesFA (doms : Array DomC) (isa : Array Nat) (i k : Nat)
+    (di : DomC) : List (Literal × Clause) :=
+  (intCandidates di).filterMap fun idx => avbeBadIndexPairFA doms isa i k idx
+
+theorem avbeIndexPrunesFA_eq (doms : Array DomC) (is : List Nat) (i k : Nat)
+    (di : DomC) :
+    avbeIndexPrunesFA doms is.toArray i k di =
+      avbeIndexPrunes doms is i k di := by
+  unfold avbeIndexPrunesFA avbeIndexPrunes
+  congr 1
+  funext idx
+  exact avbeBadIndexPairFA_eq doms is i k idx
+
+/-- `avbePrunePairs` with the table, guard and domains hoisted. -/
+def avbePrunePairsFA (doms : Array DomC) (isa : Array Nat) (i k : Nat)
+    (di dk : DomC) (g : Bool) : List (Literal × Clause) :=
+  match intBounds di, intBounds dk with
+  | some _, some _ =>
+      if !g then []
+      else
+        match di.fixedValue with
+        | some (.int idx) =>
+            match avieEntryA isa idx with
+            | none => []
+            | some j => avbeFixedPrunes doms i k idx j
+        | some _ => []
+        | none => safePrunes di (avbeIndexPrunesFA doms isa i k di)
+  | _, _ => []
+
+theorem avbePrunePairsFA_eq (doms : Array DomC) (is : List Nat) (i k : Nat) :
+    avbePrunePairsFA doms is.toArray i k (doms.getD i DomC.empty)
+        (doms.getD k DomC.empty) (avbeGuardB doms is i k) =
+      avbePrunePairs doms is i k := by
+  unfold avbePrunePairsFA avbePrunePairs
+  simp only [avieEntryA_eq, avbeIndexPrunesFA_eq]
+
+/-- `avbeOut` with the table, guard, bounds and fixed values hoisted. -/
+def avbeOutFA (doms : Array DomC) (isa : Array Nat) (i k : Nat)
+    (di dk : DomC) (bi bk : Option (Int × Int))
+    (fi fk : Option Value) (g : Bool) : AvbeOut :=
+  match bi, bk with
+  | some _, some _ =>
+      if !g then .fix
+      else
+        match fi with
+        | some (.int idx) =>
+            match avieEntryA isa idx with
+            | none => .conflict [posNe i idx]
+            | some j =>
+                let dj := doms.getD j DomC.empty
+                match fk, dj.fixedValue with
+                | some (.bool v), some (.bool b) =>
+                    if b == v then .fix
+                    else .conflict [posNe i idx, posBool k (!v), posBool j v]
+                | some (.bool _), _ =>
+                    let ps := avbePrunePairsFA doms isa i k di dk g
+                    if ps.isEmpty then .fix else .prune ps
+                | none, some (.bool _) =>
+                    let ps := avbePrunePairsFA doms isa i k di dk g
+                    if ps.isEmpty then .fix else .prune ps
+                | _, _ => .fix
+        | some _ => .fix
+        | none =>
+            let ps := avbePrunePairsFA doms isa i k di dk g
+            if ps.isEmpty then .fix else .prune ps
+  | _, _ => .fix
+
+theorem avbeOutFA_eq (doms : Array DomC) (is : List Nat) (i k : Nat) :
+    avbeOutFA doms is.toArray i k (doms.getD i DomC.empty)
+        (doms.getD k DomC.empty) (intBounds (doms.getD i DomC.empty))
+        (intBounds (doms.getD k DomC.empty))
+        (doms.getD i DomC.empty).fixedValue
+        (doms.getD k DomC.empty).fixedValue (avbeGuardB doms is i k) =
+      avbeOut doms is i k := by
+  unfold avbeOutFA avbeOut
+  simp only [avieEntryA_eq, avbePrunePairsFA_eq]
+
+/-- Runtime twin of `avbeOut` used by compiled code only. -/
+def avbeOutFast (doms : Array DomC) (is : List Nat) (i k : Nat) : AvbeOut :=
+  avbeOutFA doms is.toArray i k (doms.getD i DomC.empty)
+    (doms.getD k DomC.empty) (intBounds (doms.getD i DomC.empty))
+    (intBounds (doms.getD k DomC.empty))
+    (doms.getD i DomC.empty).fixedValue
+    (doms.getD k DomC.empty).fixedValue (avbeGuardB doms is i k)
+
+theorem avbeOutFast_eq (doms : Array DomC) (is : List Nat) (i k : Nat) :
+    avbeOutFast doms is i k = avbeOut doms is i k := by
+  unfold avbeOutFast
+  exact avbeOutFA_eq doms is i k
+
+@[csimp] theorem avbeOut_eq_fast : @avbeOut = @avbeOutFast := by
+  funext doms is i k
+  exact (avbeOutFast_eq doms is i k).symm
 
 /-! ### Stage-3 membership lemmas -/
 

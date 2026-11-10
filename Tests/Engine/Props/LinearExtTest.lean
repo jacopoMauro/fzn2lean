@@ -45,6 +45,8 @@ def mkProblem (ds : List Dom) (cs : List DomConstraint) : CompiledProblem DomCon
     constraints := cs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 def isFix {p : CompiledProblem DomConstraint} {T : LitTable} :
@@ -250,7 +252,15 @@ def lePruneTrueView : EngineView :=
 def lePruneFalseView : EngineView :=
   { doms := #[DomC.bounds 5 6, DomC.bounds 2 3, boolUnfixed], level := 0 }
 
+def leSkipTrueView : EngineView :=
+  { doms := #[DomC.bounds 0 0, DomC.bounds 0 0, boolTrue], level := 0 }
+
+def leSkipFalseView : EngineView :=
+  { doms := #[DomC.bounds 5 5, DomC.bounds 1 1, boolFalse], level := 0 }
+
 def checkLeReif : IO Unit := do
+  check "le reif decided r=true: fix" (isFix (leROut leSkipTrueView))
+  check "le reif decided r=false: fix" (isFix (leROut leSkipFalseView))
   match pruneLits? (leROut leTrueView), pruneClauses? (leROut leTrueView) with
   | some lits, some [reason] =>
       check "le reif r=true: literal" (lits == [posLe 1 3])
@@ -497,6 +507,37 @@ def propsOfTest (p : CompiledProblem DomConstraint) (T : LitTable) (init : Array
             exact h)
           (by simpa [hx] using List.mem_toArray.mp x.2)
 
+/-- The test table satisfies the pruning contract. -/
+theorem propsOfTest_pruneSound (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC)
+    (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+      DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)) :
+    PropsSound p T (propsOfTest p T init hinit) := by
+  intro id pr hid
+  have hpr : pr ∈ propsOfTest p T init hinit := by
+    rw [Array.mem_iff_getElem?]
+    exact ⟨id, hid⟩
+  unfold propsOfTest at hpr
+  rw [Array.mem_map] at hpr
+  obtain ⟨x, _, hxpr⟩ := hpr
+  rw [← hxpr]
+  split
+  case h_1 cs is b heq =>
+    exact linEqPropWith_pruneSound cs is b (heq ▸ List.mem_toArray.mp x.2)
+  case h_2 cs is b heq =>
+    exact linNePropWith_pruneSound cs is b (heq ▸ List.mem_toArray.mp x.2)
+  case h_3 cs is b r heq =>
+    exact linEqReifPropWith_pruneSound cs is b r (heq ▸ List.mem_toArray.mp x.2)
+  case h_4 cs is b r heq =>
+    exact linLeReifPropWith_pruneSound cs is b r (heq ▸ List.mem_toArray.mp x.2)
+  case h_5 cs is b r heq =>
+    exact linNeReifPropWith_pruneSound cs is b r (heq ▸ List.mem_toArray.mp x.2)
+  case h_6 cs is b heq =>
+    exact linLePropWith_pruneSound cs is b (heq ▸ List.mem_toArray.mp x.2)
+  case h_7 =>
+    exact propCheckV2With_pruneSound p T x.val init
+      (hinit x.val (List.mem_toArray.mp x.2)) (List.mem_toArray.mp x.2)
+
 /-- The fully generic table: every constraint goes through `propCheckV2With`. -/
 def propsOfGeneric (p : CompiledProblem DomConstraint) (T : LitTable) (init : Array DomC)
     (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
@@ -528,7 +569,11 @@ def checkPropTableAgreement (label : String) (p : CompiledProblem DomConstraint)
           ((isFix t && isFix g) || (!isFix t && !isFix g))
     | _, _ => fail s!"{label}: missing propagator {i}"
 
-def initEq : Array DomC := #[DomC.boundsHoles 0 10 #[], DomC.boundsHoles 0 10 #[]]
+/-- The compact domain produced by converting the interval `0..10`. -/
+def conv (lo hi : Int) : DomC :=
+  (DomC.ofDom? ⟨.holes lo hi []⟩).getD DomC.empty
+
+def initEq : Array DomC := #[conv 0 10, conv 0 10]
 
 theorem hinitEq : ∀ dc ∈ pEq.constraints, ∀ s ∈ dcSlotsFull dc,
     DomC.ofDom? (pEq.domains.getD s Dom.empty) = some (initEq.getD s DomC.empty) := by
@@ -538,7 +583,7 @@ theorem hinitEq : ∀ dc ∈ pEq.constraints, ∀ s ∈ dcSlotsFull dc,
   have hs' : s = 0 ∨ s = 1 := by simpa [dcSlotsFull] using hs
   rcases hs' with rfl | rfl <;> decide
 
-def initNe : Array DomC := #[DomC.boundsHoles 0 10 #[], DomC.boundsHoles 0 10 #[]]
+def initNe : Array DomC := #[conv 0 10, conv 0 10]
 
 theorem hinitNe : ∀ dc ∈ pNe.constraints, ∀ s ∈ dcSlotsFull dc,
     DomC.ofDom? (pNe.domains.getD s Dom.empty) = some (initNe.getD s DomC.empty) := by
@@ -549,7 +594,7 @@ theorem hinitNe : ∀ dc ∈ pNe.constraints, ∀ s ∈ dcSlotsFull dc,
   rcases hs' with rfl | rfl <;> decide
 
 def initLeR : Array DomC :=
-  #[DomC.boundsHoles 0 10 #[], DomC.boundsHoles 0 10 #[], DomC.bool 3]
+  #[conv 0 10, conv 0 10, DomC.bool 3]
 
 theorem hinitLeR : ∀ dc ∈ pLeR.constraints, ∀ s ∈ dcSlotsFull dc,
     DomC.ofDom? (pLeR.domains.getD s Dom.empty) = some (initLeR.getD s DomC.empty) := by
@@ -561,7 +606,7 @@ theorem hinitLeR : ∀ dc ∈ pLeR.constraints, ∀ s ∈ dcSlotsFull dc,
   rcases hs' with rfl | rfl | rfl <;> decide
 
 def initEqR : Array DomC :=
-  #[DomC.boundsHoles 0 10 #[], DomC.boundsHoles 0 10 #[], DomC.bool 3]
+  #[conv 0 10, conv 0 10, DomC.bool 3]
 
 theorem hinitEqR : ∀ dc ∈ pEqR.constraints, ∀ s ∈ dcSlotsFull dc,
     DomC.ofDom? (pEqR.domains.getD s Dom.empty) = some (initEqR.getD s DomC.empty) := by
@@ -573,7 +618,7 @@ theorem hinitEqR : ∀ dc ∈ pEqR.constraints, ∀ s ∈ dcSlotsFull dc,
   rcases hs' with rfl | rfl | rfl <;> decide
 
 def initNeR : Array DomC :=
-  #[DomC.boundsHoles 0 10 #[], DomC.boundsHoles 0 10 #[], DomC.bool 3]
+  #[conv 0 10, conv 0 10, DomC.bool 3]
 
 theorem hinitNeR : ∀ dc ∈ pNeR.constraints, ∀ s ∈ dcSlotsFull dc,
     DomC.ofDom? (pNeR.domains.getD s Dom.empty) = some (initNeR.getD s DomC.empty) := by
@@ -629,68 +674,100 @@ def initStateTest (p : CompiledProblem DomConstraint) (T : LitTable) :
         if hready : initReady p doms = true then
           let hinitAll := initReady_spec hready
           let props := propsOfTest p T doms hinitAll
-          let st : EngineState p T :=
-            { table := T
-              doms := doms
-              trail := #[]
-              levelStart := #[0]
-              level := 0
-              changeIndex := Array.replicate doms.size (#[] : Array Nat)
-              db := {}
-              reasons := #[]
-              props := props
-              subs := #[]
-              queueHigh := #[]
-              queueLow := #[]
-              inQueue := ByteArray.empty
-              activity := Array.replicate doms.size (0.0 : Float)
-              activityHeap := #[]
-              phases := #[]
-              restarts := 0
-              stats := {} }
-          let st := registerProps st
-          let st := (List.range props.size).foldl (fun st i => enqueueProp st i) st
-          some st
+          some (initStateCore p T doms props)
         else none
+
+/-- The test-local entry carries the conversion equation. -/
+theorem initStateTest_initConv
+    {p : CompiledProblem DomConstraint} {T : LitTable} {st : EngineState p T}
+    (h : initStateTest p T = some st) : InitConv p st.doms := by
+  unfold initStateTest at h
+  cases hg : gateOkFast (propagationProblem p) with
+  | true =>
+      simp only [hg, Bool.not_true, Bool.false_eq_true, if_false] at h
+      cases hc : convertDomains p.domains with
+      | none => simp [hc] at h
+      | some doms =>
+          simp only [hc] at h
+          by_cases hr : initReady p doms = true
+          · simp [hr] at h
+            subst h
+            rw [initStateCore_doms]
+            exact ⟨(convertDomains_spec hc).2⟩
+          · simp [hr] at h
+  | false => simp [hg] at h
+
+/-- The test-local entry satisfies `RootInv`. -/
+theorem initStateTest_rootInv
+    {p : CompiledProblem DomConstraint} {T : LitTable} {st : EngineState p T}
+    (h : initStateTest p T = some st) (hT : T.Inv) :
+    RootInv p T st.doms st := by
+  unfold initStateTest at h
+  cases hg : gateOkFast (propagationProblem p) with
+  | true =>
+      simp only [hg, Bool.not_true, Bool.false_eq_true, if_false] at h
+      cases hc : convertDomains p.domains with
+      | none => simp [hc] at h
+      | some doms =>
+          simp only [hc] at h
+          by_cases hr : initReady p doms = true
+          · simp [hr] at h
+            subst h
+            rw [initStateCore_doms]
+            exact initStateCore_rootInv p T doms _ hT
+              (initInv_of_convertDomains hc) ⟨(convertDomains_spec hc).2⟩
+          · simp [hr] at h
+  | false => simp [hg] at h
+
+/-- The test-local entry's propagator table satisfies `PropsSound`. -/
+theorem initStateTest_propsSound
+    {p : CompiledProblem DomConstraint} {T : LitTable} {st : EngineState p T}
+    (h : initStateTest p T = some st) :
+    PropsSound p T st.props := by
+  unfold initStateTest at h
+  cases hg : gateOkFast (propagationProblem p) with
+  | true =>
+      simp only [hg, Bool.not_true, Bool.false_eq_true, if_false] at h
+      cases hc : convertDomains p.domains with
+      | none => simp [hc] at h
+      | some doms =>
+          simp only [hc] at h
+          by_cases hr : initReady p doms = true
+          · simp [hr] at h
+            subst h
+            rw [initStateCore_props]
+            exact propsOfTest_pruneSound p T doms _
+          · simp [hr] at h
+  | false => simp [hg] at h
+
+/-- The test-local entry satisfies the history invariants, by the same
+argument as `Search.initState_histInv`. -/
+theorem initStateTest_histInv
+    {p : CompiledProblem DomConstraint} {T : LitTable} {st : EngineState p T}
+    (h : initStateTest p T = some st) : HistInv st.doms st := by
+  unfold initStateTest at h
+  split at h
+  · simp at h
+  · split at h
+    · simp at h
+    · split at h
+      · simp only [Option.some.injEq] at h
+        subst h
+        rw [initStateCore_doms]
+        exact initStateCore_histInv p T _ _
+      · simp at h
 
 /-- The `coreSolveFull` body with `initStateTest`. -/
 def coreSolveTest (p : CompiledProblem DomConstraint)
     (o : SearchConfig) (fuel : Nat) : CoreResult × EngineStats :=
   let T : LitTable := {}
-  match initStateTest p T with
+  match hinit : initStateTest p T with
   | none => (.gaveUp, { gaveUp := 1 })
   | some st0 =>
-      let prio := annotPrioArray p
-      let orders := LeanFzn.Engine.configOrders p o
-      match addSeedClauses p T st0 with
-      | (st, some _) =>
-          let st := { st with stats := { st.stats with conflicts := st.stats.conflicts + 1 } }
-          (.unsat, st.stats)
-      | (st, none) =>
-          match st.db.emptyConflict? with
-          | some _ => (.unsat, st.stats)
-          | none =>
-              let (db, out) := st.db.propagateUnits p T st.doms
-              match out with
-              | .none =>
-                  let st := { st with db := db }
-                  let (r, st) := search p T st.doms o prio orders st #[] fuel
-                  (r, st.stats)
-              | .prune ps =>
-                  let st := { st with db := db }
-                  let (r, st) := search p T st.doms o prio orders st
-                    (pushClausePrunes #[] ps) fuel
-                  (r, st.stats)
-              | .conflict ec _ =>
-                  let a := analyze p T st.doms st ec fuel
-                  let st := { st with db := db }
-                  if !a.ok then (.gaveUp, { st.stats with gaveUp := 1 })
-                  else
-                    match a.learned with
-                    | none => (.gaveUp, { st.stats with gaveUp := 1 })
-                    | some lc =>
-                        if lc.lits.isEmpty then (.unsat, st.stats)
-                        else (.gaveUp, { st.stats with gaveUp := 1 })
+      coreSolveFrom p T o st0
+        (initStateTest_rootInv hinit LitTable.inv_empty)
+        (initStateTest_propsSound hinit)
+        (annotPrioArray p) (LeanFzn.Engine.configOrders p o) fuel
 
 def verdictName : CoreResult → String
   | .sat _ => "sat"

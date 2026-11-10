@@ -42,12 +42,12 @@ def run : IO UInt32 := do
   let check (b : Bool) : IO Unit := do
     if !b then ok.set false
   check (← expectOk "empty" (parseSolveFlags [])
-    (fun (c, src) => c = { (default : SearchConfig) with var := .act, val := .min } &&
+    (fun (c, src) => c = { (default : SearchConfig) with var := .act, val := .incumbent } &&
       c.engine = .core && src = []))
   check (← expectOk "core-default-var-only" (parseSolveFlags ["--var=minc"])
-    (fun (c, _) => c.engine = .core && c.var = .minc && c.val = .act))
+    (fun (c, _) => c.engine = .core && c.var = .minc && c.val = .incumbent))
   check (← expectOk "core-default-preset" (parseSolveFlags ["--strategy=default"])
-    (fun (c, _) => c = (default : SearchConfig)))
+    (fun (c, _) => c = { (default : SearchConfig) with restartExplicit := true }))
   check (← expectOk "source" (parseSolveFlags ["a.fzn", "--stats", "b.fzn"])
     (fun (c, src) => c.stats && src = ["a.fzn", "b.fzn"]))
   check (← expectOk "legacy" (parseSolveFlags
@@ -62,8 +62,8 @@ def run : IO UInt32 := do
     (fun (c, _) => c.engine = .core && c.var = .act && c.val = .min))
   check (← expectOk "default-kernel-bisect" (parseSolveFlags ["--opt=bisect"])
     (fun (c, _) => c.engine = .kernel))
-  check (← expectOk "default-kernel-opt-fast" (parseSolveFlags ["--strategy=opt-fast"])
-    (fun (c, _) => c.engine = .kernel && c.opt = .seeded && c.val = .incumbent))
+  check (← expectOk "default-core-opt-fast" (parseSolveFlags ["--strategy=opt-fast"])
+    (fun (c, _) => c.engine = .core && c.opt = .seeded && c.val = .incumbent))
   check (← expectError "removed certified option" (parseSolveFlags ["--certified"])
     "unknown option")
   check (← expectOk "engine-kernel" (parseSolveFlags ["--engine=kernel"])
@@ -79,9 +79,9 @@ def run : IO UInt32 := do
   check (← expectOk "engine-core-val-incumbent" (parseSolveFlags
       ["--engine=core", "--val=incumbent"])
     (fun (c, _) => c.engine = .core && c.val = .incumbent && c.opt = .linear))
-  check (← expectError "engine-core-seeded-val-incumbent" (parseSolveFlags
+  check (← expectOk "engine-core-seeded-val-incumbent" (parseSolveFlags
       ["--engine=core", "--opt=seeded", "--val=incumbent"])
-    "'--val=incumbent' is not supported by '--engine=core --opt=seeded'")
+    (fun (c, _) => c.engine = .core && c.opt = .seeded && c.val = .incumbent))
   check (← expectOk "engine-core-opt-seeded" (parseSolveFlags
       ["--engine=core", "--opt=seeded"])
     (fun (c, _) => c.engine = .core && c.opt = .seeded))
@@ -97,10 +97,11 @@ def run : IO UInt32 := do
       ["--engine=kernel", "--engine=core"])
     "more than once")
   check (← expectOk "preset-default" (parseSolveFlags ["--strategy=default"])
-    (fun (c, _) => c = (default : SearchConfig)))
+    (fun (c, _) => c = { (default : SearchConfig) with restartExplicit := true }))
   check (← expectOk "preset-override" (parseSolveFlags
       ["--strategy=annot", "--var=minc", "--val=act"])
-    (fun (c, _) => c = (default : SearchConfig)))
+    (fun (c, _) => c = { (default : SearchConfig) with
+      var := .minc, val := .act, restartExplicit := true }))
   check (← expectOk "preset-annot" (parseSolveFlags ["--strategy=annot"])
     (fun (c, _) => c.var = .annot && c.val = .annot))
   check (← expectOk "var-annot" (parseSolveFlags ["--var=annot"])
@@ -138,6 +139,10 @@ def run : IO UInt32 := do
   check (← expectOk "restart" (parseSolveFlags
       ["--opt=seeded", "--restart=luby", "--restart-base=200"])
     (fun (c, _) => c.restart = .luby && c.restartBase = 200))
+  check (← expectOk "conflict-limit" (parseSolveFlags ["--conflict-limit=2500"])
+    (fun (c, _) => c.conflictLimit = some 2500 && c.engine = .core))
+  check (← expectError "conflict-limit-zero" (parseSolveFlags
+      ["--conflict-limit=0"]) "must be positive")
   check (← expectOk "preset-restarts" (parseSolveFlags ["--strategy=restarts"])
     (fun (c, _) => c.opt = .seeded && c.restart = .luby))
   check (← expectOk "restart-linear-core" (parseSolveFlags ["--restart=luby"])
@@ -145,7 +150,11 @@ def run : IO UInt32 := do
   check (← expectError "restart-linear-kernel" (parseSolveFlags
       ["--engine=kernel", "--restart=luby"])
     "requires '--opt=seeded'")
-  check (← expectError "restart-base-none" (parseSolveFlags ["--restart-base=200"])
+  check (← expectOk "restart-base-default-core" (parseSolveFlags ["--restart-base=200"])
+    (fun (c, _) => c.engine = .core && c.restart = .none && c.restartBase = 200 &&
+      !c.restartExplicit))
+  check (← expectError "restart-base-none" (parseSolveFlags
+      ["--restart=none", "--restart-base=200"])
     "requires '--restart")
   check (← expectError "restart-portfolio" (parseSolveFlags
       ["--opt=seeded", "--restart=luby", "--portfolio=opt-fast"])
@@ -210,10 +219,10 @@ def run : IO UInt32 := do
   check (← expectError "primal-time-zero" (parseSolveFlags
       ["--primal=dive", "--primal-time=0"])
     "must be positive")
-  check (← expectError "primal-lns" (parseSolveFlags ["--primal=lns"])
-    "F6.2")
-  check (← expectError "primal-preset-lns" (parseSolveFlags ["--strategy=lns"])
-    "F6.1")
+  check (← expectOk "primal-lns" (parseSolveFlags ["--primal=lns"])
+    (fun (c, _) => c.primal = .lns && c.opt = .linear))
+  check (← expectOk "primal-preset-lns" (parseSolveFlags ["--strategy=lns"])
+    (fun (c, _) => c.primal = .lns && c.opt = .linear))
   check (← expectError "primal-time-limit" (parseSolveFlags
       ["--primal=dive", "--time-limit=100"])
     "timed branch-and-bound adapter")

@@ -1,0 +1,10 @@
+% E0 fixture (fuzz seed 104967). SAT; verdict correct. Two first-UIP learn steps
+% (unit clauses) with reason resolutions (2 pivot expansions). Only the EXACT
+% variants of (a)/(c) fail (bound-implied falsification), not the semantic ones.
+var 0..4: v0;
+var 0..5: v1;
+var -1..3: v2;
+constraint int_plus(v1, v2, v0);
+constraint int_lt(v1, v0);
+constraint int_lt(v2, v1);
+solve satisfy;

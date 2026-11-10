@@ -34,18 +34,20 @@ private def parseVarValue (value : String) : Except String VarStrategy :=
   | "annot" => .ok .annot
   | "act" => .ok .act
   | "domwdeg" => .ok .domwdeg
+  | "wdeg" => .ok .wdeg
   | "obj" => .ok .obj
-  | _ => .error s!"invalid value '{value}' for --var: expected minc, annot, act, domwdeg or obj"
+  | _ => .error s!"invalid value '{value}' for --var: expected minc, annot, act, domwdeg, wdeg or obj"
 
 private def parseValValue (value : String) : Except String ValStrategy :=
   match value with
   | "min" => .ok .min
   | "max" => .ok .max
   | "median" => .ok .median
+  | "split" => .ok .split
   | "act" => .ok .act
   | "annot" => .ok .annot
   | "incumbent" => .ok .incumbent
-  | _ => .error s!"invalid value '{value}' for --val: expected min, max, median, act, annot or incumbent"
+  | _ => .error s!"invalid value '{value}' for --val: expected min, max, median, split, act, annot or incumbent"
 
 private def parseOptValue (value : String) : Except String OptStrategy :=
   match value with
@@ -79,7 +81,8 @@ private def parsePresolveValue (value : String) : Except String PresolveStrategy
   match value with
   | "none" => .ok .none
   | "root" => .ok .root
-  | _ => .error s!"invalid value '{value}' for --presolve: expected none or root"
+  | "dedup" => .ok .dedup
+  | _ => .error s!"invalid value '{value}' for --presolve: expected none, root or dedup"
 
 private def markSeen (seen : List String) (flag : String) : Except String (List String) :=
   if seen.contains flag then
@@ -110,7 +113,7 @@ private def applyFlag (seen : List String) (c : SearchConfig) (arg : String) :
   else if let some value := flagValue? arg "--restart" then
     let seen ← markSeen seen "--restart"
     let restart ← parseRestartValue value
-    return some ({ c with restart := restart }, seen)
+    return some ({ c with restart := restart, restartExplicit := true }, seen)
   else if let some value := flagValue? arg "--restart-base" then
     let seen ← markSeen seen "--restart-base"
     let restartBase ← parseNatValue "--restart-base" value
@@ -135,6 +138,16 @@ private def applyFlag (seen : List String) (c : SearchConfig) (arg : String) :
     let seen ← markSeen seen "--time-limit"
     let timeLimit ← parseNatValue "--time-limit" value
     return some ({ c with timeLimit := some timeLimit }, seen)
+  else if let some value := flagValue? arg "--conflict-limit" then
+    let seen ← markSeen seen "--conflict-limit"
+    let n ← parseNatValue "--conflict-limit" value
+    if n == 0 then
+      throw "option '--conflict-limit' must be positive (it is a conflict budget)"
+    return some ({ c with conflictLimit := some n }, seen)
+  else if let some value := flagValue? arg "--threads" then
+    let seen ← markSeen seen "--threads"
+    let threads ← parseNatValue "--threads" value
+    return some ({ c with threads := threads }, seen)
   else if let some value := flagValue? arg "--portfolio" then
     let seen ← markSeen seen "--portfolio"
     if value.isEmpty then
@@ -158,8 +171,8 @@ private def applyFlag (seen : List String) (c : SearchConfig) (arg : String) :
     -- applied by the preset pass; explicit flags after it still override
     return some (c, seen)
   else if ["--engine", "--var", "--val", "--opt", "--restart", "--restart-base", "--primal",
-           "--primal-time", "--prop", "--presolve", "--time-limit",
-           "--portfolio", "--seed"].contains arg then
+           "--primal-time", "--prop", "--presolve", "--time-limit", "--conflict-limit",
+           "--threads", "--portfolio", "--seed"].contains arg then
     throw s!"option '{arg}' requires a value ('{arg}=...')"
   else
     return none
@@ -200,7 +213,7 @@ private def parseConfigWords (args : List String) (defaultEngine : EngineKind)
             throw s!"unknown strategy preset '{name}' (expected default, annot, opt-fast, restarts, lns or auto)"
         | some preset =>
             match preset.toConfig with
-            | some c => pure c
+            | some c => pure { c with restartExplicit := true }
             | none => throw "strategy preset 'auto' is not implemented yet (F9 strategy guide)"
   let base := { base with engine := defaultEngine }
   let rec go (seen : List String) (c : SearchConfig) :
@@ -224,14 +237,24 @@ private def parseConfigWords (args : List String) (defaultEngine : EngineKind)
   let c :=
     if !allowLegacyRouting || explicitEngine || c.checkImplementedBase matches .ok _ then c
     else { c with engine := .kernel }
-  -- S7: a Core run with no `--var`, `--val`, preset or portfolio uses the
-  -- best measured Core configuration `act/min`.  The record default stays
-  -- `minc/act`, so the kernel route and the presets keep their meaning.
-  let explicitVarVal := args.any (fun a =>
-    (flagValue? a "--var").isSome || (flagValue? a "--val").isSome)
+  -- S7: a Core run with no preset or portfolio fills `--var` and `--val`
+  -- independently.  `var` defaults to the best measured `act`; `val` defaults
+  -- to `incumbent` under the linear driver (each objective round seeds it from
+  -- the previous incumbent) and to `min` under seeded.  The seeded default
+  -- stays `min` until the M2 default-change bar; `--val=incumbent` is accepted
+  -- by the seeded driver too and seeds its phases the same way.  The record
+  -- default stays `minc/act`, so the kernel route and the presets keep their
+  -- meaning.
+  let explicitVar := args.any (fun a => (flagValue? a "--var").isSome)
+  let explicitVal := args.any (fun a => (flagValue? a "--val").isSome)
   let c :=
-    if c.engine == .core && !explicitVarVal && presetName.isNone && c.portfolio.isNone then
-      { c with var := .act, val := .min }
+    if c.engine == .core && presetName.isNone && c.portfolio.isNone then
+      let var := if explicitVar then c.var else .act
+      let val :=
+        if explicitVal then c.val
+        else if c.opt == .linear then .incumbent
+        else .min
+      { c with var := var, val := val }
     else c
   match c.checkImplementedBase with
   | .error e =>
@@ -318,6 +341,18 @@ def parsePortfolio (value : String) : Except String PortfolioSpec := do
       throw "portfolio probe entries share the final entry's value presentation: give every entry the same '--val'"
   | none => pure spec
 
+/-- The parallel portfolio is a built-in strategy mix.  An explicit preset or
+`--var`/`--val` would silently disable that mix, so combining them is a usage
+error rather than a silently ignored flag. -/
+private def checkPortfolioFlags (args : List String) (presetName : Option String)
+    (c : SearchConfig) : Except String Unit := do
+  if c.threads > 1 then
+    if presetName.isSome then
+      throw "option '--threads' selects the built-in portfolio and cannot be combined with '--strategy'"
+    if args.any (fun a => (flagValue? a "--var").isSome) ||
+        args.any (fun a => (flagValue? a "--val").isSome) then
+      throw "option '--threads' selects the built-in portfolio; do not combine it with '--var' or '--val'"
+
 /-- The full implementation gate: the base checks plus the outer portfolio
 constraints and syntax.  The CLI calls this before loading the model, so a
 malformed or ignored flag is a usage error. -/
@@ -343,6 +378,7 @@ def SearchConfig.checkImplemented (c : SearchConfig) : Except String Unit := do
 def parseSolveFlags (args : List String) : Except String (SearchConfig × List String) := do
   let (c, src) ← parseConfigWords args .core
   let presetName ← findStrategy args
+  checkPortfolioFlags args presetName c
   match c.checkImplemented with
   | .error e =>
       match presetName with
@@ -356,6 +392,8 @@ def parseCoreSolveFlags (args : List String) : Except String (SearchConfig × Li
   let (c, src) ← parseConfigWords args .core false
   if c.engine != .core then
     throw "the list-based kernel is isolated in LeanFzn/Legacy and is unavailable in the public CLI"
+  let presetName ← findStrategy args
+  checkPortfolioFlags args presetName c
   c.checkCoreImplemented
   c.checkImplemented
   pure (c, src)

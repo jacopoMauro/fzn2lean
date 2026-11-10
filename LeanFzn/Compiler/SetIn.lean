@@ -144,4 +144,67 @@ def restrictSetInModel (m : Model) : Model :=
     variables := m.variables.map (restrictVarDecl m)
     constraints := m.constraints.filter (fun c => !setInRestricts m c) }
 
+/-! ## Precomputed fast twin
+
+The definitions above rescan the whole constraint list once per variable
+and the whole variable list once per constraint.  On large models that is
+quadratic.  The twin below collects the tagged restrictions in one pass
+and uses hash-set membership for the finite-variable test; the equality
+with the scanning definitions is proved in `Proofs/SetIn` and
+`Proofs/Normalize`, and `compileModelFull` runs the twin. -/
+
+/-- Every constant-set restriction of the model, tagged by subject name,
+    collected in one pass over the constraints. -/
+def setInRestrictionList (m : Model) :
+    List (String × SetInRestriction) :=
+  m.constraints.filterMap fun c =>
+    match setInShape c with
+    | some (y, s, b) => (setArgDenote s).map (fun sv => (y.name, (sv, b)))
+    | none => none
+
+/-- The restrictions of a precomputed tagged list that apply to the
+    variable named `x`. -/
+def setInCondsOf (rs : List (String × SetInRestriction)) (x : String) :
+    List SetInRestriction :=
+  rs.filterMap fun p => if p.1 = x then some p.2 else none
+
+/-- Insert every subject name of a tagged restriction list into a hash
+    set. -/
+def insertSubjectNames (rs : List (String × SetInRestriction))
+    (s : Std.HashSet String) : Std.HashSet String :=
+  rs.foldl (fun s p => s.insert p.1) s
+
+/-- The names of the variables that are the subject of a constant-set
+    restriction. -/
+def setInSubjectNames (rs : List (String × SetInRestriction)) :
+    Std.HashSet String :=
+  insertSubjectNames rs ∅
+
+/-- The declared type restricted by a precomputed condition list (the
+    match structure of `restrictVarType`). -/
+def restrictVarTypeOf : List SetInRestriction → BasicVarType → BasicVarType
+  | [], .intRange lo hi => .intRange lo hi
+  | conds, .intRange lo hi =>
+      .intSet ((setElems (.interval lo hi)).filter (setInAccepts conds))
+  | [], .intSet xs => .intSet xs
+  | conds, .intSet xs => .intSet (xs.filter (setInAccepts conds))
+  | _, ty => ty
+
+/-- The declaration with its domain restricted by a precomputed
+    condition list, gated by the subject-name hash set. -/
+def restrictVarDeclOf (rs : List (String × SetInRestriction))
+    (subjects : Std.HashSet String) : VarDeclItem → VarDeclItem
+  | .basic ty n anns none =>
+      if subjects.contains n.name then
+        .basic (restrictVarTypeOf (setInCondsOf rs n.name) ty) n anns none
+      else .basic ty n anns none
+  | d => d
+
+/-- The drop test with a precomputed finite-variable name set. -/
+def setInRestrictsOf (finites : Std.HashSet String)
+    (c : ConstraintItem) : Bool :=
+  match setInSubject c with
+  | some x => finites.contains x && (setInCondOf x c).isSome
+  | none => false
+
 end LeanFzn.Compiler

@@ -56,12 +56,14 @@ private def varName : VarStrategy → String
   | .annot => "annot"
   | .act => "act"
   | .domwdeg => "domwdeg"
+  | .wdeg => "wdeg"
   | .obj => "obj"
 
 private def valName : ValStrategy → String
   | .min => "min"
   | .max => "max"
   | .median => "median"
+  | .split => "split"
   | .act => "act"
   | .annot => "annot"
   | .incumbent => "incumbent"

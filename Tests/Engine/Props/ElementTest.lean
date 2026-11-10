@@ -39,6 +39,8 @@ def mkProblem (ds : List Dom) (cs : List DomConstraint) : CompiledProblem DomCon
     constraints := cs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- Convert domains the way the engine does. -/
@@ -307,11 +309,18 @@ def checkAvieDuplicate : IO Unit := do
   checkPruneBatch "avie duplicate slots" pAvieDup view (avieDupOut view)
     [ (posNe 1 9, [posNe 1 9, posNe 0 1, negNe 2 9]) ]
 
-/-- A Boolean array slot is malformed for the integer family: no-op. -/
+/-- A Boolean array slot has no integer hull.  Since Q3.2 removed the
+whole-table validity guard, a *selected* Boolean slot is reported as an
+empty integer range (a certified conflict) instead of suppressing the
+whole propagator; a Boolean result sharing the table's hull is a no-op. -/
 def checkAvieMalformed : IO Unit := do
   let view := view5 (DomC.bounds 1 1) (DomC.bounds 5 9) (DomC.bool 3)
     (DomC.bounds 0 10) (DomC.bounds 0 10)
-  checkFix "avie Boolean array slot" (avieOut view)
+  checkConflict "avie Boolean selected slot" pAvie view (avieOut view)
+    [posNe 0 1, negLe 2 1, posLe 1 4]
+  let viewBoolResult := view5 (DomC.bounds 1 1) (DomC.bool 3) (DomC.bool 3)
+    (DomC.bounds 0 10) (DomC.bounds 0 10)
+  checkFix "avie Boolean selected slot with Boolean result" (avieOut viewBoolResult)
   let viewEmpty := view5 (DomC.bounds 1 1) (DomC.bounds 1 0) (DomC.bounds 0 10)
     (DomC.bounds 0 10) (DomC.bounds 0 10)
   checkFix "avie empty result bounds" (avieOut viewEmpty)
@@ -413,6 +422,34 @@ def propsOfTest (p : CompiledProblem DomConstraint) (T : LitTable) (init : Array
             exact h)
           (by simpa [hx] using List.mem_toArray.mp x.2)
 
+/-- The dedicated element table satisfies the pruning contract. -/
+theorem propsOfTest_pruneSound (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC)
+    (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+      DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)) :
+    PropsSound p T (propsOfTest p T init hinit) := by
+  intro id pr hid
+  have hpr : pr ∈ propsOfTest p T init hinit := by
+    rw [Array.mem_iff_getElem?]
+    exact ⟨id, hid⟩
+  unfold propsOfTest at hpr
+  rw [Array.mem_map] at hpr
+  obtain ⟨x, _, hxpr⟩ := hpr
+  rw [← hxpr]
+  split
+  case h_1 xs i k heq =>
+    exact arrayIntElementPropWith_pruneSound xs i k
+      (heq ▸ List.mem_toArray.mp x.2)
+  case h_2 is i k heq =>
+    exact arrayVarIntElementPropWith_pruneSound is i k
+      (heq ▸ List.mem_toArray.mp x.2)
+  case h_3 is i k heq =>
+    exact arrayVarBoolElementPropWith_pruneSound is i k
+      (heq ▸ List.mem_toArray.mp x.2)
+  case h_4 =>
+    exact propCheckV2With_pruneSound p T x.val init
+      (hinit x.val (List.mem_toArray.mp x.2)) (List.mem_toArray.mp x.2)
+
 /-- The fully generic table: every constraint goes through
 `propCheckV2With`. -/
 def propsOfGeneric (p : CompiledProblem DomConstraint) (T : LitTable) (init : Array DomC)
@@ -423,6 +460,23 @@ def propsOfGeneric (p : CompiledProblem DomConstraint) (T : LitTable) (init : Ar
     propCheckV2With p T x.1 init
       (hinit x.1 (List.mem_toArray.mp x.2))
       (List.mem_toArray.mp x.2)
+
+/-- The fully generic table satisfies the pruning contract. -/
+theorem propsOfGeneric_pruneSound (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC)
+    (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+      DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)) :
+    PropsSound p T (propsOfGeneric p T init hinit) := by
+  intro id pr hid
+  have hpr : pr ∈ propsOfGeneric p T init hinit := by
+    rw [Array.mem_iff_getElem?]
+    exact ⟨id, hid⟩
+  unfold propsOfGeneric at hpr
+  rw [Array.mem_map] at hpr
+  obtain ⟨x, _, hxpr⟩ := hpr
+  rw [← hxpr]
+  exact propCheckV2With_pruneSound p T x.val init
+    (hinit x.val (List.mem_toArray.mp x.2)) (List.mem_toArray.mp x.2)
 
 /-- Output kind as a small tag. -/
 def outTag {p : CompiledProblem DomConstraint} {T : LitTable} :
@@ -512,29 +566,109 @@ def initStateWith
         if hready : initReady p doms = true then
           let hinitAll := initReady_spec hready
           let props := mkProps p T doms hinitAll
-          let st : EngineState p T :=
-            { table := T
-              doms := doms
-              trail := #[]
-              levelStart := #[0]
-              level := 0
-              changeIndex := Array.replicate doms.size (#[] : Array Nat)
-              db := {}
-              reasons := #[]
-              props := props
-              subs := #[]
-              queueHigh := #[]
-              queueLow := #[]
-              inQueue := ByteArray.empty
-              activity := Array.replicate doms.size (0.0 : Float)
-              activityHeap := #[]
-              phases := #[]
-              restarts := 0
-              stats := {} }
-          let st := registerProps st
-          let st := (List.range props.size).foldl (fun st i => enqueueProp st i) st
-          some st
+          some (initStateCore p T doms props)
         else none
+
+/-- The test-local entry satisfies the history invariants, by the same
+argument as `Search.initState_histInv`. -/
+theorem initStateWith_histInv
+    (mkProps : (p : CompiledProblem DomConstraint) → (T : LitTable) → (init : Array DomC) →
+      (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+        DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)) →
+      Array (PropV2 p T))
+    {p : CompiledProblem DomConstraint} {T : LitTable} {st : EngineState p T}
+    (h : initStateWith mkProps p T = some st) : HistInv st.doms st := by
+  unfold initStateWith at h
+  split at h
+  · simp at h
+  · split at h
+    · simp at h
+    · split at h
+      · simp only [Option.some.injEq] at h
+        subst h
+        rw [initStateCore_doms]
+        exact initStateCore_histInv p T _ _
+      · simp at h
+
+/-- The test-local entry carries the conversion equation. -/
+theorem initStateWith_initConv
+    (mkProps : (p : CompiledProblem DomConstraint) → (T : LitTable) → (init : Array DomC) →
+      (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+        DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)) →
+      Array (PropV2 p T))
+    {p : CompiledProblem DomConstraint} {T : LitTable} {st : EngineState p T}
+    (h : initStateWith mkProps p T = some st) : InitConv p st.doms := by
+  unfold initStateWith at h
+  cases hg : gateOkFast (propagationProblem p) with
+  | true =>
+      simp only [hg, Bool.not_true, Bool.false_eq_true, if_false] at h
+      cases hc : convertDomains p.domains with
+      | none => simp [hc] at h
+      | some doms =>
+          simp only [hc] at h
+          by_cases hr : initReady p doms = true
+          · simp [hr] at h
+            subst h
+            rw [initStateCore_doms]
+            exact ⟨(convertDomains_spec hc).2⟩
+          · simp [hr] at h
+  | false => simp [hg] at h
+
+/-- The parameterized entry satisfies `RootInv`. -/
+theorem initStateWith_rootInv
+    (mkProps : (p : CompiledProblem DomConstraint) → (T : LitTable) → (init : Array DomC) →
+      (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+        DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)) →
+      Array (PropV2 p T))
+    {p : CompiledProblem DomConstraint} {T : LitTable} {st : EngineState p T}
+    (h : initStateWith mkProps p T = some st) (hT : T.Inv) :
+    RootInv p T st.doms st := by
+  unfold initStateWith at h
+  cases hg : gateOkFast (propagationProblem p) with
+  | true =>
+      simp only [hg, Bool.not_true, Bool.false_eq_true, if_false] at h
+      cases hc : convertDomains p.domains with
+      | none => simp [hc] at h
+      | some doms =>
+          simp only [hc] at h
+          by_cases hr : initReady p doms = true
+          · simp [hr] at h
+            subst h
+            rw [initStateCore_doms]
+            exact initStateCore_rootInv p T doms _ hT
+              (initInv_of_convertDomains hc) ⟨(convertDomains_spec hc).2⟩
+          · simp [hr] at h
+  | false => simp [hg] at h
+
+/-- The parameterized entry's propagator table satisfies `PropsSound`
+whenever the builder does. -/
+theorem initStateWith_propsSound
+    (mkProps : (p : CompiledProblem DomConstraint) → (T : LitTable) → (init : Array DomC) →
+      (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+        DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)) →
+      Array (PropV2 p T))
+    (hmk : ∀ (p : CompiledProblem DomConstraint) (T : LitTable) (init : Array DomC)
+      (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+        DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)),
+      PropsSound p T (mkProps p T init hinit))
+    {p : CompiledProblem DomConstraint} {T : LitTable} {st : EngineState p T}
+    (h : initStateWith mkProps p T = some st) :
+    PropsSound p T st.props := by
+  unfold initStateWith at h
+  cases hg : gateOkFast (propagationProblem p) with
+  | true =>
+      simp only [hg, Bool.not_true, Bool.false_eq_true, if_false] at h
+      cases hc : convertDomains p.domains with
+      | none => simp [hc] at h
+      | some doms =>
+          simp only [hc] at h
+          by_cases hr : initReady p doms = true
+          · simp [hr] at h
+            subst h
+            rw [initStateCore_props]
+            exact hmk p T doms _
+          · simp [hr] at h
+  | false => simp [hg] at h
 
 def initStateTest (p : CompiledProblem DomConstraint) (T : LitTable) :
     Option (EngineState p T) :=
@@ -546,52 +680,32 @@ def initStateGeneric (p : CompiledProblem DomConstraint) (T : LitTable) :
 
 /-- The `coreSolveFull` body with a chosen propagator table. -/
 def coreSolveWith
-    (initFn : (p : CompiledProblem DomConstraint) → (T : LitTable) → Option (EngineState p T))
+    (mkProps : (p : CompiledProblem DomConstraint) → (T : LitTable) → (init : Array DomC) →
+      (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+        DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)) →
+      Array (PropV2 p T))
+    (hmk : ∀ (p : CompiledProblem DomConstraint) (T : LitTable) (init : Array DomC)
+      (hinit : ∀ dc ∈ p.constraints, ∀ s ∈ dcSlotsFull dc,
+        DomC.ofDom? (p.domains.getD s Dom.empty) = some (init.getD s DomC.empty)),
+      PropsSound p T (mkProps p T init hinit))
     (p : CompiledProblem DomConstraint)
     (o : SearchConfig) (fuel : Nat) : CoreResult × EngineStats :=
   let T : LitTable := {}
-  match initFn p T with
+  match hinit : initStateWith mkProps p T with
   | none => (.gaveUp, { gaveUp := 1 })
   | some st0 =>
-      let prio := annotPrioArray p
-      let orders := LeanFzn.Engine.configOrders p o
-      match addSeedClauses p T st0 with
-      | (st, some _) =>
-          let st := { st with stats := { st.stats with conflicts := st.stats.conflicts + 1 } }
-          (.unsat, st.stats)
-      | (st, none) =>
-          match st.db.emptyConflict? with
-          | some _ => (.unsat, st.stats)
-          | none =>
-              let (db, out) := st.db.propagateUnits p T st.doms
-              match out with
-              | .none =>
-                  let st := { st with db := db }
-                  let (r, st) := search p T st.doms o prio orders st #[] fuel
-                  (r, st.stats)
-              | .prune ps =>
-                  let st := { st with db := db }
-                  let (r, st) := search p T st.doms o prio orders st
-                    (pushClausePrunes #[] ps) fuel
-                  (r, st.stats)
-              | .conflict ec _ =>
-                  let a := analyze p T st.doms st ec fuel
-                  let st := { st with db := db }
-                  if !a.ok then (.gaveUp, { st.stats with gaveUp := 1 })
-                  else
-                    match a.learned with
-                    | none => (.gaveUp, { st.stats with gaveUp := 1 })
-                    | some lc =>
-                        if lc.lits.isEmpty then (.unsat, st.stats)
-                        else (.gaveUp, { st.stats with gaveUp := 1 })
+      coreSolveFrom p T o st0
+        (initStateWith_rootInv mkProps hinit LitTable.inv_empty)
+        (initStateWith_propsSound mkProps hmk hinit)
+        (annotPrioArray p) (LeanFzn.Engine.configOrders p o) fuel
 
 def coreSolveTest (p : CompiledProblem DomConstraint)
     (o : SearchConfig) (fuel : Nat) : CoreResult × EngineStats :=
-  coreSolveWith initStateTest p o fuel
+  coreSolveWith propsOfTest propsOfTest_pruneSound p o fuel
 
 def coreSolveGeneric (p : CompiledProblem DomConstraint)
     (o : SearchConfig) (fuel : Nat) : CoreResult × EngineStats :=
-  coreSolveWith initStateGeneric p o fuel
+  coreSolveWith propsOfGeneric propsOfGeneric_pruneSound p o fuel
 
 def verdictName : CoreResult → String
   | .sat _ => "sat"

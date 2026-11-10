@@ -24,7 +24,7 @@ seed (its database remains valid at the current problem). -/
 def coreSeedVerdict (o : SearchConfig) (fuel : Nat)
     (prev : Option (List Value)) (p : CompiledProblem DomConstraint)
     (s : CoreSeed p) : CertVerdict × CoreSeed p :=
-  let r := coreSolveSeed p o fuel s
+  let r := coreSolveSeed p o prev fuel s
   match r.1 with
   | .sat a => (.sat a, r.2.2)
   | .unsat => (.unsat, r.2.2)
@@ -36,7 +36,7 @@ theorem coreSeedVerdict_sat {o : SearchConfig} {fuel : Nat}
     {s : CoreSeed p} {a : List Value}
     (h : (coreSeedVerdict o fuel prev p s).1 = .sat a) :
     a ∈ allAssigns p.domains ∧ accepts p a = true := by
-  cases hc : (coreSolveSeed p o fuel s).1 with
+  cases hc : (coreSolveSeed p o prev fuel s).1 with
   | sat a' =>
       have h' : CertVerdict.sat a' = CertVerdict.sat a := by
         simpa [coreSeedVerdict, hc] using h
@@ -51,7 +51,7 @@ theorem coreSeedVerdict_unsat {o : SearchConfig} {fuel : Nat}
     {s : CoreSeed p}
     (h : (coreSeedVerdict o fuel prev p s).1 = .unsat) :
     ∀ b ∈ allAssigns p.domains, accepts p b = false := by
-  cases hc : (coreSolveSeed p o fuel s).1 with
+  cases hc : (coreSolveSeed p o prev fuel s).1 with
   | sat a' => simp [coreSeedVerdict, hc] at h
   | unsat => exact coreSolveSeed_unsat hc
   | gaveUp => simp [coreSeedVerdict, hc] at h

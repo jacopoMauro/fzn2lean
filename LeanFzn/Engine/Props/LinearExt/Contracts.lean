@@ -165,33 +165,15 @@ theorem linLeReifOutWith_run_conflict (p : CompiledProblem DomConstraint) (T : L
   unfold linLeReifOutWith at h
   dsimp only at h
   split at h
-  · rename_i htrue
-    obtain ⟨ls, hls, hdec, hent⟩ := linPlanOut_run_conflict p T _ _ _ h
-    obtain ⟨ls0, h0, hlsEq⟩ := linPlanAppendLit_conf_mem hls
-    have h0' : (linLePlan (linTerms coeffs.toArray is.toArray bds) b).conflict? =
-        some ls0 := by simpa using h0
-    obtain ⟨hconf, hls0⟩ := linLePlan_conflict_cases h0'
-    refine ⟨true, htrue, ls0, by simpa using h0', ?_, ?_, ?_⟩
-    · rw [hdec, hlsEq]; simp
-    · rw [hdec]; exact hent
-    · intro l hl
-      rw [hdec, hlsEq] at hl
-      rcases List.mem_append.mp hl with hl0 | hlLit
-      · rw [hls0] at hl0
-        obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hl0
-        simpa [atomSlot_linMinNegLit] using
-          linConflict_lits_evalLit_false p coeffs is b view hsize bds hbds hWF t ht
-      · rw [List.mem_singleton.mp hlLit]
-        simpa [atomSlot, posBool] using domC_evalLit_posBool_compl
-          (d := view.doms.getD r DomC.empty) htrue
+  · cases h
   · split at h
-    · rename_i hfalse
+    · rename_i htrue
       obtain ⟨ls, hls, hdec, hent⟩ := linPlanOut_run_conflict p T _ _ _ h
       obtain ⟨ls0, h0, hlsEq⟩ := linPlanAppendLit_conf_mem hls
-      have h0' : (linGePlan (linTerms coeffs.toArray is.toArray bds) (b + 1)).conflict? =
+      have h0' : (linLePlan (linTerms coeffs.toArray is.toArray bds) b).conflict? =
           some ls0 := by simpa using h0
-      obtain ⟨hconf, hls0⟩ := linGePlan_conflict_cases h0'
-      refine ⟨false, hfalse, ls0, by simpa using h0', ?_, ?_, ?_⟩
+      obtain ⟨hconf, hls0⟩ := linLePlan_conflict_cases h0'
+      refine ⟨true, htrue, ls0, by simpa using h0', ?_, ?_, ?_⟩
       · rw [hdec, hlsEq]; simp
       · rw [hdec]; exact hent
       · intro l hl
@@ -199,16 +181,36 @@ theorem linLeReifOutWith_run_conflict (p : CompiledProblem DomConstraint) (T : L
         rcases List.mem_append.mp hl with hl0 | hlLit
         · rw [hls0] at hl0
           obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hl0
-          simpa [atomSlot_linMaxNegLit] using
-            linMaxConflict_lits_evalLit_false p coeffs is b view hsize bds hbds hWF t ht
+          simpa [atomSlot_linMinNegLit] using
+            linConflict_lits_evalLit_false p coeffs is b view hsize bds hbds hWF t ht
         · rw [List.mem_singleton.mp hlLit]
           simpa [atomSlot, posBool] using domC_evalLit_posBool_compl
-            (d := view.doms.getD r DomC.empty) hfalse
-    · exfalso
-      obtain ⟨ls, hls, hdec, hent⟩ := linPlanOut_run_conflict p T _ _ _ h
-      rw [linLeReifDecidePlan_conflict_none r
-        (linTerms coeffs.toArray is.toArray bds) b] at hls
-      cases hls
+            (d := view.doms.getD r DomC.empty) htrue
+    · split at h
+      · rename_i hfalse
+        obtain ⟨ls, hls, hdec, hent⟩ := linPlanOut_run_conflict p T _ _ _ h
+        obtain ⟨ls0, h0, hlsEq⟩ := linPlanAppendLit_conf_mem hls
+        have h0' : (linGePlan (linTerms coeffs.toArray is.toArray bds) (b + 1)).conflict? =
+            some ls0 := by simpa using h0
+        obtain ⟨hconf, hls0⟩ := linGePlan_conflict_cases h0'
+        refine ⟨false, hfalse, ls0, by simpa using h0', ?_, ?_, ?_⟩
+        · rw [hdec, hlsEq]; simp
+        · rw [hdec]; exact hent
+        · intro l hl
+          rw [hdec, hlsEq] at hl
+          rcases List.mem_append.mp hl with hl0 | hlLit
+          · rw [hls0] at hl0
+            obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hl0
+            simpa [atomSlot_linMaxNegLit] using
+              linMaxConflict_lits_evalLit_false p coeffs is b view hsize bds hbds hWF t ht
+          · rw [List.mem_singleton.mp hlLit]
+            simpa [atomSlot, posBool] using domC_evalLit_posBool_compl
+              (d := view.doms.getD r DomC.empty) hfalse
+      · exfalso
+        obtain ⟨ls, hls, hdec, hent⟩ := linPlanOut_run_conflict p T _ _ _ h
+        rw [linLeReifDecidePlan_conflict_none r
+          (linTerms coeffs.toArray is.toArray bds) b] at hls
+        cases hls
 
 theorem linPlanAppendLit_conflict_none {plan : LinPlan} {l : Literal}
     (h : (linPlanAppendLit plan l).conflict? = none) : plan.conflict? = none := by
@@ -246,89 +248,91 @@ theorem linLeReifOutWith_run_prune (p : CompiledProblem DomConstraint) (T : LitT
   unfold linLeReifOutWith at h
   dsimp only at h
   split at h
-  · rename_i htrue
-    obtain ⟨hconf, _hne, hqfacts⟩ := linPlanOut_run_prune p T _ _ _ h
-    have hconfInner : (linLePlan (linTerms coeffs.toArray is.toArray bds) b).conflict? =
-        none := linPlanAppendLit_conflict_none hconf
-    have hnot := linLePlan_conflict_none_cases hconfInner
-    have hb : linTotalMin (linTerms coeffs.toArray is.toArray bds) ≤ b := by omega
-    refine ⟨bds, linTerms coeffs.toArray is.toArray bds, hbds, rfl, ?_⟩
-    intro q hq
-    obtain ⟨l, reason, hpr, hlit, hdec, hent⟩ := hqfacts q hq
-    obtain ⟨reason0, hpr0, hreason⟩ := linPlanAppendLit_prunes_mem hpr
-    have hpr0' : (l, reason0) ∈ linPrunes (linTerms coeffs.toArray is.toArray bds) b := by
-      unfold linLePlan at hpr0
-      split at hpr0
-      · simp at hpr0
-      · exact hpr0
-    refine ⟨l, reason, Or.inl ⟨true, htrue, l, reason0, hpr0, rfl, hreason⟩,
-      hlit, hdec, hent, ?_, ?_⟩
-    · exact linPrune_lit_evalLit_none p coeffs is b view hsize bds hbds hWF hb hpr0'
-    · intro q' hq' hne
-      rw [hreason] at hq'
-      rcases List.mem_append.mp hq' with hq0 | hqlit
-      · exact linPrune_other_lits_evalLit_false p coeffs is b view hsize bds hbds hWF
-          hpr0' q' hq0 hne
-      · rw [List.mem_singleton.mp hqlit]
-        simpa [atomSlot, posBool] using domC_evalLit_posBool_compl
-          (d := view.doms.getD r DomC.empty) htrue
+  · cases h
   · split at h
-    · rename_i hfalse
+    · rename_i htrue
       obtain ⟨hconf, _hne, hqfacts⟩ := linPlanOut_run_prune p T _ _ _ h
-      have hconfInner :
-          (linGePlan (linTerms coeffs.toArray is.toArray bds) (b + 1)).conflict? = none :=
-        linPlanAppendLit_conflict_none hconf
-      have hnot := linGePlan_conflict_none_cases hconfInner
-      have hb : b + 1 ≤ linTotalMax (linTerms coeffs.toArray is.toArray bds) := by omega
+      have hconfInner : (linLePlan (linTerms coeffs.toArray is.toArray bds) b).conflict? =
+          none := linPlanAppendLit_conflict_none hconf
+      have hnot := linLePlan_conflict_none_cases hconfInner
+      have hb : linTotalMin (linTerms coeffs.toArray is.toArray bds) ≤ b := by omega
       refine ⟨bds, linTerms coeffs.toArray is.toArray bds, hbds, rfl, ?_⟩
       intro q hq
       obtain ⟨l, reason, hpr, hlit, hdec, hent⟩ := hqfacts q hq
       obtain ⟨reason0, hpr0, hreason⟩ := linPlanAppendLit_prunes_mem hpr
-      have hpr0' : (l, reason0) ∈
-          linPrunesGe (linTerms coeffs.toArray is.toArray bds) (b + 1) := by
-        unfold linGePlan at hpr0
+      have hpr0' : (l, reason0) ∈ linPrunes (linTerms coeffs.toArray is.toArray bds) b := by
+        unfold linLePlan at hpr0
         split at hpr0
         · simp at hpr0
         · exact hpr0
-      refine ⟨l, reason, Or.inl ⟨false, hfalse, l, reason0, hpr0, rfl, hreason⟩,
+      refine ⟨l, reason, Or.inl ⟨true, htrue, l, reason0, hpr0, rfl, hreason⟩,
         hlit, hdec, hent, ?_, ?_⟩
-      · exact linPruneGe_lit_evalLit_none p coeffs is (b + 1) view hsize bds hbds hWF hb hpr0'
+      · exact linPrune_lit_evalLit_none p coeffs is b view hsize bds hbds hWF hb hpr0'
       · intro q' hq' hne
         rw [hreason] at hq'
         rcases List.mem_append.mp hq' with hq0 | hqlit
-        · exact linPruneGe_other_lits_evalLit_false p coeffs is (b + 1) view hsize bds hbds hWF
+        · exact linPrune_other_lits_evalLit_false p coeffs is b view hsize bds hbds hWF
             hpr0' q' hq0 hne
         · rw [List.mem_singleton.mp hqlit]
           simpa [atomSlot, posBool] using domC_evalLit_posBool_compl
-            (d := view.doms.getD r DomC.empty) hfalse
-    · have hdNone : (view.doms.getD r DomC.empty).evalLit (posBool r true) = none :=
-        domC_evalLit_posBool_none_of_not (by assumption) (by assumption)
-      obtain ⟨hconf, _hne, hqfacts⟩ := linPlanOut_run_prune p T _ _ _ h
-      refine ⟨bds, linTerms coeffs.toArray is.toArray bds, hbds, rfl, ?_⟩
-      intro q hq
-      obtain ⟨l, reason, hpr, hlit, hdec, hent⟩ := hqfacts q hq
-      rcases linLeReifDecidePlan_prunes_cases hpr with
-        ⟨hmax, hl, hr⟩ | ⟨hmin, hl, hr⟩
-      · refine ⟨l, reason, Or.inr ⟨hdNone, hpr⟩, hlit, hdec, hent, ?_, ?_⟩
-        · rw [hl]
-          exact domC_evalLit_posBool_none_of_none hdNone (b := true)
+            (d := view.doms.getD r DomC.empty) htrue
+    · split at h
+      · rename_i hfalse
+        obtain ⟨hconf, _hne, hqfacts⟩ := linPlanOut_run_prune p T _ _ _ h
+        have hconfInner :
+            (linGePlan (linTerms coeffs.toArray is.toArray bds) (b + 1)).conflict? = none :=
+          linPlanAppendLit_conflict_none hconf
+        have hnot := linGePlan_conflict_none_cases hconfInner
+        have hb : b + 1 ≤ linTotalMax (linTerms coeffs.toArray is.toArray bds) := by omega
+        refine ⟨bds, linTerms coeffs.toArray is.toArray bds, hbds, rfl, ?_⟩
+        intro q hq
+        obtain ⟨l, reason, hpr, hlit, hdec, hent⟩ := hqfacts q hq
+        obtain ⟨reason0, hpr0, hreason⟩ := linPlanAppendLit_prunes_mem hpr
+        have hpr0' : (l, reason0) ∈
+            linPrunesGe (linTerms coeffs.toArray is.toArray bds) (b + 1) := by
+          unfold linGePlan at hpr0
+          split at hpr0
+          · simp at hpr0
+          · exact hpr0
+        refine ⟨l, reason, Or.inl ⟨false, hfalse, l, reason0, hpr0, rfl, hreason⟩,
+          hlit, hdec, hent, ?_, ?_⟩
+        · exact linPruneGe_lit_evalLit_none p coeffs is (b + 1) view hsize bds hbds hWF hb hpr0'
         · intro q' hq' hne
-          rw [hr] at hq'
+          rw [hreason] at hq'
           rcases List.mem_append.mp hq' with hq0 | hqlit
-          · obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hq0
-            simpa [atomSlot_linMaxNegLit] using
-              linMaxConflict_lits_evalLit_false p coeffs is b view hsize bds hbds hWF t ht
-          · exact absurd (List.mem_singleton.mp hqlit) (by rw [hl] at hne; exact hne)
-      · refine ⟨l, reason, Or.inr ⟨hdNone, hpr⟩, hlit, hdec, hent, ?_, ?_⟩
-        · rw [hl]
-          exact domC_evalLit_posBool_none_of_none hdNone (b := false)
-        · intro q' hq' hne
-          rw [hr] at hq'
-          rcases List.mem_append.mp hq' with hq0 | hqlit
-          · obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hq0
-            simpa [atomSlot_linMinNegLit] using
-              linConflict_lits_evalLit_false p coeffs is b view hsize bds hbds hWF t ht
-          · exact absurd (List.mem_singleton.mp hqlit) (by rw [hl] at hne; exact hne)
+          · exact linPruneGe_other_lits_evalLit_false p coeffs is (b + 1) view hsize bds hbds hWF
+              hpr0' q' hq0 hne
+          · rw [List.mem_singleton.mp hqlit]
+            simpa [atomSlot, posBool] using domC_evalLit_posBool_compl
+              (d := view.doms.getD r DomC.empty) hfalse
+      · have hdNone : (view.doms.getD r DomC.empty).evalLit (posBool r true) = none :=
+          domC_evalLit_posBool_none_of_not (by assumption) (by assumption)
+        obtain ⟨hconf, _hne, hqfacts⟩ := linPlanOut_run_prune p T _ _ _ h
+        refine ⟨bds, linTerms coeffs.toArray is.toArray bds, hbds, rfl, ?_⟩
+        intro q hq
+        obtain ⟨l, reason, hpr, hlit, hdec, hent⟩ := hqfacts q hq
+        rcases linLeReifDecidePlan_prunes_cases hpr with
+          ⟨hmax, hl, hr⟩ | ⟨hmin, hl, hr⟩
+        · refine ⟨l, reason, Or.inr ⟨hdNone, hpr⟩, hlit, hdec, hent, ?_, ?_⟩
+          · rw [hl]
+            exact domC_evalLit_posBool_none_of_none hdNone (b := true)
+          · intro q' hq' hne
+            rw [hr] at hq'
+            rcases List.mem_append.mp hq' with hq0 | hqlit
+            · obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hq0
+              simpa [atomSlot_linMaxNegLit] using
+                linMaxConflict_lits_evalLit_false p coeffs is b view hsize bds hbds hWF t ht
+            · exact absurd (List.mem_singleton.mp hqlit) (by rw [hl] at hne; exact hne)
+        · refine ⟨l, reason, Or.inr ⟨hdNone, hpr⟩, hlit, hdec, hent, ?_, ?_⟩
+          · rw [hl]
+            exact domC_evalLit_posBool_none_of_none hdNone (b := false)
+          · intro q' hq' hne
+            rw [hr] at hq'
+            rcases List.mem_append.mp hq' with hq0 | hqlit
+            · obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hq0
+              simpa [atomSlot_linMinNegLit] using
+                linConflict_lits_evalLit_false p coeffs is b view hsize bds hbds hWF t ht
+            · exact absurd (List.mem_singleton.mp hqlit) (by rw [hl] at hne; exact hne)
 
 theorem linEqReifOutWith_run_conflict (p : CompiledProblem DomConstraint) (T : LitTable)
     (coeffs : List Int) (is : List Nat) (b : Int) (r : Nat) (view : EngineView)
@@ -781,6 +785,7 @@ def linEqReifPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
   let dc := DomConstraint.linEqReif coeffs is b r
   let cs := coeffs.toArray
   let slots := is.toArray
+  let hslots := slotsIntB p is
   { vars := (dcSlotsFull dc).toArray
     events := slots.flatMap (fun s => #[(s, .bounds), (s, .fix)]) ++ #[(r, .fix)]
     run := fun view =>
@@ -788,7 +793,7 @@ def linEqReifPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
         match hbds : linExtractBounds view.doms slots with
         | none => .fix
         | some bds =>
-            if _hslots : slotsIntB p is = true then
+            if _hslots : hslots = true then
               if _hguard : viewIntKindB view slots = true then
                 linEqReifOutWith p T coeffs is b r view hmem hsize bds hbds _hslots
               else .fix
@@ -973,18 +978,25 @@ def linLeReifPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
   let dc := DomConstraint.linLeReif coeffs is b r
   let cs := coeffs.toArray
   let slots := is.toArray
+  let hslots := slotsIntB p is
   { vars := (dcSlotsFull dc).toArray
     events := slots.map (fun s => (s, .bounds)) ++ #[(r, .fix)]
     run := fun view =>
       if hsize : cs.size = slots.size then
-        match hbds : linExtractBounds view.doms slots with
+        let d := view.doms.getD r DomC.empty
+        match linTotals view.doms cs slots with
         | none => .fix
-        | some bds =>
-            if _hslots : slotsIntB p is = true then
-              if _hguard : viewIntKindB view slots = true then
-                linLeReifOutWith p T coeffs is b r view hmem hsize bds hbds _hslots
-              else .fix
-            else .fix
+        | some (tmin, tmax) =>
+          if linRowSkipTotalsB d r tmin tmax b then .fix
+          else
+            match hbds : linExtractBounds view.doms slots with
+            | none => .fix
+            | some bds =>
+                if _hslots : hslots = true then
+                  if _hguard : viewIntKindB view slots = true then
+                    linLeReifOutWith p T coeffs is b r view hmem hsize bds hbds _hslots
+                  else .fix
+                else .fix
       else
         .fix }
 
@@ -1013,21 +1025,18 @@ theorem linLeReifPropWith_run_conflict (p : CompiledProblem DomConstraint) (T : 
   · rw [dif_pos hsize'] at h
     split at h
     · cases h
-    · rename_i bds hbds
-      by_cases hslots' : slotsIntB p is = true
-      · rw [dif_pos hslots'] at h
-        by_cases hguard' : viewIntKindB view is.toArray = true
-        · rw [dif_pos hguard'] at h
+    · rename_i tmin tmax htot
+      split at h
+      · cases h
+      · split at h
+        · cases h
+        · rename_i bds hbds
           obtain ⟨rb, hrb, hls0⟩ :=
             linLeReifOutWith_run_conflict p T coeffs is b r view hmem hsize' bds hbds
-              hslots' hWF hguard' h
+              hslots hWF hguard h
           obtain ⟨ls0, hls, hdec, hent, hfalse⟩ := hls0
           exact ⟨bds, linTerms coeffs.toArray is.toArray bds, hbds, rfl, rb, hrb,
             ⟨ls0, hls, hdec, hent, hfalse⟩⟩
-        · rw [dif_neg hguard'] at h
-          cases h
-      · rw [dif_neg hslots'] at h
-        cases h
   · rw [dif_neg hsize'] at h
     cases h
 
@@ -1060,19 +1069,16 @@ theorem linLeReifPropWith_run_prune (p : CompiledProblem DomConstraint) (T : Lit
   · rw [dif_pos hsize'] at h
     split at h
     · cases h
-    · rename_i bds hbds
-      by_cases hslots' : slotsIntB p is = true
-      · rw [dif_pos hslots'] at h
-        by_cases hguard' : viewIntKindB view is.toArray = true
-        · rw [dif_pos hguard'] at h
+    · rename_i tmin tmax htot
+      split at h
+      · cases h
+      · split at h
+        · cases h
+        · rename_i bds hbds
           obtain ⟨bds', terms, hbds', hterms, hq⟩ :=
             linLeReifOutWith_run_prune p T coeffs is b r view hmem hsize' bds hbds
-              hslots' hWF hguard' h
+              hslots hWF hguard h
           exact ⟨bds', terms, hbds', hterms, hq⟩
-        · rw [dif_neg hguard'] at h
-          cases h
-      · rw [dif_neg hslots'] at h
-        cases h
   · rw [dif_neg hsize'] at h
     cases h
 
@@ -1163,6 +1169,7 @@ def linNeReifPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
   let dc := DomConstraint.linNeReif coeffs is b r
   let cs := coeffs.toArray
   let slots := is.toArray
+  let hslots := slotsIntB p is
   { vars := (dcSlotsFull dc).toArray
     events := slots.flatMap (fun s => #[(s, .bounds), (s, .fix)]) ++ #[(r, .fix)]
     run := fun view =>
@@ -1170,7 +1177,7 @@ def linNeReifPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
         match hbds : linExtractBounds view.doms slots with
         | none => .fix
         | some bds =>
-            if _hslots : slotsIntB p is = true then
+            if _hslots : hslots = true then
               if _hguard : viewIntKindB view slots = true then
                 linNeReifOutWith p T coeffs is b r view hmem hsize bds hbds _hslots
               else .fix

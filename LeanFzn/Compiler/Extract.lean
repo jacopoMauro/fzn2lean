@@ -62,6 +62,39 @@ theorem nameIndex_some : ∀ (names : List String) (s : String) (i : Nat),
             · rw [List.getElem?_cons_succ]
               exact hget
 
+structure Extractors where
+  lookup : String → Option Nat
+  allDiff : List BasicExpr → Option (List Nat)
+  lin : ArrayLiteral → Option (List Nat)
+  intArg : BasicExpr → Option DomIntArg
+
+def nameMapAux : List String → Nat → Std.HashMap String Nat
+  | [], _ => {}
+  | n :: ns, i => (nameMapAux ns (i + 1)).insert n i
+
+def nameMap (names : List String) : Std.HashMap String Nat := nameMapAux names 0
+
+theorem nameMapAux_get? (names : List String) (i : Nat) (s : String) :
+    (nameMapAux names i).get? s = (nameIndex names s).map (· + i) := by
+  induction names generalizing i with
+  | nil => simp [nameMapAux, nameIndex]
+  | cons n ns ih =>
+      simp only [nameMapAux]
+      rw [Std.HashMap.get?_insert]
+      by_cases h : (n == s) = true
+      · simp [h, nameIndex]
+      · rw [ih (i + 1)]
+        have h' : (n == s) = false := by simpa using h
+        simp only [h', Bool.false_eq_true, ite_false, nameIndex, Option.map_map]
+        congr 1
+        funext x
+        simp only [Function.comp_apply]
+        omega
+
+theorem nameMap_get? (names : List String) (s : String) :
+    (nameMap names).get? s = nameIndex names s := by
+  simpa [nameMap] using nameMapAux_get? names 0 s
+
 /-- From an in-bounds successful option lookup, the bang read
     returns the same value (the bridge `hvals`-style premises need). -/
 theorem getElem_of_getElem? {α : Type} [Inhabited α] {l : List α}
@@ -177,6 +210,33 @@ def intArgOf (names : List String) : BasicExpr → Option DomIntArg
   | .ident x => (nameIndex names x.name).map DomIntArg.slot
   | .lit (.int k) => some (.lit k)
   | _ => none
+
+def allDiffIndicesWith (lookup : String → Option Nat) : List BasicExpr → Option (List Nat)
+  | [] => some []
+  | .ident x :: rest =>
+      match lookup x.name with
+      | some i => (allDiffIndicesWith lookup rest).map (fun is => i :: is)
+      | none => none
+  | _ => none
+
+def linIndicesWith (lookup : String → Option Nat) : ArrayLiteral → Option (List Nat)
+  | [] => some []
+  | .ident x :: rest =>
+      match lookup x.name with
+      | some i => (linIndicesWith lookup rest).map (fun is => i :: is)
+      | none => none
+  | _ => none
+
+def intArgOfWith (lookup : String → Option Nat) : BasicExpr → Option DomIntArg
+  | .ident x => (lookup x.name).map DomIntArg.slot
+  | .lit (.int k) => some (.lit k)
+  | _ => none
+
+def extractorsOfNames (names : List String) : Extractors :=
+  { lookup := fun s => nameIndex names s
+    allDiff := allDiffIndices names
+    lin := linIndices names
+    intArg := intArgOf names }
 
 /-- The slot-indexed reading of one model constraint, if its shape is
     one the propagators understand (see the module table).  `names`
@@ -482,6 +542,306 @@ def extractConstraint (names : List String) (c : ConstraintItem) : Option DomCon
       | _ => none
   | _ => none
 
+def extractConstraintWith (e : Extractors) (c : ConstraintItem) : Option DomConstraint :=
+  match c.name.name with
+  | "int_eq" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match e.lookup x.name, e.lookup y.name with
+          | some i, some j => some (.eqSlot i j)
+          | _, _ => none
+      | [.basic (.ident x), .basic (.lit (.int k))] =>
+          (e.lookup x.name).map (fun i => .constEq i (.int k))
+      | [.basic (.lit (.int k)), .basic (.ident y)] =>
+          (e.lookup y.name).map (fun i => .constEq i (.int k))
+      | _ => none
+  | "int_ne" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match e.lookup x.name, e.lookup y.name with
+          | some i, some j => some (.neSlot i j)
+          | _, _ => none
+      | _ => none
+  | "int_le" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match e.lookup x.name, e.lookup y.name with
+          | some i, some j => some (.leSlot i j)
+          | _, _ => none
+      | [.basic (.ident x), .basic (.lit (.int k))] =>
+          (e.lookup x.name).map (fun i => .leConstHi i k)
+      | [.basic (.lit (.int k)), .basic (.ident y)] =>
+          (e.lookup y.name).map (fun i => .leConstLo i k)
+      | _ => none
+  | "int_plus" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident z)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup z.name with
+          | some i, some j, some k => some (.plusSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "all_different" =>
+      match c.args with
+      | [.array elems] => (e.allDiff elems).map DomConstraint.allDiff
+      | _ => none
+  | "int_lin_eq" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b))] =>
+          match linCoeffs ks, e.lin elems with
+          | some coeffs, some is =>
+              if coeffs.length == is.length then some (.linEq coeffs is b) else none
+          | _, _ => none
+      | _ => none
+  | "int_lin_le" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b))] =>
+          match linCoeffs ks, e.lin elems with
+          | some coeffs, some is =>
+              if coeffs.length == is.length then some (.linLe coeffs is b) else none
+          | _, _ => none
+      | _ => none
+  | "int_times" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident z)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup z.name with
+          | some i, some j, some k => some (.timesSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "int_min" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident z)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup z.name with
+          | some i, some j, some k => some (.minSlot i j k)
+          | _, _, _ => none
+      | [.basic a₀, .basic a₁, .basic a₂] =>
+          match e.intArg a₀, e.intArg a₁, e.intArg a₂ with
+          | some o₀, some o₁, some o₂ => some (.minPair o₀ o₁ o₂)
+          | _, _, _ => none
+      | _ => none
+  | "int_max" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident z)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup z.name with
+          | some i, some j, some k => some (.maxSlot i j k)
+          | _, _, _ => none
+      | [.basic a₀, .basic a₁, .basic a₂] =>
+          match e.intArg a₀, e.intArg a₁, e.intArg a₂ with
+          | some o₀, some o₁, some o₂ => some (.maxPair o₀ o₁ o₂)
+          | _, _, _ => none
+      | _ => none
+  | "int_abs" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match e.lookup x.name, e.lookup y.name with
+          | some i, some k => some (.absSlot i k)
+          | _, _ => none
+      | _ => none
+  | "int_lt" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match e.lookup x.name, e.lookup y.name with
+          | some i, some j => some (.ltSlot i j)
+          | _, _ => none
+      | [.basic (.ident x), .basic (.lit (.int k))] =>
+          (e.lookup x.name).map (fun i => .ltConstHi i k)
+      | [.basic (.lit (.int k)), .basic (.ident y)] =>
+          (e.lookup y.name).map (fun i => .ltConstLo i k)
+      | _ => none
+  | "bool_not" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match e.lookup x.name, e.lookup y.name with
+          | some i, some j => some (.boolNotSlot i j)
+          | _, _ => none
+      | _ => none
+  | "bool_and" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident z)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup z.name with
+          | some i, some j, some k => some (.boolAndSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "bool_or" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident z)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup z.name with
+          | some i, some j, some k => some (.boolOrSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "int_lin_ne" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b))] =>
+          match linCoeffs ks, e.lin elems with
+          | some coeffs, some is =>
+              if coeffs.length == is.length then some (.linNe coeffs is b) else none
+          | _, _ => none
+      | _ => none
+  | "bool_clause" =>
+      match c.args with
+      | [.array elems1, .array elems2] =>
+          match e.lin elems1, e.lin elems2 with
+          | some ps, some ns => some (.boolClauseSlot ps ns)
+          | _, _ => none
+      | _ => none
+  | "array_bool_and" =>
+      match c.args with
+      | [.array elems, .basic (.ident r)] =>
+          match e.lin elems, e.lookup r.name with
+          | some is, some k => some (.arrayBoolAndSlot is k)
+          | _, _ => none
+      | _ => none
+  | "bool2int" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match e.lookup x.name, e.lookup y.name with
+          | some i, some k => some (.bool2intSlot i k)
+          | _, _ => none
+      | _ => none
+  | "bool_eq" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y)] =>
+          match e.lookup x.name, e.lookup y.name with
+          | some i, some j => some (.boolEqSlot i j)
+          | _, _ => none
+      | _ => none
+  | "array_int_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.ident y)] =>
+          match intLits elems, e.lookup x.name,
+            e.lookup y.name with
+          | some xs, some i, some k => some (.arrayIntElementSlot xs i k)
+          | _, _, _ => none
+      | _ => none
+  | "array_var_int_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.ident y)] =>
+          match e.lin elems, e.lookup x.name,
+            e.lookup y.name with
+          | some is, some i, some k => some (.arrayVarIntElementSlot is i k)
+          | _, _, _ => none
+      | _ => none
+  | "array_var_bool_element" =>
+      match c.args with
+      | [.basic (.ident x), .array elems, .basic (.ident y)] =>
+          match e.lin elems, e.lookup x.name,
+            e.lookup y.name with
+          | some is, some i, some k => some (.arrayVarBoolElementSlot is i k)
+          | _, _, _ => none
+      | _ => none
+  | "int_eq_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident r)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup r.name with
+          | some i, some j, some k => some (.eqReifSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "int_le_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident r)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup r.name with
+          | some i, some j, some k => some (.leReifSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "int_ne_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.ident y), .basic (.ident r)] =>
+          match e.lookup x.name, e.lookup y.name,
+            e.lookup r.name with
+          | some i, some j, some k => some (.neReifSlot i j k)
+          | _, _, _ => none
+      | _ => none
+  | "int_lin_eq_reif" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b)),
+          .basic (.ident r)] =>
+          match linCoeffs ks, e.lin elems,
+            e.lookup r.name with
+          | some coeffs, some is, some k =>
+              if coeffs.length == is.length then
+                some (.linEqReif coeffs is b k) else none
+          | _, _, _ => none
+      | _ => none
+  | "int_lin_le_reif" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b)),
+          .basic (.ident r)] =>
+          match linCoeffs ks, e.lin elems,
+            e.lookup r.name with
+          | some coeffs, some is, some k =>
+              if coeffs.length == is.length then
+                some (.linLeReif coeffs is b k) else none
+          | _, _, _ => none
+      | _ => none
+  | "int_lin_ne_reif" =>
+      match c.args with
+      | [.array ks, .array elems, .basic (.lit (.int b)),
+          .basic (.ident r)] =>
+          match linCoeffs ks, e.lin elems,
+            e.lookup r.name with
+          | some coeffs, some is, some k =>
+              if coeffs.length == is.length then
+                some (.linNeReif coeffs is b k) else none
+          | _, _, _ => none
+      | _ => none
+  | "int_div" =>
+      match c.args with
+      | [.basic a₀, .basic a₁, .basic a₂] =>
+          match e.intArg a₀, e.intArg a₁, e.intArg a₂ with
+          | some o₀, some o₁, some o₂ => some (.divGen o₀ o₁ o₂)
+          | _, _, _ => none
+      | _ => none
+  | "int_mod" =>
+      match c.args with
+      | [.basic a₀, .basic a₁, .basic a₂] =>
+          match e.intArg a₀, e.intArg a₁, e.intArg a₂ with
+          | some o₀, some o₁, some o₂ => some (.modGen o₀ o₁ o₂)
+          | _, _, _ => none
+      | _ => none
+  | "array_int_maximum" =>
+      match c.args with
+      | [.basic (.ident x), .array elems] =>
+          match e.lookup x.name, e.lin elems with
+          | some k, some is =>
+              some (.maxGen (is.map DomIntArg.slot) (.slot k))
+          | _, _ => none
+      | _ => none
+  | "array_int_minimum" =>
+      match c.args with
+      | [.basic (.ident x), .array elems] =>
+          match e.lookup x.name, e.lin elems with
+          | some k, some is =>
+              some (.minGen (is.map DomIntArg.slot) (.slot k))
+          | _, _ => none
+      | _ => none
+  -- C0 set membership: `set_in(x, S)` / `set_in_reif(x, S, r)` with a
+  -- CONSTANT set (a literal set, or a parameter resolved by the
+  -- compiler layer; the extraction layer takes only the literal
+  -- form).  Both are leaf-enforced constraints carrying the set as a
+  -- payload.
+  | "set_in" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.set s))] =>
+          match e.lookup x.name with
+          | some i => some (.setInSlot i s.denote)
+          | none => none
+      | _ => none
+  | "set_in_reif" =>
+      match c.args with
+      | [.basic (.ident x), .basic (.lit (.set s)), .basic (.ident r)] =>
+          match e.lookup x.name, e.lookup r.name with
+          | some i, some k => some (.setInReifSlot i s.denote k)
+          | _, _ => none
+      | _ => none
+  | _ => none
+
 /-! ## The extracted list -/
 
 /-- **The propagation set of a model**: every constraint of an
@@ -495,6 +855,107 @@ def extractConstraints (m : Model) : Except String (List DomConstraint) := do
   let slots ← slotsChecked m
   let names := slots.map Prod.fst
   return m.constraints.filterMap (extractConstraint names)
+
+def extractorsOfMap (idx : Std.HashMap String Nat) : Extractors :=
+  { lookup := fun s => idx.get? s
+    allDiff := allDiffIndicesWith (fun s => idx.get? s)
+    lin := linIndicesWith (fun s => idx.get? s)
+    intArg := intArgOfWith (fun s => idx.get? s) }
+
+theorem extractConstraintWith_extractorsOfNames (names : List String)
+    (c : ConstraintItem) :
+    extractConstraintWith (extractorsOfNames names) c
+      = extractConstraint names c := by
+  rfl
+
+def extractConstraintFast (idx : Std.HashMap String Nat) (c : ConstraintItem) :
+    Option DomConstraint :=
+  extractConstraintWith (extractorsOfMap idx) c
+
+theorem allDiffIndicesWith_eq (lookup : String → Option Nat) (names : List String)
+    (hidx : ∀ s, lookup s = nameIndex names s) :
+    ∀ elems, allDiffIndicesWith lookup elems = allDiffIndices names elems
+  | [] => rfl
+  | .ident x :: rest => by
+      simp only [allDiffIndicesWith, allDiffIndices,
+        allDiffIndicesWith_eq lookup names hidx rest]
+      rw [hidx x.name]
+  | .lit _ :: _ => by simp [allDiffIndicesWith, allDiffIndices]
+
+theorem linIndicesWith_eq (lookup : String → Option Nat) (names : List String)
+    (hidx : ∀ s, lookup s = nameIndex names s) :
+    ∀ elems, linIndicesWith lookup elems = linIndices names elems
+  | [] => rfl
+  | .ident x :: rest => by
+      simp only [linIndicesWith, linIndices,
+        linIndicesWith_eq lookup names hidx rest]
+      rw [hidx x.name]
+  | .lit _ :: _ => by simp [linIndicesWith, linIndices]
+
+theorem intArgOfWith_eq (lookup : String → Option Nat) (names : List String)
+    (hidx : ∀ s, lookup s = nameIndex names s) (a : BasicExpr) :
+    intArgOfWith lookup a = intArgOf names a := by
+  cases a with
+  | ident x =>
+      simp only [intArgOfWith, intArgOf]
+      rw [hidx x.name]
+  | lit l => cases l <;> rfl
+
+theorem extractorsOfMap_eq (names : List String) (idx : Std.HashMap String Nat)
+    (hidx : ∀ s, idx.get? s = nameIndex names s) :
+    extractorsOfMap idx = extractorsOfNames names := by
+  simp only [extractorsOfMap, extractorsOfNames]
+  congr 1
+  · funext s
+    exact hidx s
+  · funext elems
+    exact allDiffIndicesWith_eq (fun s => idx.get? s) names hidx elems
+  · funext elems
+    exact linIndicesWith_eq (fun s => idx.get? s) names hidx elems
+  · funext a
+    exact intArgOfWith_eq (fun s => idx.get? s) names hidx a
+
+theorem extractConstraintFast_eq (names : List String) (idx : Std.HashMap String Nat)
+    (hidx : ∀ s, idx.get? s = nameIndex names s) (c : ConstraintItem) :
+    extractConstraintFast idx c = extractConstraint names c := by
+  unfold extractConstraintFast
+  rw [extractorsOfMap_eq names idx hidx]
+  rfl
+
+theorem filterMap_congr {α β : Type} {f g : α → Option β} :
+    ∀ {l : List α}, (∀ a ∈ l, f a = g a) → l.filterMap f = l.filterMap g
+  | [], _ => rfl
+  | a :: l, h => by
+      simp only [List.filterMap_cons]
+      rw [h a (by simp)]
+      cases hg : g a with
+      | none =>
+          exact filterMap_congr (l := l) (fun b hb => h b (by simp [hb]))
+      | some b =>
+          rw [filterMap_congr (l := l) (fun c hc => h c (by simp [hc]))]
+
+def extractConstraintsFast (m : Model) : Except String (List DomConstraint) := do
+  let slots ← slotsChecked m
+  let names := slots.map Prod.fst
+  let idx := nameMap names
+  return m.constraints.filterMap (extractConstraintFast idx)
+
+theorem extractConstraintsFast_eq (m : Model) :
+    extractConstraintsFast m = extractConstraints m := by
+  unfold extractConstraintsFast extractConstraints
+  cases h : slotsChecked m with
+  | error e => rfl
+  | ok slots =>
+      apply congrArg Except.ok
+      apply filterMap_congr
+      intro c _
+      exact extractConstraintFast_eq (slots.map Prod.fst)
+        (nameMap (slots.map Prod.fst)) (nameMap_get? _) c
+
+@[csimp] theorem extractConstraints_eq_fast :
+    @extractConstraints = @extractConstraintsFast := by
+  funext m
+  exact (extractConstraintsFast_eq m).symm
 
 /-- The extracted constraint set, as an empty list when the model is
     outside the searched fragment.  Only for theorem statements and

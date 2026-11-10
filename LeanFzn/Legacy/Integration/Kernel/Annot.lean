@@ -52,6 +52,7 @@ def configOrders (p : CompiledProblem DomConstraint) (o : SearchConfig)
   | .min => List.replicate p.domains.length .min
   | .max => List.replicate p.domains.length .max
   | .median => List.replicate p.domains.length .median
+  | .split => List.replicate p.domains.length .split
   | .incumbent => phaseOrders p prev
   | .act => []
 

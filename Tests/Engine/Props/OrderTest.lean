@@ -37,6 +37,8 @@ def mkProblem (ds : List Dom) (cs : List DomConstraint) : CompiledProblem DomCon
     constraints := cs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- Convert domains the way the engine does; used to build `eq`'s `init`. -/

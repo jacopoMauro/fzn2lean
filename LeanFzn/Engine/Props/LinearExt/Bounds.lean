@@ -239,10 +239,10 @@ def linPrunesGe (terms : List LinTerm) (b : Int) : List (Literal × Clause) :=
           else none
         else none
 
-/-- Runtime twin of `linPrunesGe` (see `linPrunesFast`). -/
-def linPrunesGeFast (terms : List LinTerm) (b : Int) : List (Literal × Clause) :=
-  let arr := terms.toArray
-  let total := linTotalMax terms
+/-- Runtime twin of `linPrunesGe` parameterised by a precomputed term array
+and total, so callers can share both across several plans. -/
+def linPrunesGeFastAt (terms : List LinTerm) (arr : Array LinTerm) (total : Int)
+    (b : Int) : List (Literal × Clause) :=
   (List.range terms.length).filterMap fun i =>
     match arr[i]? with
     | none => none
@@ -260,9 +260,13 @@ def linPrunesGeFast (terms : List LinTerm) (b : Int) : List (Literal × Clause) 
           else none
         else none
 
+/-- Runtime twin of `linPrunesGe` (see `linPrunesGeFastAt`). -/
+def linPrunesGeFast (terms : List LinTerm) (b : Int) : List (Literal × Clause) :=
+  linPrunesGeFastAt terms terms.toArray (linTotalMax terms) b
+
 @[csimp] theorem linPrunesGe_eq_fast : @linPrunesGe = @linPrunesGeFast := by
   funext terms b
-  unfold linPrunesGe linPrunesGeFast
+  unfold linPrunesGe linPrunesGeFast linPrunesGeFastAt
   congr 1
   funext i
   simp only [List.getElem?_toArray]
@@ -335,10 +339,6 @@ On a view domain whose `lo?`/`hi?` coincide, such a literal is definitely
 false; on a domain that does not already fix the value it is undefined.
 -/
 
-def DomC.intKindB : DomC → Bool
-  | .bool _ => false
-  | _ => true
-
 theorem DomC.evalLit_posNe_intKind {d : DomC} (hWF : d.WF)
     (hk : d.intKindB = true) {s : Nat} {lo hi : Int}
     (hlo : d.lo? = some lo) (hhi : d.hi? = some hi) (heq : lo = hi) :
@@ -372,6 +372,26 @@ theorem DomC.evalLit_posNe_intKind {d : DomC} (hWF : d.WF)
       have hbeq : (lo == hi) = true := by rw [beq_iff_eq]; exact heq
       have hfix : (DomC.boundsHoles lo' hi' holes).fixedValue.isSome = true := by
         simp [DomC.fixedValue, hlo, hhi, hbeq]
+      simp [posNe, DomC.evalLit, hfix, hmiv]
+  | sparse values =>
+      have hhead : arrayHead? values = some lo := by
+        simpa [DomC.lo?] using hlo
+      have hlast : arrayLast? values = some hi := by
+        simpa [DomC.hi?] using hhi
+      have hmemlo : lo ∈ values.toList := by
+        obtain ⟨hpos, hx0⟩ := arrayHead?_eq_some hhead
+        rw [← hx0]
+        exact Array.mem_toList_iff.mpr
+          (Array.mem_of_getElem? (Array.getElem?_eq_getElem hpos))
+      have hm : (DomC.sparse values).mem (.int lo) = true := by
+        simp only [DomC.mem]
+        exact (memHoleRange_eq_true_iff hWF).mpr hmemlo
+      have hmiv := DomC.memIntView_true_of_mem hm (v := lo) rfl
+      have hbeq : (lo == hi) = true := by rw [beq_iff_eq]; exact heq
+      have hfix : (DomC.sparse values).fixedValue.isSome = true := by
+        simp only [DomC.fixedValue, hhead, hlast]
+        rw [hbeq]
+        rfl
       simp [posNe, DomC.evalLit, hfix, hmiv]
 
 /-! ## Assignment-level reasons for the inequality passes -/
@@ -1129,5 +1149,137 @@ theorem linMaxConflict_satisfied_of_ge {terms : List LinTerm} {b : Int} {a : Ass
   have hmax := linDotSum_le_linTotalMax terms a hfalse
   omega
 
+
+/-! ## Row-slack skip lemmas
+
+A row whose total maximum already satisfies `dot ≤ b` cannot produce a
+lower-side prune or a conflict, and a row whose total minimum already
+satisfies `dot ≥ c` cannot produce an upper-side prune or a conflict.
+These are the arithmetic facts behind the conservative skip used by the
+reified inequality propagator; they do not assume any particular bound
+ordering beyond `min ≤ max` for each term.
+-/
+
+theorem linTermMin_le_max {c lo hi : Int} (h : lo ≤ hi) :
+    linTermMin c lo hi ≤ linTermMax c lo hi := by
+  unfold linTermMin linTermMax
+  by_cases hc : 0 ≤ c
+  · simp [hc]
+    exact Int.mul_le_mul_of_nonneg_left h hc
+  · have hc' : c ≤ 0 := by omega
+    simp [hc]
+    exact Int.mul_le_mul_of_nonpos_left hc' h
+
+theorem linTotalMin_le_totalMax {terms : List LinTerm}
+    (hmm : ∀ t ∈ terms, t.min ≤ t.max) : linTotalMin terms ≤ linTotalMax terms := by
+  induction terms with
+  | nil => simp [linTotalMin, linTotalMax]
+  | cons t ts ih =>
+      simp only [linTotalMin, linTotalMax]
+      have ht := hmm t (by simp)
+      have hts : ∀ u ∈ ts, u.min ≤ u.max := fun u hu => hmm u (by simp [hu])
+      have := ih hts
+      omega
+
+theorem linPrunes_eq_nil_of_totalMax_le {terms : List LinTerm} {b : Int}
+    (hmm : ∀ t ∈ terms, t.min ≤ t.max)
+    (h : linTotalMax terms ≤ b) : linPrunes terms b = [] := by
+  apply List.eq_nil_iff_forall_not_mem.mpr
+  intro p hp
+  obtain ⟨i, t, ht, hbr⟩ := linPrunes_mem hp
+  have hother : linTotalMin (terms.eraseIdx i) ≤ linTotalMax (terms.eraseIdx i) := by
+    apply linTotalMin_le_totalMax
+    intro u hu
+    exact hmm u (List.mem_of_mem_eraseIdx hu)
+  have hsum := linTotalMax_eq_eraseIdx_add (terms := terms) (i := i) (t := t) ht
+  have hb : t.max ≤ b - linTotalMin (terms.eraseIdx i) := by
+    omega
+  rcases hbr with ⟨hc, hl, hlt, hr⟩ | ⟨hnc, hc, hl, hlt, hr⟩
+  · have hlt' : (b - linTotalMin (terms.eraseIdx i)) / t.c < t.hi := by
+      simpa [linOtherMin] using hlt
+    have htmax : t.max = t.c * t.hi := by
+      unfold LinTerm.max linTermMax
+      simp [show 0 ≤ t.c from by omega]
+    have hge : t.hi ≤ (b - linTotalMin (terms.eraseIdx i)) / t.c := by
+      apply Int.le_ediv_of_mul_le hc
+      rw [Int.mul_comm]
+      rw [← htmax]
+      exact hb
+    omega
+  · have hlt' : t.lo < -((b - linTotalMin (terms.eraseIdx i)) / (-t.c)) := by
+      simpa [linOtherMin] using hlt
+    have htmax : t.max = t.c * t.lo := by
+      unfold LinTerm.max linTermMax
+      simp [show ¬ 0 ≤ t.c from by omega]
+    have hB : t.c * t.lo ≤ b - linTotalMin (terms.eraseIdx i) := by
+      rw [← htmax]
+      exact hb
+    have hle : -((b - linTotalMin (terms.eraseIdx i)) / (-t.c)) ≤ t.lo := by
+      have hneg : 0 < -t.c := by omega
+      have h' : (-t.lo) * (-t.c) ≤ b - linTotalMin (terms.eraseIdx i) := by
+        rw [Int.neg_mul_neg, Int.mul_comm]
+        exact hB
+      have := Int.le_ediv_of_mul_le (a := -t.lo) (b := b - linTotalMin (terms.eraseIdx i)) (c := -t.c) hneg h'
+      omega
+    omega
+
+theorem linPrunesGe_eq_nil_of_le_totalMin {terms : List LinTerm} {c : Int}
+    (hmm : ∀ t ∈ terms, t.min ≤ t.max)
+    (h : c ≤ linTotalMin terms) : linPrunesGe terms c = [] := by
+  apply List.eq_nil_iff_forall_not_mem.mpr
+  intro p hp
+  obtain ⟨i, t, ht, hbr⟩ := linPrunesGe_mem hp
+  have hother : linTotalMin (terms.eraseIdx i) ≤ linTotalMax (terms.eraseIdx i) := by
+    apply linTotalMin_le_totalMax
+    intro u hu
+    exact hmm u (List.mem_of_mem_eraseIdx hu)
+  have hsum : linTotalMin terms = linTotalMin (terms.eraseIdx i) + t.min :=
+    linTotalMin_eq_eraseIdx_add ht
+  have hb : c - linTotalMax (terms.eraseIdx i) ≤ t.min := by
+    omega
+  rcases hbr with ⟨hc, hl, hlt, hr⟩ | ⟨hnc, hc, hl, hlt, hr⟩
+  · have hlt' : t.lo < -((linTotalMax (terms.eraseIdx i) - c) / t.c) := by
+      simpa [linOtherMax] using hlt
+    have htmin : t.min = t.c * t.lo := by
+      unfold LinTerm.min linTermMin
+      simp [show 0 ≤ t.c from by omega]
+    have hlo : -((linTotalMax (terms.eraseIdx i) - c) / t.c) ≤ t.lo := by
+      have h1 : (-t.lo) * t.c ≤ linTotalMax (terms.eraseIdx i) - c := by
+        rw [Int.neg_mul]
+        rw [Int.mul_comm t.lo t.c, ← htmin]
+        omega
+      have h' := Int.le_ediv_of_mul_le (a := -t.lo) (b := linTotalMax (terms.eraseIdx i) - c) (c := t.c) hc h1
+      omega
+    omega
+  · have hlt' : (c - linTotalMax (terms.eraseIdx i)) / t.c < t.hi := by
+      simpa [linOtherMax] using hlt
+    have htmin : t.min = t.c * t.hi := by
+      unfold LinTerm.min linTermMin
+      simp [show ¬ 0 ≤ t.c from by omega]
+    have hhi : t.hi ≤ (c - linTotalMax (terms.eraseIdx i)) / t.c := by
+      have hneg : 0 < -t.c := by omega
+      have h1 : c - linTotalMax (terms.eraseIdx i) ≤ (-t.hi) * (-t.c) := by
+        rw [Int.neg_mul_neg, Int.mul_comm]
+        rw [← htmin]
+        exact hb
+      have hq := Int.ediv_le_of_le_mul (a := c - linTotalMax (terms.eraseIdx i)) (b := -t.hi) (c := -t.c) hneg h1
+      rw [Int.ediv_neg] at hq
+      omega
+    omega
+
+/-- Every term extracted from a well-formed view has `min ≤ max`. -/
+theorem linTerms_min_le_max {view : EngineView} {cs : Array Int} {slots : Array Nat}
+    {bds : Array (Int × Int)}
+    (h1 : cs.size = slots.size)
+    (hbds : linExtractBounds view.doms slots = some bds)
+    (hWF : ViewWF view slots) :
+    ∀ t ∈ linTerms cs slots bds, t.min ≤ t.max := by
+  intro t ht
+  obtain ⟨hlo, hhi⟩ := linTerms_mem_bounds h1 hbds ht
+  have hbdsize := (linExtractBounds_spec hbds).1
+  have hmem : t.s ∈ slots.toList := linTerms_slot_mem h1 hbdsize ht
+  have hdWF := hWF.dom_wf hmem
+  have hle : t.lo ≤ t.hi := DomC.lo?_le_hi? _ hdWF hlo hhi
+  exact linTermMin_le_max hle
 
 end LeanFzn.Engine

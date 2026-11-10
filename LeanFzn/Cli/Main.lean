@@ -144,7 +144,16 @@ private def runSolve (args : List String) : IO UInt32 := do
       | .error e =>
           IO.eprintln s!"leanfzn: {e}"
           return 2
-      | .ok model => LeanFzn.Core.runModel o model
+      | .ok model =>
+          let rc ← LeanFzn.Core.runModel o model
+          if o.threads > 1 then
+            -- The portfolio's other workers may still be inside a long pure
+            -- search round; exit directly so a completed proof is reported at
+            -- its own wall time instead of after task-manager finalization.
+            (← IO.getStdout).flush
+            (← IO.getStderr).flush
+            IO.Process.exit (UInt8.ofNat rc.toNat)
+          return rc
 
 def main (args : List String) : IO UInt32 := do
   match args with

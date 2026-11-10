@@ -37,6 +37,8 @@ def mkProblem (ds : List Dom) (cs : List DomConstraint) : CompiledProblem DomCon
     constraints := cs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- Initial converted domains used to discharge the kind-homogeneity guard. -/

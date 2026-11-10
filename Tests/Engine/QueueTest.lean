@@ -39,7 +39,9 @@ def emptyDom : Domain := { rep := .general [] }
 
 def p : CompiledProblem DomConstraint :=
   { names := [], domains := [emptyDom], constraints := [], objective := (),
-    source := default, toStore := fun _ _ => none }
+    source := default, domainsArray := [emptyDom].toArray,
+    domainsArray_toList := List.toList_toArray,
+    toStore := fun _ _ => none }
 
 def T : LitTable := {}
 
@@ -93,7 +95,7 @@ def mkState (doms : Array DomC) (reasons : Array (EClause p T) := #[]) :
     queueHigh := #[]
     queueLow := #[]
     inQueue := ByteArray.empty
-    activity := Array.replicate doms.size (0.0 : Float)
+    activity := ⟨Array.replicate doms.size (0.0 : Float)⟩
     activityHeap := #[]
     phases := #[]
     restarts := 0

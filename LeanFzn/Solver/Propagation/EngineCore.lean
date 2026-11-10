@@ -147,26 +147,38 @@ def fitsB (problem : Problem Constraint Objective)
       | none => true
 
 /-- Runtime twin of `fitsB` that tests membership on the compact domain
-    representation instead of materialising `Dom.enum` for every slot. -/
+    representation instead of materialising `Dom.enum` for every slot, and
+    reads both the assignment and the domain list through arrays so the leaf
+    check is linear rather than a quadratic `List.get?` walk. -/
 def fitsBFast (problem : Problem Constraint Objective)
     (a : Assignment) : Bool :=
-  a.length == problem.domains.length &&
-    (List.range a.length).all fun s =>
-      match a[s]? with
-      | some v => (problem.domains.getD s Dom.empty).memBool v
+  let arr := a.toArray
+  let doms := problem.domains.toArray
+  arr.size == doms.size &&
+    (List.range arr.size).all fun s =>
+      match arr[s]? with
+      | some v => (doms.getD s Dom.empty).memBool v
       | none => true
 
 /-- The leaf membership twin agrees with `fitsB`. -/
 theorem fitsBFast_eq (problem : Problem Constraint Objective) (a : Assignment) :
     fitsBFast problem a = fitsB problem a := by
   unfold fitsBFast fitsB
+  dsimp only
+  rw [List.size_toArray, List.size_toArray]
   congr 1
   apply List.all_congr rfl
   intro s
   cases h : a[s]? with
-  | none => rfl
+  | none =>
+      have h' : a.toArray[s]? = none := by simpa using h
+      simp [h']
   | some v =>
+      have h' : a.toArray[s]? = some v := by simpa using h
+      rw [h']
+      rw [Array.getD_eq_getD_getElem?, List.getElem?_toArray]
       rw [Bool.eq_iff_iff, Dom.memBool_iff, valueMemB_iff]
+      simp
 
 /-- Compile `fitsB` as the compact-membership twin; proofs keep the
 reference definition. -/

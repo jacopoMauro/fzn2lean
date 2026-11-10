@@ -55,6 +55,12 @@ def negBool (s : Nat) (b : Bool) : Literal := ⟨.boolEq s b, false⟩
 #check LitTable.internArray_append_only
 #check LitTable.internArray_tableWF
 #check LitTable.internArray_wf
+#check LitTable.internPacks
+#check LitTable.internPacks_lits
+#check LitTable.internPacks_append_only
+#check LitTable.internPacks_tableWF
+#check LitTable.internPacks_wf
+#check LitTable.internPacksFast_eq
 
 /-- The intern laws instantiated at the empty table. -/
 example : (T0.intern (posLe 0 5)).1.lit = posLe 0 5 :=
@@ -112,6 +118,15 @@ def main : IO UInt32 := do
     ((T0.internArray sample).1.toList.map PLit.decode == sample.toList)) && ok
   ok := (← check "internArray table size"
     ((T0.internArray sample).2.lits.size == 3)) && ok
+  ok := (← check "internPacks reuses a valid hint"
+    ((T1.internPacks #[⟨0, posLe 0 5⟩]).1.toList.map (fun q => q.idx) == [0] &&
+      (T1.internPacks #[⟨0, posLe 0 5⟩]).2.lits.size == T1.lits.size)) && ok
+  ok := (← check "internPacks rejects a stale hint"
+    ((T1.internPacks #[⟨0, posLe 0 6⟩]).1.toList.map (fun q => q.idx) == [1] &&
+      (T1.internPacks #[⟨0, posLe 0 6⟩]).2.lits.size == T1.lits.size + 1)) && ok
+  ok := (← check "internPacks decodes to the input list"
+    ((T0.internPacks (sample.map (fun l => ⟨0, l⟩))).1.toList.map PLit.decode ==
+      sample.toList)) && ok
   ok := (← check "decode pLit"
     (T0.decode (pLit (posLe 0 5)) == posLe 0 5)) && ok
   ok := (← check "decode packed negation"

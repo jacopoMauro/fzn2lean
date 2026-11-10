@@ -76,6 +76,18 @@ def HistInv (init : Array DomC) (st : EngineState p T) : Prop :=
 def Good (init : Array DomC) (st : EngineState p T) : Prop :=
   SlotHistory init st ∧ TrailInv st ∧ DomsWF st
 
+/-- Root-domain containment: while the engine is at decision level zero,
+every accepted assignment is still represented in every live domain.  This
+is the semantic bridge from a literal being false on the root domains to its
+negation being entailed by the problem.  It is proof-only and never read by
+the executable engine. -/
+def RootDomInv (p : CompiledProblem DomConstraint) (init : Array DomC)
+    (st : EngineState p T) : Prop :=
+  st.level = 0 →
+    ∀ b ∈ allAssigns p.domains, accepts p b = true →
+      ∀ s, s < p.domains.length → ∀ v, b[s]? = some v →
+        (st.doms.getD s DomC.empty).mem v = true
+
 /-- Per-step bookkeeping: the failed flag stays false, reasons grow by one
 push, pending grows by the new item, and new pending items resolve against
 the new reasons array. -/

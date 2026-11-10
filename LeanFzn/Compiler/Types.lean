@@ -38,6 +38,12 @@ structure CompiledProblem (C : Type) extends
     LeanFzn.Solver.Core.Problem C Unit where
   source : Model
   toStore : LeanFzn.Solver.Core.Assignment → Store
+  /-- Array mirror of `domains`, so hot paths can index in O(1) instead of
+  walking the `List`.  Kept in sync by construction (`assemble`,
+  `assembleDom`); the proof field makes the relation available to every
+  consumer. -/
+  domainsArray : Array LeanFzn.Solver.Core.Domain
+  domainsArray_toList : domainsArray.toList = domains
 
 /-- Public outcomes of the directly verified LeanFzn.Solver. -/
 inductive Result where

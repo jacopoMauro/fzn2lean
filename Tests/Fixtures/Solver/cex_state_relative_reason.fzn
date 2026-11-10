@@ -1,0 +1,32 @@
+% B1 fixture (fuzz seed 100057, delta-minimized): the state-relative vs
+% state-free gap that the STRICT (exact) trail track flags but the semantic
+% and domain tracks accept. SAT; verdict correct (witness checker:OK).
+%
+% `int_max(v0, v2, v1)` compiles to database clauses including
+%   [x2<=1 | x1>1].
+% Once the decision pins x1=1, that clause is UNIT under the frame (v2's
+% remaining domain excludes x2>1 and the pinned slot x1=1 excludes x1>1). The
+% dispatcher records the pivot x2<=1 with this clause as reason (a-exact
+% violation: the non-pivot x1>1 has no EXACT earlier trail entry x1<=1 - the
+% trail carries the decision literal x1=1, which only IMPLIES x1<=1).
+%
+% B1 two-track reading: the domain-based falsification the dispatcher uses
+% (`clauseRemaining`/`literalImpossible`) holds for the flagged non-pivot, and
+% the semantic-track checks (a-sem/c-sem, single-entry implication) hold. Only
+% the exact track (`FalsifiedByTrailNorm`/`StepChronology`,
+% LeanFzn/Solver/Propagation/ExplainedPropagation.lean:328) fails, which is the
+% documented U0 boundary: the exact `DomReasonRecorded` obligation is gated to
+% unit-learned/kitted fragments (`UnitClauseEvidence`, `ClosureRefutation.lean`)
+% and replaced by the SEMANTIC contract (`LcgContract.lean`, `SemReasonOK`)
+% for the non-unit LCG runtime. Not a runtime/soundness defect: pivot truth
+% follows from `clauseRemaining_singleton_implies` (domains), independent of
+% what the trail records.
+%
+% Run: .lake/build/bin/tests_lcg_harness --only --no-chrono
+%        Tests/Fixtures/Solver/cex_state_relative_reason.fzn
+% Expected: a=(2, 0), c=(2, 0) (exact only; semantic and domain tracks pass).
+var -1..-1: v0;
+var 1..2: v1;
+var 1..2: v2;
+constraint int_max(v0, v2, v1);
+solve satisfy;

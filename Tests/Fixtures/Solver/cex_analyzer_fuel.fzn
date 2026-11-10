@@ -1,0 +1,13 @@
+% E0 counterexample (minimized from fuzz seed 104085). SAT; verdict correct.
+% At one analyzeConflict site the real analyzer returns none because its fuel
+% (analysisFuel) is exhausted on a short trail (15 entries) - and still exhausted at 1000x fuel, i.e. the analyzer cycles: a bound ping-pong chain
+% x2<=3, x3<=3, x2<=2, x3<=2, x2<=1 ... with mutually recursive reasons.
+var -1..4: v0;
+var -2..3: v1;
+var 1..4: v2;
+var 0..4: v3;
+var 1..3: v4;
+constraint int_plus(v1, v3, v2);
+constraint int_plus(v1, v4, v0);
+constraint int_le(v3, v2);
+solve satisfy;

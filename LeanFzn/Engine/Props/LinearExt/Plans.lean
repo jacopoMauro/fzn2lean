@@ -100,17 +100,76 @@ theorem linPlanOut_run_fix_of_no_prunes (p : CompiledProblem DomConstraint) (T :
 
 /-! ## The inequality plans -/
 
+def linPlanEmpty : LinPlan :=
+  { conflict? := none, prunes := [] }
+
 def linLePlan (terms : List LinTerm) (b : Int) : LinPlan :=
   if b < linTotalMin terms then
     { conflict? := some (linConflictLits terms), prunes := [] }
   else
     { conflict? := none, prunes := linPrunes terms b }
 
+/-- Runtime twin of `linLePlan`: one total and one term array shared by the
+conflict test and the prune scan. -/
+def linLePlanFast (terms : List LinTerm) (b : Int) : LinPlan :=
+  let total := linTotalMin terms
+  if b < total then
+    { conflict? := some (linConflictLits terms), prunes := [] }
+  else
+    { conflict? := none, prunes := linPrunesFastAt terms terms.toArray total b }
+
+@[csimp] theorem linLePlan_eq_fast : @linLePlan = @linLePlanFast := by
+  funext terms b
+  unfold linLePlan linLePlanFast
+  dsimp only
+  by_cases hb : b < linTotalMin terms
+  · rw [if_pos hb, if_pos hb]
+  · rw [if_neg hb, if_neg hb]
+    rw [show linPrunesFastAt terms terms.toArray (linTotalMin terms) b =
+        linPrunesFast terms b from rfl, ← linPrunes_eq_fast]
+
 def linGePlan (terms : List LinTerm) (b : Int) : LinPlan :=
   if linTotalMax terms < b then
     { conflict? := some (linMaxLits terms), prunes := [] }
   else
     { conflict? := none, prunes := linPrunesGe terms b }
+
+/-- Runtime twin of `linGePlan`: one total and one term array shared by the
+conflict test and the prune scan. -/
+def linGePlanFast (terms : List LinTerm) (b : Int) : LinPlan :=
+  let total := linTotalMax terms
+  if total < b then
+    { conflict? := some (linMaxLits terms), prunes := [] }
+  else
+    { conflict? := none, prunes := linPrunesGeFastAt terms terms.toArray total b }
+
+@[csimp] theorem linGePlan_eq_fast : @linGePlan = @linGePlanFast := by
+  funext terms b
+  unfold linGePlan linGePlanFast
+  dsimp only
+  by_cases hb : linTotalMax terms < b
+  · rw [if_pos hb, if_pos hb]
+  · rw [if_neg hb, if_neg hb]
+    rw [show linPrunesGeFastAt terms terms.toArray (linTotalMax terms) b =
+        linPrunesGeFast terms b from rfl, ← linPrunesGe_eq_fast]
+
+/-- A lower-side row that is already satisfied cannot prune or conflict. -/
+theorem linLePlan_eq_empty_of_totalMax_le {terms : List LinTerm} {b : Int}
+    (hmm : ∀ t ∈ terms, t.min ≤ t.max) (h : linTotalMax terms ≤ b) :
+    linLePlan terms b = linPlanEmpty := by
+  unfold linLePlan linPlanEmpty
+  have hminmax := linTotalMin_le_totalMax hmm
+  rw [if_neg (by omega)]
+  rw [linPrunes_eq_nil_of_totalMax_le hmm h]
+
+/-- An upper-side row that is already satisfied cannot prune or conflict. -/
+theorem linGePlan_eq_empty_of_lt_totalMin {terms : List LinTerm} {b : Int}
+    (hmm : ∀ t ∈ terms, t.min ≤ t.max) (h : b < linTotalMin terms) :
+    linGePlan terms (b + 1) = linPlanEmpty := by
+  unfold linGePlan linPlanEmpty
+  have hminmax := linTotalMin_le_totalMax hmm
+  rw [if_neg (by omega)]
+  rw [linPrunesGe_eq_nil_of_le_totalMin hmm (by omega)]
 
 theorem linLePlan_conf_entailed {terms : List LinTerm} {b : Int} {ls : List Literal}
     (h : (linLePlan terms b).conflict? = some ls) {a : Assignment}
@@ -256,6 +315,36 @@ def linEqPlan (terms : List LinTerm) (b : Int) : LinPlan :=
     { conflict? := some (linMaxLits terms), prunes := [] }
   else
     { conflict? := none, prunes := linPrunes terms b ++ linPrunesGe terms b }
+
+/-- Runtime twin of `linEqPlan`: both totals and the term array are computed
+once and shared by both prune scans. -/
+def linEqPlanFast (terms : List LinTerm) (b : Int) : LinPlan :=
+  let arr := terms.toArray
+  let totalMin := linTotalMin terms
+  let totalMax := linTotalMax terms
+  if b < totalMin then
+    { conflict? := some (linConflictLits terms), prunes := [] }
+  else if totalMax < b then
+    { conflict? := some (linMaxLits terms), prunes := [] }
+  else
+    { conflict? := none,
+      prunes := linPrunesFastAt terms arr totalMin b ++
+        linPrunesGeFastAt terms arr totalMax b }
+
+@[csimp] theorem linEqPlan_eq_fast : @linEqPlan = @linEqPlanFast := by
+  funext terms b
+  unfold linEqPlan linEqPlanFast
+  dsimp only
+  by_cases hmin : b < linTotalMin terms
+  · rw [if_pos hmin, if_pos hmin]
+  · by_cases hmax : linTotalMax terms < b
+    · rw [if_neg hmin, if_neg hmin, if_pos hmax, if_pos hmax]
+    · rw [if_neg hmin, if_neg hmin, if_neg hmax, if_neg hmax]
+      rw [show linPrunesFastAt terms terms.toArray (linTotalMin terms) b =
+          linPrunesFast terms b from rfl,
+        show linPrunesGeFastAt terms terms.toArray (linTotalMax terms) b =
+          linPrunesGeFast terms b from rfl,
+        ← linPrunes_eq_fast, ← linPrunesGe_eq_fast]
 
 theorem linEqPlan_conflict_cases {terms : List LinTerm} {b : Int} {ls : List Literal}
     (h : (linEqPlan terms b).conflict? = some ls) :

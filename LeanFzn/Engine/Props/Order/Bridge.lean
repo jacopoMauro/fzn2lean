@@ -33,6 +33,7 @@ theorem DomC.memIntView_false_of_fixed_int_other {d : DomC} (hWF : d.WF)
   | bounds lo hi => simpa [DomC.memIntView] using hmc
   | bitset lo words => simpa [DomC.memIntView] using hmc
   | boundsHoles lo hi holes => simpa [DomC.memIntView] using hmc
+  | sparse values => simpa [DomC.memIntView] using hmc
 
 theorem DomC.evalLit_posNe_true_of_fixed_int_other {d : DomC} (hWF : d.WF)
     {s : Nat} {c q : Int} (h : d.fixedValue = some (.int q)) (hq : q ≠ c) :

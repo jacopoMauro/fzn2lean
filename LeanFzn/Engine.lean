@@ -6,6 +6,7 @@ import LeanFzn.Engine.Trail
 import LeanFzn.Engine.Clauses
 import LeanFzn.Engine.Prop
 import LeanFzn.Engine.Props.Ne
+import LeanFzn.Engine.Props.AllDiff
 import LeanFzn.Engine.Props.Bool
 import LeanFzn.Engine.Props.Linear
 import LeanFzn.Engine.Queue

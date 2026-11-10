@@ -1,0 +1,16 @@
+% E0 fixture (fuzz seed 101112). UNSAT; verdict correct. The first-UIP path FIRES:
+% one learn/backjump with a NON-UNIT learned clause [x3>1 | x4<=1 | x0<=1]
+% and a SKIPPED-LEVEL jump (source level 3 -> target 1). Afterwards the learned
+% clause is unit under the frame but its non-pivot literal x3>1 is not falsified
+% by the trail (a-sem / c-sem violation).
+var 1..6: v0;
+var 0..2: v1;
+var 0..4: v2;
+var 1..6: v3;
+var 0..4: v4;
+constraint int_min(v4, v0, v3);
+constraint all_different([v3, v2, v0]);
+constraint int_times(v0, v4, v1);
+constraint int_plus(v2, v4, v0);
+constraint int_lt(v3, v0);
+solve satisfy;

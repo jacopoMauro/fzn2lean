@@ -51,11 +51,56 @@ never call the old search implementations.
 | Solution acceptance | `Semantics/{Model,Evaluation}` → `Checker/Runtime/` → `Checker/Proofs/` |
 | Public solve | `Cli/Main` → `Integration/Public/Driver` → `Public/Solve` or `Public/{Optimize,Seed}` |
 | Core runtime | `Engine/Types` → `Dom`, `Lit`, `Trail` → `Prop`, `Clauses`, `Queue/Run` → `Analyze`, `Reduce`, `Search` |
-| Source correspondence | `Compiler/{Domain,Extract,Compile,Normalize,SetIn}` → `Compiler/Proofs/{Exact,Normalize,SetIn,Objective}` |
+| Source correspondence | `Compiler/{Domain,Extract,Compile,Normalize,Fragment,LiteralFold,SetIn,SetShape,SetExpand,Bounds}` → `Compiler/Proofs/{Exact,Normalize,Fragment,LiteralFold,SetIn,SetShape,SetShapeWF,SetExpand,Bounds,Objective}` |
+| TSP rank evidence | `Compiler/RankCircuit` → `Engine/Proofs/RankCircuit` → `Tests/Compiler/RankCircuitTest` |
 | Generic optimization | `Integration/Optimization/Basic` → `Optimization/Partial` → `Public/Optimize` |
 | Historical solver | Explicit `Legacy/Solver/{UIP,Chronological}` and `Legacy/Integration/` imports |
 
 Paths are relative to `LeanFzn/` and omit `.lean`.
+
+## Compiler pipeline
+
+`compileModelFull m` runs five certified stages in order. `normalizeFull`
+performs parameter/fragment expansion, the literal folds and constant-set
+restriction (`Compiler/{Fragment,LiteralFold,SetIn,Normalize}`).
+`shapeExpandModel` (in `Compiler/SetShape.lean`) rewrites the finite set
+shapes `set_in_reif(x,S,b)` and `set_in(x,S)` with a variable integer
+element, `set_card(S,k)` for a declared set `S`, `set_union` over
+declared/literal finite sets, `set_intersect` over declared/literal finite
+sets, and `array_var_set_element(i,[S…],T)` over an
+explicit set array into fresh scalar auxiliaries: membership and equality
+bits, Boolean conjunctions, `bool2int` aliases, linked by `bool_clause` rows,
+one `bool_or` (union) or `bool_and` (intersection) row per universe value, or
+one `array_var_bool_element` row per
+value of the element/target universe. The shape pass and the set passes use
+precomputed hash-set name tables (`ShapeState.maxLen`, `setNameSet`,
+`setInSubjectNames`) and bounded fresh-name allocation so their cost is
+linear on the multi-million-constraint warehouse models; the twins are proved
+pointwise equal to the scanning specifications. `setExpandModel` (in
+`Compiler/SetExpand.lean`) then replaces
+every bounded scalar set variable by one fresh Boolean per universe value,
+rewrites the supported `set_in`/`set_in_reif` literal-membership shapes, and
+rejects any surviving reference to a removed set name; `setStore` rebuilds the
+source set values from those Booleans. `boundsModel` (in
+`Compiler/Bounds.lean`) then replaces every bare `var int`
+with an interval replayed by a verified checker from a case-split, forced-branch
+or linear-row certificate; a variable without a derivation returns `none`, and
+the front door reports the honest unsupported error. Only checked entries are
+used, and the recognizer's arithmetic is never trusted. `compileModel` finally
+builds the finite-domain problem. `compileModelOpt` reaches the same path
+through `compileModelFull (satisfyPart m)`, so the objective variable needs no
+special bound case. The two-direction equivalence and well-formedness
+preservation of the whole pipeline are in
+`Compiler/Proofs/{Normalize,SetShape,SetShapeWF,SetExpand,Bounds}`.
+
+The TSP rank checker is deliberately outside `compileModelFull`.
+`Compiler/RankCircuit.lean` recognizes the Gecode `circuit` decomposition and
+checks a certificate for the rank recurrence; `Engine/Proofs/RankCircuit.lean`
+proves the generated 2-cycle clauses entailed. The default engine does not
+register these clauses (T3 was rejected; see
+`tmp/design/t2-rank-circuit.md`), and `Engine.Search` does not import the proof
+module. `tests_rank_circuit` keeps the checker, the entailment theorem and the
+false-ground UNSAT case as offline evidence.
 
 ## Core-only public APIs
 
@@ -78,7 +123,7 @@ statements without making the old execution contract part of the public API.
 | `Public/Solve` | `solveCompiled` maps Core `gaveUp` to `SearchResult.unknown`. `solveModel` compiles and transfers SAT/UNSAT to source stores. The stats twin performs the same single Core run. |
 | `Public/Optimize` | Raw Core SAT/UNSAT is sound; give-up becomes an incomplete round. Linear optimization reuses generic branch-and-bound and exact streaming proofs. |
 | `Public/Seed` | Carries the certified clause database across stronger bounds using Engine.Incremental. Its invariant and streaming correspondence cover incomplete runs; no legacy fallback or unconditional completion theorem is used. |
-| `Public/Driver` | Validates Core-only options, prints valid incumbents immediately, uses exit 4 for unknown/incomplete, and emits terminal markers only on certified completion. |
+| `Public/Driver` | Validates Core-only options, prints valid incumbents immediately, uses exit 4 for unknown/incomplete, and emits terminal markers only on certified completion. For `--threads=N` it runs independent certified workers over the four measured strategies, sharing only the parsed model and a mutex-guarded incumbent/proof state; an optimization proof is reported only when its optimum equals the best checked printed incumbent, while a satisfaction run reports the first completed verdict after checking a SAT witness. |
 | `Config/Parse` | `parseCoreSolveFlags` disables implicit legacy routing and rejects the kernel engine. The older compatibility parser is used only by explicit legacy APIs. |
 | `Emit/Model` | Source-store rendering extracted from old source solving, with no backend dependency. |
 
@@ -124,7 +169,7 @@ proofs remain attached to the preserved legacy definitions.
 | `Prop`, `Props/` | Generic and specialized certified propagators |
 | `Queue/{Types,Worklist,Apply,Run}` | Invariant specifications, event registration, pending prunings and fixpoint execution |
 | `Proofs/Queue/{History,Invariants,Bookkeeping,Soundness}` | Preservation and propagation soundness |
-| `Analyze`, `Reduce`, `Search` | Conflict analysis, clause reduction, variable/value policies, restarts and search |
+| `Analyze`, `Reduce`, `Search` | Conflict analysis, clause reduction, variable/value policies, restarts and search; `Proofs/Queue/Root` supplies the root-entailment certificate used to erase level-zero literals from learned clauses, and learned clauses retain packed-literal intern hints (`CItem.pidx`) that `LitTable.internPacks` revalidates before reuse |
 | `Incremental` | Certified database transport and seeded Core search across objective bounds |
 
 Order propagators have `Bounds`, `Compare`, `Bridge`, `ReifiedReasons` and

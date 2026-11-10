@@ -548,6 +548,138 @@ theorem restrictSetIn_exact {m : Model} {store : Store}
             obtain ⟨v, hread, hcont⟩ := hv'
             exact ⟨v, hread, restrictVarType_contains_imp hcont⟩
 
+/-! ## The precomputed fast twin
+
+`SetIn.setInRestrictionList` collects the tagged restrictions in one
+pass, `setInCondsOf` filters that list, and the subject/finite-name hash
+sets gate the scans.  The lemmas below connect them to the scanning
+definitions, so `restrictSetInModelFast` is extensionally identical. -/
+
+/-- The per-variable scan equals filtering the precomputed tagged list. -/
+theorem setInConds_eq_filterMap (m : Model) (x : String) :
+    setInConds m x =
+      (setInRestrictionList m).filterMap
+        (fun p => if p.1 = x then some p.2 else none) := by
+  unfold setInConds setInRestrictionList
+  rw [List.filterMap_filterMap]
+  congr 1
+  funext c
+  cases hs : setInShape c with
+  | none => simp [setInCondOf, hs]
+  | some p =>
+      obtain ⟨y, s, b⟩ := p
+      cases hd : setArgDenote s with
+      | none => simp [setInCondOf, hs, hd]
+      | some sv =>
+          by_cases hy : y.name = x <;> simp [setInCondOf, hs, hd, hy]
+
+/-- `setInCondsOf` is the filterMap of the tagged list. -/
+theorem setInCondsOf_eq_filterMap (rs : List (String × SetInRestriction))
+    (x : String) :
+    setInCondsOf rs x =
+      rs.filterMap (fun p => if p.1 = x then some p.2 else none) := rfl
+
+/-- The restricted type is the model-independent match on its condition
+    list. -/
+theorem restrictVarType_eq_restrictVarTypeOf (m : Model) (name : String)
+    (ty : BasicVarType) :
+    restrictVarType m name ty = restrictVarTypeOf (setInConds m name) ty := by
+  cases ty with
+  | intRange lo hi =>
+      cases h : setInConds m name <;> simp [restrictVarType, restrictVarTypeOf, h]
+  | intSet xs =>
+      cases h : setInConds m name <;> simp [restrictVarType, restrictVarTypeOf, h]
+  | par t =>
+      cases h : setInConds m name <;> simp [restrictVarType, restrictVarTypeOf, h]
+  | setOfIntRange lo hi =>
+      cases h : setInConds m name <;> simp [restrictVarType, restrictVarTypeOf, h]
+  | setOfIntSet xs =>
+      cases h : setInConds m name <;> simp [restrictVarType, restrictVarTypeOf, h]
+
+/-- With no conditions the model-independent restriction is the identity. -/
+theorem restrictVarTypeOf_nil (ty : BasicVarType) :
+    restrictVarTypeOf [] ty = ty := by
+  cases ty <;> rfl
+
+/-- Membership in the precomputed subject-name set. -/
+theorem insertSubjectNames_contains
+    (rs : List (String × SetInRestriction)) (s : Std.HashSet String)
+    (x : String) :
+    (insertSubjectNames rs s).contains x =
+      (s.contains x || rs.any (fun p => p.1 == x)) := by
+  induction rs generalizing s with
+  | nil => simp [insertSubjectNames]
+  | cons p ps ih =>
+      simp only [insertSubjectNames, List.foldl_cons] at ih ⊢
+      rw [ih, Std.HashSet.contains_insert]
+      simp [Bool.or_assoc, Bool.or_comm, Bool.or_left_comm]
+
+/-- Membership in the subject-name set is exactly being a subject. -/
+theorem setInSubjectNames_contains
+    (rs : List (String × SetInRestriction)) (x : String) :
+    (setInSubjectNames rs).contains x =
+      rs.any (fun p => p.1 == x) := by
+  simp [setInSubjectNames, insertSubjectNames_contains]
+
+/-- A condition list is empty exactly when no tagged restriction has the
+    name. -/
+theorem setInCondsOf_eq_nil_iff
+    (rs : List (String × SetInRestriction)) (x : String) :
+    setInCondsOf rs x = [] ↔ rs.any (fun p => p.1 == x) = false := by
+  induction rs with
+  | nil => simp [setInCondsOf]
+  | cons p ps ih =>
+      simp only [setInCondsOf, List.filterMap_cons, List.any_cons] at ih ⊢
+      by_cases hp : p.1 = x
+      · simp [hp]
+      · simp [hp, ih]
+
+/-- Outside the subject-name set there are no conditions. -/
+theorem setInCondsOf_eq_nil_of_subjects_false
+    {rs : List (String × SetInRestriction)} {x : String}
+    (h : (setInSubjectNames rs).contains x = false) :
+    setInCondsOf rs x = [] := by
+  rw [setInCondsOf_eq_nil_iff]
+  rw [setInSubjectNames_contains] at h
+  exact h
+
+/-- The gated declaration rewrite equals the scanning one. -/
+theorem restrictVarDeclOf_eq (m : Model)
+    (rs : List (String × SetInRestriction))
+    (hconds : ∀ x, setInCondsOf rs x = setInConds m x)
+    (d : VarDeclItem) :
+    restrictVarDeclOf rs (setInSubjectNames rs) d = restrictVarDecl m d := by
+  cases d with
+  | array ty n anns es => rfl
+  | basic ty n anns init =>
+      cases init with
+      | some e => rfl
+      | none =>
+          unfold restrictVarDeclOf restrictVarDecl
+          by_cases hs : (setInSubjectNames rs).contains n.name
+          · simp only [hs, if_true]
+            rw [hconds n.name, ← restrictVarType_eq_restrictVarTypeOf]
+          · have hsf : (setInSubjectNames rs).contains n.name = false := by
+              simpa using hs
+            have hnil : setInCondsOf rs n.name = [] :=
+              setInCondsOf_eq_nil_of_subjects_false hsf
+            have hnil' : setInConds m n.name = [] := by
+              rw [← hconds n.name, hnil]
+            have ht : restrictVarType m n.name ty = ty := by
+              rw [restrictVarType_eq_restrictVarTypeOf, hnil',
+                restrictVarTypeOf_nil]
+            simp [hsf, ht]
+
+/-- Specialization of `restrictVarDeclOf_eq` to the collected list. -/
+theorem restrictVarDeclOf_restrictionList (m : Model) (d : VarDeclItem) :
+    restrictVarDeclOf (setInRestrictionList m)
+        (setInSubjectNames (setInRestrictionList m)) d =
+      restrictVarDecl m d := by
+  apply restrictVarDeclOf_eq
+  intro x
+  rw [setInCondsOf_eq_filterMap]
+  exact (setInConds_eq_filterMap m x).symm
+
 /-! ## Static well-formedness -/
 
 theorem restrictVarDecl_name (m : Model) (d : VarDeclItem) :

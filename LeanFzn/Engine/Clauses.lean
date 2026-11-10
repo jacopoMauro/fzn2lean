@@ -40,6 +40,7 @@ Design notes (N5 deviations, all stated in the handoff):
 import LeanFzn.Engine.Types
 import LeanFzn.Engine.Lit
 import LeanFzn.Engine.Dom
+import LeanFzn.Engine.Trail
 
 open LeanFzn LeanFzn.Compiler LeanFzn.Semantics LeanFzn.Solver.Core
 open LeanFzn.Solver.Propagation
@@ -212,9 +213,36 @@ def litValueC (doms : Array DomC) (l : PLit) : Option Bool :=
   | some d => d.evalLit l.lit
   | none => none
 
+/-- One-endpoint falsity test for a stored literal.  `litValueC` computes
+both endpoints of an `intLe` atom; the watch scan only needs to know
+whether the literal is false. -/
+def falsifiesLitC (doms : Array DomC) (l : PLit) : Bool :=
+  match doms[l.slot]? with
+  | some d => d.falsifiesLit l.lit
+  | none => false
+
+theorem falsifiesLitC_eq (doms : Array DomC) (l : PLit) :
+    falsifiesLitC doms l = true ↔ litValueC doms l = some false := by
+  unfold falsifiesLitC litValueC
+  cases h : doms[l.slot]? with
+  | none => simp
+  | some d => exact DomC.falsifiesLit_eq d l.lit
+
 /-- The slot of a stored literal is carried by its denotation, not by its
 watch index. -/
 def litSlotC (l : PLit) : Nat := l.slot
+
+/-- A literal false in `litValueC` is false on its `getD` domain. -/
+theorem litValueC_false_evalLit {doms : Array DomC} {r : PLit}
+    (h : litValueC doms r = some false) :
+    (doms.getD r.slot DomC.empty).evalLit r.lit = some false := by
+  unfold litValueC at h
+  cases hd : doms[r.slot]? with
+  | none => rw [hd] at h; simp at h
+  | some d =>
+      rw [hd] at h
+      rw [Array.getD_eq_getElem?_getD, hd]
+      exact h
 
 /-! ## Watch scanning -/
 
@@ -262,7 +290,11 @@ private def scanFind (doms : Array DomC) (lits : Array PLit) (w1 w2 : Nat) :
     Nat → Nat → Option Nat
   | 0, _ => none
   | fuel + 1, j =>
-      if j < lits.size then
+      -- Direct binary-clause path: with exactly two in-range, distinct
+      -- watched positions there is no third position to replace a watch
+      -- with, so the general replacement scan is unnecessary.
+      if lits.size = 2 ∧ w1 ≠ w2 ∧ w1 < 2 ∧ w2 < 2 then none
+      else if j < lits.size then
         if lits.size < 2 then
           none
         else if j = w1 ∨ j = w2 then
@@ -270,7 +302,7 @@ private def scanFind (doms : Array DomC) (lits : Array PLit) (w1 w2 : Nat) :
         else
           match lits[j]? with
           | some q =>
-              if litValueC doms q = some false then
+              if falsifiesLitC doms q then
                 scanFind doms lits w1 w2 fuel (j + 1)
               else some j
           | none => scanFind doms lits w1 w2 fuel (j + 1)
@@ -348,6 +380,166 @@ private def propagateScan (p : CompiledProblem DomConstraint) (T : LitTable)
   let olds := db.watchList l.idx
   scanWatches p T doms l olds olds.size 0 #[] #[] db
 
+/-- Mark one learned clause as used by propagation/conflict.  Missing ids
+are ignored; only the `used` policy bit changes. -/
+def ClauseDB.markUsed (db : ClauseDB p T) (id : Nat) : ClauseDB p T :=
+  match db.clauses[id]? with
+  | some sc => { db with clauses := db.clauses.set! id { sc with used := true } }
+  | none => db
+
+/-- Mark the clauses named by a propagation output. -/
+def ClauseDB.markOutUsed (db : ClauseDB p T) (out : WPropOut p T) : ClauseDB p T :=
+  match out with
+  | .none => db
+  | .conflict _ id => db.markUsed id
+  | .prune ps => ps.foldl (fun db pe => db.markUsed pe.2) db
+
+theorem ClauseDB.markUsed_clauses_size (db : ClauseDB p T) (id : Nat) :
+    (db.markUsed id).clauses.size = db.clauses.size := by
+  unfold ClauseDB.markUsed
+  split
+  · rw [Array.size_set!]
+  · rfl
+
+@[simp] theorem ClauseDB.markUsed_live (db : ClauseDB p T) (id : Nat) :
+    (db.markUsed id).live = db.live := by
+  unfold ClauseDB.markUsed
+  split <;> rfl
+
+@[simp] theorem ClauseDB.markUsed_free (db : ClauseDB p T) (id : Nat) :
+    (db.markUsed id).free = db.free := by
+  unfold ClauseDB.markUsed
+  split <;> rfl
+
+@[simp] theorem ClauseDB.markUsed_watch (db : ClauseDB p T) (id : Nat) :
+    (db.markUsed id).watch = db.watch := by
+  unfold ClauseDB.markUsed
+  split <;> rfl
+
+theorem ClauseDB.markUsed_clauses_e (db : ClauseDB p T) (id : Nat) (j : Nat) :
+    ((db.markUsed id).clauses[j]?).map
+        (fun sc : StoredClause p T => sc.e) =
+      (db.clauses[j]?).map (fun sc : StoredClause p T => sc.e) := by
+  unfold ClauseDB.markUsed
+  split
+  · rename_i sc hget
+    rw [array_getElem?_set!]
+    by_cases hji : id = j
+    · subst hji
+      have hlt : id < db.clauses.size := (Array.getElem?_eq_some_iff.mp hget).1
+      have hval : db.clauses[id] = sc := (Array.getElem?_eq_some_iff.mp hget).2
+      simp [hlt, hget, hval]
+    · simp [hji]
+  · rfl
+
+theorem ClauseDB.markUsed_clauses_deleted (db : ClauseDB p T) (id : Nat) (j : Nat) :
+    ((db.markUsed id).clauses[j]?).map
+        (fun sc : StoredClause p T => sc.deleted) =
+      (db.clauses[j]?).map (fun sc : StoredClause p T => sc.deleted) := by
+  unfold ClauseDB.markUsed
+  split
+  · rename_i sc hget
+    rw [array_getElem?_set!]
+    by_cases hji : id = j
+    · subst hji
+      have hlt : id < db.clauses.size := (Array.getElem?_eq_some_iff.mp hget).1
+      have hval : db.clauses[id] = sc := (Array.getElem?_eq_some_iff.mp hget).2
+      simp [hlt, hget, hval]
+    · simp [hji]
+  · rfl
+
+theorem ClauseDB.markUsed_getElem? (db : ClauseDB p T) (id j : Nat) :
+    (db.markUsed id).clauses[j]? =
+      (db.clauses[j]?).map
+        (fun sc => if j = id then { sc with used := true } else sc) := by
+  unfold ClauseDB.markUsed
+  split
+  · rename_i sc hget
+    rw [array_getElem?_set!]
+    by_cases hji : j = id
+    · subst hji
+      have hlt : j < db.clauses.size := (Array.getElem?_eq_some_iff.mp hget).1
+      have hval : db.clauses[j] = sc := (Array.getElem?_eq_some_iff.mp hget).2
+      simp [hlt, hget, hval]
+    · have hidj : ¬ id = j := fun h => hji h.symm
+      simp [hji, hidj]
+  · rename_i hnone
+    by_cases hji : j = id
+    · subst hji
+      rw [hnone]
+      simp
+    · have hidj : ¬ id = j := fun h => hji h.symm
+      simp [hji, hidj]
+
+theorem ClauseDB.markOutUsed_clauses_size (db : ClauseDB p T) (out : WPropOut p T) :
+    (db.markOutUsed out).clauses.size = db.clauses.size := by
+  unfold ClauseDB.markOutUsed
+  split
+  · rfl
+  · exact ClauseDB.markUsed_clauses_size db _
+  · rename_i ps
+    rw [← Array.foldl_toList]
+    induction ps.toList generalizing db with
+    | nil => rfl
+    | cons pe rest ih => simp only [List.foldl_cons]; rw [ih, ClauseDB.markUsed_clauses_size]
+
+@[simp] theorem ClauseDB.markOutUsed_live (db : ClauseDB p T) (out : WPropOut p T) :
+    (db.markOutUsed out).live = db.live := by
+  unfold ClauseDB.markOutUsed
+  split
+  · rfl
+  · exact ClauseDB.markUsed_live db _
+  · rename_i ps
+    rw [← Array.foldl_toList]
+    induction ps.toList generalizing db with
+    | nil => rfl
+    | cons pe rest ih => simp only [List.foldl_cons]; rw [ih, ClauseDB.markUsed_live]
+
+@[simp] theorem ClauseDB.markOutUsed_free (db : ClauseDB p T) (out : WPropOut p T) :
+    (db.markOutUsed out).free = db.free := by
+  unfold ClauseDB.markOutUsed
+  split
+  · rfl
+  · exact ClauseDB.markUsed_free db _
+  · rename_i ps
+    rw [← Array.foldl_toList]
+    induction ps.toList generalizing db with
+    | nil => rfl
+    | cons pe rest ih => simp only [List.foldl_cons]; rw [ih, ClauseDB.markUsed_free]
+
+theorem ClauseDB.markOutUsed_clauses_e (db : ClauseDB p T) (out : WPropOut p T) (j : Nat) :
+    ((db.markOutUsed out).clauses[j]?).map
+        (fun sc : StoredClause p T => sc.e) =
+      (db.clauses[j]?).map (fun sc : StoredClause p T => sc.e) := by
+  unfold ClauseDB.markOutUsed
+  split
+  · rfl
+  · exact ClauseDB.markUsed_clauses_e db _ j
+  · rename_i ps
+    rw [← Array.foldl_toList]
+    induction ps.toList generalizing db with
+    | nil => rfl
+    | cons pe rest ih =>
+        simp only [List.foldl_cons]
+        rw [ih, ClauseDB.markUsed_clauses_e]
+
+theorem ClauseDB.markOutUsed_clauses_deleted (db : ClauseDB p T) (out : WPropOut p T)
+    (j : Nat) :
+    ((db.markOutUsed out).clauses[j]?).map
+        (fun sc : StoredClause p T => sc.deleted) =
+      (db.clauses[j]?).map (fun sc : StoredClause p T => sc.deleted) := by
+  unfold ClauseDB.markOutUsed
+  split
+  · rfl
+  · exact ClauseDB.markUsed_clauses_deleted db _ j
+  · rename_i ps
+    rw [← Array.foldl_toList]
+    induction ps.toList generalizing db with
+    | nil => rfl
+    | cons pe rest ih =>
+        simp only [List.foldl_cons]
+        rw [ih, ClauseDB.markUsed_clauses_deleted]
+
 /-- Propagate a literal that just became false (the caller passes the
 literal itself, not its negation).  Clause ids are returned for prunings;
 the reason is the clause itself. -/
@@ -355,7 +547,8 @@ def ClauseDB.propagateLiteral (p : CompiledProblem DomConstraint) (T : LitTable)
     (db : ClauseDB p T) (doms : Array DomC) (l : PLit) :
     ClauseDB p T × WPropOut p T :=
   let r := propagateScan p T db doms l
-  (r.1, r.2.shape)
+  let out := r.2.shape
+  (r.1.markOutUsed out, out)
 
 /-! ## Unit propagation -/
 
@@ -398,7 +591,7 @@ def canonLit (st : EngineState p T) (l : PLit) : PLit × EngineState p T :=
 
 /-- Runtime twin of `canonLit` that passes the table fields separately. -/
 @[inline] def canonLitFast (st : EngineState p T) (l : PLit) : PLit × EngineState p T :=
-  let (l', tab) := LitTable.internOneFast st.table.lits st.table.lookup l.lit
+  let (l', tab) := LitTable.internOneFast st.table.lits st.table.lookup st.table.neg l.lit
   (l', { st with table := tab })
 
 /-- The fast canonicaliser is the reference one. -/
@@ -443,23 +636,83 @@ theorem canonLit_tableWF (st : EngineState p T) (l : PLit)
   rw [canonLit_table]
   exact LitTable.intern_tableWF hT
 
+/-- `canonLit` preserves the bundled intern-table invariant. -/
+theorem canonLit_table_inv (st : EngineState p T) (l : PLit)
+    (hT : st.table.Inv) : (canonLit st l).2.table.Inv := by
+  rw [canonLit_table]
+  exact LitTable.intern_inv hT l.lit
+
 /-- The canonicalised literal is well-formed in the resulting table. -/
 theorem canonLit_wf (st : EngineState p T) (l : PLit)
     (hT : st.table.TableWF) : (canonLit st l).2.table.WF (canonLit st l).1 := by
   rw [canonLit_fst, canonLit_table]
   exact LitTable.intern_wf hT
 
+/-- Re-intern the negation of one packed literal in the live table, reusing
+the negation-index cache (D3).  On a cache hit the literal table is
+unchanged; on a miss the negation is interned and both directions are
+recorded. -/
+def canonNegLit (st : EngineState p T) (l : PLit) : PLit × EngineState p T :=
+  let (l', tab) := st.table.internNeg l
+  (l', { st with table := tab })
+
+/-- The literal component of a canonicalised negation is the negation. -/
+theorem canonNegLit_lit (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).1.lit = l.lit.negate := by
+  unfold canonNegLit
+  exact LitTable.internNeg_fst_lit st.table l
+
+/-- The first component of `canonNegLit` is the interned negation pack. -/
+theorem canonNegLit_fst (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).1 = (st.table.internNeg l).1 := by
+  unfold canonNegLit
+  rfl
+
+/-- The table of the resulting state is the negation-interned table. -/
+theorem canonNegLit_table (st : EngineState p T) (l : PLit) :
+    (canonNegLit st l).2.table = (st.table.internNeg l).2 := by
+  unfold canonNegLit
+  rfl
+
+/-- `canonNegLit` extends the literal table append-only. -/
+theorem canonNegLit_table_append_only (st : EngineState p T) (l : PLit) :
+    st.table.lits.toList <+: (canonNegLit st l).2.table.lits.toList := by
+  rw [canonNegLit_table]
+  exact LitTable.internNeg_append_only st.table l
+
+/-- `canonNegLit` preserves the intern-table invariant. -/
+theorem canonNegLit_tableWF (st : EngineState p T) (l : PLit)
+    (hT : st.table.TableWF) : (canonNegLit st l).2.table.TableWF := by
+  rw [canonNegLit_table]
+  exact LitTable.internNeg_tableWF hT
+
+/-- The literal returned by `canonNegLit` is well formed in the resulting
+table when the argument is well formed. -/
+theorem canonNegLit_wf (st : EngineState p T) (l : PLit)
+    (hT : st.table.Inv) (hl : st.table.WF l) :
+    (canonNegLit st l).2.table.WF (canonNegLit st l).1 := by
+  rw [canonNegLit_fst, canonNegLit_table]
+  exact LitTable.internNeg_wf hT hl
+
+/-- `canonNegLit` preserves the bundled intern-table invariant when the
+argument is well formed. -/
+theorem canonNegLit_table_inv (st : EngineState p T) (l : PLit)
+    (hT : st.table.Inv) (hl : st.table.WF l) :
+    (canonNegLit st l).2.table.Inv := by
+  rw [canonNegLit_table]
+  exact LitTable.internNeg_inv hT hl
+
 /-- The auxiliary interning of a clause's decoded literals. -/
 def canonClauseAux (st : EngineState p T) (c : EClause p T) :
     Array PLit × LitTable :=
-  st.table.internArray (c.lits.map PLit.decode)
+  st.table.internPacks c.lits
 
 /-- Interning the decoded literals preserves the decoded literal list. -/
 theorem canonClauseAux_lits (st : EngineState p T) (c : EClause p T) :
     (canonClauseAux st c).1.toList.map PLit.decode =
       c.lits.toList.map PLit.decode := by
   unfold canonClauseAux
-  rw [LitTable.internArray_lits, Array.toList_map]
+  exact LitTable.internPacks_lits st.table c.lits
 
 /-- Pointwise form of the decoded-list equality, in the shape used by
 `EClause.reindex`. -/
@@ -484,14 +737,14 @@ def canonClause (st : EngineState p T) (c : EClause p T) :
 and `T'` the live table value. -/
 def canonClauseTab (T : LitTable) (T' : LitTable) (c : EClause p T) :
     Array PLit × LitTable :=
-  T'.internArray (c.lits.map PLit.decode)
+  T'.internPacks c.lits
 
 /-- Decoded lits are preserved by the table-level canonicaliser. -/
 theorem canonClauseTab_lits (T : LitTable) (T' : LitTable) (c : EClause p T) :
     (canonClauseTab T T' c).1.toList.map PLit.decode =
       c.lits.toList.map PLit.decode := by
   unfold canonClauseTab
-  rw [LitTable.internArray_lits, Array.toList_map]
+  exact LitTable.internPacks_lits T' c.lits
 
 /-- Runtime twin of `canonClause` that destructures the state before
 canonicalising.  Passing the whole state to `canonClauseAux` makes the
@@ -501,24 +754,24 @@ the whole array.  Destructuring transfers ownership of the table. -/
 @[inline] def canonClauseFast (st : EngineState p T) (c : EClause p T) :
     EClause p T × EngineState p T :=
   match st with
-  | ⟨table, doms, trail, levelStart, level, changeIndex, db, reasons, props,
-      subs, queueHigh, queueLow, inQueue, activity, activityHeap, phases,
-      restarts, nextReduce, stats⟩ =>
+  | ⟨table, doms, trail, levelStart, level, changeIndex, db, reasons, reasonCap, props,
+      subs, queueHigh, queueLow, inQueue, activity, activityInc, activityHeap, phases,
+      restarts, lastRestartConflict, nextReduce, slotWeight, stats⟩ =>
     let r := canonClauseTab T table c
     (c.reindex r.1 (canonPointwise (canonClauseTab_lits T table c)),
-      ⟨r.2, doms, trail, levelStart, level, changeIndex, db, reasons, props,
-        subs, queueHigh, queueLow, inQueue, activity, activityHeap, phases,
-        restarts, nextReduce, stats⟩)
+      ⟨r.2, doms, trail, levelStart, level, changeIndex, db, reasons, reasonCap, props,
+        subs, queueHigh, queueLow, inQueue, activity, activityInc, activityHeap, phases,
+        restarts, lastRestartConflict, nextReduce, slotWeight, stats⟩)
 
 /-- The fast canonicaliser is the reference one. -/
 theorem canonClauseFast_eq (st : EngineState p T) (c : EClause p T) :
     canonClauseFast st c = canonClause st c := by
   cases st with
-  | mk table doms trail levelStart level changeIndex db reasons props subs
-      queueHigh queueLow inQueue activity activityHeap phases restarts
-      nextReduce stats =>
+  | mk table doms trail levelStart level changeIndex db reasons reasonCap props subs
+      queueHigh queueLow inQueue activity activityInc activityHeap phases restarts
+      lastRestartConflict nextReduce slotWeight stats =>
     simp [canonClauseFast, canonClause, canonClauseAux, canonClauseTab,
-      EClause.reindex]
+      EClause.reindex, LitTable.internPacksFast_eq]
 
 /-- Compile `canonClause` as the ownership-preserving twin; proofs keep
 the reference definition. -/
@@ -578,13 +831,19 @@ theorem canonClause_lits (st : EngineState p T) (c : EClause p T) :
 theorem canonClause_table_append_only (st : EngineState p T) (c : EClause p T) :
     st.table.lits.toList <+: (canonClause st c).2.table.lits.toList := by
   rw [canonClause_table]
-  exact LitTable.internArray_append_only st.table (c.lits.map PLit.decode)
+  exact LitTable.internPacks_append_only st.table c.lits
 
 /-- `canonClause` preserves the intern-table invariant. -/
 theorem canonClause_tableWF (st : EngineState p T) (c : EClause p T)
     (hT : st.table.TableWF) : (canonClause st c).2.table.TableWF := by
   rw [canonClause_table]
-  exact LitTable.internArray_tableWF hT (c.lits.map PLit.decode)
+  exact LitTable.internPacks_tableWF hT c.lits
+
+/-- `canonClause` preserves the bundled intern-table invariant. -/
+theorem canonClause_table_inv (st : EngineState p T) (c : EClause p T)
+    (hT : st.table.Inv) : (canonClause st c).2.table.Inv := by
+  rw [canonClause_table]
+  exact LitTable.internPacks_inv hT c.lits
 
 /-- Every literal of the canonicalised clause is well-formed in the
 resulting table. -/
@@ -595,7 +854,7 @@ theorem canonClause_wf (st : EngineState p T) (c : EClause p T)
   intro i q hq
   rw [canonClause_fst_lits] at hq
   rw [canonClause_table]
-  exact LitTable.internArray_wf hT (c.lits.map PLit.decode) i q hq
+  exact LitTable.internPacks_wf hT c.lits i q hq
 
 /-- The canonicalised clause is still entailed (its proof is the transported
 proof of the input clause). -/
@@ -636,6 +895,36 @@ theorem reasonClause?_entailed (st : EngineState p T) (r : ReasonRef)
     (c : EClause p T) (h : reasonClause? st r = some c) :
     Entailed p (st.table.decodeClause c.lits) :=
   c.ent
+
+/-- Trimming the transient-reason suffix preserves the explanation of every
+trail entry.  This is the semantic obligation for `P6.3`: analysis only calls
+`reasonClause?` on entries read from the trail, so it cannot observe a trimmed
+slot. -/
+theorem trimReasons_reasonClause?_of_trail (st : EngineState p T)
+    (h : TrailInv st) (i : Nat) (e : Entry) (he : st.trail[i]? = some e) :
+    reasonClause? st.trimReasons e.reason = reasonClause? st e.reason := by
+  cases hr : e.reason with
+  | decision => rfl
+  | learned id => rfl
+  | reason id =>
+      have hid : id < st.reasonBound :=
+        reasonBound_spec st h i e id he hr
+      rw [reasonClause?_reason, reasonClause?_reason]
+      unfold EngineState.trimReasons
+      dsimp only
+      rw [Array.shrink_eq_take, Array.take_eq_extract]
+      by_cases hlt : id < st.reasons.size
+      · have hmin : id < min st.reasonBound st.reasons.size :=
+          Nat.lt_min.mpr ⟨hid, hlt⟩
+        simp [Array.getElem?_extract, hmin]
+      · have hnone : st.reasons[id]? = none := by
+          apply Array.getElem?_eq_none
+          omega
+        have hnot : ¬ id < min st.reasonBound st.reasons.size := by
+          have hle : min st.reasonBound st.reasons.size ≤ st.reasons.size :=
+            Nat.min_le_right _ _
+          omega
+        simp [Array.getElem?_extract, hnot, hnone]
 
 /-! ## The clause-database invariant -/
 
@@ -712,6 +1001,128 @@ theorem ClauseDB.InvExcept.toInv (db : ClauseDB p T) (except : Nat)
   · subst id
     exact hnew sc hcl hdel hsz
   · exact h.2.2.1 id sc hid hcl hdel hsz
+
+theorem ClauseDB.markUsed_deletedCount (db : ClauseDB p T) (id : Nat) :
+    (db.markUsed id).deletedCount = db.deletedCount := by
+  unfold ClauseDB.markUsed
+  split
+  · rename_i sc hget
+    have hlt : id < db.clauses.size := (Array.getElem?_eq_some_iff.mp hget).1
+    have hval : db.clauses[id] = sc := (Array.getElem?_eq_some_iff.mp hget).2
+    unfold ClauseDB.deletedCount
+    dsimp only
+    rw [← Array.countP_toList, Array.toList_set!]
+    rw [List.countP_set (l := db.clauses.toList) (i := id)
+      (a := { sc with used := true }) (by simpa using hlt)]
+    have hlen : id < db.clauses.toList.length := by simpa using hlt
+    have hgetList : db.clauses.toList[id] = sc := by
+      rw [Array.getElem_toList hlen]
+      exact hval
+    rw [hgetList]
+    cases hd : sc.deleted with
+    | false => simp [hd]
+    | true =>
+        have hB : 0 < db.clauses.toList.countP
+            (fun sc : StoredClause p T => sc.deleted) := by
+          rw [List.countP_pos_iff]
+          refine ⟨sc, ?_, ?_⟩
+          · rw [← hgetList]
+            exact List.getElem_mem hlen
+          · simpa [hgetList] using hd
+        simp
+        rw [← Array.countP_toList]
+        rw [Nat.sub_one_add_one (Nat.ne_of_gt hB)]
+  · rfl
+
+theorem ClauseDB.markUsed_liveCount (db : ClauseDB p T) (id : Nat) :
+    (db.markUsed id).liveCount = db.liveCount := by
+  unfold ClauseDB.liveCount
+  rw [ClauseDB.markUsed_clauses_size, ClauseDB.markUsed_deletedCount]
+
+theorem ClauseDB.markOutUsed_deletedCount (db : ClauseDB p T) (out : WPropOut p T) :
+    (db.markOutUsed out).deletedCount = db.deletedCount := by
+  unfold ClauseDB.markOutUsed
+  split
+  · rfl
+  · exact ClauseDB.markUsed_deletedCount db _
+  · rename_i ps
+    rw [← Array.foldl_toList]
+    induction ps.toList generalizing db with
+    | nil => rfl
+    | cons pe rest ih =>
+        simp only [List.foldl_cons]
+        rw [ih, ClauseDB.markUsed_deletedCount]
+
+theorem ClauseDB.markOutUsed_liveCount (db : ClauseDB p T) (out : WPropOut p T) :
+    (db.markOutUsed out).liveCount = db.liveCount := by
+  unfold ClauseDB.liveCount
+  rw [ClauseDB.markOutUsed_clauses_size, ClauseDB.markOutUsed_deletedCount]
+
+theorem ClauseDB.markUsed_inv (db : ClauseDB p T) (id : Nat) (h : db.Inv) :
+    (db.markUsed id).Inv := by
+  have hget := ClauseDB.markUsed_getElem? db id
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+  · intro i ids hi x hx
+    rw [ClauseDB.markUsed_watch] at hi
+    rw [ClauseDB.markUsed_clauses_size]
+    exact h.watch_lt i ids hi x hx
+  · intro j scj hgetj hdel hsz
+    rw [hget j] at hgetj
+    cases hsrc : db.clauses[j]? with
+    | none => rw [hsrc] at hgetj; simp at hgetj
+    | some old =>
+        rw [hsrc] at hgetj
+        simp only [Option.map_some, Option.some.injEq] at hgetj
+        subst hgetj
+        by_cases hji : j = id
+        · simp [hji] at hdel hsz
+          simpa [hji] using h.pos_lt j old hsrc hdel hsz
+        · simp [hji] at hdel hsz ⊢
+          exact h.pos_lt j old hsrc hdel hsz
+  · intro j scj hgetj hdel hsz
+    rw [hget j] at hgetj
+    cases hsrc : db.clauses[j]? with
+    | none => rw [hsrc] at hgetj; simp at hgetj
+    | some old =>
+        rw [hsrc] at hgetj
+        simp only [Option.map_some, Option.some.injEq] at hgetj
+        subst hgetj
+        by_cases hji : j = id
+        · simp [hji] at hdel hsz
+          have hw := h.watches j old hsrc (by simpa using hdel) (by simpa using hsz)
+          simpa [ClauseDB.WatchedBy, ClauseDB.WatchesAt, ClauseDB.watchList,
+            ClauseDB.markUsed_watch, hji] using hw
+        · simp [hji] at hdel hsz ⊢
+          simpa [ClauseDB.WatchedBy, ClauseDB.WatchesAt, ClauseDB.watchList,
+            ClauseDB.markUsed_watch, hji] using h.watches j old hsrc hdel hsz
+  · simpa [ClauseDB.markUsed_live, ClauseDB.markUsed_liveCount] using h.live_eq
+  · intro j hj
+    rw [ClauseDB.markUsed_free] at hj
+    obtain ⟨sc, hsc, hdel⟩ := h.free_deleted j hj
+    refine ⟨if j = id then { sc with used := true } else sc, ?_, ?_⟩
+    · rw [hget j, hsc]
+      simp
+    · by_cases hji : j = id
+      · simp [hji]
+        exact hdel
+      · simp [hji]
+        exact hdel
+  · rw [ClauseDB.markUsed_free]
+    exact h.free_nodup
+
+theorem ClauseDB.markOutUsed_inv (db : ClauseDB p T) (out : WPropOut p T)
+    (h : db.Inv) : (db.markOutUsed out).Inv := by
+  unfold ClauseDB.markOutUsed
+  split
+  · exact h
+  · exact ClauseDB.markUsed_inv db _ h
+  · rename_i ps
+    rw [← Array.foldl_toList]
+    induction ps.toList generalizing db with
+    | nil => exact h
+    | cons pe rest ih =>
+        simp only [List.foldl_cons]
+        exact ih _ (ClauseDB.markUsed_inv db pe.2 h)
 
 /-- `ensureWatch` preserves watch membership. -/
 theorem ClauseDB.watchesAt_ensureWatch (db : ClauseDB p T) (n i id : Nat)
@@ -1475,6 +1886,28 @@ def ClauseDB.PrunesOK (db : ClauseDB p T) (ps : Array (PLit × Nat)) : Prop :=
     ∃ sc, db.clauses[id]? = some sc ∧ sc.deleted = false ∧
       l.lit ∈ sc.e.lits.map PLit.decode
 
+/-- The two-watched-literal pruning contract.  Each pruned literal is a
+watched literal of a live stored clause, and every other literal of that
+clause is either the propagated literal (whose negation was just applied) or
+already false on the domains.  Proof-only: used by the root-entailment
+invariant to turn a clause propagation into an entailed unit. -/
+def ClauseDB.PrunesAllBut (db : ClauseDB p T) (doms : Array DomC) (l : PLit)
+    (ps : Array (PLit × Nat)) : Prop :=
+  ∀ (q : PLit) (id : Nat), (q, id) ∈ ps.toList →
+    ∃ sc, db.clauses[id]? = some sc ∧ sc.deleted = false ∧
+      q.lit ∈ sc.e.lits.map PLit.decode ∧
+      ∀ (k : Nat) (r : PLit), sc.e.lits[k]? = some r → r.lit ≠ q.lit →
+        r.lit = l.lit ∨
+          (doms.getD r.slot DomC.empty).evalLit r.lit = some false
+
+/-- `PrunesAllBut` implies the syntactic `PrunesOK` contract. -/
+theorem ClauseDB.PrunesAllBut.prunesOK {db : ClauseDB p T} {doms : Array DomC}
+    {l : PLit} {ps : Array (PLit × Nat)} (h : db.PrunesAllBut doms l ps) :
+    db.PrunesOK ps := by
+  intro q id hmem
+  obtain ⟨sc, hget, hdel, hmemlit, -⟩ := h q id (by simpa using hmem)
+  exact ⟨sc, hget, hdel, hmemlit⟩
+
 /-- A conflict result names a live stored clause whose `e` is returned. -/
 def ClauseDB.ConflictOK (db : ClauseDB p T) (c : EClause p T) (id : Nat) : Prop :=
   ∃ sc, db.clauses[id]? = some sc ∧ sc.deleted = false ∧ sc.e = c
@@ -1588,6 +2021,71 @@ private theorem unitsScan_prunes (p : CompiledProblem DomConstraint) (T : LitTab
         rw [← hps]
         exact hpre
 
+/-- Every pruning produced by the unit-clause scan is an entailed unit. -/
+private theorem unitsScan_prunes_entailed (p : CompiledProblem DomConstraint)
+    (T : LitTable) (doms : Array DomC) (db : ClauseDB p T) (fuel i : Nat)
+    (prunes : Array (PLit × Nat)) {ps : Array (PLit × Nat)}
+    (hpre : ∀ (q : PLit) (id : Nat), (q, id) ∈ prunes.toList →
+      Entailed p [q.lit])
+    (h : (unitsScan p T doms db fuel i prunes).2 = .prune ps) :
+    ∀ (q : PLit) (id : Nat), (q, id) ∈ ps.toList → Entailed p [q.lit] := by
+  induction fuel generalizing i prunes with
+  | zero =>
+      have h' : unitsScan p T doms db 0 i prunes = (db, .prune prunes) := rfl
+      rw [h'] at h
+      simp only [WPropOut.prune.injEq] at h
+      have hps : prunes = ps := h
+      rw [← hps]
+      exact hpre
+  | succ fuel ih =>
+      unfold unitsScan at h
+      split at h
+      · split at h
+        · rename_i sc hget
+          split at h
+          · exact ih (i + 1) prunes hpre h
+          · rename_i hcond
+            split at h
+            · rename_i l hl
+              split at h
+              · exact ih (i + 1) prunes hpre h
+              · simp at h
+              · have hcond' : ¬ ((sc.deleted || sc.e.lits.size != 1) = true) := by
+                  simpa using hcond
+                have hcondf : (sc.deleted || sc.e.lits.size != 1) = false := by
+                  cases hv : (sc.deleted || sc.e.lits.size != 1) with
+                  | false => rfl
+                  | true => exact (hcond' (by simpa [hv])).elim
+                have hsize : sc.e.lits.size = 1 := by
+                  have hb : (sc.e.lits.size != 1) = false :=
+                    (Bool.or_eq_false_iff.mp hcondf).2
+                  simpa using hb
+                have hlist : sc.e.lits.toList = [l] := by
+                  apply List.ext_getElem?
+                  intro j
+                  rw [Array.getElem?_toList]
+                  cases j with
+                  | zero => simpa using hl
+                  | succ j =>
+                      rw [Array.getElem?_eq_none (by omega)]
+                      simp
+                have hent : Entailed p [l.lit] := by
+                  have h := sc.e.ent
+                  rw [LitTable.decodeClause, hlist] at h
+                  simpa [LitTable.decode] using h
+                exact ih (i + 1) _ (fun q id hq => by
+                  rw [Array.toList_push, List.mem_append] at hq
+                  rcases hq with hq | hq
+                  · exact hpre q id hq
+                  · simp only [List.mem_singleton, Prod.mk.injEq] at hq
+                    obtain ⟨rfl, rfl⟩ := hq
+                    exact hent) h
+            · exact ih (i + 1) prunes hpre h
+        · exact ih (i + 1) prunes hpre h
+      · have hps : prunes = ps := by simpa using h
+        rw [← hps]
+        exact hpre
+
 /-- `ofPrunes` only hides the empty list. -/
 theorem WPropOut.ofPrunes_prune {ps ps' : Array (PLit × Nat)}
     (h : WPropOut.ofPrunes (p := p) (T := T) ps = .prune ps') : ps' = ps := by
@@ -1652,6 +2150,20 @@ theorem ClauseDB.propagateUnits_prunes (db : ClauseDB p T) (doms : Array DomC)
   have h' : (unitsScan p T doms db db.clauses.size 0 #[]).2 = .prune ps0 := hout
   have hres := unitsScan_prunes _ _ _ _ _ _ _
     (by intro l id hm; simp at hm) h'
+  rw [hps]
+  exact hres
+
+/-- Every pruning from `propagateUnits` is an entailed unit. -/
+theorem ClauseDB.propagateUnits_prunes_entailed (db : ClauseDB p T)
+    (doms : Array DomC) {ps : Array (PLit × Nat)}
+    (h : (db.propagateUnits p T doms).2 = .prune ps) :
+    ∀ (q : PLit) (id : Nat), (q, id) ∈ ps.toList → Entailed p [q.lit] := by
+  unfold ClauseDB.propagateUnits at h
+  dsimp only at h
+  obtain ⟨ps0, hout, hps⟩ := WPropOut.shape_prune h
+  have h' : (unitsScan p T doms db db.clauses.size 0 #[]).2 = .prune ps0 := hout
+  have hres := unitsScan_prunes_entailed _ _ _ _ _ _ _
+    (by intro q id hm; simp at hm) h'
   rw [hps]
   exact hres
 
@@ -1951,8 +2463,8 @@ entry content of row `l.idx`; `i` is the scan frontier and `kept` the future
 content of that row.  Clauses still watching `l.idx` are backed either by the
 already-visited survivors in `kept` or by the unvisited suffix
 `olds.extract i olds.size`. -/
-private structure ScanInv (db0 : ClauseDB p T) (l : PLit) (olds : Array Nat)
-    (i : Nat) (kept : Array Nat) (db : ClauseDB p T)
+private structure ScanInv (db0 : ClauseDB p T) (l : PLit) (doms : Array DomC)
+    (olds : Array Nat) (i : Nat) (kept : Array Nat) (db : ClauseDB p T)
     (prunes : Array (PLit × Nat)) : Prop where
   watch_lt : ∀ (i : Nat) (ids : Array Nat), db.watch[i]? = some ids →
     ∀ id ∈ ids, id < db.clauses.size
@@ -1971,17 +2483,23 @@ private structure ScanInv (db0 : ClauseDB p T) (l : PLit) (olds : Array Nat)
   free_eq0 : db.free = db0.free
   meta_eq : ∀ (id : Nat), clauseMeta db id = clauseMeta db0 id
   prunes_ok : db0.PrunesOK prunes
+  /-- Conditional all-but contract: whenever the stored clauses live in a
+  well-formed intern table, every prune is backed by a clause whose other
+  literals are the propagated literal or already false. -/
+  prunes_allbut : ∀ (S : LitTable), db0.LitsWF S → S.WF l →
+    db0.PrunesAllBut doms l prunes
 
 /-- The initial scan state: no entry has been visited yet, so the whole entry
 row is still the unvisited suffix. -/
-private theorem ScanInv.base {db : ClauseDB p T} {l : PLit} {olds : Array Nat}
-    {prunes : Array (PLit × Nat)}
+private theorem ScanInv.base {db : ClauseDB p T} {l : PLit} {doms : Array DomC}
+    {olds : Array Nat} {prunes : Array (PLit × Nat)}
     (h : db.Inv) (hrow : db.watchList l.idx = olds)
     (_holds : ∀ id ∈ olds, id < db.clauses.size)
     (hlidx : l.idx < db.watch.size)
-    (hpr : db.PrunesOK prunes) : ScanInv db l olds 0 #[] db prunes := by
+    (hpr : db.PrunesAllBut doms l prunes) :
+    ScanInv db l doms olds 0 #[] db prunes := by
   refine ⟨h.watch_lt, h.pos_lt, ?_, h.live_eq, h.free_deleted, h.free_nodup,
-    ?_, hlidx, rfl, rfl, rfl, ?_, hpr⟩
+    ?_, hlidx, rfl, rfl, rfl, ?_, hpr.prunesOK, fun S _ _ => hpr⟩
   · have hzero : olds.extract 0 olds.size = olds :=
       Array.extract_eq_self_of_le (Nat.le_refl _)
     intro id sc hget hdel hsz
@@ -2015,13 +2533,13 @@ private theorem ScanInv.base {db : ClauseDB p T} {l : PLit} {olds : Array Nat}
 /-- Advancing the frontier after pushing the current entry into `kept`
 preserves the scan invariant. -/
 private theorem ScanInv.withKept {db0 : ClauseDB p T} {l : PLit}
-    {olds : Array Nat} {i : Nat} {kept : Array Nat} {db : ClauseDB p T}
-    {prunes : Array (PLit × Nat)}
-    (hinv : ScanInv db0 l olds i kept db prunes) (kept' : Array Nat)
+    {doms : Array DomC} {olds : Array Nat} {i : Nat} {kept : Array Nat}
+    {db : ClauseDB p T} {prunes : Array (PLit × Nat)}
+    (hinv : ScanInv db0 l doms olds i kept db prunes) (kept' : Array Nat)
     (hi : i < olds.size) (hsub : ∀ x ∈ kept, x ∈ kept')
     (hnew : olds[i]! ∈ kept')
     (hlt : ∀ x ∈ kept', x < db.clauses.size) :
-    ScanInv db0 l olds (i + 1) kept' db prunes :=
+    ScanInv db0 l doms olds (i + 1) kept' db prunes :=
   { watch_lt := hinv.watch_lt
     pos_lt := hinv.pos_lt
     backed := ScanBacked.step hi hsub hnew hinv.backed
@@ -2034,18 +2552,19 @@ private theorem ScanInv.withKept {db0 : ClauseDB p T} {l : PLit}
     live_eq0 := hinv.live_eq0
     free_eq0 := hinv.free_eq0
     meta_eq := hinv.meta_eq
-    prunes_ok := hinv.prunes_ok }
+    prunes_ok := hinv.prunes_ok
+    prunes_allbut := hinv.prunes_allbut }
 
 /-- Advancing the frontier when the current entry is dropped (deleted slot or
 stale watch) preserves the scan invariant. -/
-private theorem ScanInv.skip {db0 : ClauseDB p T} {l : PLit} {olds : Array Nat}
-    {i : Nat} {kept : Array Nat} {db : ClauseDB p T}
+private theorem ScanInv.skip {db0 : ClauseDB p T} {l : PLit} {doms : Array DomC}
+    {olds : Array Nat} {i : Nat} {kept : Array Nat} {db : ClauseDB p T}
     {prunes : Array (PLit × Nat)}
-    (hinv : ScanInv db0 l olds i kept db prunes)
+    (hinv : ScanInv db0 l doms olds i kept db prunes)
     (hi : i < olds.size)
     (hslot : ∀ sc, db.clauses[olds[i]!]? = some sc →
       sc.deleted = true ∨ ¬ ClauseWatches sc l ∨ sc.e.lits.size < 2) :
-    ScanInv db0 l olds (i + 1) kept db prunes :=
+    ScanInv db0 l doms olds (i + 1) kept db prunes :=
   { watch_lt := hinv.watch_lt
     pos_lt := hinv.pos_lt
     backed := ScanBacked.skip hi hslot hinv.backed
@@ -2058,7 +2577,8 @@ private theorem ScanInv.skip {db0 : ClauseDB p T} {l : PLit} {olds : Array Nat}
     live_eq0 := hinv.live_eq0
     free_eq0 := hinv.free_eq0
     meta_eq := hinv.meta_eq
-    prunes_ok := hinv.prunes_ok }
+    prunes_ok := hinv.prunes_ok
+    prunes_allbut := hinv.prunes_allbut }
 
 /-- Extracting the watched literal from `ClauseWatches₁`. -/
 private theorem ClauseWatches₁.some {sc : StoredClause p T} {l : PLit}
@@ -2159,10 +2679,12 @@ private theorem clauseMeta.conflictOK {db db0 : ClauseDB p T} {id : Nat}
 
 /-- Postcondition of one scan. -/
 private structure ScanPost (db0 : ClauseDB p T) (db' : ClauseDB p T)
-    (out : WPropOut p T) : Prop where
+    (out : WPropOut p T) (l : PLit) (doms : Array DomC) : Prop where
   inv : db'.Inv
   conflict : ∀ (c : EClause p T) (id : Nat), out = .conflict c id → db0.ConflictOK c id
   prune : ∀ ps, out = .prune ps → db0.PrunesOK ps
+  prune_allbut : ∀ (S : LitTable), db0.LitsWF S → S.WF l →
+    ∀ ps, out = .prune ps → db0.PrunesAllBut doms l ps
   meta_eq : ∀ (id : Nat), clauseMeta db' id = clauseMeta db0 id
   size_eq : db'.clauses.size = db0.clauses.size
   live_eq : db'.live = db0.live
@@ -2170,15 +2692,16 @@ private structure ScanPost (db0 : ClauseDB p T) (db' : ClauseDB p T)
 
 /-- Terminal pruning branch: the row becomes `kept`. -/
 private theorem ScanInv.final_prune {db0 : ClauseDB p T} {l : PLit}
-    {olds : Array Nat} {i : Nat} {kept : Array Nat} {db : ClauseDB p T}
-    {prunes : Array (PLit × Nat)}
-    (hinv : ScanInv db0 l olds i kept db prunes) (hi : olds.size ≤ i) :
-    ScanPost db0 { db with watch := db.watch.set! l.idx kept } (.prune prunes) := by
+    {doms : Array DomC} {olds : Array Nat} {i : Nat} {kept : Array Nat}
+    {db : ClauseDB p T} {prunes : Array (PLit × Nat)}
+    (hinv : ScanInv db0 l doms olds i kept db prunes) (hi : olds.size ≤ i) :
+    ScanPost db0 { db with watch := db.watch.set! l.idx kept } (.prune prunes)
+      l doms := by
   have hrow : ({ db with watch := db.watch.set! l.idx kept }).watchList l.idx = kept :=
     watchList_set_self db l.idx kept hinv.lidx_lt
   have hempty : olds.extract i olds.size = #[] :=
     Array.extract_eq_empty_of_le (by simpa using hi)
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
     · intro i ids hi id hid
       by_cases hil : i = l.idx
@@ -2212,6 +2735,10 @@ private theorem ScanInv.final_prune {db0 : ClauseDB p T} {l : PLit}
     simp only [WPropOut.prune.injEq] at h
     subst h
     exact hinv.prunes_ok
+  · intro S hLW hwf ps h
+    simp only [WPropOut.prune.injEq] at h
+    subst h
+    exact hinv.prunes_allbut S hLW hwf
   · intro id
     exact hinv.meta_eq id
   · exact hinv.size_eq
@@ -2220,9 +2747,9 @@ private theorem ScanInv.final_prune {db0 : ClauseDB p T} {l : PLit}
 
 /-- Conflict branch: the row becomes `(kept.push id) ++ olds.extract (i+1)`. -/
 private theorem ScanInv.conflict_post {db0 : ClauseDB p T} {l : PLit}
-    {olds : Array Nat} {i : Nat} {kept : Array Nat} {db : ClauseDB p T}
-    {prunes : Array (PLit × Nat)}
-    (hinv : ScanInv db0 l olds i kept db prunes)
+    {doms : Array DomC} {olds : Array Nat} {i : Nat} {kept : Array Nat}
+    {db : ClauseDB p T} {prunes : Array (PLit × Nat)}
+    (hinv : ScanInv db0 l doms olds i kept db prunes)
     (holds : ∀ x ∈ olds, x < db0.clauses.size)
     (hi : i < olds.size) {sc : StoredClause p T}
     (hget : db.clauses[olds[i]!]? = some sc) (hdel : sc.deleted = false)
@@ -2230,7 +2757,7 @@ private theorem ScanInv.conflict_post {db0 : ClauseDB p T} {l : PLit}
     ScanPost db0
       { db with watch :=
           db.watch.set! l.idx ((kept.push olds[i]!) ++ olds.extract (i + 1) olds.size) }
-      (.conflict sc.e olds[i]!) := by
+      (.conflict sc.e olds[i]!) l doms := by
   let nw := (kept.push olds[i]!) ++ olds.extract (i + 1) olds.size
   have hrow : ({ db with watch := db.watch.set! l.idx nw }).watchList l.idx = nw :=
     watchList_set_self db l.idx _ hinv.lidx_lt
@@ -2248,7 +2775,7 @@ private theorem ScanInv.conflict_post {db0 : ClauseDB p T} {l : PLit}
     ScanBacked.mono (db := db)
       (db' := { db with watch := db.watch.set! l.idx nw })
       (fun _ => rfl) hrows (fun x hx => hx) hbacked0
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
     · intro i' ids hi' x hx
       by_cases hil : i' = l.idx
@@ -2284,6 +2811,8 @@ private theorem ScanInv.conflict_post {db0 : ClauseDB p T} {l : PLit}
     have hc := clauseMeta.conflictOK hinv.meta_eq hget hdel
     rwa [he] at hc
   · intro ps h
+    simp at h
+  · intro S _ _ ps h
     simp at h
   · intro id'
     exact hinv.meta_eq id'
@@ -2333,6 +2862,13 @@ private theorem getElem!_mem {α : Type} [Inhabited α] {xs : Array α} {i : Nat
   rfl
 
 /-- `scanFind` only returns in-bounds positions. -/
+private theorem scanFind_eq_none_of_binary (doms : Array DomC) (lits : Array PLit)
+    {w1 w2 : Nat} (h2 : lits.size = 2) (hne : w1 ≠ w2) (h1 : w1 < 2)
+    (h2' : w2 < 2) (fuel j : Nat) : scanFind doms lits w1 w2 fuel j = none := by
+  cases fuel with
+  | zero => simp [scanFind]
+  | succ fuel => simp [scanFind, h2, hne, h1, h2']
+
 private theorem scanFind_some_lt (doms : Array DomC) (lits : Array PLit) (w1 w2 : Nat) :
     ∀ (fuel j k : Nat), scanFind doms lits w1 w2 fuel j = some k → k < lits.size := by
   intro fuel
@@ -2344,20 +2880,23 @@ private theorem scanFind_some_lt (doms : Array DomC) (lits : Array PLit) (w1 w2 
       intro j k h
       unfold scanFind at h
       split at h
-      · rename_i hlt
-        split at h
-        · simp at h
-        · split at h
-          · exact ih (j + 1) k h
-          · split at h
-            · rename_i q hq
-              split at h
-              · exact ih (j + 1) k h
-              · simp only [Option.some.injEq] at h
-                subst h
-                exact hlt
-            · exact ih (j + 1) k h
       · simp at h
+      · split at h
+        · rename_i hlt
+          split at h
+          · simp at h
+          · rename_i hge
+            split at h
+            · exact ih (j + 1) k h
+            · split at h
+              · rename_i q hq
+                split at h
+                · exact ih (j + 1) k h
+                · simp only [Option.some.injEq] at h
+                  subst h
+                  exact hlt
+              · exact ih (j + 1) k h
+        · simp at h
 
 /-- A successful replacement search can only happen in a clause of size at
 least two (unit clauses are not watched). -/
@@ -2373,20 +2912,110 @@ private theorem scanFind_some_size (doms : Array DomC) (lits : Array PLit)
       intro j k h
       unfold scanFind at h
       split at h
-      · split at h
-        · simp at h
-        · rename_i hge
-          split at h
-          · exact ih (j + 1) k h
-          · split at h
-            · rename_i q hq
-              split at h
-              · exact ih (j + 1) k h
-              · simp only [Option.some.injEq] at h
-                subst h
-                omega
-            · exact ih (j + 1) k h
       · simp at h
+      · split at h
+        · rename_i hlt
+          split at h
+          · simp at h
+          · rename_i hge
+            split at h
+            · exact ih (j + 1) k h
+            · split at h
+              · rename_i q hq
+                split at h
+                · exact ih (j + 1) k h
+                · simp only [Option.some.injEq] at h
+                  subst h
+                  omega
+              · exact ih (j + 1) k h
+        · simp at h
+
+/-- Auxiliary form of `scanFind_none_false`: the scan has already checked
+all positions below the frontier `j`, and `j + fuel` covers the clause. -/
+private theorem scanFind_none_false_aux (doms : Array DomC) (lits : Array PLit)
+    (w1 w2 : Nat) (h2 : w2 < lits.size) :
+    ∀ (fuel j : Nat),
+      (∀ (k : Nat) (q : PLit), k < j → lits[k]? = some q → k ≠ w1 → k ≠ w2 →
+        falsifiesLitC doms q = true) →
+      scanFind doms lits w1 w2 fuel j = none →
+      ∀ (k : Nat) (q : PLit), k < j + fuel → k < lits.size → lits[k]? = some q →
+        k ≠ w1 → k ≠ w2 → falsifiesLitC doms q = true := by
+  intro fuel
+  induction fuel with
+  | zero =>
+      intro j hpre hnone k q hk hks hq hne1 hne2
+      exact hpre k q hk hq hne1 hne2
+  | succ fuel ih =>
+      intro j hpre hnone k q hk hks hq hne1 hne2
+      unfold scanFind at hnone
+      by_cases hbin : lits.size = 2 ∧ w1 ≠ w2 ∧ w1 < 2 ∧ w2 < 2
+      · rw [if_pos hbin] at hnone
+        obtain ⟨hsz, hne, hlt1, hlt2⟩ := hbin
+        omega
+      · rw [if_neg hbin] at hnone
+        by_cases hj : j < lits.size
+        · rw [if_pos hj] at hnone
+          by_cases hsmall : lits.size < 2
+          · rw [if_pos hsmall] at hnone
+            omega
+          · rw [if_neg hsmall] at hnone
+            by_cases hw : j = w1 ∨ j = w2
+            · rw [if_pos hw] at hnone
+              exact ih (j + 1) (by
+                intro k' q' hk' hq' hne1' hne2'
+                by_cases hlt : k' < j
+                · exact hpre k' q' hlt hq' hne1' hne2'
+                · have hkeq : k' = j := by omega
+                  subst hkeq
+                  rcases hw with h | h
+                  · exact (hne1' h).elim
+                  · exact (hne2' h).elim) hnone k q (by omega) hks hq hne1 hne2
+            · rw [if_neg hw] at hnone
+              cases hget : lits[j]? with
+              | none =>
+                  rw [hget] at hnone
+                  dsimp only at hnone
+                  have hge := Array.getElem?_eq_none_iff.mp hget
+                  exact ih (j + 1) (by
+                    intro k' q' hk' hq' hne1' hne2'
+                    by_cases hlt : k' < j
+                    · exact hpre k' q' hlt hq' hne1' hne2'
+                    · have hkeq : k' = j := by omega
+                      subst hkeq
+                      rw [hget] at hq'
+                      cases hq') hnone k q (by omega) hks hq hne1 hne2
+              | some r =>
+                  rw [hget] at hnone
+                  dsimp only at hnone
+                  by_cases hf : falsifiesLitC doms r
+                  · rw [if_pos hf] at hnone
+                    exact ih (j + 1) (by
+                      intro k' q' hk' hq' hne1' hne2'
+                      by_cases hlt : k' < j
+                      · exact hpre k' q' hlt hq' hne1' hne2'
+                      · have hkeq : k' = j := by omega
+                        subst hkeq
+                        rw [hget] at hq'
+                        cases hq'
+                        exact hf) hnone k q (by omega) hks hq hne1 hne2
+                  · rw [if_neg hf] at hnone
+                    simp at hnone
+        · rw [if_neg hj] at hnone
+          simp at hnone
+          exact hpre k q (by omega) hq hne1 hne2
+
+/-- If `scanFind` with full fuel finds no replacement position, every
+non-watched clause literal is false on the domains. -/
+private theorem scanFind_none_false (doms : Array DomC) (lits : Array PLit)
+    (w1 w2 : Nat) (h2 : w2 < lits.size)
+    (hnone : scanFind doms lits w1 w2 lits.size 0 = none) :
+    ∀ (k : Nat) (q : PLit), lits[k]? = some q → k ≠ w1 → k ≠ w2 →
+      falsifiesLitC doms q = true := by
+  intro k q hk hne1 hne2
+  have hks : k < lits.size := (Array.getElem?_eq_some_iff.mp hk).1
+  exact scanFind_none_false_aux doms lits w1 w2 h2 lits.size 0
+    (fun k' _ hk' _ _ _ => absurd hk' (Nat.not_lt_zero k')) hnone k q
+    (by simpa using hks) hks hk hne1 hne2
 
 /-- Watch-entry validity after moving a watch: grow the table, then push the
 clause id into the new watch row. -/
@@ -2445,10 +3074,10 @@ private theorem scanWatches_post
     (holds : ∀ id ∈ olds, id < db0.clauses.size)
     (_hlidx : l.idx < db0.watch.size) :
     ∀ (fuel i : Nat) (kept : Array Nat) (prunes : Array (PLit × Nat))
-      (db : ClauseDB p T), ScanInv db0 l olds i kept db prunes →
+      (db : ClauseDB p T), ScanInv db0 l doms olds i kept db prunes →
       i + fuel = olds.size →
       ScanPost db0 (scanWatches p T doms l olds fuel i kept prunes db).1
-        (scanWatches p T doms l olds fuel i kept prunes db).2 := by
+        (scanWatches p T doms l olds fuel i kept prunes db).2 l doms := by
   intro fuel
   induction fuel with
   | zero =>
@@ -2501,6 +3130,7 @@ private theorem scanWatches_post
               · exact hidlt
             split
             · -- clause watches l
+              rename_i hwatch
               split
               · -- other watched position out of range
                 rename_i hothernone
@@ -2540,7 +3170,7 @@ private theorem scanWatches_post
                 · -- other is true: keep watching
                   have hnew : olds[i]! ∈ kept.push olds[i]! :=
                     Array.mem_push.mpr (Or.inr rfl)
-                  have hinv' : ScanInv db0 l olds (i + 1) (kept.push olds[i]!) db prunes :=
+                  have hinv' : ScanInv db0 l doms olds (i + 1) (kept.push olds[i]!) db prunes :=
                     hinv.withKept _ hi hsub hnew hpush_lt
                   exact ih (i + 1) _ prunes db hinv' (by omega)
                 · -- other is not true
@@ -2568,7 +3198,7 @@ private theorem scanWatches_post
                         (scanWatches p T doms l olds fuel (i + 1) kept'
                           prunes db3).1
                         (scanWatches p T doms l olds fuel (i + 1) kept'
-                          prunes db3).2
+                          prunes db3).2 l doms
                       have hjlt : j < sc.e.lits.size :=
                         scanFind_some_lt doms sc.e.lits sc.w1 sc.w2 _ 0 j hfind
                       have hcl3 : db3.clauses = db.clauses.set! olds[i]! sc' := by
@@ -2677,8 +3307,8 @@ private theorem scanWatches_post
                             · exact Or.inr ⟨hqidx,
                                 ClauseDB.watchesAt_set_push_self db2 q.idx olds[i]! hqlt⟩
                           exact ⟨hpos1, hpos2⟩
-                      have hinv3 : ScanInv db0 l olds (i + 1) kept' db3 prunes := by
-                        refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+                      have hinv3 : ScanInv db0 l doms olds (i + 1) kept' db3 prunes := by
+                        refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
                         · -- watch_lt
                           have hwl1 : ∀ (i' : Nat) (ids : Array Nat), db1.watch[i']? = some ids →
                               ∀ x ∈ ids, x < db1.clauses.size := by
@@ -2830,6 +3460,8 @@ private theorem scanWatches_post
                             exact hinv.meta_eq k
                         · -- prunes_ok
                           exact hinv.prunes_ok
+                        · -- prunes_allbut
+                          exact hinv.prunes_allbut
                       exact ih (i + 1) kept' prunes db3 hinv3 (by omega)
                     · -- replacement position is out of range
                       rename_i hnonej
@@ -2841,6 +3473,7 @@ private theorem scanWatches_post
                         simp
                       exact hsome hnonej
                   · -- no replacement
+                    rename_i heq
                     split
                     · -- other is false: conflict
                       exact ScanInv.conflict_post hinv holds hi hget hdel hidlt
@@ -2858,9 +3491,88 @@ private theorem scanWatches_post
                             exact ⟨other, Array.mem_of_getElem? hother, rfl⟩
                       have hkeepmem : olds[i]! ∈ kept.push olds[i]! :=
                         Array.mem_push.mpr (Or.inr rfl)
-                      have hinv' : ScanInv db0 l olds (i + 1) (kept.push olds[i]!) db
+                      have hinv' : ScanInv db0 l doms olds (i + 1) (kept.push olds[i]!) db
                           (prunes.push (other, olds[i]!)) :=
-                        { hinv.withKept _ hi hsub hkeepmem hpush_lt with prunes_ok := hnew }
+                        { hinv.withKept _ hi hsub hkeepmem hpush_lt with
+                          prunes_ok := hnew
+                          prunes_allbut := by
+                            intro S hLW hwf q id' hmem
+                            rw [Array.toList_push, List.mem_append,
+                              List.mem_singleton] at hmem
+                            rcases hmem with hmem | ⟨rfl, rfl⟩
+                            · exact hinv.prunes_allbut S hLW hwf q id' hmem
+                            · obtain ⟨sc0, hget0, he0, hdel0⟩ :=
+                                clauseMeta.back hinv.meta_eq hget
+                              refine ⟨sc0, hget0, ?_, ?_, ?_⟩
+                              · rw [hdel0, hdel]
+                              · rw [he0, Array.mem_map]
+                                exact ⟨other, Array.mem_of_getElem? hother, rfl⟩
+                              · intro k r hr hne
+                                rw [he0] at hr
+                                have h2 : sc.w2 < sc.e.lits.size := by
+                                  rcases hwatch with h1 | hcase
+                                  · have ho : sc.e.lits[sc.w2]? = some other := by
+                                      rw [← otherWatchedPos_eq_w2 h1]
+                                      exact hother
+                                    exact (Array.getElem?_eq_some_iff.mp ho).1
+                                  · obtain ⟨q2, hq2, -⟩ := ClauseWatches₂.some hcase
+                                    exact (Array.getElem?_eq_some_iff.mp hq2).1
+                                have hmemlit : ∀ (k : Nat) (r : PLit),
+                                    sc.e.lits[k]? = some r → S.WF r := by
+                                  intro k r hr
+                                  exact hLW olds[i]! sc0 hget0 r (by
+                                    rw [he0]
+                                    exact Array.mem_toList_iff.mpr
+                                      (Array.mem_of_getElem? hr))
+                                by_cases hcw1 : ClauseWatches₁ sc l
+                                · by_cases hk1 : k = sc.w1
+                                  · subst hk1
+                                    obtain ⟨qw, hqw, hqidx⟩ := ClauseWatches₁.some hcw1
+                                    rw [hqw] at hr
+                                    have hreq : r = qw := (Option.some.inj hr).symm
+                                    subst hreq
+                                    exact Or.inl (LitTable.WF_lit_eq
+                                      (hmemlit _ _ hqw) hwf hqidx)
+                                  · by_cases hk2 : k = sc.w2
+                                    · subst hk2
+                                      have ho : sc.e.lits[sc.w2]? = some other := by
+                                        rw [← otherWatchedPos_eq_w2 hcw1]
+                                        exact hother
+                                      exact absurd
+                                        (congrArg PLit.lit
+                                          (Option.some.inj (hr.symm.trans ho))) hne
+                                    · exact Or.inr
+                                        (litValueC_false_evalLit
+                                          ((falsifiesLitC_eq doms r).mp
+                                            (scanFind_none_false doms sc.e.lits sc.w1 sc.w2
+                                              h2 heq k r hr hk1 hk2)))
+                                · have hcw2 : ClauseWatches₂ sc l :=
+                                    hwatch.resolve_left hcw1
+                                  by_cases hk2 : k = sc.w2
+                                  · subst hk2
+                                    obtain ⟨qw, hqw, hqidx⟩ := ClauseWatches₂.some hcw2
+                                    rw [hqw] at hr
+                                    have hreq : r = qw := (Option.some.inj hr).symm
+                                    subst hreq
+                                    exact Or.inl (LitTable.WF_lit_eq
+                                      (hmemlit _ _ hqw) hwf hqidx)
+                                  · by_cases hk1 : k = sc.w1
+                                    · subst hk1
+                                      have hsome : sc.e.lits[sc.w1]? ≠ none := by
+                                        rw [hr]
+                                        simp
+                                      have hp := otherWatchedPos_eq_w1 hcw1 hsome
+                                      have ho : sc.e.lits[sc.w1]? = some other := by
+                                        rw [← hp]
+                                        exact hother
+                                      exact absurd
+                                        (congrArg PLit.lit
+                                          (Option.some.inj (hr.symm.trans ho))) hne
+                                    · exact Or.inr
+                                        (litValueC_false_evalLit
+                                          ((falsifiesLitC_eq doms r).mp
+                                            (scanFind_none_false doms sc.e.lits sc.w1 sc.w2
+                                              h2 heq k r hr hk1 hk2))) }
                       exact ih (i + 1) _ _ db hinv' (by omega)
             · -- clause does not watch l: stale entry
               rename_i hnw
@@ -3088,7 +3800,8 @@ private theorem scanWatches_prov
 shaping. -/
 private theorem propagateLiteral_eq (db : ClauseDB p T) (doms : Array DomC) (l : PLit) :
     db.propagateLiteral p T doms l =
-      (let r := propagateScan p T db doms l; (r.1, r.2.shape)) := rfl
+      (let r := propagateScan p T db doms l;
+       let out := r.2.shape; (r.1.markOutUsed out, out)) := rfl
 
 /-- `ensureWatch` preserves the clause-database invariant. -/
 theorem ClauseDB.ensureWatch_inv (db : ClauseDB p T) (n : Nat) (h : db.Inv) :
@@ -3134,7 +3847,7 @@ database. -/
 private theorem propagateLiteral_scanPost (db : ClauseDB p T) (doms : Array DomC)
     (l : PLit) (hinv : db.Inv) :
     ScanPost (db.ensureWatch (l.idx + 1)) (propagateScan p T db doms l).1
-      (propagateScan p T db doms l).2 := by
+      (propagateScan p T db doms l).2 l doms := by
   unfold propagateScan
   dsimp only
   have hdb0 : (db.ensureWatch (l.idx + 1)).Inv :=
@@ -3175,7 +3888,9 @@ private theorem propagateLiteral_scanProv (db : ClauseDB p T) (doms : Array DomC
 theorem ClauseDB.propagateLiteral_inv (db : ClauseDB p T) (doms : Array DomC)
     (l : PLit) (h : db.Inv) : (db.propagateLiteral p T doms l).1.Inv := by
   have h' := (propagateLiteral_scanPost db doms l h).inv
-  simpa [ClauseDB.propagateLiteral] using h'
+  have h2 := ClauseDB.markOutUsed_inv (propagateScan p T db doms l).1
+    (propagateScan p T db doms l).2.shape h'
+  simpa [ClauseDB.propagateLiteral] using h2
 
 /-- A conflict reported by `propagateLiteral` names a live stored clause whose
 carried clause is returned. -/
@@ -3229,7 +3944,11 @@ theorem ClauseDB.propagateLiteral_clauses_e (db : ClauseDB p T) (doms : Array Do
   have hmeta := (propagateLiteral_scanProv db doms l).meta_eq
   have h1 := clauseMeta.e_eq hmeta id
   rw [ensureWatch_clauses db (l.idx + 1)] at h1
-  simpa [ClauseDB.propagateLiteral] using h1
+  rw [show (db.propagateLiteral p T doms l).1 =
+      (propagateScan p T db doms l).1.markOutUsed
+        (propagateScan p T db doms l).2.shape from rfl]
+  rw [ClauseDB.markOutUsed_clauses_e]
+  simpa using h1
 
 /-- Propagation never changes the deletion flags. -/
 theorem ClauseDB.propagateLiteral_clauses_deleted (db : ClauseDB p T)
@@ -3241,24 +3960,210 @@ theorem ClauseDB.propagateLiteral_clauses_deleted (db : ClauseDB p T)
   have hmeta := (propagateLiteral_scanProv db doms l).meta_eq
   have h1 := clauseMeta.deleted_eq hmeta id
   rw [ensureWatch_clauses db (l.idx + 1)] at h1
-  simpa [ClauseDB.propagateLiteral] using h1
+  rw [show (db.propagateLiteral p T doms l).1 =
+      (propagateScan p T db doms l).1.markOutUsed
+        (propagateScan p T db doms l).2.shape from rfl]
+  rw [ClauseDB.markOutUsed_clauses_deleted]
+  simpa using h1
 
 /-- Propagation never changes the number of clause slots. -/
 theorem ClauseDB.propagateLiteral_clauses_size (db : ClauseDB p T) (doms : Array DomC)
     (l : PLit) : (db.propagateLiteral p T doms l).1.clauses.size = db.clauses.size := by
   have h := (propagateLiteral_scanProv db doms l).size_eq
-  simpa [ClauseDB.propagateLiteral, ensureWatch_clauses] using h
+  rw [show (db.propagateLiteral p T doms l).1 =
+      (propagateScan p T db doms l).1.markOutUsed
+        (propagateScan p T db doms l).2.shape from rfl]
+  rw [ClauseDB.markOutUsed_clauses_size]
+  simpa [ensureWatch_clauses] using h
 
 /-- Propagation never changes the live count. -/
 theorem ClauseDB.propagateLiteral_live (db : ClauseDB p T) (doms : Array DomC)
     (l : PLit) : (db.propagateLiteral p T doms l).1.live = db.live := by
   have h := (propagateLiteral_scanProv db doms l).live_eq
-  simpa [ClauseDB.propagateLiteral, ensureWatch_live] using h
+  rw [show (db.propagateLiteral p T doms l).1 =
+      (propagateScan p T db doms l).1.markOutUsed
+        (propagateScan p T db doms l).2.shape from rfl]
+  rw [ClauseDB.markOutUsed_live]
+  simpa [ensureWatch_live] using h
 
 /-- Propagation never changes the free list. -/
 theorem ClauseDB.propagateLiteral_free (db : ClauseDB p T) (doms : Array DomC)
     (l : PLit) : (db.propagateLiteral p T doms l).1.free = db.free := by
   have h := (propagateLiteral_scanProv db doms l).free_eq
-  simpa [ClauseDB.propagateLiteral, ensureWatch_free] using h
+  rw [show (db.propagateLiteral p T doms l).1 =
+      (propagateScan p T db doms l).1.markOutUsed
+        (propagateScan p T db doms l).2.shape from rfl]
+  rw [ClauseDB.markOutUsed_free]
+  simpa [ensureWatch_free] using h
+
+/-! ## Well-formedness of the stored clause literals
+
+`ClauseDB.LitsWF` records that every literal of every stored clause is
+well-formed in the live intern table.  The packed literal keeps its intern
+index across database updates, so the invariant is monotone in the table and
+transported along every clause-array operation that preserves the carried
+clause values.  It is proof-only. -/
+
+/-- `LitsWF` is monotone under append-only table growth. -/
+theorem ClauseDB.LitsWF.mono_table {S S' : LitTable} {db : ClauseDB p T}
+    (hpre : S.lits.toList <+: S'.lits.toList) (h : db.LitsWF S) :
+    db.LitsWF S' := by
+  intro id sc hget l hl
+  exact LitTable.WF_mono hpre (h id sc hget l hl)
+
+/-- Transport `LitsWF` across a database whose slots carry the same clauses
+pointwise. -/
+theorem ClauseDB.LitsWF.of_map_e {S : LitTable} {db db' : ClauseDB p T}
+    (h : db.LitsWF S)
+    (he : ∀ (id : Nat), (db'.clauses[id]?).map (fun sc : StoredClause p T => sc.e) =
+      (db.clauses[id]?).map (fun sc : StoredClause p T => sc.e)) :
+    db'.LitsWF S := by
+  intro id sc hget l hl
+  have hmap := he id
+  rw [hget, Option.map_some] at hmap
+  cases hget0 : db.clauses[id]? with
+  | none => rw [hget0] at hmap; simp at hmap
+  | some sc0 =>
+      rw [hget0, Option.map_some] at hmap
+      have hee : sc.e = sc0.e := Option.some.inj hmap
+      rw [hee] at hl
+      exact h id sc0 hget0 l hl
+
+/-- `ensureWatch` does not touch the clause array. -/
+theorem ClauseDB.LitsWF.ensureWatch {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (n : Nat) : (db.ensureWatch n).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (fun id => by rw [ensureWatch_clauses])
+
+/-- The all-but contract for every pruning reported by `propagateLiteral`.
+Proof-only companion of `propagateLiteral_prunes`: the witness clause has the
+propagated literal and false literals everywhere else. -/
+theorem ClauseDB.propagateLiteral_prunesAllBut (db : ClauseDB p T)
+    (doms : Array DomC) (l : PLit) (S : LitTable)
+    (hLW : db.LitsWF S) (hwf : S.WF l) (hinv : db.Inv)
+    {ps : Array (PLit × Nat)}
+    (h : (db.propagateLiteral p T doms l).2 = .prune ps) :
+    db.PrunesAllBut doms l ps := by
+  have h' : (propagateScan p T db doms l).2.shape = .prune ps := by
+    simpa [ClauseDB.propagateLiteral] using h
+  obtain ⟨ps0, hout, hps⟩ := WPropOut.shape_prune h'
+  have hp := (propagateLiteral_scanPost db doms l hinv).prune_allbut S
+    (ClauseDB.LitsWF.ensureWatch hLW (l.idx + 1)) hwf ps0 hout
+  rw [← hps] at hp
+  simpa [ClauseDB.PrunesAllBut, ensureWatch_clauses] using hp
+
+
+/-- `addWatchPair` does not touch the clause array. -/
+theorem ClauseDB.LitsWF.addWatchPair {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (id : Nat) (l0 l1 : PLit) :
+    (db.addWatchPair id l0 l1).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (fun j => by rw [ClauseDB.addWatchPair_clauses])
+
+/-- `installWatches` does not touch the clause array. -/
+theorem ClauseDB.installWatches_clauses (db : ClauseDB p T) (id : Nat)
+    (e : EClause p T) :
+    (db.installWatches id e).clauses = db.clauses := by
+  unfold ClauseDB.installWatches
+  split
+  · split
+    · exact ClauseDB.addWatchPair_clauses db id _ _
+    · rfl
+  · rfl
+
+theorem ClauseDB.LitsWF.installWatches {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (id : Nat) (e : EClause p T) :
+    (db.installWatches id e).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (fun j => by rw [ClauseDB.installWatches_clauses])
+
+/-- Appending a slot preserves `LitsWF` when the new clause is well-formed. -/
+theorem ClauseDB.LitsWF.pushBase {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (sc : StoredClause p T)
+    (hsc : ∀ l ∈ sc.e.lits.toList, S.WF l) :
+    (db.pushBase sc).LitsWF S := by
+  intro j sc' hget l hl
+  unfold ClauseDB.pushBase at hget
+  rw [Array.getElem?_push] at hget
+  by_cases hj : j = db.clauses.size
+  · rw [if_pos hj] at hget
+    cases hget
+    exact hsc l hl
+  · rw [if_neg hj] at hget
+    exact h j sc' hget l hl
+
+/-- Overwriting a slot preserves `LitsWF` when the new clause is
+well-formed. -/
+theorem ClauseDB.LitsWF.reuseBase {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (id : Nat) (sc : StoredClause p T)
+    (hsc : ∀ l ∈ sc.e.lits.toList, S.WF l) :
+    (db.reuseBase id sc).LitsWF S := by
+  intro j sc' hget l hl
+  unfold ClauseDB.reuseBase at hget
+  rw [array_getElem?_set!] at hget
+  by_cases hji : id = j
+  · subst j
+    rw [if_pos rfl] at hget
+    by_cases hlt : id < db.clauses.size
+    · rw [if_pos hlt] at hget
+      cases hget
+      exact hsc l hl
+    · rw [if_neg hlt] at hget
+      exact h id sc' hget l hl
+  · rw [if_neg hji] at hget
+    exact h j sc' hget l hl
+
+/-- Adding a clause preserves `LitsWF` when the clause's literals are
+well-formed in the live table. -/
+theorem ClauseDB.LitsWF.add {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (e : EClause p T)
+    (he : ∀ l ∈ e.lits.toList, S.WF l) :
+    (db.add e).1.LitsWF S := by
+  unfold ClauseDB.add
+  dsimp only
+  split
+  · exact ClauseDB.LitsWF.installWatches
+      (ClauseDB.LitsWF.reuseBase h _ (ClauseDB.newStored e) he) _ e
+  · exact ClauseDB.LitsWF.installWatches
+      (ClauseDB.LitsWF.pushBase h (ClauseDB.newStored e) he) _ e
+
+/-- Deleting a slot preserves `LitsWF`. -/
+theorem ClauseDB.LitsWF.delete {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (id : Nat) : (db.delete id).LitsWF S := by
+  intro j sc hget l hl
+  unfold ClauseDB.delete at hget
+  split at hget
+  · rename_i sc0 hget0
+    by_cases hdel : sc0.deleted
+    · rw [if_pos hdel] at hget
+      exact h j sc hget l hl
+    · rw [if_neg hdel] at hget
+      rw [array_getElem?_set!] at hget
+      by_cases hji : id = j
+      · subst j
+        rw [if_pos rfl] at hget
+        by_cases hlt : id < db.clauses.size
+        · rw [if_pos hlt] at hget
+          cases hget
+          exact h id sc0 hget0 l (by simpa using hl)
+        · rw [if_neg hlt] at hget
+          exact h id sc hget l hl
+      · rw [if_neg hji] at hget
+        exact h j sc hget l hl
+  · exact h j sc hget l hl
+
+/-- Marking a clause used preserves `LitsWF`. -/
+theorem ClauseDB.LitsWF.markUsed {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (id : Nat) : (db.markUsed id).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (ClauseDB.markUsed_clauses_e db id)
+
+/-- Marking the clauses of a propagation output used preserves `LitsWF`. -/
+theorem ClauseDB.LitsWF.markOutUsed {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (out : WPropOut p T) : (db.markOutUsed out).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (ClauseDB.markOutUsed_clauses_e db out)
+
+/-- Two-watched-literal propagation preserves `LitsWF`: it only moves
+watches and marks clauses used, never the carried clause values. -/
+theorem ClauseDB.LitsWF.propagateLiteral {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (doms : Array DomC) (l : PLit) :
+    (db.propagateLiteral p T doms l).1.LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (ClauseDB.propagateLiteral_clauses_e db doms l)
 
 end LeanFzn.Engine

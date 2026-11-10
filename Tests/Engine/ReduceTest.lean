@@ -31,7 +31,9 @@ def emptyDom : Domain := { rep := .general [] }
 
 def p : CompiledProblem DomConstraint :=
   { names := [], domains := [emptyDom], constraints := [], objective := (),
-    source := default, toStore := fun _ _ => none }
+    source := default, domainsArray := [emptyDom].toArray,
+    domainsArray_toList := List.toList_toArray,
+    toStore := fun _ _ => none }
 
 def T : LitTable := {}
 
@@ -83,6 +85,11 @@ def deletedAt (db : ClauseDB p T) (id : Nat) : Bool :=
 
 def lbdAt (db : ClauseDB p T) (id : Nat) : Option Nat :=
   (db.clauses[id]?).map (fun sc => sc.lbd)
+
+def usedAt (db : ClauseDB p T) (id : Nat) : Bool :=
+  match db.clauses[id]? with
+  | some sc => sc.used
+  | none => false
 
 /-- Every watch entry points at a live slot. -/
 def watchesOnlyLive (db : ClauseDB p T) : Bool :=
@@ -140,6 +147,7 @@ def lbdChecks : IO Unit := do
   check "lbd: one item" (lbdOfItems #[item 7] == 1)
   check "lbd: distinct levels" (lbdOfItems items5 == 3)
   let a := finishAnalysis p T items5 none 0 (entList (items5.toList.map (fun it => it.lit)))
+    (fun it _ _ => entList _)
   check "lbd: finishAnalysis carries the item LBD" (a.lbd == 3)
   let f := failAnalysis p T 0 "test"
   check "lbd: failed analysis is zero" (f.lbd == 0)
@@ -178,6 +186,20 @@ def reduceChecks : IO Unit := do
   check "reduce: watch lists point only at live slots" (watchesOnlyLive r)
   check "reduce: every live clause is still watched" (liveClausesWatched r)
 
+  -- Usefulness flags are recorded by propagation and cleared after each
+  -- reduction pass.  The final policy keeps the LBD cutoff; usefulness
+  -- variants were measured and rejected, so the flag is diagnostic.
+  let dbUsed := manyDB.markUsed 0
+  check "used: flag set on the named slot" (usedAt dbUsed 0)
+  check "used: neighbour untouched" (!usedAt dbUsed 1)
+  check "used: clause count unchanged"
+    (dbUsed.clauses.size == manyDB.clauses.size)
+  check "used: live count unchanged" (dbUsed.live == manyDB.live)
+  check "used: free list unchanged" (dbUsed.free == manyDB.free)
+  check "used: flags cleared after reduction"
+    ((List.range dbUsed.reduce.clauses.size).all fun id =>
+      !usedAt dbUsed.reduce id)
+
   -- Fewer than 100 candidates: the database is returned unchanged.
   let small := (addTag ({} : ClauseDB p T) 5 3 10).1
   check "reduce: small database is unchanged"
@@ -213,7 +235,7 @@ def mkState (db : ClauseDB p T) (learned nextReduce : Nat) : EngineState p T :=
     queueHigh := #[]
     queueLow := #[]
     inQueue := ByteArray.empty
-    activity := Array.replicate 1 (0.0 : Float)
+    activity := ⟨Array.replicate 1 (0.0 : Float)⟩
     activityHeap := #[]
     phases := #[]
     restarts := 0
@@ -235,7 +257,10 @@ def scheduleChecks : IO Unit := do
   let st1' := maybeReduce st1
   check "schedule: threshold doubles" (st1'.nextReduce == 4000)
   check "schedule: reduction ran" (st1'.db.live == 70)
-  check "schedule: stats still preserved" (st1'.stats == st1.stats)
+  check "schedule: learned count preserved" (st1'.stats.learned == 2000)
+  check "schedule: reduction counter incremented" (st1'.stats.reductions == 1)
+  check "schedule: retired counter records the difference"
+    (st1'.stats.reducedClauses == 60)
   check "schedule: table preserved" (st1'.table.lits.size == st1.table.lits.size)
 
   let st2 := mkState db 800000 800000
@@ -250,6 +275,43 @@ def scheduleChecks : IO Unit := do
     ((maybeReduce st4).nextReduce == st3'.nextReduce &&
       (maybeReduce st4).db.live == st3'.db.live)
 
+/-! ## Transient-reason suffix reclamation -/
+
+def trimChecks : IO Unit := do
+  let ecs : Array (EClause p T) := #[
+    mkClause #[pl 0 (litLe 0 1)],
+    mkClause #[pl 1 (litLe 0 2)],
+    mkClause #[pl 2 (litLe 0 3)],
+    mkClause #[pl 3 (litLe 0 4)],
+    mkClause #[pl 4 (litLe 0 5)],
+    mkClause #[pl 5 (litLe 0 6)]]
+  let e0 : Entry :=
+    { lit := pl 0 (litLe 0 1), level := 0, reason := .reason 1,
+      slot := 0, prev := .bounds 0 10 }
+  let e1 : Entry :=
+    { lit := pl 3 (litLe 0 4), level := 0, reason := .reason 3,
+      slot := 0, prev := .bounds 0 10 }
+  let st := { mkState ({} : ClauseDB p T) 0 2000 with
+    reasons := ecs, trail := #[e0, e1] }
+  let st' := st.trimReasons
+  check "trim: suffix dropped to the trail bound" (st'.reasons.size == 4)
+  check "trim: unreferenced tail slots are gone"
+    (st.reasons.size - st'.reasons.size == 2)
+  check "trim: first trail reason preserved"
+    ((reasonClause? st' e0.reason).map (fun c => c.lits) ==
+      (reasonClause? st e0.reason).map (fun c => c.lits))
+  check "trim: last trail reason preserved"
+    ((reasonClause? st' e1.reason).map (fun c => c.lits) ==
+      (reasonClause? st e1.reason).map (fun c => c.lits))
+  check "trim: trail itself is untouched"
+    (st'.trail.size == st.trail.size &&
+      (st'.trail[0]?).map (fun e => e.reason) == some (.reason 1) &&
+      (st'.trail[1]?).map (fun e => e.reason) == some (.reason 3))
+  check "trim: stats record the reclaimed slots"
+    (st.trimReasonsStats.stats.reasonsTrimmed == 2)
+  check "trim: all-trail-free state keeps every slot"
+    ((({ st with trail := #[] }).trimReasons).reasons.size == 0)
+
 /-! ## End-to-end: a small SAT model and an UNSAT model, reduction forced on -/
 
 def mkProblem (ds : List Dom) (dcs : List DomConstraint) :
@@ -259,6 +321,8 @@ def mkProblem (ds : List Dom) (dcs : List DomConstraint) :
     constraints := dcs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- Two ternary slots multiplied into a fixed 1: decision conflicts force
@@ -283,48 +347,24 @@ def unsatProblem : CompiledProblem DomConstraint := php 4 3
 
 def config : SearchConfig := {}
 
-/-- A copy of `coreSolveFull`'s entry tail with the reduction threshold forced
-to zero, so every decision boundary runs `maybeReduce` from the start.  The
+/-- A copy of `coreSolveFull`'s entry with the reduction threshold forced to
+zero, so every decision boundary runs `maybeReduce` from the start.  The
 solver interface itself is untouched; this is a test-local synthetic state. -/
 def solveReduced (p : CompiledProblem DomConstraint) (o : SearchConfig)
     (fuel : Nat) : CoreResult × EngineStats :=
   let T : LitTable := {}
-  match initState p T with
+  match hinit : initState p T with
   | none => (.gaveUp, { gaveUp := 1 })
   | some st0 =>
-      let st0 : EngineState p T := { st0 with nextReduce := 0 }
-      let prio := annotPrioArray p
-      let orders := LeanFzn.Engine.configOrders p o
-      match addSeedClauses p T st0 with
-      | (st, some _) =>
-          let st := { st with
-            stats := { st.stats with conflicts := st.stats.conflicts + 1 } }
-          (.unsat, st.stats)
-      | (st, none) =>
-          match st.db.emptyConflict? with
-          | some _ => (.unsat, st.stats)
-          | none =>
-              let (db, out) := st.db.propagateUnits p T st.doms
-              match out with
-              | .none =>
-                  let st := { st with db := db }
-                  let (r, st) := search p T st.doms o prio orders st #[] fuel
-                  (r, st.stats)
-              | .prune ps =>
-                  let st := { st with db := db }
-                  let (r, st) := search p T st.doms o prio orders st
-                    (pushClausePrunes #[] ps) fuel
-                  (r, st.stats)
-              | .conflict ec _ =>
-                  let a := analyze p T st.doms st ec fuel
-                  let st := { st with db := db }
-                  if !a.ok then (.gaveUp, { st.stats with gaveUp := 1 })
-                  else
-                    match a.learned with
-                    | none => (.gaveUp, { st.stats with gaveUp := 1 })
-                    | some lc =>
-                        if lc.lits.isEmpty then (.unsat, st.stats)
-                        else (.gaveUp, { st.stats with gaveUp := 1 })
+      let st0' : EngineState p T := { st0 with nextReduce := 0 }
+      have hroot0 : RootInv p T st0.doms st0 :=
+        initState_rootInv hinit LitTable.inv_empty
+      have hroot : RootInv p T st0'.doms st0' :=
+        hroot0.congr rfl rfl (fun s => rfl) rfl rfl rfl rfl rfl rfl
+      have hprops : PropsSound p T st0'.props :=
+        initState_propsSound (st := st0) hinit
+      coreSolveFrom p T o st0' hroot hprops
+        (annotPrioArray p) (configOrders p o) fuel
 
 def noAccepted (p : CompiledProblem DomConstraint) : Bool :=
   (allAssigns p.domains).all fun a => !accepts p a
@@ -360,6 +400,7 @@ def run : IO UInt32 := do
   setLbdChecks
   reduceChecks
   scheduleChecks
+  trimChecks
   endToEndChecks
   IO.println "ReduceTest: OK"
   return 0

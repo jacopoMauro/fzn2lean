@@ -78,7 +78,21 @@ def LitTable.intern (T : LitTable) (l : Literal) : PLit × LitTable :=
   | some i => (⟨i, l⟩, T)
   | none =>
       let i := T.lits.size
-      (⟨i, l⟩, { lits := T.lits.push l, lookup := T.lookup.insert l i })
+      (⟨i, l⟩, { T with
+        lits := T.lits.push l
+        lookup := T.lookup.insert l i
+        neg := T.neg.push 0 })
+
+/-- Intern the negation of a packed literal, reusing the negation-index
+cache when present and recording both directions on a miss.  A cache hit
+returns the recorded index without touching the hash map. -/
+def LitTable.internNeg (T : LitTable) (l : PLit) : PLit × LitTable :=
+  match T.neg[l.idx]? with
+  | some (j + 1) => (⟨j, l.lit.negate⟩, T)
+  | _ =>
+      let (n, T') := T.intern l.lit.negate
+      let neg := (T'.neg.set! l.idx (n.idx + 1)).set! n.idx (l.idx + 1)
+      (n, { T' with neg })
 
 /-- Intern an array of literals left-to-right. -/
 def LitTable.internArray (T : LitTable) (ls : Array Literal) : Array PLit × LitTable :=
@@ -574,7 +588,8 @@ theorem LitTable.intern_of_get?_some {T : LitTable} {l : Literal} {i : Nat}
 theorem LitTable.intern_of_get?_none {T : LitTable} {l : Literal}
     (h : T.lookup.get? l = none) :
     T.intern l = (⟨T.lits.size, l⟩,
-      { lits := T.lits.push l, lookup := T.lookup.insert l T.lits.size }) := by
+      { lits := T.lits.push l, lookup := T.lookup.insert l T.lits.size
+        neg := T.neg.push 0 }) := by
   unfold LitTable.intern
   rw [h]
 
@@ -653,6 +668,30 @@ theorem LitTable.intern_tableWF {T : LitTable} {l : Literal}
       rw [intern_of_get?_some hlook] at hj ⊢
       exact hT l' j hj
 
+/-- The negation cache returns the literal's negation. -/
+theorem LitTable.internNeg_fst_lit (T : LitTable) (l : PLit) :
+    (T.internNeg l).1.lit = l.lit.negate := by
+  unfold LitTable.internNeg
+  split
+  · rfl
+  · exact intern_fst_lit T l.lit.negate
+
+/-- `internNeg` extends the literal table append-only. -/
+theorem LitTable.internNeg_append_only (T : LitTable) (l : PLit) :
+    T.lits.toList <+: (T.internNeg l).2.lits.toList := by
+  unfold LitTable.internNeg
+  split
+  · exact ⟨[], by simp⟩
+  · exact intern_append_only T l.lit.negate
+
+/-- `internNeg` preserves the intern-table invariant. -/
+theorem LitTable.internNeg_tableWF {T : LitTable} {l : PLit}
+    (hT : T.TableWF) : (T.internNeg l).2.TableWF := by
+  unfold LitTable.internNeg
+  split
+  · exact hT
+  · exact intern_tableWF hT
+
 /-- A well-formed pack stays well-formed under an append-only table
 extension. -/
 theorem LitTable.WF_mono {T T' : LitTable} {p : PLit}
@@ -672,6 +711,16 @@ theorem LitTable.WF_mono {T T' : LitTable} {p : PLit}
       List.getElem?_append_left hlen']
   rw [hidx]
   exact h
+
+/-- Two well-formed packed literals with the same intern index denote the
+same literal.  This is the bridge the clause-prune contract needs to turn a
+watch-index match into literal identity. -/
+theorem LitTable.WF_lit_eq {T : LitTable} {q l : PLit}
+    (hq : T.WF q) (hl : T.WF l) (hidx : q.idx = l.idx) : q.lit = l.lit := by
+  unfold LitTable.WF at hq hl
+  rw [hidx] at hq
+  rw [hq] at hl
+  exact Option.some.inj hl
 
 /-! ### Array interning -/
 
@@ -703,58 +752,62 @@ private theorem LitTable.internArray_eq_fold (T : LitTable) (ls : Array Literal)
   rw [← Array.foldl_toList]
   exact list_foldl_intern T #[] ls.toList
 
-/-- Tail-recursive runtime twin of `internArray`.  The literal array and the
-lookup table are carried as separate accumulator arguments so that appending
-a fresh literal pushes into an unshared array; the logical definition
-`internArray` projects and replaces the table field on every step, which
-makes the compiled code copy the whole literal array at each new literal. -/
+/-- Tail-recursive runtime twin of `internArray`.  The literal array, the
+lookup table and the negation cache are carried as separate accumulator
+arguments so that appending a fresh literal pushes into an unshared array;
+the logical definition `internArray` projects and replaces the table field
+on every step, which makes the compiled code copy the whole literal array at
+each new literal. -/
 def LitTable.internListFast (ls : List Literal) (acc : Array PLit)
-    (lits : Array Literal) (lookup : Std.HashMap Literal Nat) :
+    (lits : Array Literal) (lookup : Std.HashMap Literal Nat) (neg : Array Nat) :
     Array PLit × LitTable :=
   match ls with
-  | [] => (acc, ⟨lits, lookup⟩)
+  | [] => (acc, ⟨lits, lookup, neg⟩)
   | l :: ls =>
       match lookup.get? l with
-      | some i => internListFast ls (acc.push ⟨i, l⟩) lits lookup
+      | some i => internListFast ls (acc.push ⟨i, l⟩) lits lookup neg
       | none =>
           let i := lits.size
           internListFast ls (acc.push ⟨i, l⟩) (lits.push l) (lookup.insert l i)
+            (neg.push 0)
 
 /-- The fast list fold agrees with the reference fold. -/
 theorem LitTable.internListFast_eq (ls : List Literal) (acc : Array PLit)
-    (lits : Array Literal) (lookup : Std.HashMap Literal Nat) :
-    internListFast ls acc lits lookup = internFold ⟨lits, lookup⟩ acc ls := by
-  induction ls generalizing acc lits lookup with
+    (lits : Array Literal) (lookup : Std.HashMap Literal Nat) (neg : Array Nat) :
+    internListFast ls acc lits lookup neg = internFold ⟨lits, lookup, neg⟩ acc ls := by
+  induction ls generalizing acc lits lookup neg with
   | nil => rfl
   | cons l ls ih =>
       rw [internListFast, internFold]
       cases h : lookup.get? l with
       | some i =>
           simp only [h, LitTable.intern]
-          exact ih (acc.push ⟨i, l⟩) lits lookup
+          exact ih (acc.push ⟨i, l⟩) lits lookup neg
       | none =>
           simp only [h, LitTable.intern]
           exact ih (acc.push ⟨lits.size, l⟩) (lits.push l) (lookup.insert l lits.size)
+            (neg.push 0)
 
 /-- Tail-recursive runtime twin of `internArray`. -/
 def LitTable.internArrayFast (T : LitTable) (ls : Array Literal) :
     Array PLit × LitTable :=
-  internListFast ls.toList #[] T.lits T.lookup
+  internListFast ls.toList #[] T.lits T.lookup T.neg
 
-/-- Single-literal twin of `intern` that keeps the literal array and lookup
-table as separate arguments, so the append can reuse the array when the
-caller transfers the fields. -/
+/-- Single-literal twin of `intern` that keeps the literal array, lookup
+table and negation cache as separate arguments, so the append can reuse the
+arrays when the caller transfers the fields. -/
 def LitTable.internOneFast (lits : Array Literal)
-    (lookup : Std.HashMap Literal Nat) (l : Literal) : PLit × LitTable :=
+    (lookup : Std.HashMap Literal Nat) (neg : Array Nat) (l : Literal) :
+    PLit × LitTable :=
   match lookup.get? l with
-  | some i => (⟨i, l⟩, ⟨lits, lookup⟩)
+  | some i => (⟨i, l⟩, ⟨lits, lookup, neg⟩)
   | none =>
       let i := lits.size
-      (⟨i, l⟩, ⟨lits.push l, lookup.insert l i⟩)
+      (⟨i, l⟩, ⟨lits.push l, lookup.insert l i, neg.push 0⟩)
 
 /-- The single-literal twin is the reference `intern`. -/
 theorem LitTable.internOneFast_eq (T : LitTable) (l : Literal) :
-    internOneFast T.lits T.lookup l = T.intern l := by
+    internOneFast T.lits T.lookup T.neg l = T.intern l := by
   unfold internOneFast LitTable.intern
   cases h : T.lookup.get? l <;> simp [h]
 
@@ -762,7 +815,7 @@ theorem LitTable.internOneFast_eq (T : LitTable) (l : Literal) :
 theorem LitTable.internArrayFast_eq (T : LitTable) (ls : Array Literal) :
     T.internArrayFast ls = T.internArray ls := by
   rw [internArrayFast, internArray_eq_fold]
-  exact internListFast_eq ls.toList #[] T.lits T.lookup
+  exact internListFast_eq ls.toList #[] T.lits T.lookup T.neg
 
 /-- Compile `internArray` as the tail-recursive twin; proofs keep the
 reference fold. -/
@@ -795,6 +848,199 @@ theorem LitTable.internArray_lits (T : LitTable) (ls : Array Literal) :
     (T.internArray ls).1.toList.map PLit.decode = ls.toList := by
   rw [internArray_eq_fold]
   simpa using internFold_lits T #[] ls.toList
+
+/-- Lookup after `Array.set!`. -/
+theorem array_set!_getElem? {α : Type} (a : Array α) (i j : Nat) (v : α) :
+    (a.set! i v)[j]? = if i = j then (if i < a.size then some v else none) else a[j]? := by
+  change (a.setIfInBounds i v)[j]? = _
+  rw [Array.getElem?_setIfInBounds]
+
+/-- Lookup after two nested `Array.set!`s (the outer write wins on a tie). -/
+theorem array_set!_set!_getElem? {α : Type} (a : Array α) (i j k : Nat) (u v : α) :
+    ((a.set! i u).set! j v)[k]? =
+      if k = j then (if j < a.size then some v else none)
+      else if k = i then (if i < a.size then some u else none)
+      else a[k]? := by
+  rw [array_set!_getElem?]
+  by_cases hkj : k = j
+  · subst hkj
+    simp [Array.size_set!]
+  · rw [if_neg hkj]
+    rw [array_set!_getElem?]
+    by_cases hki : k = i
+    · subst hki
+      simp [Array.size_set!]
+      omega
+    · rw [if_neg hki]
+      rw [if_neg (by omega : ¬ j = k), if_neg (by omega : ¬ i = k)]
+
+/-- The negation cache is semantically consistent with the literal array:
+a cached entry at source index `i` points to an index holding the negation of
+the literal stored at `i`. -/
+def LitTable.NegWF (T : LitTable) : Prop :=
+  ∀ (i j : Nat) (l : Literal), T.neg[i]? = some (j + 1) → T.lits[i]? = some l →
+    T.lits[j]? = some l.negate
+
+/-- Bundled intern-table invariant: the lookup cache is sound, the negation
+cache has exactly one slot per literal, and its entries are consistent. -/
+structure LitTable.Inv (T : LitTable) : Prop where
+  table_wf : T.TableWF
+  neg_size : T.neg.size = T.lits.size
+  neg_wf : T.NegWF
+
+/-- The empty table satisfies the bundled invariant. -/
+theorem LitTable.inv_empty : ({} : LitTable).Inv := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro l i h
+    simp [LitTable.TableWF] at h
+  · rfl
+  · intro i j l hij _
+    simp at hij
+
+/-- Interning one literal preserves the bundled table invariant. -/
+theorem LitTable.intern_inv {T : LitTable} (h : T.Inv) (l : Literal) :
+    (T.intern l).2.Inv := by
+  refine ⟨LitTable.intern_tableWF (l := l) h.table_wf, ?_, ?_⟩
+  · cases hlook : T.lookup.get? l with
+    | some i =>
+        rw [LitTable.intern_of_get?_some hlook]
+        exact h.neg_size
+    | none =>
+        rw [LitTable.intern_of_get?_none hlook]
+        simp only [Array.size_push]
+        have hsz := h.neg_size
+        omega
+  · intro i j m hij him
+    cases hlook : T.lookup.get? l with
+    | some i0 =>
+        rw [LitTable.intern_of_get?_some hlook] at hij him ⊢
+        exact h.neg_wf i j m hij him
+    | none =>
+        rw [LitTable.intern_of_get?_none hlook] at hij him ⊢
+        rw [Array.getElem?_push] at hij
+        split at hij
+        · simp at hij
+        · rename_i hne
+          rw [Array.getElem?_push] at him
+          split at him
+          · rename_i hieq
+            have hlt : i < T.neg.size := (Array.getElem?_eq_some_iff.mp hij).1
+            have hsz := h.neg_size
+            omega
+          · rename_i hne2
+            have h1 := h.neg_wf i j m hij him
+            rw [Array.getElem?_push]
+            have hjlt : j < T.lits.size := (Array.getElem?_eq_some_iff.mp h1).1
+            rw [if_neg (by omega)]
+            exact h1
+
+/-- Interning an array preserves the bundled table invariant. -/
+theorem LitTable.internArray_inv {T : LitTable} (h : T.Inv) (ls : Array Literal) :
+    (T.internArray ls).2.Inv := by
+  rw [LitTable.internArray_eq_fold]
+  have hmain : ∀ (T : LitTable) (acc : Array PLit) (ls : List Literal),
+      T.Inv → (internFold T acc ls).2.Inv := by
+    intro T acc ls
+    induction ls generalizing T acc with
+    | nil => intro hT; exact hT
+    | cons l ls ih =>
+        intro hT
+        simp only [internFold]
+        cases hq : T.intern l with
+        | mk p T' =>
+            refine ih T' (acc.push p) ?_
+            have := LitTable.intern_inv hT l
+            rw [hq] at this
+            exact this
+  exact hmain T #[] ls.toList h
+
+/-- The literal returned by `internNeg` is well formed in the resulting
+table, provided the argument is well formed and the table invariant holds. -/
+theorem LitTable.internNeg_wf {T : LitTable} (h : T.Inv) {l : PLit}
+    (hl : T.WF l) : (T.internNeg l).2.WF (T.internNeg l).1 := by
+  unfold LitTable.internNeg
+  split
+  · rename_i j hij
+    exact h.neg_wf l.idx j l.lit hij hl
+  · exact LitTable.intern_wf (l := l.lit.negate) h.table_wf
+
+/-- The negation cache is consistent after `internNeg`. -/
+theorem LitTable.internNeg_negWF {T : LitTable} (h : T.Inv) {l : PLit}
+    (hl : T.WF l) : (T.internNeg l).2.NegWF := by
+  unfold LitTable.internNeg
+  split
+  · rename_i j hij
+    exact h.neg_wf
+  · rename_i hmiss
+    let n := (T.intern l.lit.negate).1
+    let T' := (T.intern l.lit.negate).2
+    have hT' : T'.Inv := LitTable.intern_inv h l.lit.negate
+    have hnlits : T'.lits[l.idx]? = some l.lit := by
+      unfold T'
+      exact LitTable.WF_mono (LitTable.intern_append_only T l.lit.negate) hl
+    have hnn : T'.lits[n.idx]? = some l.lit.negate := by
+      unfold n T'
+      simpa only [LitTable.WF, LitTable.intern_fst_lit] using
+        LitTable.intern_wf (l := l.lit.negate) h.table_wf
+    intro i j m hij him
+    change (((T'.neg.set! l.idx (n.idx + 1)).set! n.idx (l.idx + 1))[i]?)
+      = some (j + 1) at hij
+    change T'.lits[i]? = some m at him
+    rw [array_set!_set!_getElem?] at hij
+    by_cases hin : i = n.idx
+    · rw [if_pos hin] at hij
+      by_cases hb : n.idx < T'.neg.size
+      · rw [if_pos hb] at hij
+        have hj : j = l.idx := by
+          have := Option.some.inj hij
+          omega
+        subst j
+        have hm : m = l.lit.negate := by
+          rw [hin] at him
+          rw [hnn] at him
+          exact (Option.some.inj him).symm
+        subst m
+        rw [hnlits, Literal.negate_negate]
+      · rw [if_neg hb] at hij
+        simp at hij
+    · rw [if_neg hin] at hij
+      by_cases hil : i = l.idx
+      · rw [if_pos hil] at hij
+        by_cases hb : l.idx < T'.neg.size
+        · rw [if_pos hb] at hij
+          have hj : j = n.idx := by
+            have := Option.some.inj hij
+            omega
+          subst j
+          have hm : m = l.lit := by
+            rw [hil] at him
+            rw [hnlits] at him
+            exact (Option.some.inj him).symm
+          subst m
+          rw [hnn]
+        · rw [if_neg hb] at hij
+          simp at hij
+      · rw [if_neg hil] at hij
+        exact hT'.neg_wf i j m hij him
+
+/-- The negation cache keeps one slot per literal after `internNeg`. -/
+theorem LitTable.internNeg_neg_size {T : LitTable} (h : T.Inv) (l : PLit) :
+    (T.internNeg l).2.neg.size = (T.internNeg l).2.lits.size := by
+  unfold LitTable.internNeg
+  split
+  · exact h.neg_size
+  · dsimp only
+    rw [Array.size_set!, Array.size_set!]
+    exact (LitTable.intern_inv h l.lit.negate).neg_size
+
+/-- `internNeg` preserves the bundled table invariant. -/
+theorem LitTable.internNeg_inv {T : LitTable} (h : T.Inv) {l : PLit}
+    (hl : T.WF l) : (T.internNeg l).2.Inv := by
+  refine ⟨?_, LitTable.internNeg_neg_size h l, LitTable.internNeg_negWF h hl⟩
+  unfold LitTable.internNeg
+  split
+  · exact h.table_wf
+  · exact (LitTable.intern_inv h l.lit.negate).table_wf
 
 /-- The decoded clause of an interned array is the input literal list.
 This is the form N5/N6 use to build an `EClause.ofLits`. -/
@@ -885,6 +1131,261 @@ theorem LitTable.internArray_wf {T : LitTable} (hT : T.TableWF)
   rw [internArray_eq_fold]
   exact (internFold_tableWF T #[] ls.toList hT
     (by intro j p hj; simp at hj)).2
+
+/-! ### Hinted clause interning -/
+
+/-- A pack is already interned when the live table maps its index to its
+carried literal. -/
+def LitTable.PackOK (T : LitTable) (l : PLit) : Prop :=
+  T.lits[l.idx]? = some l.lit
+
+/-- Intern a pack, reusing its index when the table already maps that index
+to the carried literal.  The index is only a hint: a stale or placeholder
+index falls back to the hash-map `intern`. -/
+def LitTable.internPack (T : LitTable) (l : PLit) : PLit × LitTable :=
+  if T.lits[l.idx]? == some l.lit then (l, T) else T.intern l.lit
+
+/-- The literal component of a hinted intern is unchanged. -/
+theorem LitTable.internPack_fst_lit (T : LitTable) (l : PLit) :
+    (T.internPack l).1.lit = l.lit := by
+  unfold internPack
+  split
+  · rfl
+  · exact LitTable.intern_fst_lit T l.lit
+
+/-- Hinted interning extends the table append-only. -/
+theorem LitTable.internPack_append_only (T : LitTable) (l : PLit) :
+    T.lits.toList <+: (T.internPack l).2.lits.toList := by
+  unfold internPack
+  split
+  · exact ⟨[], by simp⟩
+  · exact LitTable.intern_append_only T l.lit
+
+/-- Hinted interning preserves the hash-map well-formedness. -/
+theorem LitTable.internPack_tableWF {T : LitTable} (hT : T.TableWF)
+    (l : PLit) : (T.internPack l).2.TableWF := by
+  unfold internPack
+  split
+  · exact hT
+  · exact LitTable.intern_tableWF hT
+
+/-- Hinted interning preserves the bundled table invariant. -/
+theorem LitTable.internPack_inv {T : LitTable} (hT : T.Inv)
+    (l : PLit) : (T.internPack l).2.Inv := by
+  unfold internPack
+  split
+  · exact hT
+  · exact LitTable.intern_inv hT l.lit
+
+/-- The returned pack is well formed in the returned table. -/
+theorem LitTable.internPack_wf {T : LitTable} (hT : T.TableWF)
+    (l : PLit) : (T.internPack l).2.WF (T.internPack l).1 := by
+  unfold internPack
+  split
+  · rename_i h
+    exact beq_iff_eq.mp h
+  · exact LitTable.intern_wf hT
+
+/-- The list fold underlying `internPacks` (proof-only helper). -/
+private def LitTable.internPackFold (T : LitTable) (acc : Array PLit) :
+    List PLit → Array PLit × LitTable
+  | [] => (acc, T)
+  | l :: ls =>
+      let q := T.internPack l
+      internPackFold q.2 (acc.push q.1) ls
+
+/-- Intern an array of packed literals left-to-right, reusing indices that
+the table already validates. -/
+def LitTable.internPacks (T : LitTable) (ls : Array PLit) :
+    Array PLit × LitTable :=
+  internPackFold T #[] ls.toList
+
+/-- The decoded literals of the hinted fold are the accumulated literals
+followed by the remaining input. -/
+private theorem LitTable.internPackFold_lits (T : LitTable) (acc : Array PLit)
+    (ls : List PLit) :
+    (internPackFold T acc ls).1.toList.map PLit.decode =
+      acc.toList.map PLit.decode ++ ls.map PLit.decode := by
+  induction ls generalizing T acc with
+  | nil => simp [internPackFold]
+  | cons l ls ih =>
+      simp only [internPackFold]
+      cases hq : T.internPack l with
+      | mk p T' =>
+          rw [ih T' (acc.push p)]
+          have hp : PLit.decode p = PLit.decode l := by
+            have := LitTable.internPack_fst_lit T l
+            rw [hq] at this
+            exact this
+          simp [Array.toList_push, hp]
+
+/-- The hinted fold denotes exactly the input literal list. -/
+theorem LitTable.internPacks_lits (T : LitTable) (ls : Array PLit) :
+    (T.internPacks ls).1.toList.map PLit.decode = ls.toList.map PLit.decode := by
+  unfold internPacks
+  simpa using LitTable.internPackFold_lits T #[] ls.toList
+
+/-- The hinted fold extends the table append-only. -/
+private theorem LitTable.internPackFold_append_only (T : LitTable)
+    (acc : Array PLit) (ls : List PLit) :
+    T.lits.toList <+: (internPackFold T acc ls).2.lits.toList := by
+  induction ls generalizing T acc with
+  | nil => exact ⟨[], by simp [internPackFold]⟩
+  | cons l ls ih =>
+      simp only [internPackFold]
+      cases hq : T.internPack l with
+      | mk p T' =>
+          have h1 := LitTable.internPack_append_only T l
+          rw [hq] at h1
+          exact h1.trans (ih T' (acc.push p))
+
+/-- Hinted interning an array extends the table append-only. -/
+theorem LitTable.internPacks_append_only (T : LitTable) (ls : Array PLit) :
+    T.lits.toList <+: (T.internPacks ls).2.lits.toList := by
+  unfold internPacks
+  exact LitTable.internPackFold_append_only T #[] ls.toList
+
+/-- Combined fold invariant: the result table is well-formed and every
+returned pack is well-formed in it. -/
+private theorem LitTable.internPackFold_tableWF (T : LitTable)
+    (acc : Array PLit) (ls : List PLit) (hT : T.TableWF)
+    (hacc : ∀ (j : Nat) p, acc[j]? = some p → T.WF p) :
+    (internPackFold T acc ls).2.TableWF ∧
+      (∀ (j : Nat) p, (internPackFold T acc ls).1[j]? = some p →
+        (internPackFold T acc ls).2.WF p) := by
+  induction ls generalizing T acc with
+  | nil => exact ⟨hT, hacc⟩
+  | cons l ls ih =>
+      simp only [internPackFold]
+      cases hq : T.internPack l with
+      | mk p T' =>
+          have hT' : T'.TableWF := by
+            have := LitTable.internPack_tableWF (T := T) hT l
+            rw [hq] at this
+            exact this
+          have hp : T'.WF p := by
+            have := LitTable.internPack_wf (T := T) hT l
+            rw [hq] at this
+            exact this
+          have hpre : T.lits.toList <+: T'.lits.toList := by
+            have := LitTable.internPack_append_only T l
+            rw [hq] at this
+            exact this
+          have hacc' : ∀ (j : Nat) q, (acc.push p)[j]? = some q → T'.WF q := by
+            intro j q hj
+            rw [Array.getElem?_push] at hj
+            by_cases hjeq : j = acc.size
+            · rw [if_pos hjeq] at hj
+              simp only [Option.some.injEq] at hj
+              subst q
+              exact hp
+            · rw [if_neg hjeq] at hj
+              exact WF_mono hpre (hacc j q hj)
+          exact ih T' (acc.push p) hT' hacc'
+
+/-- Hinted interning preserves the hash-map well-formedness. -/
+theorem LitTable.internPacks_tableWF {T : LitTable} (hT : T.TableWF)
+    (ls : Array PLit) : (T.internPacks ls).2.TableWF := by
+  unfold internPacks
+  exact (LitTable.internPackFold_tableWF T #[] ls.toList hT
+    (by intro j p hj; simp at hj)).1
+
+/-- Every pack returned by hinted interning is well formed in the returned
+table. -/
+theorem LitTable.internPacks_wf {T : LitTable} (hT : T.TableWF)
+    (ls : Array PLit) :
+    ∀ (i : Nat) (p : PLit), (T.internPacks ls).1[i]? = some p →
+      (T.internPacks ls).2.WF p := by
+  unfold internPacks
+  exact (LitTable.internPackFold_tableWF T #[] ls.toList hT
+    (by intro j p hj; simp at hj)).2
+
+/-- The hinted fold preserves the bundled table invariant. -/
+private theorem LitTable.internPackFold_inv (T : LitTable)
+    (acc : Array PLit) (ls : List PLit) (hT : T.Inv) :
+    (internPackFold T acc ls).2.Inv := by
+  induction ls generalizing T acc with
+  | nil => exact hT
+  | cons l ls ih =>
+      simp only [internPackFold]
+      cases hq : T.internPack l with
+      | mk p T' =>
+          have := LitTable.internPack_inv hT l
+          rw [hq] at this
+          exact ih T' (acc.push p) this
+
+/-- Hinted interning an array preserves the bundled table invariant. -/
+theorem LitTable.internPacks_inv {T : LitTable} (hT : T.Inv)
+    (ls : Array PLit) : (T.internPacks ls).2.Inv := by
+  unfold internPacks
+  exact LitTable.internPackFold_inv T #[] ls.toList hT
+
+/-- Tail-recursive runtime twin of `internPacks`.  A valid hint is reused
+without touching the hash map; otherwise the literal is interned exactly as
+`internPack` does. -/
+def LitTable.internPackListFast (ls : List PLit) (acc : Array PLit)
+    (lits : Array Literal) (lookup : Std.HashMap Literal Nat) (neg : Array Nat) :
+    Array PLit × LitTable :=
+  match ls with
+  | [] => (acc, ⟨lits, lookup, neg⟩)
+  | l :: ls =>
+      if lits[l.idx]? == some l.lit then
+        internPackListFast ls (acc.push l) lits lookup neg
+      else
+        match lookup.get? l.lit with
+        | some i =>
+            internPackListFast ls (acc.push ⟨i, l.lit⟩) lits lookup neg
+        | none =>
+            let i := lits.size
+            internPackListFast ls (acc.push ⟨i, l.lit⟩) (lits.push l.lit)
+              (lookup.insert l.lit i) (neg.push 0)
+
+/-- The fast hinted list fold agrees with the reference fold. -/
+theorem LitTable.internPackListFast_eq (ls : List PLit) (acc : Array PLit)
+    (lits : Array Literal) (lookup : Std.HashMap Literal Nat) (neg : Array Nat) :
+    internPackListFast ls acc lits lookup neg =
+      internPackFold ⟨lits, lookup, neg⟩ acc ls := by
+  induction ls generalizing acc lits lookup neg with
+  | nil => rfl
+  | cons l ls ih =>
+      rw [internPackListFast]
+      by_cases h : (lits[l.idx]? == some l.lit) = true
+      · rw [if_pos h]
+        have hp : LitTable.internPack ⟨lits, lookup, neg⟩ l =
+            (l, ⟨lits, lookup, neg⟩) := by
+          unfold LitTable.internPack
+          rw [if_pos h]
+        rw [internPackFold, hp]
+        exact ih (acc.push l) lits lookup neg
+      · rw [if_neg h]
+        cases hl : lookup.get? l.lit with
+        | some i =>
+            have hp : LitTable.internPack ⟨lits, lookup, neg⟩ l =
+                (⟨i, l.lit⟩, ⟨lits, lookup, neg⟩) := by
+              unfold LitTable.internPack LitTable.intern
+              rw [if_neg h, hl]
+            rw [internPackFold, hp]
+            exact ih (acc.push ⟨i, l.lit⟩) lits lookup neg
+        | none =>
+            have hp : LitTable.internPack ⟨lits, lookup, neg⟩ l =
+                (⟨lits.size, l.lit⟩,
+                  ⟨lits.push l.lit, lookup.insert l.lit lits.size, neg.push 0⟩) := by
+              unfold LitTable.internPack LitTable.intern
+              rw [if_neg h, hl]
+            rw [internPackFold, hp]
+            exact ih (acc.push ⟨lits.size, l.lit⟩) (lits.push l.lit)
+              (lookup.insert l.lit lits.size) (neg.push 0)
+
+/-- Tail-recursive runtime twin of `internPacks`. -/
+def LitTable.internPacksFast (T : LitTable) (ls : Array PLit) :
+    Array PLit × LitTable :=
+  internPackListFast ls.toList #[] T.lits T.lookup T.neg
+
+/-- The fast hinted array fold is the reference one. -/
+theorem LitTable.internPacksFast_eq (T : LitTable) (ls : Array PLit) :
+    T.internPacksFast ls = T.internPacks ls := by
+  unfold internPacksFast internPacks
+  exact LitTable.internPackListFast_eq ls.toList #[] T.lits T.lookup T.neg
 
 /-! ## Evaluation bridge -/
 

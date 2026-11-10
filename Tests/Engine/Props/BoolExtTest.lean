@@ -36,6 +36,8 @@ def mkProblem (ds : List Dom) (cs : List DomConstraint) : CompiledProblem DomCon
     constraints := cs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- Convert domains the way the engine does. -/
@@ -379,6 +381,26 @@ def checkArrFix : IO Unit :=
 def checkArrMalformed : IO Unit :=
   checkFix "array non-Boolean source fix" (outArr (view3 bcInt bcB bcB))
 
+def outArrFast (view : EngineView) : PropOut pArr ({} : LitTable) :=
+  (arrayBoolAndPropFast pArr ({} : LitTable) [0, 1] 2 hmemArr).run view
+
+/-- The closed-form propagator emits exactly the enumerating plan's
+conflict clause and prune units/reasons on every two-source view over
+free, fixed-false and fixed-true Boolean domains. -/
+def checkArrFastAgrees : IO Unit := do
+  for d0 in [bcB, bcF, bcT] do
+    for d1 in [bcB, bcF, bcT] do
+      for d2 in [bcB, bcF, bcT] do
+        let view := view3 d0 d1 d2
+        check s!"array fast/slow agree {repr view.doms}"
+          (sameOutput (outArr view) (outArrFast view))
+  check "array fast/slow agree empty"
+    (sameOutput (outArrEmpty (view2 bcB bcB))
+      ((arrayBoolAndPropFast pArrEmpty ({} : LitTable) [] 0 hmemArrEmpty).run
+        (view2 bcB bcB)))
+  check "array fast/slow agree non-Boolean"
+    (sameOutput (outArr (view3 bcInt bcB bcB)) (outArrFast (view3 bcInt bcB bcB)))
+
 /-! ## 6. Malformed fixed-arity inputs -/
 
 def checkMalformed : IO Unit := do
@@ -651,6 +673,7 @@ def main : IO UInt32 := do
   checkArrConflict
   checkArrFix
   checkArrMalformed
+  checkArrFastAgrees
   checkMalformed
   checkDifferentials
   IO.println "BoolExtTest: OK"

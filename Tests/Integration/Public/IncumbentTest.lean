@@ -4,14 +4,15 @@ File: Tests/Integration/Public/IncumbentTest.lean
 N15 runtime tests for incumbent-guided Core rounds: `seedPhases` maps a
 previous incumbent to the saved-phase array, `selectValue` under
 `--val=incumbent` tries that phase for every variable strategy, and the
-entries `coreSolveFullWith` / `coreSolveWith` / `coreVerdictWith` honour
-it end to end.  The linear Core gate accepts `--val=incumbent`; the seeded
-entry still refuses it because it has no phase seed yet.
+entries `coreSolveFullWith` / `coreSolveWith` / `coreVerdictWith` and
+`coreSolveSeed` honour it end to end.  Both the linear and the seeded Core
+gate accept `--val=incumbent`.
 
 Run with:
   lake env lean --run Tests/Integration/Public/IncumbentTest.lean
 -/
 import LeanFzn.Integration.Public.Optimize
+import LeanFzn.Engine.Incremental
 import LeanFzn.Parser.Parser
 
 open LeanFzn LeanFzn.Compiler LeanFzn.Semantics LeanFzn.Solver.Core
@@ -38,6 +39,8 @@ def mkProblem (ds : List Dom) (dcs : List DomConstraint) :
     constraints := dcs
     objective := ()
     source := default
+    domainsArray := ds.toArray
+    domainsArray_toList := List.toList_toArray
     toStore := fun _ _ => none }
 
 /-- One free integer slot `0..3`. -/
@@ -80,6 +83,11 @@ def entryChecks : IO Unit := do
       check s!"entry: min ignores the seed, got {repr b}" (b == [.int 0])
       check s!"entry: first round without a seed picks 0, got {repr c}" (c == [.int 0])
   | _, _, _ => fail "entry: free problem did not return SAT"
+  match coreSolveSeed freeProblem (cfg .minc .incumbent) (some [.int 3]) 100
+      (CoreSeed.initial freeProblem) with
+  | (.sat a, _, _) =>
+      check s!"seeded entry: incumbent phase picks 3, got {repr a}" (a == [.int 3])
+  | _ => fail "seeded entry: free problem did not return SAT"
   match coreVerdictWith (some [.int 3]) freeProblem (cfg .minc .incumbent) with
   | .sat a =>
       check s!"verdict: seeded verdict returns the incumbent, got {repr a}"
@@ -92,12 +100,12 @@ def entryChecks : IO Unit := do
         (a == [.int 3])
   | _ => fail "solver: solveWith is not SAT"
 
-/-- The option gate: linear accepts the incumbent route, seeded refuses it. -/
+/-- The option gate: both drivers accept the incumbent route. -/
 def gateChecks : IO Unit := do
   check "gate: linear core accepts --val=incumbent"
     (gateOk { engine := .core, val := .incumbent, opt := .linear })
-  check "gate: seeded core rejects --val=incumbent"
-    (!gateOk { engine := .core, val := .incumbent, opt := .seeded })
+  check "gate: seeded core accepts --val=incumbent"
+    (gateOk { engine := .core, val := .incumbent, opt := .seeded })
 
 /-- A small optimization model runs end to end under the incumbent route and
 reaches the same optimum as the incumbent-free minimum route. -/

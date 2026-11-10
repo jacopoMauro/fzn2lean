@@ -40,7 +40,7 @@ def insertPending (st : EngineState p T) (item : Pending) :
         let st := trailPush st
           { lit := l, level := st.level, reason := item.reason, slot := slot, prev := d }
         let st := emitSlot st slot d d'
-        let (neg, st) := canonLit st l.negate
+        let (neg, st) := canonNegLit st l
         (st, none, some neg, false)
 
 /-- Turn a propagator's `prune` array into pending assignments, interning

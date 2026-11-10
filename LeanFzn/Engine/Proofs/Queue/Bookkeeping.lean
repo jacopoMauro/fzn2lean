@@ -17,37 +17,37 @@ theorem insertPending_reasons {st : EngineState p T} (item : Pending) :
     (insertPending st item).1.reasons = st.reasons := by
   unfold insertPending
   dsimp only
-  repeat' (first | split | simp [canonLit_reasons, canonClause_reasons, trailPush_reasons, emitSlot_reasons])
+  repeat' (first | split | simp [canonLit_reasons, canonNegLit_reasons, canonClause_reasons, trailPush_reasons, emitSlot_reasons])
 
 theorem insertPending_props {st : EngineState p T} (item : Pending) :
     (insertPending st item).1.props = st.props := by
   unfold insertPending
   dsimp only
-  repeat' (first | split | simp [canonLit_props, canonClause_props, trailPush_props, emitSlot_props])
+  repeat' (first | split | simp [canonLit_props, canonNegLit_props, canonClause_props, trailPush_props, emitSlot_props])
 
 theorem insertPending_subs {st : EngineState p T} (item : Pending) :
     (insertPending st item).1.subs = st.subs := by
   unfold insertPending
   dsimp only
-  repeat' (first | split | simp [canonLit_subs, canonClause_subs, trailPush_subs, emitSlot_subs])
+  repeat' (first | split | simp [canonLit_subs, canonNegLit_subs, canonClause_subs, trailPush_subs, emitSlot_subs])
 
 theorem insertPending_level {st : EngineState p T} (item : Pending) :
     (insertPending st item).1.level = st.level := by
   unfold insertPending
   dsimp only
-  repeat' (first | split | simp [canonLit_level, canonClause_level, trailPush_level, emitSlot_level])
+  repeat' (first | split | simp [canonLit_level, canonNegLit_level, canonClause_level, trailPush_level, emitSlot_level])
 
 theorem insertPending_levelStart {st : EngineState p T} (item : Pending) :
     (insertPending st item).1.levelStart = st.levelStart := by
   unfold insertPending
   dsimp only
-  repeat' (first | split | simp [canonLit_levelStart, canonClause_levelStart, trailPush_levelStart, emitSlot_levelStart])
+  repeat' (first | split | simp [canonLit_levelStart, canonNegLit_levelStart, canonClause_levelStart, trailPush_levelStart, emitSlot_levelStart])
 
 theorem insertPending_db {st : EngineState p T} (item : Pending) :
     (insertPending st item).1.db = st.db := by
   unfold insertPending
   dsimp only
-  repeat' (first | split | simp [canonLit_db, canonClause_db, trailPush_db, emitSlot_db])
+  repeat' (first | split | simp [canonLit_db, canonNegLit_db, canonClause_db, trailPush_db, emitSlot_db])
 
 theorem insertPending_table_append_only {st : EngineState p T} (item : Pending) :
     st.table.lits.toList <+: (insertPending st item).1.table.lits.toList := by
@@ -75,12 +75,12 @@ theorem insertPending_table_append_only {st : EngineState p T} (item : Pending) 
           propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
       let st3 : EngineState p T := trailPush st2 e
       let st4 : EngineState p T := emitSlot st3 slot d d'
-      change st.table.lits.toList <+: (canonLit st4 l.negate).2.table.lits.toList
+      change st.table.lits.toList <+: (canonNegLit st4 l).2.table.lits.toList
       have h01 : st.table.lits.toList <+: st1.table.lits.toList :=
         canonLit_table_append_only st item.lit
       have h14 : st1.table.lits.toList <+: st4.table.lits.toList := by
         simp [st2, st3, st4, trailPush_table, emitSlot_table]
-      exact h01.trans (h14.trans (canonLit_table_append_only st4 l.negate))
+      exact h01.trans (h14.trans (canonNegLit_table_append_only st4 l))
 
 theorem insertPending_tableWF {st : EngineState p T} (hT : st.table.TableWF) (item : Pending) :
     (insertPending st item).1.table.TableWF := by
@@ -108,11 +108,47 @@ theorem insertPending_tableWF {st : EngineState p T} (hT : st.table.TableWF) (it
           propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
       let st3 : EngineState p T := trailPush st2 e
       let st4 : EngineState p T := emitSlot st3 slot d d'
-      change (canonLit st4 l.negate).2.table.TableWF
+      change (canonNegLit st4 l).2.table.TableWF
       have h1 : st1.table.TableWF := canonLit_tableWF st item.lit hT
       have h4 : st4.table.TableWF := by
         simpa [st2, st3, st4, trailPush_table, emitSlot_table] using h1
-      exact canonLit_tableWF st4 l.negate h4
+      exact canonNegLit_tableWF st4 l h4
+
+theorem insertPending_table_inv {st : EngineState p T} (hT : st.table.Inv) (item : Pending) :
+    (insertPending st item).1.table.Inv := by
+  unfold insertPending
+  dsimp only
+  split
+  · exact canonLit_table_inv st item.lit hT
+  · split
+    · exact canonClause_table_inv _ _ (canonLit_table_inv st item.lit hT)
+    · exact canonLit_table_inv st item.lit hT
+  · split
+    · split
+      · exact canonClause_table_inv _ _ (canonLit_table_inv st item.lit hT)
+      · exact canonLit_table_inv st item.lit hT
+    · rename_i hz
+      let st1 : EngineState p T := (canonLit st item.lit).2
+      let l : PLit := (canonLit st item.lit).1
+      let slot : Slot := l.slot
+      let d : DomC := st1.doms.getD slot DomC.empty
+      let d' : DomC := d.applyLit l.lit
+      let e : Entry := { lit := l, level := st1.level, reason := item.reason, slot := slot, prev := d }
+      let st2 : EngineState p T := { st1 with
+        doms := st1.doms.set! slot d',
+        stats := { st1.stats with
+          propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
+      let st3 : EngineState p T := trailPush st2 e
+      let st4 : EngineState p T := emitSlot st3 slot d d'
+      change (canonNegLit st4 l).2.table.Inv
+      have h1 : st1.table.Inv := canonLit_table_inv st item.lit hT
+      have h4 : st4.table.Inv := by
+        simpa [st2, st3, st4, trailPush_table, emitSlot_table] using h1
+      have hwf1 : st1.table.WF l := by
+        simpa [st1, l] using canonLit_wf st item.lit hT.table_wf
+      have hwf4 : st4.table.WF l := by
+        simpa [st2, st3, st4, trailPush_table, emitSlot_table] using hwf1
+      exact canonNegLit_table_inv st4 l h4 hwf4
 
 theorem insertPending_trail_push {st : EngineState p T} (item : Pending)
     (h1 : ((canonLit st item.lit).2.doms.getD (canonLit st item.lit).1.slot DomC.empty).evalLit
@@ -142,21 +178,23 @@ theorem insertPending_trail_push {st : EngineState p T} (item : Pending)
       propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
   let st3 : EngineState p T := trailPush st2 e
   let st4 : EngineState p T := emitSlot st3 slot d d'
-  change ∃ e' : Entry, (canonLit st4 l.negate).2.trail = st.trail.push e' ∧
+  change ∃ e' : Entry, (canonNegLit st4 l).2.trail = st.trail.push e' ∧
     e'.slot = item.lit.slot ∧
     e'.prev = st.doms.getD item.lit.slot DomC.empty ∧
     e'.level = st.level ∧
     e'.lit = l ∧
     e'.reason = item.reason ∧
-    (canonLit st4 l.negate).2.trail.size = st.trail.size + 1
+    (canonNegLit st4 l).2.trail.size = st.trail.size + 1
   refine ⟨e, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · simp [st4, st3, st2, st1, e, trailPush, emitSlot_trail, canonLit_trail]
+  · rw [canonNegLit_trail]
+    simp [st4, st3, st2, st1, e, trailPush, emitSlot_trail, canonLit_trail]
   · simp [e, slot, l, PLit.slot, canonLit_lit]
   · simp [e, d, st1, l, slot, PLit.slot, canonLit_doms, canonLit_lit]
   · simp [e, st1, canonLit_level]
   · simp [e]
   · simp [e]
-  · simp [st4, st3, st2, st1, e, trailPush, emitSlot_trail, canonLit_trail]
+  · rw [canonNegLit_trail]
+    simp [st4, st3, st2, st1, e, trailPush, emitSlot_trail, canonLit_trail]
 
 theorem insertPending_trail_doms {st : EngineState p T} (item : Pending)
     (h1 : ((canonLit st item.lit).2.doms.getD (canonLit st item.lit).1.slot DomC.empty).evalLit
@@ -182,8 +220,9 @@ theorem insertPending_trail_doms {st : EngineState p T} (item : Pending)
       propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
   let st3 : EngineState p T := trailPush st2 e
   let st4 : EngineState p T := emitSlot st3 slot d d'
-  change (canonLit st4 l.negate).2.doms =
+  change (canonNegLit st4 l).2.doms =
     st.doms.set! item.lit.slot ((st.doms.getD item.lit.slot DomC.empty).applyLit item.lit.lit)
+  rw [canonNegLit_doms]
   simp [st4, st3, st2, st1, d, d', l, slot, e, PLit.slot, canonLit_doms, canonLit_lit, trailPush_doms, emitSlot_doms]
 
 theorem insertPending_failed {st : EngineState p T} (item : Pending)
@@ -194,6 +233,63 @@ theorem insertPending_failed {st : EngineState p T} (item : Pending)
   dsimp only at h
   repeat' (first | split at h)
   all_goals simp_all
+
+/-- When `insertPending` reports a propagated negation, that negation is the
+negation of the inserted literal. -/
+theorem insertPending_neg_lit {st : EngineState p T} (item : Pending)
+    {st' : EngineState p T} {conf : Option (EClause p T)} {nl : PLit} {failed : Bool}
+    (h : insertPending st item = (st', conf, some nl, failed)) :
+    nl.lit = item.lit.lit.negate := by
+  unfold insertPending at h
+  dsimp only at h
+  repeat' (first | split at h)
+  all_goals
+    injection h with hst hrest
+    injection hrest with hconf hrest
+    injection hrest with hneg hfailed
+    cases hneg
+    try rw [canonNegLit_lit, canonLit_lit]
+
+/-- When `insertPending` pushes a literal and reports its negation, that
+negation is well formed in the resulting intern table. -/
+theorem insertPending_neg_wf {st : EngineState p T} (hT : st.table.Inv) (item : Pending)
+    {st' : EngineState p T} {conf : Option (EClause p T)} {nl : PLit} {failed : Bool}
+    (h : insertPending st item = (st', conf, some nl, failed)) :
+    st'.table.WF nl := by
+  unfold insertPending at h
+  dsimp only at h
+  split at h
+  · cases h
+  · split at h
+    · cases h
+    · cases h
+  · split at h
+    · split at h
+      · cases h
+      · cases h
+    · rename_i hz
+      cases h
+      let st1 : EngineState p T := (canonLit st item.lit).2
+      let l : PLit := (canonLit st item.lit).1
+      let slot : Slot := l.slot
+      let d : DomC := st1.doms.getD slot DomC.empty
+      let d' : DomC := d.applyLit l.lit
+      let e : Entry := { lit := l, level := st1.level, reason := item.reason, slot := slot, prev := d }
+      let st2 : EngineState p T := { st1 with
+        doms := st1.doms.set! slot d',
+        stats := { st1.stats with
+          propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
+      let st3 : EngineState p T := trailPush st2 e
+      let st4 : EngineState p T := emitSlot st3 slot d d'
+      change (canonNegLit st4 l).2.table.WF (canonNegLit st4 l).1
+      have h1 : st1.table.Inv := canonLit_table_inv st item.lit hT
+      have h4 : st4.table.Inv := by
+        simpa [st2, st3, st4, trailPush_table, emitSlot_table] using h1
+      have hwf1 : st1.table.WF l := by
+        simpa [st1, l] using canonLit_wf st item.lit hT.table_wf
+      have hwf4 : st4.table.WF l := by
+        simpa [st2, st3, st4, trailPush_table, emitSlot_table] using hwf1
+      exact canonNegLit_wf st4 l h4 hwf4
 
 theorem insertPending_conflict {st : EngineState p T} (item : Pending)
     {st' : EngineState p T} {neg : Option PLit} {failed : Bool} {c : EClause p T}
@@ -550,6 +646,14 @@ theorem frame_canonLit (st : EngineState p T) (l : PLit) :
     by rw [canonLit_trail]; exact List.prefix_refl _, fun _ => by rw [canonLit_db],
     by rw [canonLit_db], fun h => by simpa [canonLit_db] using h⟩
 
+theorem frame_canonNegLit (st : EngineState p T) (l : PLit) :
+    Frame st (canonNegLit st l).2 :=
+  ⟨(canonNegLit_props st l).symm, (canonNegLit_subs st l).symm, (canonNegLit_level st l).symm, (canonNegLit_levelStart st l).symm,
+    canonNegLit_table_append_only st l,
+    canonNegLit_tableWF st l, by rw [canonNegLit_reasons]; exact List.prefix_refl _,
+    by rw [canonNegLit_trail]; exact List.prefix_refl _, fun _ => by rw [canonNegLit_db],
+    by rw [canonNegLit_db], fun h => by simpa [canonNegLit_db] using h⟩
+
 theorem frame_canonClause (st : EngineState p T) (c : EClause p T) :
     Frame st (canonClause st c).2 :=
   ⟨(canonClause_props st c).symm, (canonClause_subs st c).symm, (canonClause_level st c).symm,
@@ -645,11 +749,11 @@ theorem frame_insertPending (st : EngineState p T) (item : Pending) :
           propagations := st1.stats.propagations + (if item.count then 1 else 0) } }
       let st3 : EngineState p T := trailPush st2 e
       let st4 : EngineState p T := emitSlot st3 slot d d'
-      change Frame st (canonLit st4 l.negate).2
+      change Frame st (canonNegLit st4 l).2
       exact (frame_canonLit st item.lit).trans
         ((frame_domsStats st1 _ _).trans
           ((frame_trailPush st2 e).trans
-            ((frame_emitSlot st3 slot d d').trans (frame_canonLit st4 l.negate))))
+            ((frame_emitSlot st3 slot d d').trans (frame_canonNegLit st4 l))))
 
 theorem pushPropStep_frame (st : EngineState p T) (pending : Array Pending) (failed : Bool)
     (pe : PLit × EClause p T) (hf : failed = false) :

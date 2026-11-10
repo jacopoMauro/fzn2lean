@@ -90,6 +90,22 @@ open LeanFzn LeanFzn.Solver
 def accepts (problem : CompiledProblem DomConstraint) (assignment : List Value) : Bool :=
   problem.constraints.all fun constraint => constraint.satisfiedB assignment
 
+/-- Leaf twin of `accepts`: convert the assignment to an array once, then
+read every slot in O(1) with `satisfiedBA`. -/
+def acceptsFast (problem : CompiledProblem DomConstraint) (assignment : List Value) : Bool :=
+  let a := assignment.toArray
+  problem.constraints.all fun constraint => constraint.satisfiedBA a
+
+theorem acceptsFast_eq (problem : CompiledProblem DomConstraint) (assignment : List Value) :
+    acceptsFast problem assignment = accepts problem assignment := by
+  unfold acceptsFast accepts
+  dsimp only
+  simp only [DomConstraint.satisfiedBA_eq]
+
+@[csimp] theorem accepts_eq_fast : @accepts = @acceptsFast := by
+  funext problem assignment
+  exact (acceptsFast_eq problem assignment).symm
+
 open LeanFzn.Solver in
 /-- The `k`-th constraint argument as a basic expression (helper for
     the 2/3-ary predicates; array arguments are REJECTED here, so
@@ -390,6 +406,67 @@ def compileConstraints (env : Store) (names : List String) :
       let dcs ← compileConstraints env names rest
       return dc :: dcs
 
+/-! The map-backed compilation twin.  `compileConstraint` resolves every
+identifier through `nameIndex`, a linear scan of the slot-name list, and
+`compileConstraints` repeats it for every constraint.  The twin builds
+the name→position map once and routes the extractable shapes through
+`extractConstraintWith`; non-extractable shapes fall back to the
+specification body (they are the rare literal-bound shapes).  Proofs
+keep the original definitions; `@[csimp]` installs the twin at code
+generation. -/
+
+/-- One constraint through the map-backed extractor, falling back to
+    the specification compiler when the shape is not extractable. -/
+def compileConstraintFast (env : Store) (names : List String)
+    (e : Extractors) (c : ConstraintItem) : Except String DomConstraint :=
+  match extractConstraintWith e c with
+  | some dc => .ok dc
+  | none => compileConstraint env names c
+
+theorem compileConstraintFast_eq (env : Store) (names : List String)
+    (e : Extractors) (he : e = extractorsOfNames names) (c : ConstraintItem) :
+    compileConstraintFast env names e c = compileConstraint env names c := by
+  unfold compileConstraintFast compileConstraint
+  rw [he, extractConstraintWith_extractorsOfNames]
+  cases h : extractConstraint names c <;> rfl
+
+private def compileConstraintsFastAux (env : Store) (names : List String)
+    (e : Extractors) : List ConstraintItem → Except String (List DomConstraint)
+  | [] => .ok []
+  | c :: rest => do
+      let dc ← compileConstraintFast env names e c
+      let dcs ← compileConstraintsFastAux env names e rest
+      return dc :: dcs
+
+/-- `compileConstraints` with the name map built once. -/
+def compileConstraintsFast (env : Store) (names : List String)
+    (cs : List ConstraintItem) : Except String (List DomConstraint) :=
+  compileConstraintsFastAux env names
+    (extractorsOfMap (nameMap names)) cs
+
+theorem compileConstraintsFastAux_eq (env : Store) (names : List String)
+    (e : Extractors) (he : e = extractorsOfNames names) :
+    ∀ cs : List ConstraintItem,
+      compileConstraintsFastAux env names e cs
+        = compileConstraints env names cs
+  | [] => rfl
+  | c :: rest => by
+      simp only [compileConstraintsFastAux, compileConstraints]
+      rw [compileConstraintFast_eq env names e he c,
+        compileConstraintsFastAux_eq env names e he rest]
+
+theorem compileConstraintsFast_eq (env : Store) (names : List String)
+    (cs : List ConstraintItem) :
+    compileConstraintsFast env names cs = compileConstraints env names cs := by
+  unfold compileConstraintsFast
+  exact compileConstraintsFastAux_eq env names _
+    (extractorsOfMap_eq names (nameMap names) (nameMap_get? names)) cs
+
+@[csimp] theorem compileConstraints_eq_fast :
+    @compileConstraints = @compileConstraintsFast := by
+  funext env names cs
+  exact (compileConstraintsFast_eq env names cs).symm
+
 /-! ## The auxiliary-slot expansion (the literal-argument shapes)
 
 The nine literal-argument shapes that pin a predicate's operand to a
@@ -451,12 +528,12 @@ inductive AuxShape where
   /-- `bool_or(x, y, false)`: `x ∨ y = false` forces both operands
       false — no aux slot. -/
   | orFalse (x y : Ident)
-  /-- `int_eq_reif(x, k, r)` (PLAN C5b): an aux slot carries the
-      literal `k` (domain `[.int k]`), rewritten to
-      `int_eq_reif(x, AUX, r)`. -/
+  /-- `int_eq_reif(x, k, r)` (PLAN C5b, R12): no aux slot; rewritten
+      to the certified singleton linear equality `1*x = k`, reified at
+      `r` (`int_lin_eq_reif [1] [x] k r`). -/
   | eqReifRK (x r : Ident) (k : Int)
-  /-- `int_eq_reif(k, x, r)` (PLAN C5b): an aux slot carries the
-      literal `k` (domain `[.int k]`). -/
+  /-- `int_eq_reif(k, x, r)` (PLAN C5b, R12): no aux slot; rewritten
+      to `int_lin_eq_reif [1] [x] k r` (equality is symmetric). -/
   | eqReifKR (x r : Ident) (k : Int)
   /-- `int_le_reif(x, k, r)` (PLAN C5b): an aux slot carries the
       literal `k` (domain `[.int k]`). -/
@@ -848,8 +925,8 @@ def AuxShape.pin : AuxShape → Option Value
   | .timesKKR _ k _ => some (.int k)
   | .neRK _ k => some (.int k)
   | .neKR _ k => some (.int k)
-  | .eqReifRK _ _ k => some (.int k)
-  | .eqReifKR _ _ k => some (.int k)
+  | .eqReifRK _ _ _ => none
+  | .eqReifKR _ _ _ => none
   | .leReifRK _ _ k => some (.int k)
   | .leReifKR _ _ k => some (.int k)
   | .neReifRK _ _ k => some (.int k)
@@ -987,13 +1064,20 @@ def AuxShape.expand : AuxShape → Ident → List ConstraintItem
       ,{ name := Ident.mk "bool_not"
        , args := [.basic (.ident y), .basic (.lit (.bool true))]
        , anns := [] }]
-  | .eqReifRK x r _, aux =>
-      [{ name := Ident.mk "int_eq_reif"
-       , args := [.basic (.ident x), .basic (.ident aux), .basic (.ident r)]
+  | .eqReifRK x r k, _ =>
+      -- R12: the constant operand lives in the certified linear shape
+      -- itself (`1*x = k`, reified at `r`), so no aux slot is needed.
+      -- The `[1]`/`[x]` singleton linear equality is semantically the
+      -- source `int_eq_reif(x, k, r)`, and the engine's linear-equality
+      -- reified propagator reads exactly this shape.
+      [{ name := Ident.mk "int_lin_eq_reif"
+       , args := [.array [.lit (.int 1)], .array [.ident x],
+           .basic (.lit (.int k)), .basic (.ident r)]
        , anns := [] }]
-  | .eqReifKR x r _, aux =>
-      [{ name := Ident.mk "int_eq_reif"
-       , args := [.basic (.ident aux), .basic (.ident x), .basic (.ident r)]
+  | .eqReifKR x r k, _ =>
+      [{ name := Ident.mk "int_lin_eq_reif"
+       , args := [.array [.lit (.int 1)], .array [.ident x],
+           .basic (.lit (.int k)), .basic (.ident r)]
        , anns := [] }]
   | .leReifRK x r _, aux =>
       [{ name := Ident.mk "int_le_reif"
@@ -1292,6 +1376,8 @@ def assemble (model : Model) (slots : List (String × List Value))
     (dcs : List DomConstraint) : CompiledProblem DomConstraint :=
   { names := slots.map Prod.fst
     domains := slots.map (fun p => Dom.ofList p.2)
+    domainsArray := (slots.map (fun p => Dom.ofList p.2)).toArray
+    domainsArray_toList := List.toList_toArray
     constraints := dcs
     objective := ()
     source := model
@@ -1301,16 +1387,23 @@ def assemble (model : Model) (slots : List (String × List Value))
       | none => parEnv model x }
 
 /-- Fast twin of `assemble`: the same problem shape, with the slot
-    domains already in compact form. -/
+    domains already in compact form and the slot-name index built once as a
+    hash map.  Store reconstruction runs once per emitted solution and looks
+    up every declared variable, so the `nameIndex` list scan this replaces
+    made emission quadratic in the number of slots. -/
 def assembleDom (model : Model) (slots : List (String × Dom))
     (dcs : List DomConstraint) : CompiledProblem DomConstraint :=
-  { names := slots.map Prod.fst
+  let names := slots.map Prod.fst
+  let idx := nameMap names
+  { names := names
     domains := slots.map Prod.snd
+    domainsArray := (slots.map Prod.snd).toArray
+    domainsArray_toList := List.toList_toArray
     constraints := dcs
     objective := ()
     source := model
     toStore := fun a x =>
-      match nameIndex (slots.map Prod.fst) x.name with
+      match idx.get? x.name with
       | some i => a[i]?
       | none => parEnv model x }
 
@@ -1330,7 +1423,7 @@ theorem assembleDom_eq (model : Model) (slots : List (String × Dom))
     rw [← henum, List.map_map]
     have hc := congrArg (List.map Prod.snd) hcanon
     simpa [List.map_map, Function.comp_def, enumSlot, canonSlot] using hc.symm
-  rw [hnames, hdom]
+  simp only [hnames, hdom, nameMap_get?, List.getElem?_toArray]
 
 /-- Compile the explicitly supported FlatZinc fragment to the shared
     `Core.Problem` with `DomConstraint` payloads. Every rejection

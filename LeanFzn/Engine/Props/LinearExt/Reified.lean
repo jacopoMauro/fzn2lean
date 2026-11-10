@@ -60,9 +60,6 @@ theorem linPlanAppendLit_prunes_entailed {p : CompiledProblem DomConstraint} {pl
 def linPlanSingle (l : Literal) (reason : Clause) : LinPlan :=
   { conflict? := none, prunes := [(l, reason)] }
 
-def linPlanEmpty : LinPlan :=
-  { conflict? := none, prunes := [] }
-
 theorem linPlanSingle_prunes {l : Literal} {reason : Clause} {l' : Literal} {r : Clause}
     (h : (l', r) ∈ (linPlanSingle l reason).prunes) :
     l' = l ∧ r = reason := by
@@ -336,6 +333,92 @@ def linLeReifDecidePlan (r : Nat) (terms : List LinTerm) (b : Int) : LinPlan :=
     linPlanSingle (posBool r false) (linConflictLits terms ++ [posBool r false])
   else
     linPlanEmpty
+
+/-- A row whose totals span `b` cannot force the undecided reification
+variable, so the decision plan is empty. -/
+theorem linLeReifDecidePlan_eq_empty {r : Nat} {terms : List LinTerm} {b : Int}
+    (hle : linTotalMin terms ≤ b) (hlt : b < linTotalMax terms) :
+    linLeReifDecidePlan r terms b = linPlanEmpty := by
+  unfold linLeReifDecidePlan linPlanEmpty
+  rw [if_neg (by omega)]
+  rw [if_neg (by omega)]
+
+/-- Conservative row-slack test for `linLeReif`: a true result means the
+inequality is already decided for the reification variable's current value,
+so the plan cannot contain a conflict or a pruning.  The test only folds
+the row totals; it does not build terms or reasons. -/
+def linRowSkipB (d : DomC) (r : Nat) (terms : List LinTerm) (b : Int) : Bool :=
+  let tmin := linTotalMin terms
+  let tmax := linTotalMax terms
+  match d.evalLit (posBool r true) with
+  | some true => decide (tmax ≤ b)
+  | some false => decide (b < tmin)
+  | none => decide (tmin ≤ b ∧ b < tmax)
+
+/-- The row totals read directly from the bound array, without building
+the `LinTerm` list or the reason literals.  `none` mirrors a failed
+`linExtractBounds`. -/
+def linTotalsAux (doms : Array DomC) (cs : Array Int) (slots : Array Nat)
+    (i : Nat) (tmin tmax : Int) : Option (Int × Int) :=
+  if h : i < slots.size then
+    match hc : cs[i]? with
+    | some c =>
+        let d := doms.getD slots[i] DomC.empty
+        match hlo : d.lo?, hhi : d.hi? with
+        | some lo, some hi =>
+            linTotalsAux doms cs slots (i + 1)
+              (tmin + linTermMin c lo hi) (tmax + linTermMax c lo hi)
+        | _, _ => none
+    | none => none
+  else some (tmin, tmax)
+termination_by slots.size - i
+decreasing_by omega
+
+def linTotals (doms : Array DomC) (cs : Array Int) (slots : Array Nat) :
+    Option (Int × Int) :=
+  linTotalsAux doms cs slots 0 0 0
+
+/-- Totals-only version of `linRowSkipB`. -/
+def linRowSkipTotalsB (d : DomC) (r : Nat) (tmin tmax b : Int) : Bool :=
+  match d.evalLit (posBool r true) with
+  | some true => decide (tmax ≤ b)
+  | some false => decide (b < tmin)
+  | none => decide (tmin ≤ b ∧ b < tmax)
+
+theorem linRowSkipTotalsB_eq_skip (d : DomC) (r : Nat)
+    (terms : List LinTerm) (b : Int) :
+    linRowSkipTotalsB d r (linTotalMin terms) (linTotalMax terms) b =
+      linRowSkipB d r terms b := by
+  unfold linRowSkipTotalsB linRowSkipB
+  rfl
+
+/-- The skip test only fires when the corresponding plan is empty, so it
+does not lose propagation. -/
+theorem linRowSkipB_sound {d : DomC} {r : Nat} {terms : List LinTerm} {b : Int}
+    (hmm : ∀ t ∈ terms, t.min ≤ t.max)
+    (hskip : linRowSkipB d r terms b = true) :
+    (d.evalLit (posBool r true) = some true → linLePlan terms b = linPlanEmpty) ∧
+    (d.evalLit (posBool r true) = some false →
+      linGePlan terms (b + 1) = linPlanEmpty) ∧
+    (d.evalLit (posBool r true) = none →
+      linLeReifDecidePlan r terms b = linPlanEmpty) := by
+  unfold linRowSkipB at hskip
+  split at hskip
+  · rename_i htrue
+    have hle : linTotalMax terms ≤ b := of_decide_eq_true hskip
+    refine ⟨fun _ => linLePlan_eq_empty_of_totalMax_le hmm hle, ?_, ?_⟩
+    · intro h; rw [htrue] at h; cases h
+    · intro h; rw [htrue] at h; cases h
+  · rename_i hfalse
+    have hlt : b < linTotalMin terms := of_decide_eq_true hskip
+    refine ⟨?_, fun _ => linGePlan_eq_empty_of_lt_totalMin hmm hlt, ?_⟩
+    · intro h; rw [hfalse] at h; cases h
+    · intro h; rw [hfalse] at h; cases h
+  · rename_i hnone
+    have hspan : linTotalMin terms ≤ b ∧ b < linTotalMax terms := of_decide_eq_true hskip
+    refine ⟨?_, ?_, fun _ => linLeReifDecidePlan_eq_empty hspan.1 hspan.2⟩
+    · intro h; rw [hnone] at h; cases h
+    · intro h; rw [hnone] at h; cases h
 
 def linEqReifDecidePlan (r : Nat) (terms : List LinTerm) (b : Int) : LinPlan :=
   if linTotalMin terms = b ∧ linTotalMax terms = b then
@@ -898,7 +981,9 @@ def linLeReifOutWith (p : CompiledProblem DomConstraint) (T : LitTable)
     (hslots : slotsIntB p is = true) : PropOut p T :=
   let terms := linTerms coeffs.toArray is.toArray bds
   let d := view.doms.getD r DomC.empty
-  if _htrue : d.evalLit (posBool r true) = some true then
+  if _hskip : linRowSkipB d r terms b = true then
+    .fix
+  else if _htrue : d.evalLit (posBool r true) = some true then
     linPlanOut p T
       (linPlanAppendLit (linLePlan terms b) (posBool r false))
       (fun ls hls => linLeReif_fixed_conf_entailed p coeffs is b r view hmem hsize bds hbds hslots true hls)

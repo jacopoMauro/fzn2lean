@@ -57,14 +57,61 @@ private def checkRun (m : Model) (p : CompiledProblem DomConstraint) (run : OptR
 def main : IO UInt32 := do
   match LeanFzn.Core.parseSolveFlags [] with
   | .error e => throw (IO.userError e)
-  | .ok (o, _) => expect "Core act/min default" (o.engine == .core && o.var == .act && o.val == .min)
+  | .ok (o, _) =>
+      expect "Core act/incumbent default"
+        (o.engine == .core && o.var == .act && o.val == .incumbent)
+  match LeanFzn.Core.parseSolveFlags ["--val=min"] with
+  | .error e => throw (IO.userError e)
+  | .ok (o, _) =>
+      expect "--val=min alone keeps var=act"
+        (o.engine == .core && o.var == .act && o.val == .min)
+  match LeanFzn.Core.parseSolveFlags ["--var=minc"] with
+  | .error e => throw (IO.userError e)
+  | .ok (o, _) =>
+      expect "--var=minc alone keeps val=incumbent"
+        (o.engine == .core && o.var == .minc && o.val == .incumbent)
+  match LeanFzn.Core.parseSolveFlags ["--opt=seeded"] with
+  | .error e => throw (IO.userError e)
+  | .ok (o, _) =>
+      expect "seeded default uses val=min"
+        (o.engine == .core && o.var == .act && o.val == .min)
+  match LeanFzn.Core.parseSolveFlags ["--strategy=default"] with
+  | .error e => throw (IO.userError e)
+  | .ok (o, _) =>
+      expect "default preset keeps minc/act"
+        (o.engine == .core && o.var == .minc && o.val == .act)
+  match LeanFzn.Core.parseSolveFlags ["--restart=none"] with
+  | .error e => throw (IO.userError e)
+  | .ok (o, _) =>
+      expect "explicit --restart=none is pinned"
+        (o.engine == .core && o.restart == .none && o.restartExplicit)
+  match LeanFzn.Core.parseSolveFlags ["--restart-base=200"] with
+  | .error e => throw (IO.userError e)
+  | .ok (o, _) =>
+      expect "--restart-base alone sets the after-incumbent base"
+        (o.engine == .core && o.restart == .none && o.restartBase == 200 &&
+          !o.restartExplicit)
+  expect "explicit --restart=none rejects --restart-base"
+    (match LeanFzn.Core.parseSolveFlags ["--restart=none", "--restart-base=200"] with
+     | .error _ => true
+     | .ok _ => false)
+  expect "the automatic restart base must be positive"
+    (match LeanFzn.Core.parseSolveFlags ["--restart-base=0"] with
+     | .error _ => true
+     | .ok _ => false)
+  expect "roundConfig fills an unset restart after an incumbent"
+    ((roundConfig { var := .act, val := .incumbent } (some (0 : Nat))).restart == .luby)
+  expect "roundConfig keeps an explicit restart"
+    ((roundConfig { restartExplicit := true } (some (0 : Nat))).restart == .none)
+  expect "roundConfig keeps the first-round schedule"
+    ((roundConfig { var := .act } (none : Option Nat)).restart == .none)
   expect "removed certified option is unknown"
     (match LeanFzn.Core.parseSolveFlags ["--certified"] with
      | .error msg => msg == "unknown option '--certified'"
      | .ok _ => false)
   for args in [["--engine=kernel"], ["--time-limit=10"], ["--var=obj"],
       ["--opt=bisect"], ["--primal=dive"], ["--heur-act"],
-      ["--portfolio=opt-fast:1,opt-fast"], ["--opt=seeded", "--val=incumbent"]] do
+      ["--portfolio=opt-fast:1,opt-fast"]] do
     expect s!"reject legacy-only flags {args}" (match LeanFzn.Core.parseSolveFlags args with | .error _ => true | _ => false)
   let sat := model "var 0..2: x :: output_var; solve satisfy;"
   match LeanFzn.Core.solveModel sat config with
@@ -75,9 +122,13 @@ def main : IO UInt32 := do
   let unsat := model "var 0..1: x; constraint int_eq(x,0); constraint int_eq(x,1); solve satisfy;"
   expect "certified UNSAT" (match LeanFzn.Core.solveModel unsat config with | .unsat => true | _ => false)
   let sparse := model "var {0,1000000}: x :: output_var; solve satisfy;"
-  let (r, st) := LeanFzn.Core.solveModelWithStats sparse config coreFuel
-  expect "wide sparse input stays unknown without fallback"
-    ((match r with | .unknown _ => true | _ => false) && st.gaveUp == 1)
+  let (r, _) := LeanFzn.Core.solveModelWithStats sparse config coreFuel
+  match r with
+  | .sat store =>
+      expect "wide sparse input solved with checked witness"
+        (LeanFzn.Checker.checkModelSolutionFast sparse
+          (emitCertifiedSolution sparse store) == .accepted)
+  | _ => throw (IO.userError "expected wide sparse Core SAT")
   for direction in ["minimize", "maximize"] do
     let m := model s!"var 0..2: x :: output_var; solve {direction} x;"
     let expected : Int := if direction == "minimize" then 0 else 2
@@ -96,10 +147,13 @@ def main : IO UInt32 := do
         expect "seed trace matches rounds" (sum.seeds.length == sum.run.sols.length + 1)
   let sparseOpt := model "var {0,1000000}: x :: output_var; solve minimize x;"
   match LeanFzn.Core.optimizeCore sparseOpt config, LeanFzn.Core.optimizeCoreSeed config sparseOpt with
-  | .ok (_, run), .ok sum =>
-      expect "both optimizers preserve give-up"
-        (!run.complete && !sum.run.complete && run.sols.isEmpty && sum.run.sols.isEmpty)
-  | _, _ => throw (IO.userError "expected compiled incomplete optimization")
+  | .ok (p, run), .ok sum =>
+      expect "wide sparse linear optimum"
+        (run.complete && run.sols.getLast?.map (·.2) == some 0 && checkRun sparseOpt p run)
+      expect "wide sparse seeded optimum"
+        (sum.run.complete && sum.run.sols.getLast?.map (·.2) == some 0 &&
+          checkRun sparseOpt sum.p sum.run)
+  | _, _ => throw (IO.userError "expected compiled sparse optimization")
   match compileModelFull sat with
   | .error e => throw (IO.userError e)
   | .ok p =>

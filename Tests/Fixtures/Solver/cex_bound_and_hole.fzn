@@ -1,0 +1,13 @@
+% E0 counterexample (minimized from fuzz seed 295, 2 vars). SAT; verdict correct.
+% Violates the draft U0 contract (a)/(c)/(d):
+%  * conflict clause [x1<=0 | x0>0] of int_le(x1,x0) after decision x0=0 and
+%    propagation x1!=0: the literal x1<=0 is falsified only by the CONJUNCTION of the
+%    ROOT lower bound x1>=0 and the trail hole x1!=0 (neither implies it alone), so
+%    markLit finds no falsifier, analysis=none, chronological fallback.
+%  * after the fallback consumes the sibling (x0!=0), reason literals x0<=0 (needed
+%    for x1!=1) are in the frame but on neither the trail nor the original domains.
+var 0..1: v1;
+var 0..1: v2;
+constraint int_ne(v2, v1);
+constraint int_le(v2, v1);
+solve satisfy;

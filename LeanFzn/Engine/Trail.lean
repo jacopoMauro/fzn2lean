@@ -117,11 +117,37 @@ theorem getD_setGrow_other_of_lt {α : Type} (a : Array α) (i j : Nat) (v d d' 
   rw [← Array.getD_eq_getElem?_getD, ← Array.getD_eq_getElem?_getD]
   exact Array.getD_setGrow_other a i j v d h
 
+theorem getD_set!_self {α : Type} (a : Array α) (i : Nat) (v d : α)
+    (h : i < a.size) : (a.set! i v).getD i d = v := by
+  rw [getD_eq_getElem?_getD, Array.set!_eq_setIfInBounds,
+    Array.getElem?_setIfInBounds]
+  simp [h]
+
+theorem getD_set!_other {α : Type} (a : Array α) (i j : Nat) (v d : α)
+    (hj : j < a.size) (h : j ≠ i) :
+    (a.set! i v).getD j d = a.getD j d := by
+  have hne : i ≠ j := fun hij => h hij.symm
+  rw [getD_eq_getElem?_getD, getD_eq_getElem?_getD,
+    Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds]
+  by_cases hi : i < a.size
+  · simp [hne, hi, hj]
+  · simp [hne, hi]
+
 theorem getD_extract {α : Type} (a : Array α) (s t i : Nat) (d : α)
     (h : i < min t a.size - s) :
     (a.extract s t).getD i d = a.getD (s + i) d := by
   rw [getD_eq_getElem?_getD, Array.getElem?_extract, if_pos h]
   exact (getD_eq_getElem?_getD a (s + i) d).symm
+
+/-- The default argument of `getD` is irrelevant at an in-range index. -/
+theorem getD_eq_getD_of_lt {α : Type} (a : Array α) {i : Nat} (h : i < a.size)
+    (d d' : α) : a.getD i d = a.getD i d' := by
+  simp [Array.getD, h]
+
+/-- At or beyond the end, `getD` returns its default. -/
+theorem getD_eq_default_of_size_le {α : Type} (a : Array α) {i : Nat}
+    (h : a.size ≤ i) (d : α) : a.getD i d = d := by
+  simp [Array.getD, Nat.not_lt.mpr h]
 
 end Array
 
@@ -177,6 +203,43 @@ theorem SortedList.push {a : Array Nat} {v : Nat} (h : SortedList a)
   subst hy
   exact hv x (by simpa using hx)
 
+/-- A non-strictly increasing array of naturals.  Decision-level starts use
+this weaker notion: a level with no assignments makes two consecutive starts
+equal, so the strictly increasing `SortedList` does not hold on every
+reachable state. -/
+def SortedListLE (a : Array Nat) : Prop := a.toList.Pairwise (· ≤ ·)
+
+theorem SortedListLE.getD_le {a : Array Nat} (h : SortedListLE a) {i j : Nat}
+    (hij : i ≤ j) (hj : j < a.size) : a.getD i 0 ≤ a.getD j 0 := by
+  rcases Nat.lt_or_eq_of_le hij with hlt | heq
+  · have hi : i < a.size := Nat.lt_of_lt_of_le hlt (Nat.le_of_lt hj)
+    have hi' : i < a.toList.length := by simpa [Array.length_toList] using hi
+    have hj' : j < a.toList.length := by simpa [Array.length_toList] using hj
+    have hp := (List.pairwise_iff_getElem.mp h) i j hi' hj' hlt
+    have hgi : a.getD i 0 = a[i] := by simp [Array.getD, hi]
+    have hgj : a.getD j 0 = a[j] := by simp [Array.getD, hj]
+    rw [hgi, hgj]
+    rw [Array.getElem_toList hi', Array.getElem_toList hj'] at hp
+    exact hp
+  · subst heq
+    exact Nat.le_refl _
+
+theorem SortedListLE.extract {a : Array Nat} (h : SortedListLE a) (s t : Nat) :
+    SortedListLE (a.extract s t) := by
+  have h' : a.toList.Pairwise (· ≤ ·) := h
+  rw [SortedListLE, Array.toList_extract, List.extract_eq_take_drop]
+  exact (h'.drop (i := s)).take (i := t - s)
+
+theorem SortedListLE.push {a : Array Nat} {v : Nat} (h : SortedListLE a)
+    (hv : ∀ x, x ∈ a → x ≤ v) : SortedListLE (a.push v) := by
+  have h' : a.toList.Pairwise (· ≤ ·) := h
+  rw [SortedListLE, Array.toList_push, List.pairwise_append]
+  refine ⟨h', by simp, ?_⟩
+  intro x hx y hy
+  simp only [List.mem_singleton] at hy
+  subst hy
+  exact hv x (by simpa using hx)
+
 theorem Array.getD_mem {a : Array Nat} {i : Nat} (h : i < a.size) :
     a.getD i 0 ∈ a := by
   have hgi : a.getD i 0 = a[i] := by simp [Array.getD, h]
@@ -201,20 +264,52 @@ def backjumpLimit (st : EngineState p T) (k : Nat) : Nat :=
 
 end EngineState
 
+/-- Accumulator step for the largest reason id named by a trail entry. -/
+def reasonStep (m : Nat) (e : Entry) : Nat :=
+  match e.reason with
+  | .reason id => max m (id + 1)
+  | _ => m
+
+/-- The fold over the trail prefix through level `k`: positions below
+`levelStart[k+1]` (the whole trail when that index is the current level's
+out-of-range start). -/
+def EngineState.reasonPrefixBound (st : EngineState p T) (k : Nat) : Nat :=
+  (st.trail.toList.take (st.levelStart.getD (k + 1) st.trail.size)).foldl
+    reasonStep 0
+
+/-- One plus the largest transient-reason id referenced by the trail.  A
+reachable state reads the per-level cache; hand-built states with no cache
+fall back to the whole-trail fold. -/
+def EngineState.reasonBound (st : EngineState p T) : Nat :=
+  if st.reasonCap.size = st.level + 1 then st.reasonCap.getD st.level 0
+  else st.trail.foldl reasonStep 0
+
 /-- Append one trail entry, updating the per-slot change index with the new
-trail position (oldest first).  The change index grows on demand. -/
+trail position (oldest first).  The change index grows on demand.  When the
+reason cache has one entry per level (the reachable shape), the current
+level's entry is bumped to include the new entry's reason id. -/
 def trailPush (st : EngineState p T) (e : Entry) : EngineState p T :=
   let pos := st.trail.size
   { st with
     trail := st.trail.push e
     changeIndex := st.changeIndex.setGrow e.slot
-      ((st.changeIndex.getD e.slot #[]).push pos) #[] }
+      ((st.changeIndex.getD e.slot #[]).push pos) #[]
+    reasonCap :=
+      if st.reasonCap.size = st.level + 1 then
+        st.reasonCap.set! st.level
+          (max (st.reasonCap.getD st.level 0) (reasonStep 0 e))
+      else st.reasonCap }
 
-/-- Enter a new decision level. -/
+/-- Enter a new decision level.  The new level starts with the same reason
+bound (no entry has been pushed at it yet). -/
 def newLevel (st : EngineState p T) : EngineState p T :=
   { st with
     level := st.level + 1
-    levelStart := st.levelStart.push st.trail.size }
+    levelStart := st.levelStart.push st.trail.size
+    reasonCap :=
+      if st.reasonCap.size = st.level + 1 then
+        st.reasonCap.push (st.reasonCap.getD st.level 0)
+      else st.reasonCap }
 
 /-- Replace the change list of `slot` by its positions below `limit`,
 growing the index array on demand. -/
@@ -252,7 +347,11 @@ def backjump (st : EngineState p T) (k : Nat) : EngineState p T :=
   { s with
     trail := s.trail.extract 0 limit
     levelStart := s.levelStart.extract 0 (k + 1)
-    level := k }
+    level := k
+    reasonCap :=
+      if s.reasonCap.size = s.level + 1 then
+        s.reasonCap.extract 0 (k + 1)
+      else s.reasonCap }
 
 /-! ## In-place runtime twins
 
@@ -285,7 +384,12 @@ def trailPushFast (st : EngineState p T) (e : Entry) : EngineState p T :=
     trail := st.trail.push e
     changeIndex :=
       if e.slot < st.changeIndex.size then st.changeIndex.modify e.slot (·.push pos)
-      else st.changeIndex.setGrow e.slot #[pos] #[] }
+      else st.changeIndex.setGrow e.slot #[pos] #[]
+    reasonCap :=
+      if st.reasonCap.size = st.level + 1 then
+        st.reasonCap.set! st.level
+          (max (st.reasonCap.getD st.level 0) (reasonStep 0 e))
+      else st.reasonCap }
 
 @[csimp] theorem trailPush_eq_fast : @trailPush = @trailPushFast := by
   funext p T st e
@@ -299,7 +403,11 @@ def backjumpFast (st : EngineState p T) (k : Nat) : EngineState p T :=
   { s with
     trail := s.trail.shrink limit
     levelStart := s.levelStart.shrink (k + 1)
-    level := k }
+    level := k
+    reasonCap :=
+      if s.reasonCap.size = s.level + 1 then
+        s.reasonCap.shrink (k + 1)
+      else s.reasonCap }
 
 @[csimp] theorem backjump_eq_fast : @backjump = @backjumpFast := by
   funext p T st k
@@ -392,6 +500,13 @@ def earliestImplying (st : EngineState p T) (s : Slot) (l : Literal) : Option Na
 @[simp] theorem trailPush_reasons (st : EngineState p T) (e : Entry) :
     (trailPush st e).reasons = st.reasons := rfl
 
+@[simp] theorem trailPush_reasonCap (st : EngineState p T) (e : Entry) :
+    (trailPush st e).reasonCap =
+      if st.reasonCap.size = st.level + 1 then
+        st.reasonCap.set! st.level
+          (max (st.reasonCap.getD st.level 0) (reasonStep 0 e))
+      else st.reasonCap := rfl
+
 @[simp] theorem trailPush_changeList_self (st : EngineState p T) (e : Entry) :
     (trailPush st e).changeList e.slot = (st.changeList e.slot).push st.trail.size := by
   simp [EngineState.changeList, trailPush]
@@ -427,6 +542,12 @@ theorem trailPush_trail_old (st : EngineState p T) (e : Entry) {i : Nat}
 
 @[simp] theorem newLevel_changeIndex (st : EngineState p T) :
     (newLevel st).changeIndex = st.changeIndex := rfl
+
+@[simp] theorem newLevel_reasonCap (st : EngineState p T) :
+    (newLevel st).reasonCap =
+      if st.reasonCap.size = st.level + 1 then
+        st.reasonCap.push (st.reasonCap.getD st.level 0)
+      else st.reasonCap := rfl
 
 @[simp] theorem newLevel_levelStart_size (st : EngineState p T) :
     (newLevel st).levelStart.size = st.levelStart.size + 1 := by
@@ -475,6 +596,19 @@ theorem trailPush_trail_old (st : EngineState p T) (e : Entry) {i : Nat}
       · rfl
       · exact ih _
 
+@[simp] theorem undoStep_reasonCap (st : EngineState p T) (e : Entry) (limit : Nat) :
+    (undoStep st e limit).reasonCap = st.reasonCap := rfl
+
+@[simp] theorem undoFuel_reasonCap (st : EngineState p T) (limit f : Nat) :
+    (undoFuel st limit f).reasonCap = st.reasonCap := by
+  induction f generalizing st with
+  | zero => rfl
+  | succ f ih =>
+      unfold undoFuel
+      split
+      · rfl
+      · exact ih _
+
 @[simp] theorem backjump_trail (st : EngineState p T) (k : Nat) :
     (backjump st k).trail = st.trail.extract 0 (st.backjumpLimit (min k st.level)) := by
   simp [backjump, EngineState.backjumpLimit]
@@ -486,6 +620,104 @@ theorem trailPush_trail_old (st : EngineState p T) (e : Entry) {i : Nat}
 @[simp] theorem backjump_reasons (st : EngineState p T) (k : Nat) :
     (backjump st k).reasons = st.reasons := by
   simp [backjump]
+
+@[simp] theorem backjump_reasonCap (st : EngineState p T) (k : Nat) :
+    (backjump st k).reasonCap =
+      if st.reasonCap.size = st.level + 1 then
+        st.reasonCap.extract 0 (min k st.level + 1)
+      else st.reasonCap := by
+  simp [backjump]
+
+/-! ## Reclaiming the transient-reason suffix
+
+The transient reason store is append-only while the search runs.  Every
+entry there is referenced either by a trail entry or by a pending pruning
+that is about to be applied.  Once a propagation round has drained and a
+backjump has discarded the trail suffix, all reasons above the largest id
+still named by a surviving trail entry are unreachable: no pending array
+crosses a conflict analysis or a decision boundary.  `trimReasons` shrinks
+the store to that bound.  It leaves the trail, the domains and the clause
+database untouched, so it is invisible to `HistInv`; the lookup theorem
+`trimReasons_reasonClause?_of_trail` records the only semantic obligation,
+namely that every remaining trail entry still resolves to the same clause. -/
+
+theorem reasonStep_mono (m : Nat) (e : Entry) : m ≤ reasonStep m e := by
+  unfold reasonStep
+  split <;> omega
+
+theorem reasonStep_reason (m : Nat) (e : Entry) (id : Nat)
+    (h : e.reason = .reason id) : id < reasonStep m e := by
+  unfold reasonStep
+  rw [h]
+  simp
+  omega
+
+theorem le_foldl_reasonStep (l : List Entry) (m : Nat) :
+    m ≤ l.foldl reasonStep m := by
+  induction l generalizing m with
+  | nil => exact Nat.le_refl _
+  | cons x xs ih =>
+      rw [List.foldl_cons]
+      exact Nat.le_trans (reasonStep_mono m x) (ih (reasonStep m x))
+
+theorem foldl_reasonStep_bound (l : List Entry) (m0 : Nat) :
+    ∀ e ∈ l, ∀ id, e.reason = .reason id →
+      id < l.foldl reasonStep m0 := by
+  induction l generalizing m0 with
+  | nil => intro e he; simp at he
+  | cons x xs ih =>
+      intro e he id hid
+      rw [List.foldl_cons]
+      rcases List.mem_cons.mp he with heq | hmem
+      · subst e
+        exact Nat.lt_of_lt_of_le (reasonStep_reason m0 x id hid)
+          (le_foldl_reasonStep xs (reasonStep m0 x))
+      · exact ih (reasonStep m0 x) e hmem id hid
+
+/-- Drop the transient-reason suffix that no trail entry can reach.  The
+bound is a conservative over-approximation: interior unreferenced slots are
+kept, which is harmless and keeps the operation cheap and trail-preserving. -/
+def EngineState.trimReasons (st : EngineState p T) : EngineState p T :=
+  { st with reasons := st.reasons.shrink st.reasonBound }
+
+@[simp] theorem trimReasons_trail (st : EngineState p T) :
+    st.trimReasons.trail = st.trail := rfl
+
+@[simp] theorem trimReasons_doms (st : EngineState p T) :
+    st.trimReasons.doms = st.doms := rfl
+
+@[simp] theorem trimReasons_db (st : EngineState p T) :
+    st.trimReasons.db = st.db := rfl
+
+@[simp] theorem trimReasons_reasons_size (st : EngineState p T) :
+    st.trimReasons.reasons.size = min st.reasonBound st.reasons.size := by
+  simp [EngineState.trimReasons]
+
+/-- Trimming records how many slots it dropped in the diagnostic counter. -/
+def EngineState.trimReasonsStats (st : EngineState p T) : EngineState p T :=
+  let st' := st.trimReasons
+  { st' with
+    stats := { st.stats with
+      reasonsTrimmed := st.stats.reasonsTrimmed +
+        (st.reasons.size - st'.reasons.size) } }
+
+@[simp] theorem trimReasonsStats_trail (st : EngineState p T) :
+    st.trimReasonsStats.trail = st.trail := rfl
+
+@[simp] theorem trimReasonsStats_doms (st : EngineState p T) :
+    st.trimReasonsStats.doms = st.doms := rfl
+
+@[simp] theorem trimReasonsStats_db (st : EngineState p T) :
+    st.trimReasonsStats.db = st.db := rfl
+
+@[simp] theorem trimReasonsStats_changeIndex (st : EngineState p T) (s : Nat) :
+    st.trimReasonsStats.changeList s = st.changeList s := rfl
+
+@[simp] theorem trimReasonsStats_level (st : EngineState p T) :
+    st.trimReasonsStats.level = st.level := rfl
+
+@[simp] theorem trimReasonsStats_levelStart (st : EngineState p T) :
+    st.trimReasonsStats.levelStart = st.levelStart := rfl
 
 @[simp] theorem backjump_limit_le_trail (st : EngineState p T) (k : Nat) :
     st.backjumpLimit k ≤ st.trail.size := by
@@ -524,8 +756,9 @@ structure TrailInv (st : EngineState p T) : Prop where
   levelStart_zero : st.levelStart[0]? = some 0
   /-- There is one start per level, plus the initial level. -/
   levelStart_size : st.levelStart.size = st.level + 1
-  /-- Level starts are strictly increasing. -/
-  levelStart_strict : SortedList st.levelStart
+  /-- Level start positions are non-decreasing (empty levels repeat a
+  start, so strictness is too strong on reachable states). -/
+  levelStart_sorted : SortedListLE st.levelStart
   /-- No level starts beyond the current trail. -/
   levelStart_le_trail : ∀ i, i < st.levelStart.size → st.levelStart.getD i 0 ≤ st.trail.size
   /-- Every entry's level is a live level. -/
@@ -537,6 +770,14 @@ structure TrailInv (st : EngineState p T) : Prop where
   /-- Change lists are exactly the entry positions of the slot. -/
   changeIndex_mem : ∀ s p, p ∈ st.changeList s ↔
     p < st.trail.size ∧ ∃ e, st.trail[p]? = some e ∧ e.slot = s
+  /-- The reason cache has one entry per decision level. -/
+  reasonCap_size : st.reasonCap.size = st.level + 1
+  /-- Each cached level bound is the exact fold over the trail prefix through
+  that level. -/
+  reasonCap_exact : ∀ k, k < st.reasonCap.size →
+    st.reasonCap.getD k 0 =
+      (st.trail.toList.take
+        (st.levelStart.getD (k + 1) st.trail.size)).foldl reasonStep 0
 
 /-- Every entry's level is at most the current level. -/
 theorem TrailInv.entry_level_le {st : EngineState p T} (h : TrailInv st) {i : Nat} {e : Entry}
@@ -545,16 +786,34 @@ theorem TrailInv.entry_level_le {st : EngineState p T} (h : TrailInv st) {i : Na
   have h2 := h.levelStart_size
   omega
 
+/-- Every `.reason` id named by a trail entry lies below `reasonBound`.  The
+cache is exact on any state satisfying the trail shape invariant. -/
+theorem reasonBound_spec (st : EngineState p T) (h : TrailInv st)
+    (i : Nat) (e : Entry) (id : Nat)
+    (he : st.trail[i]? = some e) (hid : e.reason = .reason id) :
+    id < st.reasonBound := by
+  unfold EngineState.reasonBound
+  rw [if_pos h.reasonCap_size]
+  rw [h.reasonCap_exact st.level (by rw [h.reasonCap_size]; omega)]
+  rw [show st.levelStart.getD (st.level + 1) st.trail.size = st.trail.size by
+    rw [Array.getD_eq_default_of_size_le _ (by rw [h.levelStart_size]; omega)]]
+  rw [← Array.length_toList, List.take_length]
+  apply foldl_reasonStep_bound st.trail.toList 0 e _ id hid
+  obtain ⟨hlt, hval⟩ := Array.getElem?_eq_some_iff.mp he
+  rw [← hval]
+  exact Array.mem_toList_iff.mpr (Array.getElem_mem hlt)
+
 /-- The shape invariant of the canonical initial state built by `Search.initState`
 (`levelStart = #[0]`, `level = 0`, empty trail, empty change lists). -/
 theorem trailInv_init {st : EngineState p T} (hls : st.levelStart = #[0])
     (hl : st.level = 0) (ht : st.trail = #[])
-    (hci : ∀ s, st.changeList s = #[]) : TrailInv st := by
+    (hci : ∀ s, st.changeList s = #[])
+    (hrc : st.reasonCap = #[0]) : TrailInv st := by
   constructor
   · simp [hls]
   · simp [hls, hl]
   · rw [hls]
-    simp [SortedList]
+    simp [SortedListLE]
   · intro i hi
     rw [hls] at hi
     simp at hi
@@ -571,16 +830,23 @@ theorem trailInv_init {st : EngineState p T} (hls : st.levelStart = #[0])
   · intro s p
     rw [hci s]
     simp [ht]
+  · rw [hrc, hl]
+    rfl
+  · intro k hk
+    rw [hrc] at hk
+    have hk0 : k = 0 := by simpa using hk
+    subst hk0
+    simp [hrc, hls, ht]
 
 /-! ## `trailPush` preserves the shape -/
 
 theorem trailPush_trailInv {st : EngineState p T} (h : TrailInv st) {e : Entry}
-    (he : e.level ≤ st.level) : TrailInv (trailPush st e) := by
+    (he : e.level = st.level) : TrailInv (trailPush st e) := by
   have hsz : (trailPush st e).trail.size = st.trail.size + 1 := trailPush_trail_size st e
   constructor
   · simpa using h.levelStart_zero
   · simpa using h.levelStart_size
-  · simpa using h.levelStart_strict
+  · simpa using h.levelStart_sorted
   · intro i hi
     have hi' : i < st.levelStart.size := by simpa using hi
     have hle := h.levelStart_le_trail i hi'
@@ -680,6 +946,68 @@ theorem trailPush_trailInv {st : EngineState p T} (h : TrailInv st) {e : Entry}
               simp only [trailPush] at hplt
               rw [Array.size_push] at hplt
               omega))] at he'
+  · rw [trailPush_reasonCap, if_pos h.reasonCap_size, trailPush_level]
+    rw [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds]
+    exact h.reasonCap_size
+  · intro k hk
+    rw [trailPush_reasonCap, if_pos h.reasonCap_size] at hk ⊢
+    rw [Array.set!_eq_setIfInBounds] at hk
+    rw [Array.size_setIfInBounds] at hk
+    have hk_le : k ≤ st.level := by rw [h.reasonCap_size] at hk; omega
+    rcases Nat.lt_or_eq_of_le hk_le with hklt | hkeq
+    · -- a lower level is untouched; the prefix below it does not include `e`
+      rw [Array.getD_set!_other _ _ _ _ _ (by rw [h.reasonCap_size]; omega) (by omega)]
+      have hlt : k + 1 < st.levelStart.size := by
+        rw [h.levelStart_size]; omega
+      have hget : (trailPush st e).levelStart.getD (k + 1)
+          (st.trail.push e).size =
+            st.levelStart.getD (k + 1) st.trail.size := by
+        rw [trailPush_levelStart]
+        rw [Array.getD_eq_getD_of_lt _ hlt (st.trail.push e).size st.trail.size]
+      have hlen : st.levelStart.getD (k + 1) st.trail.size ≤
+          st.trail.toList.length := by
+        have h0 := h.levelStart_le_trail (k + 1) hlt
+        have hd : st.levelStart.getD (k + 1) st.trail.size =
+            st.levelStart.getD (k + 1) 0 :=
+          Array.getD_eq_getD_of_lt _ hlt _ _
+        rw [hd, Array.length_toList]
+        exact h0
+      have hprefix : ((trailPush st e).trail.toList.take
+          ((trailPush st e).levelStart.getD (k + 1)
+            (trailPush st e).trail.size)) =
+            st.trail.toList.take
+              (st.levelStart.getD (k + 1) st.trail.size) := by
+        rw [trailPush_trail, Array.toList_push, hget,
+          List.take_append_of_le_length hlen]
+      rw [hprefix]
+      exact h.reasonCap_exact k (by rw [h.reasonCap_size]; omega)
+    · -- the current level includes the new entry
+      rw [hkeq] at hk ⊢
+      rw [Array.getD_set!_self _ _ _ _ (by rw [h.reasonCap_size]; omega)]
+      have hget : (trailPush st e).levelStart.getD (st.level + 1)
+          (st.trail.push e).size = st.trail.size + 1 := by
+        rw [trailPush_levelStart]
+        rw [Array.getD_eq_default_of_size_le _
+          (by rw [h.levelStart_size]; omega), Array.size_push]
+      have hfull : st.levelStart.getD (st.level + 1) st.trail.size =
+          st.trail.size := by
+        rw [Array.getD_eq_default_of_size_le _
+          (by rw [h.levelStart_size]; omega)]
+      have hprefix : ((trailPush st e).trail.toList.take
+          ((trailPush st e).levelStart.getD (st.level + 1)
+            (trailPush st e).trail.size)) = st.trail.toList ++ [e] := by
+        rw [trailPush_trail, Array.toList_push, hget]
+        rw [show st.trail.size + 1 = (st.trail.toList ++ [e]).length by simp]
+        rw [List.take_length]
+      have hcexact := h.reasonCap_exact st.level (by rw [h.reasonCap_size]; omega)
+      rw [hfull, ← Array.length_toList, List.take_length] at hcexact
+      rw [hprefix, List.foldl_append, hcexact]
+      simp only [List.foldl_cons, List.foldl_nil]
+      -- `reasonStep` is `max` with its own zero-seeded value
+      cases hr : e.reason with
+      | reason id => simp [reasonStep, hr, Nat.max_assoc]
+      | decision => simp [reasonStep, hr]
+      | learned id => simp [reasonStep, hr]
 
 /-- After a push the current level has a non-empty trail prefix, the
 precondition `newLevel` needs for strict `levelStart`. -/
@@ -694,12 +1022,11 @@ theorem trailPush_levelStart_lt_trail {st : EngineState p T} (h : TrailInv st) (
 
 /-! ## `newLevel` preserves the shape -/
 
-/-- `newLevel` preserves the shape invariant provided the current level is
-non-empty (`levelStart[level] < trail.size`).  The engine calls `newLevel`
-immediately before pushing a decision, so the hypothesis holds at every
-call site; `trailPush_levelStart_lt_trail` re-establishes it after a push. -/
-theorem newLevel_trailInv {st : EngineState p T} (h : TrailInv st)
-    (hlast : st.levelStart.getD st.level 0 < st.trail.size) : TrailInv (newLevel st) := by
+/-- `newLevel` preserves the shape invariant.  Consecutive level starts may
+be equal when the current level is empty, which is why the field is
+non-strictly sorted. -/
+theorem newLevel_trailInv {st : EngineState p T} (h : TrailInv st) :
+    TrailInv (newLevel st) := by
   constructor
   · have hs : st.levelStart.size ≠ 0 := by
       intro h0
@@ -714,9 +1041,9 @@ theorem newLevel_trailInv {st : EngineState p T} (h : TrailInv st)
     · exact h.levelStart_zero
     · exact fun h0 => hs h0.symm
   · simp [newLevel, h.levelStart_size]
-  · have h' : st.levelStart.toList.Pairwise (· < ·) := h.levelStart_strict
-    have hstrict : SortedList (st.levelStart.push st.trail.size) := by
-      rw [SortedList, Array.toList_push, List.pairwise_append]
+  · have h' : st.levelStart.toList.Pairwise (· ≤ ·) := h.levelStart_sorted
+    have hsorted : SortedListLE (st.levelStart.push st.trail.size) := by
+      rw [SortedListLE, Array.toList_push, List.pairwise_append]
       refine ⟨h', by simp, ?_⟩
       intro x hx y hy
       simp only [List.mem_singleton] at hy
@@ -726,16 +1053,10 @@ theorem newLevel_trailInv {st : EngineState p T} (h : TrailInv st)
       obtain ⟨hlt, hei⟩ := Array.getElem?_eq_some_iff.mp hi
       have hix : st.levelStart.getD i 0 = x := by
         simp [Array.getD, hlt, hei]
-      have hile : i ≤ st.level := by
-        have := h.levelStart_size
-        omega
-      have hlev : st.level < st.levelStart.size := by
-        have := h.levelStart_size
-        omega
-      have hle := h.levelStart_strict.getD_le hile hlev
+      have hle := h.levelStart_le_trail i hlt
       rw [hix] at hle
-      omega
-    simpa [newLevel] using hstrict
+      exact hle
+    simpa [newLevel] using hsorted
   · intro i hi
     rw [newLevel] at hi
     simp only [Array.size_push] at hi
@@ -765,6 +1086,46 @@ theorem newLevel_trailInv {st : EngineState p T} (h : TrailInv st)
     simpa [newLevel, EngineState.changeList] using h.changeIndex_sorted s
   · intro s p
     simpa [newLevel, EngineState.changeList] using h.changeIndex_mem s p
+  · rw [newLevel_reasonCap, if_pos h.reasonCap_size]
+    simp [h.reasonCap_size]
+  · intro k hk
+    rw [newLevel_reasonCap, if_pos h.reasonCap_size] at hk ⊢
+    rw [Array.size_push, h.reasonCap_size] at hk
+    have hfull : st.levelStart.getD (st.level + 1) st.trail.size =
+        st.trail.size := by
+      rw [Array.getD_eq_default_of_size_le _ (by rw [h.levelStart_size]; omega)]
+    have hcexact := h.reasonCap_exact st.level (by rw [h.reasonCap_size]; omega)
+    rw [hfull, ← Array.length_toList, List.take_length] at hcexact
+    simp only [newLevel_trail, newLevel_levelStart]
+    by_cases hklt : k < st.level
+    · have hkold : k < st.reasonCap.size := by rw [h.reasonCap_size]; omega
+      rw [Array.getD_push_lt (a := st.reasonCap) (i := k)
+        (v := st.reasonCap.getD st.level 0) (d := 0) hkold]
+      have hlt : k + 1 < st.levelStart.size := by
+        rw [h.levelStart_size]; omega
+      rw [Array.getD_push_lt (a := st.levelStart) (i := k + 1)
+        (v := st.trail.size) (d := st.trail.size) hlt]
+      exact h.reasonCap_exact k hkold
+    · have hcases : k = st.level ∨ k = st.level + 1 := by omega
+      rcases hcases with hkeq | hkeq
+      · subst hkeq
+        rw [Array.getD_push_lt (a := st.reasonCap) (i := st.level)
+          (v := st.reasonCap.getD st.level 0) (d := 0)
+          (by rw [h.reasonCap_size]; omega)]
+        rw [← h.levelStart_size, Array.getD_push_eq]
+        rw [← Array.length_toList, List.take_length]
+        exact hcexact
+      · subst hkeq
+        have hcache : (st.reasonCap.push (st.reasonCap.getD st.level 0)).getD
+            (st.level + 1) 0 = st.reasonCap.getD st.level 0 := by
+          rw [← h.reasonCap_size, Array.getD_push_eq]
+        rw [hcache]
+        have hrhs : (st.levelStart.push st.trail.size).getD (st.level + 1 + 1)
+            st.trail.size = st.trail.size := by
+          rw [Array.getD_eq_default_of_size_le _
+            (by rw [Array.size_push, h.levelStart_size]; omega)]
+        rw [hrhs, ← Array.length_toList, List.take_length]
+        exact hcexact
 
 /-! ## Undo: restored domains
 
@@ -1006,7 +1367,10 @@ theorem backjump_noop {st : EngineState p T} (h : TrailInv st) {k : Nat}
   have hls : st.levelStart.extract 0 (st.level + 1) = st.levelStart := by
     rw [← h.levelStart_size]
     exact Array.extract_size
-  simp [backjump, hmin, hlim, hun, ht, hls]
+  have hrc : st.reasonCap.extract 0 (st.level + 1) = st.reasonCap := by
+    rw [← h.reasonCap_size]
+    exact Array.extract_size
+  simp [backjump, hmin, hlim, hun, ht, hls, hrc]
 
 theorem backjump_level_eq_of_lt {st : EngineState p T} {k : Nat}
     (hk : k < st.level) : (backjump st k).level = k := by
@@ -1138,6 +1502,83 @@ theorem backjump_changeList_mem {st : EngineState p T} (h : TrailInv st) {k : Na
     · rw [backjump_trail_size_of_lt h hk] at hpsz
       exact decide_eq_true_eq.mpr hpsz
 
+/-- Cutting the trail and the level starts at `k+1` also cuts the reason
+cache, and each remaining cached entry is the fold over its kept prefix. -/
+theorem reasonCap_extract_exact {st : EngineState p T} (h : TrailInv st)
+    {k : Nat} (hk : k < st.level) :
+    ∀ j, j < k + 1 →
+      (st.reasonCap.extract 0 (k + 1)).getD j 0 =
+        ((st.trail.extract 0 (st.levelStart.getD (k + 1) 0)).toList.take
+          ((st.levelStart.extract 0 (k + 1)).getD (j + 1)
+            (st.trail.extract 0 (st.levelStart.getD (k + 1) 0)).size)).foldl
+          reasonStep 0 := by
+  intro j hj
+  have hk1size : k + 1 < st.levelStart.size := by
+    have hs := h.levelStart_size
+    omega
+  have hcapk : k < st.reasonCap.size := by
+    rw [h.reasonCap_size]
+    omega
+  have hLval : st.levelStart.getD (k + 1) st.trail.size =
+      st.levelStart.getD (k + 1) 0 :=
+    Array.getD_eq_getD_of_lt _ hk1size _ _
+  have hLle : st.levelStart.getD (k + 1) 0 ≤ st.trail.size :=
+    h.levelStart_le_trail (k + 1) hk1size
+  have hsize : (st.trail.extract 0 (st.levelStart.getD (k + 1) 0)).size =
+      st.levelStart.getD (k + 1) 0 := by
+    rw [Array.size_extract]
+    exact Nat.min_eq_left hLle
+  rw [Array.getD_extract]
+  · simp only [Nat.zero_add]
+    rw [Array.toList_extract, List.extract_eq_take_drop]
+    simp only [Nat.sub_zero, List.drop_zero]
+    by_cases hjk : j < k
+    · have hj1 : j + 1 < k + 1 := by omega
+      have hji : j + 1 < st.levelStart.size := by omega
+      rw [hsize, Array.getD_extract]
+      · simp only [Nat.zero_add, Nat.add_zero]
+        have hval : st.levelStart.getD (j + 1)
+            (st.levelStart.getD (k + 1) 0) =
+            st.levelStart.getD (j + 1) st.trail.size := by
+          have h1 : st.levelStart.getD (j + 1)
+              (st.levelStart.getD (k + 1) 0) =
+              st.levelStart.getD (j + 1) 0 :=
+            Array.getD_eq_getD_of_lt _ hji _ _
+          have h2 : st.levelStart.getD (j + 1) st.trail.size =
+              st.levelStart.getD (j + 1) 0 :=
+            Array.getD_eq_getD_of_lt _ hji _ _
+          rw [h1, h2]
+        have hle : st.levelStart.getD (j + 1) st.trail.size ≤
+            st.levelStart.getD (k + 1) st.trail.size := by
+          have hle0 : st.levelStart.getD (j + 1) 0 ≤
+              st.levelStart.getD (k + 1) 0 :=
+            h.levelStart_sorted.getD_le (by omega) hk1size
+          have h1 : st.levelStart.getD (j + 1) st.trail.size =
+              st.levelStart.getD (j + 1) 0 :=
+            Array.getD_eq_getD_of_lt _ hji _ _
+          have h2 : st.levelStart.getD (k + 1) st.trail.size =
+              st.levelStart.getD (k + 1) 0 :=
+            Array.getD_eq_getD_of_lt _ hk1size _ _
+          rwa [h1, h2]
+        rw [hval, ← hLval, List.take_take, Nat.min_eq_left hle]
+        exact h.reasonCap_exact j (by rw [h.reasonCap_size]; omega)
+      · have hs := h.levelStart_size
+        omega
+    · have hjeq : j = k := by omega
+      rw [hjeq]
+      rw [hsize]
+      have hnone : (st.levelStart.extract 0 (k + 1)).getD (k + 1)
+          (st.levelStart.getD (k + 1) 0) = st.levelStart.getD (k + 1) 0 := by
+        rw [Array.getD_eq_getElem?_getD,
+          Array.getElem?_eq_none_iff.mpr (by
+            rw [Array.size_extract]
+            exact Nat.min_le_left _ _)]
+        simp
+      rw [hnone, ← hLval, List.take_take, Nat.min_eq_left (Nat.le_refl _)]
+      exact h.reasonCap_exact k hcapk
+  · rw [Nat.sub_zero, Nat.min_eq_left (by rw [h.reasonCap_size]; omega)]
+    exact hj
+
 /-- The shape invariant is preserved by `backjump`. -/
 theorem backjump_trailInv {st : EngineState p T} (h : TrailInv st) (k : Nat) :
     TrailInv (backjump st k) := by
@@ -1171,7 +1612,7 @@ theorem backjump_trailInv {st : EngineState p T} (h : TrailInv st) (k : Nat) :
       · exfalso
         have hge : k + 1 ≤ e.level := by omega
         have hlevsize := h.entry_level i e he
-        have hmono := h.levelStart_strict.getD_le hge hlevsize
+        have hmono := h.levelStart_sorted.getD_le hge hlevsize
         have hstart := h.entry_levelStart_le i e he
         omega
     constructor
@@ -1187,7 +1628,7 @@ theorem backjump_trailInv {st : EngineState p T} (h : TrailInv st) (k : Nat) :
       omega
     · -- strictly increasing
       rw [backjump_levelStart_eq_of_lt hk]
-      exact SortedList.extract h.levelStart_strict 0 (k + 1)
+      exact SortedListLE.extract h.levelStart_sorted 0 (k + 1)
     · -- starts bounded by the trail
       intro i hi
       rw [backjump_levelStart_eq_of_lt hk] at hi
@@ -1195,7 +1636,7 @@ theorem backjump_trailInv {st : EngineState p T} (h : TrailInv st) (k : Nat) :
       have hi' : i < k + 1 := by omega
       rw [backjump_trail_size_of_lt h hk, backjump_levelStart_eq_of_lt hk,
         hlevelStart i hi']
-      exact h.levelStart_strict.getD_le (by omega) hk1size
+      exact h.levelStart_sorted.getD_le (by omega) hk1size
     · -- entries live on a live level
       intro i e he
       rw [backjump_trail_eq_of_lt h hk] at he
@@ -1218,6 +1659,17 @@ theorem backjump_trailInv {st : EngineState p T} (h : TrailInv st) (k : Nat) :
     · -- exact change-list membership
       intro s p
       exact backjump_changeList_mem h hk
+    · -- the reason cache keeps one entry per remaining level
+      rw [backjump_reasonCap, if_pos h.reasonCap_size, backjump_level]
+      rw [Array.size_extract, h.reasonCap_size]
+      omega
+    · -- each remaining cached bound is the fold over its kept prefix
+      intro j hj
+      rw [backjump_reasonCap, if_pos h.reasonCap_size] at hj ⊢
+      rw [Array.size_extract, h.reasonCap_size] at hj
+      rw [backjump_trail_eq_of_lt h hk, backjump_levelStart_eq_of_lt hk,
+        show min k st.level = k by omega]
+      exact reasonCap_extract_exact h hk j (by omega)
   · have hkge : st.level ≤ k := by omega
     rw [backjump_noop h hkge]
     exact h

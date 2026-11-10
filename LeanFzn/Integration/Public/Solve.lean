@@ -5,6 +5,7 @@ DAG: compiler + Core soundness -> source SAT/UNSAT theorems -> public driver.
 -/
 import LeanFzn.Engine.Search
 import LeanFzn.Compiler.Proofs.Normalize
+import LeanFzn.Integration.Public.Preprocess
 
 namespace LeanFzn.Core
 open LeanFzn LeanFzn.Engine LeanFzn.Compiler LeanFzn.Semantics LeanFzn.Solver.Core
@@ -43,82 +44,73 @@ theorem solveCompiled_unsat {p : CompiledProblem DomConstraint} {o : SearchConfi
   | unsat => exact coreSolve_unsat hc
   | gaveUp => simp [hc] at h
 
-/-- Compile and run Core once. No solver is selected when Core cannot decide. -/
-def solveModel (m : Model) (o : SearchConfig := {}) (fuel : Nat := coreFuel) : Result :=
-  match compileModelFull m with
-  | .error e => .unsupported e
-  | .ok p =>
-      if gateOkFast (propagationProblem p) then
-        match solveCompiled p o fuel with
-        | .sat a => .sat (p.toStore a)
-        | .unsat => .unsat
-        | .unknown => .unknown "Core search incomplete (gaveUp)"
-      else .unsupported "Core requires nonempty finite integer/Boolean domains"
-
-/-- The same result with the actual Core counters, without a second solve. -/
+/-- Compile and run Core once, returning the actual Core counters without a
+second solve.  A give-up carries its diagnostic cause in the public reason
+string; the cause never changes the verdict. -/
 def solveModelWithStats (m : Model) (o : SearchConfig := {}) (fuel : Nat := coreFuel) :
     Result × EngineStats :=
   match compileModelFull m with
   | .error e => (.unsupported e, {})
   | .ok p =>
       if gateOkFast (propagationProblem p) then
-        let (r, st) := coreSolveFull p o fuel
+        let (r, st) := coreSolveFullPre p o none fuel
         match r with
         | .sat a => (.sat (p.toStore a), st)
         | .unsat => (.unsat, st)
-        | .gaveUp => (.unknown "Core search incomplete (gaveUp)", st)
+        | .gaveUp => (.unknown (giveUpReason st), st)
       else (.unsupported "Core requires nonempty finite integer/Boolean domains", {})
 
+/-- Compile and run Core once. No solver is selected when Core cannot decide. -/
+def solveModel (m : Model) (o : SearchConfig := {}) (fuel : Nat := coreFuel) : Result :=
+  (solveModelWithStats m o fuel).1
+
 theorem solveModelWithStats_fst (m : Model) (o : SearchConfig) (fuel : Nat) :
-    (solveModelWithStats m o fuel).1 = solveModel m o fuel := by
-  unfold solveModelWithStats solveModel
-  cases hc : compileModelFull m with
-  | error e => rfl
-  | ok p =>
-      simp only
-      split
-      · unfold solveCompiled coreSolve
-        cases coreSolveFull p o fuel with
-        | mk r st => cases r <;> rfl
-      · rfl
+    (solveModelWithStats m o fuel).1 = solveModel m o fuel := rfl
 
 theorem solveModel_sat_correct {m : Model} {o : SearchConfig} {fuel : Nat} {store : Store}
     (hwf : WellFormed fullSig m) (h : solveModel m o fuel = .sat store) :
     Satisfies fullSig fullInterp m store := by
   unfold solveModel at h
+  unfold solveModelWithStats at h
   cases hc : compileModelFull m with
   | error e => simp [hc] at h
   | ok p =>
       simp only [hc] at h
       split at h
-      · cases hs : solveCompiled p o fuel with
-        | sat a =>
-            simp [hs] at h
-            cases h
-            obtain ⟨hm, ha⟩ := solveCompiled_sat hs
-            exact ⟨hwf, (compileFull_exact hc hwf hm ha).1⟩
-        | unsat => simp [hs] at h
-        | unknown => simp [hs] at h
+      · cases hs : coreSolveFullPre p o none fuel with
+        | mk r st =>
+          cases r with
+          | sat a =>
+              simp [hs] at h
+              cases h
+              obtain ⟨hm, ha⟩ := coreSolveFullPre_sat hs
+              exact ⟨hwf, (compileFull_exact hc hwf hm ha).1⟩
+          | unsat => simp [hs] at h
+          | gaveUp => simp [hs] at h
       · cases h
 
 theorem solveModel_unsat_correct {m : Model} {o : SearchConfig} {fuel : Nat}
     (hwf : WellFormed fullSig m) (h : solveModel m o fuel = .unsat) :
     ¬ ∃ store, Satisfies fullSig fullInterp m store ∧ LeanFzn.Semantics.ParamHonest m store := by
   unfold solveModel at h
+  unfold solveModelWithStats at h
   cases hc : compileModelFull m with
   | error e => simp [hc] at h
   | ok p =>
       simp only [hc] at h
       split at h
-      · cases hs : solveCompiled p o fuel with
-        | sat a => simp [hs] at h
-        | unsat =>
-            rintro ⟨store, hsat, hp⟩
-            obtain ⟨a, hm, ha⟩ := compileFull_covers hc hwf hsat.2 hp
-            have hn := solveCompiled_unsat hs a hm
-            rw [ha] at hn
-            cases hn
-        | unknown => simp [hs] at h
+      · cases hs : coreSolveFullPre p o none fuel with
+        | mk r st =>
+          cases r with
+          | sat a => simp [hs] at h
+          | unsat =>
+              rintro ⟨store, hsat, hp⟩
+              obtain ⟨a, hm, ha⟩ := compileFull_covers hc hwf hsat.2 hp
+              have hn := coreSolveFullPre_unsat (p := p) (o := o) (prev := none)
+                (fuel := fuel) (st := st) (by rw [hs]) a hm
+              rw [ha] at hn
+              cases hn
+          | gaveUp => simp [hs] at h
       · cases h
 
 end LeanFzn.Core

@@ -19,6 +19,9 @@ inductive VarStrategy where
   | act
   /-- Domain-size weighted degree (F7). -/
   | domwdeg
+  /-- Conflict-weighted degree: minimise `size / (weight + 1)` where the
+  weight counts conflict-explanation occurrences (P5.2). -/
+  | wdeg
   /-- Objective slot first; the legacy `--heur-obj-prio` (implemented). -/
   | obj
   deriving Repr, DecidableEq, Inhabited
@@ -31,6 +34,8 @@ inductive ValStrategy where
   | max
   /-- Median-first then alternating (F3). -/
   | median
+  /-- Binary interval split `x ≤ m` versus `x > m` (P2). -/
+  | split
   /-- Today's static activity order. -/
   | act
   /-- Annotation-directed order (F2). -/
@@ -85,6 +90,8 @@ inductive PresolveStrategy where
   | none
   /-- Root fixpoint sweep (E2). -/
   | root
+  /-- Certified duplicate-constraint canonicalisation (P7.1). -/
+  | dedup
   deriving Repr, DecidableEq, Inhabited
 
 /-- Search engine (`--engine`).  `core` is the default (N14); `kernel` is
@@ -116,11 +123,24 @@ structure SearchConfig where
   restart : RestartStrategy := .none
   /-- Restart base budget in steps (F5). -/
   restartBase : Nat := 100
+  /-- Whether the restart schedule was chosen explicitly, either by
+      `--restart` or by a preset.  The linear driver's after-incumbent Luby
+      policy only fills an otherwise unset schedule. -/
+  restartExplicit : Bool := false
   primal : PrimalStrategy := .none
   prop : PropStrategy := .auto
   presolve : PresolveStrategy := .none
   /-- Total wall budget in milliseconds; `none` is a complete run. -/
   timeLimit : Option Nat := none
+  /-- Per-round conflict budget for the Core loop (`none` is unlimited).
+      This is a diagnostic measurement cap, not a wall-clock limit: a run
+      that reaches it exits 4 with cause "conflict limit reached". -/
+  conflictLimit : Option Nat := none
+  /-- Opt-in parallel portfolio (`--threads=N`, 1..8), for linear
+      optimization and satisfaction models.  `1` keeps the ordinary
+      single-threaded driver; `N > 1` runs the built-in independent-worker
+      portfolio described in `Integration/Public/Driver`. -/
+  threads : Nat := 1
   /-- Nominal step budget of each primal (dive/LNS) slice, in nominal
       milliseconds; `Primal.primalStepsPerMs` converts it to kernel steps
       (F6).  It is not a wall-clock promise. -/
@@ -139,5 +159,14 @@ structure SearchConfig where
   actBump : Bool := false
   deriving Repr, DecidableEq, Inhabited
 
+
+/-- Restart policy for one optimization round.  Before the first incumbent
+the configured schedule is used; afterwards the complete linear driver fills
+the default `--restart=none` with Luby.  An explicit `--restart` (including
+`none`) or a preset schedule is honoured unchanged. -/
+def roundConfig {α : Type} (o : SearchConfig) (prev : Option α) : SearchConfig :=
+  if prev.isSome && !o.restartExplicit && o.restart == .none then
+    { o with restart := .luby }
+  else o
 
 end LeanFzn.Integration

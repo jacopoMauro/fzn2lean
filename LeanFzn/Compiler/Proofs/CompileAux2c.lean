@@ -963,6 +963,25 @@ theorem compileConstraint_int_eq_reif_inv {env : Store} {names : List String}
     cases hr : nameIndex names r.name <;> simp [hx, hy, hr] at hcc
   exact ⟨_, _, _, rfl, rfl, rfl, hcc.symm⟩
 
+/-- The successful compile of the R12 singleton linear-equality piece:
+    `int_lin_eq_reif [1] [x] k r` extracts to the certified
+    `linEqReif [1] [i] k ir` shape. -/
+theorem compileConstraint_int_lin_eq_reif_singleton_inv {env : Store}
+    {names : List String} {x r : Ident} {k : Int} {dc : DomConstraint}
+    (hcc : compileConstraint env names
+        { name := Ident.mk "int_lin_eq_reif"
+        , args := [.array [.lit (.int 1)], .array [.ident x],
+            .basic (.lit (.int k)), .basic (.ident r)]
+        , anns := [] } = .ok dc) :
+    ∃ i ir, nameIndex names x.name = some i ∧
+      nameIndex names r.name = some ir ∧
+      dc = .linEqReif [1] [i] k ir := by
+  simp only [compileConstraint, extractConstraint, linCoeffs,
+    linIndices] at hcc
+  cases hx : nameIndex names x.name <;> cases hr : nameIndex names r.name <;>
+    simp [hx, hr] at hcc
+  exact ⟨_, _, rfl, rfl, hcc.symm⟩
+
 /-- The successful compile of a 3-identifier `int_le_reif` piece. -/
 theorem compileConstraint_int_le_reif_inv {env : Store} {names : List String}
     {x y r : Ident} {dc : DomConstraint}

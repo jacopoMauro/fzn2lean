@@ -10,6 +10,10 @@ import LeanFzn.Compiler.Extract
 open LeanFzn.Compiler.Domains
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Compiler
 
+-- The compiled-shape checks below elaborate nested parser/extractor terms.
+-- Keep the historical regression suite buildable at the current toolchain.
+set_option maxRecDepth 8192
+
 
 /-!
 # Propagator tests

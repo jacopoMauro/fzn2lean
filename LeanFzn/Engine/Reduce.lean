@@ -493,6 +493,62 @@ def reduceCandidate {p : CompiledProblem DomConstraint} {T : LitTable}
     (sc : StoredClause p T) : Bool :=
   !sc.deleted && decide (2 < sc.lbd) && decide (2 < sc.e.lits.size)
 
+/-- Clear the per-interval usefulness flags.  Slots, clauses, proofs, watch
+positions and deletion flags are unchanged. -/
+def ClauseDB.clearUsed (db : ClauseDB p T) : ClauseDB p T :=
+  { db with clauses := db.clauses.map (fun sc => { sc with used := false }) }
+
+@[simp] theorem ClauseDB.clearUsed_clauses (db : ClauseDB p T) :
+    db.clearUsed.clauses = db.clauses.map (fun sc => { sc with used := false }) := rfl
+
+theorem ClauseDB.clearUsed_clauses_size (db : ClauseDB p T) :
+    db.clearUsed.clauses.size = db.clauses.size := by
+  rw [ClauseDB.clearUsed_clauses, Array.size_map]
+
+@[simp] theorem ClauseDB.clearUsed_live (db : ClauseDB p T) :
+    db.clearUsed.live = db.live := rfl
+
+theorem ClauseDB.clearUsed_inv (db : ClauseDB p T) (h : db.Inv) : db.clearUsed.Inv := by
+  have hcnt : db.clearUsed.liveCount = db.liveCount := by
+    have hcomp : ((fun sc : StoredClause p T => sc.deleted) ∘
+        (fun sc : StoredClause p T => { sc with used := false })) =
+        (fun sc : StoredClause p T => sc.deleted) := by
+      funext sc
+      rfl
+    unfold ClauseDB.liveCount ClauseDB.deletedCount ClauseDB.clearUsed
+    rw [Array.size_map, Array.countP_map, hcomp]
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+  · intro i ids hi id hid
+    rw [ClauseDB.clearUsed_clauses_size]
+    exact h.watch_lt i ids hi id hid
+  · intro id sc hget hdel hsz
+    rw [ClauseDB.clearUsed_clauses] at hget
+    rw [Array.getElem?_map] at hget
+    cases hold : db.clauses[id]? with
+    | none => rw [hold] at hget; simp at hget
+    | some old =>
+        rw [hold] at hget
+        simp only [Option.map_some, Option.some.injEq] at hget
+        subst sc
+        exact h.pos_lt id old hold (by simpa using hdel) (by simpa using hsz)
+  · intro id sc hget hdel hsz
+    rw [ClauseDB.clearUsed_clauses] at hget
+    rw [Array.getElem?_map] at hget
+    cases hold : db.clauses[id]? with
+    | none => rw [hold] at hget; simp at hget
+    | some old =>
+        rw [hold] at hget
+        simp only [Option.map_some, Option.some.injEq] at hget
+        subst sc
+        exact h.watches id old hold (by simpa using hdel) (by simpa using hsz)
+  · rw [ClauseDB.clearUsed_live, hcnt, h.live_eq]
+  · intro id hid
+    obtain ⟨sc, hget, hdel⟩ := h.free_deleted id hid
+    refine ⟨{ sc with used := false }, ?_, hdel⟩
+    rw [ClauseDB.clearUsed_clauses, Array.getElem?_map, hget]
+    rfl
+  · exact h.free_nodup
+
 /-- LBD histogram of the candidate set, built in one pass over the slots
 (bucket `32` collects all LBDs above 32). -/
 def ClauseDB.reduceHistogram (db : ClauseDB p T) : Array Nat :=
@@ -533,26 +589,33 @@ With fewer than 100 candidates the database is returned unchanged. -/
 def ClauseDB.reduce (db : ClauseDB p T) : ClauseDB p T :=
   let hist := db.reduceHistogram
   let total := reduceCandidateCount hist
-  if total < 100 then db
+  if total < 100 then db.clearUsed.compactWatches
   else
     let thr := reduceThresholdOf total hist
-    db.retireWhere (fun _ sc => ClauseDB.reduceDoomed thr sc)
+    ((db.retireWhere (fun _ sc => ClauseDB.reduceDoomed thr sc)).clearUsed).compactWatches
 
 theorem ClauseDB.reduce_clauses_size (db : ClauseDB p T) :
     db.reduce.clauses.size = db.clauses.size := by
   unfold ClauseDB.reduce
   dsimp only
   split
-  · rfl
-  · exact ClauseDB.retireWhere_clauses_size db _
+  · rw [ClauseDB.compactWatches_clauses]
+    exact ClauseDB.clearUsed_clauses_size db
+  · rw [ClauseDB.compactWatches_clauses, ClauseDB.clearUsed_clauses_size]
+    exact ClauseDB.retireWhere_clauses_size db _
 
 /-- Reduction preserves the structural database invariant. -/
 theorem ClauseDB.reduce_inv (db : ClauseDB p T) (h : db.Inv) : db.reduce.Inv := by
   unfold ClauseDB.reduce
   dsimp only
   split
-  · exact h
-  · exact ClauseDB.retireWhere_inv db _ h
+  · exact ClauseDB.compactWatches_inv (db.clearUsed) (ClauseDB.clearUsed_inv db h)
+  · have hdb : (db.retireWhere (fun _ sc =>
+        ClauseDB.reduceDoomed
+          (reduceThresholdOf (reduceCandidateCount db.reduceHistogram)
+            db.reduceHistogram) sc)).Inv :=
+      ClauseDB.retireWhere_inv db _ h
+    exact ClauseDB.compactWatches_inv _ (ClauseDB.clearUsed_inv _ hdb)
 
 /-- Reduction never increases the live-clause count. -/
 theorem ClauseDB.reduce_live_le (db : ClauseDB p T) (h : db.Inv) :
@@ -573,9 +636,13 @@ at every decision boundary.  The threshold is advanced even when the policy
 deleted nothing, so the work is geometric in the conflict count. -/
 def maybeReduce (st : EngineState p T) : EngineState p T :=
   if st.stats.learned >= st.nextReduce then
+    let db := st.db.reduce
     { st with
-      db := st.db.reduce
-      nextReduce := max (st.stats.learned + 1) (st.nextReduce * 2) }
+      db := db
+      nextReduce := max 2000 (max (st.stats.learned + 1) (st.nextReduce * 2))
+      stats := { st.stats with
+        reductions := st.stats.reductions + 1
+        reducedClauses := st.stats.reducedClauses + (st.db.live - db.live) } }
   else st
 
 @[simp] theorem maybeReduce_doms (st : EngineState p T) :
@@ -594,7 +661,13 @@ def maybeReduce (st : EngineState p T) : EngineState p T :=
   split <;> rfl
 
 @[simp] theorem maybeReduce_stats (st : EngineState p T) :
-    (maybeReduce st).stats = st.stats := by
+    (maybeReduce st).stats =
+      if st.stats.learned >= st.nextReduce then
+        { st.stats with
+          reductions := st.stats.reductions + 1
+          reducedClauses := st.stats.reducedClauses +
+            (st.db.live - st.db.reduce.live) }
+      else st.stats := by
   unfold maybeReduce
   split <;> rfl
 
@@ -606,7 +679,7 @@ def maybeReduce (st : EngineState p T) : EngineState p T :=
 @[simp] theorem maybeReduce_nextReduce (st : EngineState p T) :
     (maybeReduce st).nextReduce =
       if st.stats.learned >= st.nextReduce then
-        max (st.stats.learned + 1) (st.nextReduce * 2)
+        max 2000 (max (st.stats.learned + 1) (st.nextReduce * 2))
       else st.nextReduce := by
   unfold maybeReduce
   split <;> rfl
@@ -624,6 +697,85 @@ theorem maybeReduce_inv (st : EngineState p T) (h : st.db.Inv) :
   rw [maybeReduce_db]
   split
   · exact ClauseDB.reduce_inv st.db h
+  · exact h
+
+/-! ## Reduction preserves stored-literal well-formedness -/
+
+/-- `setLbd` only changes the LBD policy field of one slot. -/
+theorem ClauseDB.setLbd_clauses_e (db : ClauseDB p T) (id n j : Nat) :
+    ((db.setLbd id n).clauses[j]?).map (fun sc : StoredClause p T => sc.e) =
+      (db.clauses[j]?).map (fun sc : StoredClause p T => sc.e) := by
+  rw [ClauseDB.setLbd_getElem?]
+  by_cases hji : j = id
+  · rw [if_pos hji]
+    cases hget : db.clauses[j]? with
+    | none => rfl
+    | some sc => simp
+  · rw [if_neg hji]
+
+theorem ClauseDB.LitsWF.setLbd {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (id n : Nat) : (db.setLbd id n).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (ClauseDB.setLbd_clauses_e db id n)
+
+/-- `retireStep` never changes the carried clause. -/
+@[simp] theorem retireStep_e (doomed : Nat → StoredClause p T → Bool)
+    (id : Nat) (sc : StoredClause p T) :
+    (retireStep doomed id sc).e = sc.e := by
+  by_cases hd : sc.deleted <;> by_cases hdoom : doomed id sc <;>
+    simp [retireStep, hd, hdoom]
+
+theorem ClauseDB.retireMark_clauses_e (db : ClauseDB p T)
+    (doomed : Nat → StoredClause p T → Bool) (j : Nat) :
+    ((db.retireMark doomed).clauses[j]?).map
+        (fun sc : StoredClause p T => sc.e) =
+      (db.clauses[j]?).map (fun sc : StoredClause p T => sc.e) := by
+  rw [ClauseDB.retireMark_getElem?, Option.map_map]
+  congr 1
+  funext sc
+  exact retireStep_e doomed j sc
+
+theorem ClauseDB.LitsWF.retireMark {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (doomed : Nat → StoredClause p T → Bool) :
+    (db.retireMark doomed).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (ClauseDB.retireMark_clauses_e db doomed)
+
+theorem ClauseDB.LitsWF.retireWhere {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) (doomed : Nat → StoredClause p T → Bool) :
+    (db.retireWhere doomed).LitsWF S := by
+  unfold ClauseDB.retireWhere
+  exact ClauseDB.LitsWF.of_map_e (ClauseDB.LitsWF.retireMark h doomed)
+    (fun j => by rw [ClauseDB.compactWatches_clauses])
+
+theorem ClauseDB.clearUsed_clauses_e (db : ClauseDB p T) (j : Nat) :
+    ((db.clearUsed).clauses[j]?).map (fun sc : StoredClause p T => sc.e) =
+      (db.clauses[j]?).map (fun sc : StoredClause p T => sc.e) := by
+  rw [ClauseDB.clearUsed_clauses, Array.getElem?_map]
+  cases hget : db.clauses[j]? with
+  | none => rfl
+  | some sc => simp
+
+theorem ClauseDB.LitsWF.clearUsed {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) : (db.clearUsed).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (ClauseDB.clearUsed_clauses_e db)
+
+theorem ClauseDB.LitsWF.compactWatches {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) : (db.compactWatches).LitsWF S :=
+  ClauseDB.LitsWF.of_map_e h (fun j => by rw [ClauseDB.compactWatches_clauses])
+
+theorem ClauseDB.LitsWF.reduce {S : LitTable} {db : ClauseDB p T}
+    (h : db.LitsWF S) : db.reduce.LitsWF S := by
+  unfold ClauseDB.reduce
+  dsimp only
+  split
+  · exact ClauseDB.LitsWF.compactWatches (ClauseDB.LitsWF.clearUsed h)
+  · exact ClauseDB.LitsWF.compactWatches
+      (ClauseDB.LitsWF.clearUsed (ClauseDB.LitsWF.retireWhere h _))
+
+theorem maybeReduce_litsWF {S : LitTable} {st : EngineState p T}
+    (h : st.db.LitsWF S) : (maybeReduce st).db.LitsWF S := by
+  rw [maybeReduce_db]
+  split
+  · exact ClauseDB.LitsWF.reduce h
   · exact h
 
 end LeanFzn.Engine

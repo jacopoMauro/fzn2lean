@@ -124,6 +124,7 @@ theorem ofDom?_isBool {d : DomC} {sh : BShape}
   | bounds lo hi => simp [ofDom?] at h
   | bitset lo words => simp [ofDom?] at h
   | boundsHoles lo hi holes => simp [ofDom?] at h
+  | sparse values => simp [ofDom?] at h
 
 theorem ofDom?_fixedFalse {d : DomC} {sh : BShape}
     (h : ofDom? d = some sh) (hsh : sh = fixedFalse) :
@@ -140,6 +141,7 @@ theorem ofDom?_fixedFalse {d : DomC} {sh : BShape}
   | bounds lo hi => simp [ofDom?] at h
   | bitset lo words => simp [ofDom?] at h
   | boundsHoles lo hi holes => simp [ofDom?] at h
+  | sparse values => simp [ofDom?] at h
 
 theorem ofDom?_fixedTrue {d : DomC} {sh : BShape}
     (h : ofDom? d = some sh) (hsh : sh = fixedTrue) :
@@ -156,6 +158,7 @@ theorem ofDom?_fixedTrue {d : DomC} {sh : BShape}
   | bounds lo hi => simp [ofDom?] at h
   | bitset lo words => simp [ofDom?] at h
   | boundsHoles lo hi holes => simp [ofDom?] at h
+  | sparse values => simp [ofDom?] at h
 
 theorem ofDom?_full_none {d : DomC} {sh : BShape}
     (h : ofDom? d = some sh) (hsh : sh = full) :
@@ -174,6 +177,7 @@ theorem ofDom?_full_none {d : DomC} {sh : BShape}
   | bounds lo hi => simp [ofDom?] at h
   | bitset lo words => simp [ofDom?] at h
   | boundsHoles lo hi holes => simp [ofDom?] at h
+  | sparse values => simp [ofDom?] at h
 
 end BShape
 
@@ -233,6 +237,7 @@ theorem ofDom?_eq_none_of_not_bool {s : Nat} {d : DomC}
   | bounds lo hi => rfl
   | bitset lo words => rfl
   | boundsHoles lo hi holes => rfl
+  | sparse values => rfl
 
 theorem ofDom?_fixed_false {s : Nat} {d : DomC} {a : BArg}
     (h : BArg.ofDom? s d = some a) (hf : a.curF = true) (ht : a.curT = false) :
@@ -1255,6 +1260,7 @@ theorem initBoolB_some {p : CompiledProblem DomConstraint} {s : Nat}
           | bounds lo hi => simp [hc] at h
           | bitset lo words => simp [hc] at h
           | boundsHoles lo hi holes => simp [hc] at h
+          | sparse values => simp [hc] at h
 
 theorem exists_bool_of_mem_bool {bits : UInt8} {v : Value}
     (h : (DomC.bool bits).mem v = true) : ∃ b, v = .bool b := by
@@ -1990,11 +1996,12 @@ sound `.fix`. -/
 def arrayBoolAndPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
     (is : List Nat) (k : Nat)
     (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints) : PropV2 p T :=
+  let ready := is.all (BArgs.initBoolB p)
   { vars := (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)).toArray
     events := (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)).toArray.map
       fun s => (s, .fix)
     run := fun view =>
-      if hguard : is.all (BArgs.initBoolB p) = true then
+      if hguard : ready = true then
         (boolSupportPropWith p T (arrayBoolAndR is.length)
           (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k))
           (fun doms args hargs b hb hacc =>
@@ -2576,5 +2583,654 @@ theorem arrayBoolAndPropWith_run_fix_of_slots_none
       (arrayBoolAndR is.length)
       (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)) _ _ view hpn
   · rfl
+
+/-! ## Closed-form `array_bool_and` plan -/
+
+/-- All sources currently contain `true`. -/
+def allCurT (src : List BArg) : Bool := src.all fun a => a.curT
+
+/-- Some source currently contains `false`. -/
+def anyCurF (src : List BArg) : Bool := src.any fun a => a.curF
+
+/-- Some source other than position `p` currently contains `false`.  The
+index scan is quadratic in the operand count, which is harmless for the
+small arrays produced by FlatZinc flattening, and avoids any `eraseIdx`
+reasoning. -/
+def anyOtherCurF (src : List BArg) (p : Nat) : Bool :=
+  (List.range src.length).any fun i =>
+    (src.getD i default).curF && i != p
+
+theorem allCurT_eq_true {src : List BArg} :
+    allCurT src = true ↔ ∀ a ∈ src, a.curT = true := by
+  simp [allCurT]
+
+theorem anyCurF_eq_true {src : List BArg} :
+    anyCurF src = true ↔ ∃ a ∈ src, a.curF = true := by
+  simp [anyCurF]
+
+theorem anyOtherCurF_eq_true {src : List BArg} {p : Nat} :
+    anyOtherCurF src p = true ↔
+      ∃ i, i < src.length ∧ (src.getD i default).curF = true ∧ i ≠ p := by
+  unfold anyOtherCurF
+  rw [List.any_eq_true]
+  constructor
+  · rintro ⟨i, hi, hc⟩
+    rw [List.mem_range] at hi
+    simp only [Bool.and_eq_true] at hc
+    exact ⟨i, hi, hc.1, by simpa using hc.2⟩
+  · rintro ⟨i, hi, hc, hne⟩
+    refine ⟨i, by simpa using hi, ?_⟩
+    have hc' : src[i].curF = true := by
+      simpa [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hi] using hc
+    simp [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hi, hc', hne]
+
+/-- Closed-form support test for `array_bool_and` on `src ++ [ak]`.
+`pos < src.length` is a source position; `pos = src.length` is the result
+position.  The test is exact on nonempty Boolean boxes, but only its
+forward direction (a satisfying assignment reaches a current value that
+passes the test) is needed for soundness. -/
+def arrayBoolAndSupp (src : List BArg) (ak : BArg) (pos : Nat) (v : Bool) : Bool :=
+  if pos < src.length then
+    (if v then
+      (ak.curT && allCurT src) || (ak.curF && anyOtherCurF src pos)
+     else ak.curF)
+  else if pos = src.length then
+    (if v then allCurT src else anyCurF src)
+  else false
+
+@[simp] theorem arrayBoolAndSupp_source_false {src : List BArg} {ak : BArg}
+    {p : Nat} (hp : p < src.length) :
+    arrayBoolAndSupp src ak p false = ak.curF := by
+  simp [arrayBoolAndSupp, hp]
+
+@[simp] theorem arrayBoolAndSupp_source_true {src : List BArg} {ak : BArg}
+    {p : Nat} (hp : p < src.length) :
+    arrayBoolAndSupp src ak p true =
+      ((ak.curT && allCurT src) || (ak.curF && anyOtherCurF src p)) := by
+  simp [arrayBoolAndSupp, hp]
+
+@[simp] theorem arrayBoolAndSupp_result_false {src : List BArg} (ak : BArg) :
+    arrayBoolAndSupp src ak src.length false = anyCurF src := by
+  unfold arrayBoolAndSupp
+  simp
+
+@[simp] theorem arrayBoolAndSupp_result_true {src : List BArg} (ak : BArg) :
+    arrayBoolAndSupp src ak src.length true = allCurT src := by
+  unfold arrayBoolAndSupp
+  simp
+
+/-- A target value at one operand position: the position, slot and value
+to remove.  Turning targets into `BPrune` records keeps the prune shape
+uniform and makes membership decoding cheap. -/
+structure BTarget where
+  pos : Nat
+  slot : Nat
+  val : Bool
+  deriving Repr, DecidableEq
+
+def BTarget.toPrune (args : List BArg) (t : BTarget) : BPrune :=
+  { pos := t.pos
+    slot := t.slot
+    val := t.val
+    lit := posBool t.slot (!t.val)
+    reason := posBool t.slot (!t.val) :: BArgs.fixedLits args }
+
+/-- Values with no closed-form support. -/
+def arrayBoolAndTargets (src : List BArg) (ak : BArg) : List BTarget :=
+  let allT := allCurT src
+  let anyF := anyCurF src
+  (List.range src.length).flatMap (fun p =>
+      let a := src.getD p default
+      (if a.curF && !ak.curF then
+        [{ pos := p, slot := a.slot, val := false }]
+       else []) ++
+      (if a.curT && !((ak.curT && allT) || (ak.curF && anyOtherCurF src p)) then
+        [{ pos := p, slot := a.slot, val := true }]
+       else [])) ++
+  (if ak.curF && !anyF then
+    [{ pos := src.length, slot := ak.slot, val := false }]
+   else []) ++
+  (if ak.curT && !allT then
+    [{ pos := src.length, slot := ak.slot, val := true }]
+   else [])
+
+/-- The closed-form prune list for `array_bool_and`. -/
+def arrayBoolAndPrunesFast (src : List BArg) (ak : BArg) : List BPrune :=
+  (arrayBoolAndTargets src ak).map (fun t => t.toPrune (src ++ [ak]))
+
+/-- No satisfying Boolean tuple remains. -/
+def arrayBoolAndConflict (src : List BArg) (ak : BArg) : Bool :=
+  !((ak.curF && anyCurF src) || (ak.curT && allCurT src))
+
+/-- View-independent closed-form plan for `array_bool_and`. -/
+def arrayBoolAndPlanFast (src : List BArg) (ak : BArg) : BPlan :=
+  if arrayBoolAndConflict src ak then
+    { conflict? := some (BArgs.fixedLits (src ++ [ak])), prunes := [] }
+  else
+    { conflict? := none, prunes := arrayBoolAndPrunesFast src ak }
+
+/-- Every generated target has a failing closed-form support test and
+refers either to a source position or to the result position. -/
+theorem mem_arrayBoolAndTargets_spec {src : List BArg} {ak : BArg}
+    {t : BTarget} (h : t ∈ arrayBoolAndTargets src ak) :
+    arrayBoolAndSupp src ak t.pos t.val = false ∧
+      ((t.pos < src.length ∧ t.slot = (src.getD t.pos default).slot) ∨
+       (t.pos = src.length ∧ t.slot = ak.slot)) := by
+  unfold arrayBoolAndTargets at h
+  simp only [List.mem_append, List.mem_flatMap, List.mem_range,
+    List.mem_singleton] at h
+  rcases h with (⟨p, hp, h⟩ | h) | h
+  · rcases h with h | h
+    · by_cases hf : ((src.getD p default).curF &&
+          !ak.curF) = true
+      · rw [if_pos hf] at h
+        simp only [List.mem_singleton] at h
+        subst h
+        refine ⟨?_, Or.inl ⟨hp, rfl⟩⟩
+        rw [arrayBoolAndSupp_source_false hp]
+        have := (Bool.and_eq_true_iff.mp hf).2
+        rwa [Bool.not_eq_true'] at this
+      · rw [if_neg hf] at h
+        simp at h
+    · by_cases ht : ((src.getD p default).curT &&
+          !((ak.curT && allCurT src) ||
+            (ak.curF && anyOtherCurF src p))) = true
+      · rw [if_pos ht] at h
+        simp only [List.mem_singleton] at h
+        subst h
+        refine ⟨?_, Or.inl ⟨hp, rfl⟩⟩
+        rw [arrayBoolAndSupp_source_true hp]
+        have := (Bool.and_eq_true_iff.mp ht).2
+        rwa [Bool.not_eq_true'] at this
+      · rw [if_neg ht] at h
+        simp at h
+  · by_cases hf : (ak.curF && !anyCurF src) = true
+    · rw [if_pos hf] at h
+      simp only [List.mem_singleton] at h
+      subst h
+      refine ⟨?_, Or.inr ⟨rfl, rfl⟩⟩
+      rw [arrayBoolAndSupp_result_false]
+      have := (Bool.and_eq_true_iff.mp hf).2
+      rwa [Bool.not_eq_true'] at this
+    · rw [if_neg hf] at h
+      simp at h
+  · by_cases ht : (ak.curT && !allCurT src) = true
+    · rw [if_pos ht] at h
+      simp only [List.mem_singleton] at h
+      subst h
+      refine ⟨?_, Or.inr ⟨rfl, rfl⟩⟩
+      rw [arrayBoolAndSupp_result_true]
+      have := (Bool.and_eq_true_iff.mp ht).2
+      rwa [Bool.not_eq_true'] at this
+    · rw [if_neg ht] at h
+      simp at h
+
+/-- Support-failure projection of `mem_arrayBoolAndTargets_spec`. -/
+theorem arrayBoolAndSupp_of_mem_targets {src : List BArg} {ak : BArg}
+    {t : BTarget} (h : t ∈ arrayBoolAndTargets src ak) :
+    arrayBoolAndSupp src ak t.pos t.val = false :=
+  (mem_arrayBoolAndTargets_spec h).1
+
+/-- A target's prune has the standard complement-literal shape. -/
+theorem mem_arrayBoolAndPrunesFast {src : List BArg} {ak : BArg} {bp : BPrune}
+    (h : bp ∈ arrayBoolAndPrunesFast src ak) :
+    ∃ t ∈ arrayBoolAndTargets src ak, bp = t.toPrune (src ++ [ak]) := by
+  unfold arrayBoolAndPrunesFast at h
+  rw [List.mem_map] at h
+  obtain ⟨t, ht, hbp⟩ := h
+  exact ⟨t, ht, hbp.symm⟩
+
+/-- `getD` of an in-range index is a member. -/
+theorem mem_getD_of_lt {α : Type} {l : List α} {i : Nat} {d : α}
+    (h : i < l.length) : l.getD i d ∈ l := by
+  rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem h]
+  exact List.getElem_mem h
+
+/-- `getD` at a left index is unchanged by appending. -/
+theorem getD_append_left {α : Type} {l₁ l₂ : List α} {i : Nat} {d : α}
+    (h : i < l₁.length) :
+    (l₁ ++ l₂).getD i d = l₁.getD i d := by
+  rw [List.getD_eq_getElem?_getD, List.getD_eq_getElem?_getD,
+    List.getElem?_append_left h]
+
+/-- A failing `all id` on a Boolean list exposes a false element at an
+index. -/
+theorem exists_getD_false_of_all_false {l : List Bool} (h : l.all id = false) :
+    ∃ i, i < l.length ∧ l.getD i false = false := by
+  induction l with
+  | nil => simp at h
+  | cons x xs ih =>
+      by_cases hx : x = false
+      · exact ⟨0, by simp, by simpa using hx⟩
+      · have hx' : x = true := by cases x <;> simp_all
+        have hxs : xs.all id = false := by simpa [hx'] using h
+        obtain ⟨i, hi, hget⟩ := ih hxs
+        exact ⟨i + 1, by simpa using hi, by simpa using hget⟩
+
+/-- Values of an appended operand list. -/
+theorem valsOf_append_singleton (b : Assignment) (src : List BArg) (ak : BArg) :
+    BArgs.valsOf b (src ++ [ak]) = BArgs.valsOf b src ++ [ak.valAt b] := by
+  simp [BArgs.valsOf]
+
+/-- Reading a source position from the appended value list. -/
+theorem valsOf_append_getD_left {b : Assignment} {src : List BArg} {ak : BArg}
+    {p : Nat} (hp : p < src.length) :
+    (BArgs.valsOf b (src ++ [ak])).getD p false =
+      (src.getD p default).valAt b := by
+  rw [valsOf_append_singleton]
+  rw [getD_append_left (l₁ := BArgs.valsOf b src) (l₂ := [ak.valAt b])
+    (i := p) (d := false) (by simpa [BArgs.valsOf_length] using hp)]
+  exact BArgs.valsOf_getD (by simpa [BArgs.valsOf_length] using hp)
+
+/-- Reading the result position from the appended value list. -/
+theorem valsOf_append_getD_right {b : Assignment} {src : List BArg} {ak : BArg} :
+    (BArgs.valsOf b (src ++ [ak])).getD src.length false = ak.valAt b := by
+  rw [valsOf_append_singleton, ← BArgs.valsOf_length b src]
+  exact getD_append_singleton_self (BArgs.valsOf b src) (ak.valAt b)
+
+/-- Forward support: if the assignment's values are current and satisfy
+the `array_bool_and` relation, then the value at any operand position
+passes the closed-form test.  This is the only semantic direction needed
+for entailed reasons. -/
+theorem arrayBoolAndSupp_of_vals {src : List BArg} {ak : BArg}
+    {b : Assignment}
+    (hcurSrc : ∀ a ∈ src, a.cur (a.valAt b) = true)
+    (hcurAk : ak.cur (ak.valAt b) = true)
+    (hrel : ak.valAt b = (BArgs.valsOf b src).all id)
+    {pos : Nat} (hpos : pos < (src ++ [ak]).length) :
+    arrayBoolAndSupp src ak pos
+      ((BArgs.valsOf b (src ++ [ak])).getD pos false) = true := by
+  by_cases hp : pos < src.length
+  · rw [valsOf_append_getD_left hp]
+    have hcurP := hcurSrc (src.getD pos default) (BArgs.getD_mem hp)
+    by_cases hval : (src.getD pos default).valAt b = true
+    · rw [hval, arrayBoolAndSupp_source_true hp]
+      by_cases hak : ak.valAt b = true
+      · have hallvals : (BArgs.valsOf b src).all id = true := by
+          rw [← hrel, hak]
+        have hallT : allCurT src = true := by
+          rw [allCurT_eq_true]
+          intro a ha
+          have hva : a.valAt b = true :=
+            List.all_eq_true.mp hallvals (a.valAt b)
+              (List.mem_map_of_mem (f := fun a => a.valAt b) ha)
+          have hca := hcurSrc a ha
+          simpa [BArg.cur, hva] using hca
+        have hcurT : ak.curT = true := by
+          simpa [BArg.cur, hak] using hcurAk
+        simp [hallT, hcurT]
+      · have hakf : ak.valAt b = false := by simpa using hak
+        have hcurF : ak.curF = true := by
+          simpa [BArg.cur, hakf] using hcurAk
+        have hrelf : (BArgs.valsOf b src).all id = false := by
+          rw [← hrel, hakf]
+        have hother : anyOtherCurF src pos = true := by
+          rw [anyOtherCurF_eq_true]
+          obtain ⟨q, hq, hqval⟩ := exists_getD_false_of_all_false hrelf
+          have hqsrc : q < src.length := by
+            simpa [BArgs.valsOf_length] using hq
+          refine ⟨q, hqsrc, ?_, ?_⟩
+          · have hqv : (src.getD q default).valAt b = false := by
+              have hgd := BArgs.valsOf_getD (b := b) (args := src) (p := q) hqsrc
+              rw [hqval] at hgd
+              exact hgd.symm
+            have hcq := hcurSrc (src.getD q default) (BArgs.getD_mem hqsrc)
+            unfold BArg.cur at hcq
+            rw [hqv] at hcq
+            simpa using hcq
+          · intro hqpos
+            have hpv : (BArgs.valsOf b src).getD pos false = true := by
+              have hgd := BArgs.valsOf_getD (b := b) (args := src) (p := pos) hp
+              rw [hval] at hgd
+              exact hgd
+            rw [hqpos] at hqval
+            rw [hpv] at hqval
+            cases hqval
+        simp [hcurF, hother]
+    · have hvalf : (src.getD pos default).valAt b = false := by simpa using hval
+      rw [hvalf, arrayBoolAndSupp_source_false hp]
+      have hrelf : (BArgs.valsOf b src).all id = false := by
+        cases hh : (BArgs.valsOf b src).all id with
+        | false => rfl
+        | true =>
+            have hmem : (BArgs.valsOf b src).getD pos false ∈ BArgs.valsOf b src :=
+              mem_getD_of_lt (by simpa [BArgs.valsOf_length] using hp)
+            have hgd := List.all_eq_true.mp hh _ hmem
+            have hpv : (BArgs.valsOf b src).getD pos false = false := by
+              have hgd' := BArgs.valsOf_getD (b := b) (args := src) (p := pos) hp
+              rw [hvalf] at hgd'
+              exact hgd'
+            rw [hpv] at hgd
+            cases hgd
+      have hrelak : ak.valAt b = false := by rw [hrel, hrelf]
+      simpa [BArg.cur, hrelak] using hcurAk
+  · have hpos' : pos = src.length := by
+      have hlt : pos < src.length + 1 := by simpa using hpos
+      omega
+    subst hpos'
+    rw [valsOf_append_getD_right]
+    by_cases hak : ak.valAt b = true
+    · rw [hak, arrayBoolAndSupp_result_true]
+      have hallvals : (BArgs.valsOf b src).all id = true := by
+        rw [← hrel, hak]
+      rw [allCurT_eq_true]
+      intro a ha
+      have hva : a.valAt b = true :=
+        List.all_eq_true.mp hallvals (a.valAt b)
+          (List.mem_map_of_mem (f := fun a => a.valAt b) ha)
+      have hca := hcurSrc a ha
+      simpa [BArg.cur, hva] using hca
+    · have hakf : ak.valAt b = false := by simpa using hak
+      rw [hakf, arrayBoolAndSupp_result_false]
+      have hrelf : (BArgs.valsOf b src).all id = false := by
+        rw [← hrel, hakf]
+      rw [anyCurF_eq_true]
+      obtain ⟨q, hq, hqval⟩ := exists_getD_false_of_all_false hrelf
+      have hqsrc : q < src.length := by
+        simpa [BArgs.valsOf_length] using hq
+      have hqv : (src.getD q default).valAt b = false := by
+        have hgd := BArgs.valsOf_getD (b := b) (args := src) (p := q) hqsrc
+        rw [hqval] at hgd
+        exact hgd.symm
+      have hcq := hcurSrc (src.getD q default) (BArgs.getD_mem hqsrc)
+      refine ⟨src.getD q default, BArgs.getD_mem hqsrc, ?_⟩
+      unfold BArg.cur at hcq
+      rw [hqv] at hcq
+      simpa using hcq
+
+/-- A current member at the result position contradicts the conflict
+flag. -/
+theorem arrayBoolAndConflict_eq_false_of_supp {src : List BArg} {ak : BArg}
+    {v : Bool} (hcur : ak.cur v = true)
+    (h : arrayBoolAndSupp src ak src.length v = true) :
+    arrayBoolAndConflict src ak = false := by
+  cases v with
+  | false =>
+      rw [arrayBoolAndSupp_result_false] at h
+      have hcur' : ak.curF = true := by simpa [BArg.cur] using hcur
+      have hc : ((ak.curF && anyCurF src) || (ak.curT && allCurT src)) = true := by
+        rw [h, hcur']
+        simp
+      unfold arrayBoolAndConflict
+      rw [hc]
+      rfl
+  | true =>
+      rw [arrayBoolAndSupp_result_true] at h
+      have hcur' : ak.curT = true := by simpa [BArg.cur] using hcur
+      have hc : ((ak.curF && anyCurF src) || (ak.curT && allCurT src)) = true := by
+        rw [h, hcur']
+        simp
+      unfold arrayBoolAndConflict
+      rw [hc]
+      rfl
+
+/-- Membership of an operand's fixed fact in the whole operand list's
+fixed facts. -/
+theorem fixedLits_of_mem_fixedLit {a : BArg} {args : List BArg}
+    (ha : a ∈ args) : ∀ l ∈ a.fixedLit, l ∈ BArgs.fixedLits args := by
+  induction args with
+  | nil => simp at ha
+  | cons b bs ih =>
+      rcases List.mem_cons.mp ha with rfl | ha
+      · intro l hl
+        simp [BArgs.fixedLits, hl]
+      · intro l hl
+        simp only [BArgs.fixedLits, List.mem_append]
+        exact Or.inr (ih ha l hl)
+
+/-- Decode a failing complement literal into the removed Boolean value. -/
+theorem valAt_eq_of_not_eval_posBool {b : Assignment} {a : BArg}
+    (hbool : ∃ v, b[a.slot]? = some (.bool v)) {v : Bool}
+    (h : (posBool a.slot (!v)).eval b ≠ some true) :
+    a.valAt b = v := by
+  have hf := BArg.eval_posBool_eq_false_of_not_true hbool h
+  rw [eval_posBool_false_iff] at hf
+  obtain ⟨x, hx, hne⟩ := hf
+  have hx' : x = v := by
+    cases v <;> cases x <;> simp_all
+  subst hx'
+  exact BArg.valAt_eq_of_some_bool hx
+
+/-- Semantic support fact for `array_bool_and`: an accepted assignment
+whose fixed facts are false reaches a current value that passes the
+closed-form test, and the result operand is current. -/
+theorem arrayBoolAndSupport_of_accepts
+    (p : CompiledProblem DomConstraint) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (doms : Array DomC) (src : List BArg) (ak : BArg)
+    (hargs : BArgs.ofSlots doms (is ++ [k]) = some (src ++ [ak]))
+    (hinit : is.all (BArgs.initBoolB p) = true)
+    {b : Assignment} (hb : b ∈ allAssigns p.domains)
+    (hacc : accepts p b = true)
+    (hfalse : ∀ l ∈ BArgs.fixedLits (src ++ [ak]), l.eval b = some false)
+    {pos : Nat} (hpos : pos < (src ++ [ak]).length) :
+    arrayBoolAndSupp src ak pos
+        ((BArgs.valsOf b (src ++ [ak])).getD pos false) = true ∧
+      ak.cur (ak.valAt b) = true := by
+  have hspec := BArgs.arrayBoolAndR_spec p is k hmem doms (src ++ [ak])
+    hargs (List.all_eq_true.mp hinit) b hb hacc
+  have hlen : is.length = src.length := by
+    have hmap := BArgs.ofSlots_map_slot hargs
+    have := congrArg List.length hmap
+    simp at this
+    omega
+  have hR : arrayBoolAndR src.length
+      (BArgs.valsOf b (src ++ [ak])) = true := by
+    simpa [hlen] using hspec.1
+  have hrel : ak.valAt b = (BArgs.valsOf b src).all id := by
+    have h := hR
+    unfold arrayBoolAndR at h
+    have hget := valsOf_append_getD_right (b := b) (src := src) (ak := ak)
+    have htake : (BArgs.valsOf b (src ++ [ak])).take src.length =
+        BArgs.valsOf b src := by
+      rw [valsOf_append_singleton, ← BArgs.valsOf_length b src]
+      simp
+    rw [hget, htake] at h
+    exact beq_iff_eq.mp h
+  have hcurAll := BArgs.ofSlots_allCur hargs
+  have hfalseArg : ∀ a ∈ src ++ [ak], ∀ l ∈ a.fixedLit,
+      l.eval b = some false := by
+    intro a ha l hl
+    exact hfalse l (fixedLits_of_mem_fixedLit ha l hl)
+  have hcurSrc : ∀ a ∈ src, a.cur (a.valAt b) = true := by
+    intro a ha
+    exact BArg.cur_valAt_of_fixedLits_false
+      (hcurAll a (List.mem_append_left [ak] ha))
+      (hfalseArg a (List.mem_append_left [ak] ha))
+  have hcurAk : ak.cur (ak.valAt b) = true :=
+    BArg.cur_valAt_of_fixedLits_false
+      (hcurAll ak (by simp)) (hfalseArg ak (by simp))
+  exact ⟨arrayBoolAndSupp_of_vals hcurSrc hcurAk hrel hpos, hcurAk⟩
+
+/-- Runtime entry for the closed-form plan: parse sources and result once,
+reject duplicate slots, then compute the fast plan. -/
+def arrayBoolAndPlanOf (doms : Array DomC) (is : List Nat) (k : Nat) :
+    Option (List BArg × BArg × BPlan) :=
+  match BArgs.ofSlots doms is with
+  | none => none
+  | some src =>
+      match BArg.mk? doms k with
+      | none => none
+      | some ak =>
+          if BArgs.hasDupSlot (src ++ [ak]) then none
+          else some (src, ak, arrayBoolAndPlanFast src ak)
+
+theorem arrayBoolAndPlanOf_some {doms : Array DomC} {is : List Nat} {k : Nat}
+    {src : List BArg} {ak : BArg} {plan : BPlan}
+    (h : arrayBoolAndPlanOf doms is k = some (src, ak, plan)) :
+    BArgs.ofSlots doms is = some src ∧ BArg.mk? doms k = some ak ∧
+      BArgs.hasDupSlot (src ++ [ak]) = false ∧
+      plan = arrayBoolAndPlanFast src ak := by
+  unfold arrayBoolAndPlanOf at h
+  split at h
+  · cases h
+  · rename_i src0 hsrc
+    split at h
+    · cases h
+    · rename_i ak0 hak
+      split at h
+      · cases h
+      · rename_i hd
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl, rfl⟩ := h
+        exact ⟨hsrc, hak, by simpa using hd, rfl⟩
+
+/-- Parsing sources and the result separately is the same as parsing the
+appended slot list. -/
+theorem ofSlots_append_singleton (is : List Nat) :
+    ∀ {k : Nat} {doms : Array DomC} {src : List BArg} {ak : BArg},
+      BArgs.ofSlots doms is = some src → BArg.mk? doms k = some ak →
+      BArgs.ofSlots doms (is ++ [k]) = some (src ++ [ak]) := by
+  induction is with
+  | nil =>
+      intro k doms src ak hsrc hak
+      simp only [List.nil_append, BArgs.ofSlots] at hsrc ⊢
+      injection hsrc with hsrc'
+      subst hsrc'
+      simp [hak]
+  | cons s ss ih =>
+      intro k doms src ak hsrc hak
+      simp only [List.cons_append, BArgs.ofSlots] at hsrc ⊢
+      cases hm : BArg.mk? doms s with
+      | none => rw [hm] at hsrc; cases hsrc
+      | some a =>
+          rw [hm] at hsrc
+          cases hr : BArgs.ofSlots doms ss with
+          | none => rw [hr] at hsrc; cases hsrc
+          | some rest =>
+              rw [hr] at hsrc
+              injection hsrc with hsrc'
+              subst hsrc'
+              rw [ih hr hak]
+              simp
+
+/-- Conflict clause of the closed-form plan is entailed. -/
+theorem arrayBoolAndPlanFast_conflict_entailed
+    (p : CompiledProblem DomConstraint) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (doms : Array DomC) (src : List BArg) (ak : BArg)
+    (hargs : BArgs.ofSlots doms (is ++ [k]) = some (src ++ [ak]))
+    (hinit : is.all (BArgs.initBoolB p) = true)
+    {ls : List Literal}
+    (hls : (arrayBoolAndPlanFast src ak).conflict? = some ls) :
+    Entailed p ls := by
+  intro b hb hacc
+  by_cases hsat : Clause.SatisfiedBy ls b
+  · exact hsat
+  · exfalso
+    by_cases hconf : arrayBoolAndConflict src ak = true
+    · have hls' : BArgs.fixedLits (src ++ [ak]) = ls := by
+        simpa [arrayBoolAndPlanFast, hconf] using hls
+      subst hls'
+      have htail : ∀ l ∈ BArgs.fixedLits (src ++ [ak]), l.eval b ≠ some true := by
+        intro l hl htrue
+        exact hsat ⟨l, hl, htrue⟩
+      have hspec := BArgs.arrayBoolAndR_spec p is k hmem doms (src ++ [ak])
+        hargs (List.all_eq_true.mp hinit) b hb hacc
+      have hfalse := BArgs.fixedLits_false_of_not_true hspec.2 htail
+      have hs := arrayBoolAndSupport_of_accepts p is k hmem doms src ak
+        hargs hinit hb hacc hfalse (pos := src.length) (by simp)
+      have hsupp : arrayBoolAndSupp src ak src.length (ak.valAt b) = true := by
+        rw [← valsOf_append_getD_right (b := b) (src := src) (ak := ak)]
+        exact hs.1
+      have hcf := arrayBoolAndConflict_eq_false_of_supp hs.2 hsupp
+      rw [hcf] at hconf
+      cases hconf
+    · simp [arrayBoolAndPlanFast, hconf] at hls
+
+/-- Every prune reason of the closed-form plan is entailed. -/
+theorem arrayBoolAndPlanFast_prunes_entailed
+    (p : CompiledProblem DomConstraint) (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints)
+    (doms : Array DomC) (src : List BArg) (ak : BArg)
+    (hargs : BArgs.ofSlots doms (is ++ [k]) = some (src ++ [ak]))
+    (hinit : is.all (BArgs.initBoolB p) = true)
+    {q : BPrune} (hq : q ∈ (arrayBoolAndPlanFast src ak).prunes) :
+    Entailed p q.reason := by
+  intro b hb hacc
+  by_cases hsat : Clause.SatisfiedBy q.reason b
+  · exact hsat
+  · exfalso
+    by_cases hconf : arrayBoolAndConflict src ak = true
+    · simp [arrayBoolAndPlanFast, hconf] at hq
+    · have hpr : (arrayBoolAndPlanFast src ak).prunes =
+          arrayBoolAndPrunesFast src ak := by
+        simp [arrayBoolAndPlanFast, hconf]
+      have hq' : q ∈ arrayBoolAndPrunesFast src ak := by rwa [hpr] at hq
+      obtain ⟨t, ht, rfl⟩ := mem_arrayBoolAndPrunesFast hq'
+      have htspec := mem_arrayBoolAndTargets_spec ht
+      have hhead : (posBool t.slot (!t.val)).eval b ≠ some true := by
+        intro htrue
+        exact hsat ⟨_, by simp [BTarget.toPrune], htrue⟩
+      have htail : ∀ l ∈ BArgs.fixedLits (src ++ [ak]), l.eval b ≠ some true := by
+        intro l hl htrue
+        exact hsat ⟨l, by simp [BTarget.toPrune, hl], htrue⟩
+      have hspec := BArgs.arrayBoolAndR_spec p is k hmem doms (src ++ [ak])
+        hargs (List.all_eq_true.mp hinit) b hb hacc
+      have hfalse := BArgs.fixedLits_false_of_not_true hspec.2 htail
+      have hboolArg : ∃ v, b[t.slot]? = some (.bool v) := by
+        rcases htspec.2 with ⟨hlt, hslot⟩ | ⟨_heq, hslot⟩
+        · have hb' := hspec.2 (src.getD t.pos default)
+            (List.mem_append_left [ak] (BArgs.getD_mem hlt))
+          simpa [hslot] using hb'
+        · have hb' := hspec.2 ak (by simp)
+          simpa [hslot] using hb'
+      have hposArgs : t.pos < (src ++ [ak]).length := by
+        rcases htspec.2 with ⟨hlt, _⟩ | ⟨heq, _⟩
+        · simp [List.length_append]; omega
+        · simp [List.length_append]; omega
+      have hget : (BArgs.valsOf b (src ++ [ak])).getD t.pos false = t.val := by
+        rcases htspec.2 with ⟨hlt, hslot⟩ | ⟨heq, hslot⟩
+        · have hbarg : ∃ v, b[(src.getD t.pos default).slot]? =
+              some (.bool v) := by
+            simpa [hslot] using hboolArg
+          have hhead' : (posBool (src.getD t.pos default).slot (!t.val)).eval b
+              ≠ some true := by
+            simpa [hslot] using hhead
+          have hva := valAt_eq_of_not_eval_posBool hbarg hhead'
+          rw [valsOf_append_getD_left hlt, hva]
+        · rw [heq]
+          have hbarg : ∃ v, b[ak.slot]? = some (.bool v) := by
+            simpa [hslot] using hboolArg
+          have hhead' : (posBool ak.slot (!t.val)).eval b ≠ some true := by
+            simpa [hslot] using hhead
+          have hva := valAt_eq_of_not_eval_posBool hbarg hhead'
+          rw [valsOf_append_getD_right, hva]
+      have hs := arrayBoolAndSupport_of_accepts p is k hmem doms src ak
+        hargs hinit hb hacc hfalse hposArgs
+      have hsupp := hs.1
+      rw [hget] at hsupp
+      rw [htspec.1] at hsupp
+      cases hsupp
+
+/-- Certified closed-form `array_bool_and` propagator.  It parses the
+sources and the result separately (avoiding a second `ofSlots` pass and
+the exponential truth-table enumerator), rejects duplicate slots, and
+uses the closed-form plan when the initial source domains are Boolean. -/
+def arrayBoolAndPropFast (p : CompiledProblem DomConstraint) (T : LitTable)
+    (is : List Nat) (k : Nat)
+    (hmem : DomConstraint.arrayBoolAndSlot is k ∈ p.constraints) : PropV2 p T :=
+  let ready := is.all (BArgs.initBoolB p)
+  { vars := (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)).toArray
+    events := (dcSlotsFull (DomConstraint.arrayBoolAndSlot is k)).toArray.map
+      fun s => (s, .fix)
+    run := fun view =>
+      if hguard : ready = true then
+        match hplan : arrayBoolAndPlanOf view.doms is k with
+        | none => .fix
+        | some (src, ak, plan) =>
+            have hargs := ofSlots_append_singleton is
+              (arrayBoolAndPlanOf_some hplan).1
+              (arrayBoolAndPlanOf_some hplan).2.1
+            have hplanEq : plan = arrayBoolAndPlanFast src ak :=
+              (arrayBoolAndPlanOf_some hplan).2.2.2
+            BPlan.out p T plan
+              (fun ls hls =>
+                arrayBoolAndPlanFast_conflict_entailed p is k hmem view.doms
+                  src ak hargs hguard (hplanEq ▸ hls))
+              (fun q hq =>
+                arrayBoolAndPlanFast_prunes_entailed p is k hmem view.doms
+                  src ak hargs hguard (hplanEq ▸ hq))
+      else .fix }
 
 end LeanFzn.Engine

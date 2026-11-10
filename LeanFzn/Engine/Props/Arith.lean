@@ -261,6 +261,9 @@ theorem argBounds?_slot {doms : Array DomC} {s : Nat} {lo hi : Int}
   | boundsHoles lo' hi' holes =>
       simp [hd] at h
       simpa [hd] using linBoundAt_spec h
+  | sparse values =>
+      simp [hd] at h
+      simpa [hd] using linBoundAt_spec h
 
 /-- Build the initial box of one operand. -/
 def mkGArg? (doms : Array DomC) (a : DomIntArg) : Option GArg :=

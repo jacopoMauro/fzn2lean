@@ -108,7 +108,7 @@ def chainTest (st : St) : IO St := do
       st.check s!"chain: model compiles ({e})" false
   | .ok (p, spec) =>
       let mut st := st
-      match coreSolveSeed p ({} : SearchConfig) coreFuel (CoreSeed.initial p) with
+      match coreSolveSeed p ({} : SearchConfig) none coreFuel (CoreSeed.initial p) with
       | (.sat a1, _, s1) =>
           st ← st.check "chain: first round is SAT" true
           st ← st.check "chain: first witness fits the box"
@@ -137,7 +137,7 @@ def chainTest (st : St) : IO St := do
               st ← st.check "chain: rebased seed is still marked seeded"
                 s2.seeded
               match coreSolveSeed (curP p spec (some v1))
-                  ({} : SearchConfig) coreFuel s2 with
+                  ({} : SearchConfig) (some a1) coreFuel s2 with
               | (.sat a2, _, s2') =>
                   st ← st.check "chain: second round finds an improvement"
                     true

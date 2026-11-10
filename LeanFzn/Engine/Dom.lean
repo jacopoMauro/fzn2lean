@@ -7,6 +7,7 @@ compiled `Dom`.  The representation is the frozen `DomC` from
 `.bitset` domain on the hot path.  Entry conversion (`ofDom?`) and the
 membership/fit bridges are proved in this module (N3).
 -/
+import LeanFzn.Engine.Bits
 import LeanFzn.Engine.Types
 import LeanFzn.Solver.Propagation.EngineCore
 
@@ -18,6 +19,10 @@ namespace LeanFzn.Engine
 
 /-! ## Basic bit helpers -/
 
+/-! The set-bit scans `lowestBit`/`highestBit`, `u64bit`, and their
+specifications live in `LeanFzn.Engine.Bits`; this module re-exports them
+through the import above. -/
+
 /-- Population count of a 64-bit word (SWAR). -/
 def popcount64 (x : UInt64) : Nat :=
   let x := x - ((x >>> (1 : UInt64)) &&& (0x5555555555555555 : UInt64))
@@ -25,28 +30,6 @@ def popcount64 (x : UInt64) : Nat :=
     ((x >>> (2 : UInt64)) &&& (0x3333333333333333 : UInt64))
   let x := (x + (x >>> (4 : UInt64))) &&& (0x0F0F0F0F0F0F0F0F : UInt64)
   ((x * (0x0101010101010101 : UInt64)) >>> (56 : UInt64)).toNat
-
-/-- The one-bit mask at position `k % 64`. -/
-def u64bit (k : Nat) : UInt64 := (1 : UInt64) <<< (UInt64.ofNat (k % 64))
-
-/-- Lowest set bit of a nonzero word.  Uses a 64-bit mask rather than a
-    `Nat.testBit` conversion so the bitset endpoints stay on machine words. -/
-def lowestBit (w : UInt64) : Nat :=
-  let rec go (k : Nat) : Nat :=
-    if k < 64 then
-      if w &&& u64bit k != 0 then k else go (k + 1)
-    else 0
-  termination_by 64 - k
-  if w == 0 then 0 else go 0
-
-/-- Highest set bit of a nonzero word (64-bit masks, no `Nat.testBit`). -/
-def highestBit (w : UInt64) : Nat :=
-  let rec go (k : Nat) : Nat :=
-    if k < 64 then
-      if w &&& u64bit (63 - k) != 0 then 63 - k else go (k + 1)
-    else 0
-  termination_by 64 - k
-  if w == 0 then 0 else go 0
 
 def u64maskLe (k : Nat) : UInt64 :=
   if k ≥ 63 then (0xFFFFFFFFFFFFFFFF : UInt64)
@@ -62,6 +45,7 @@ def DomC.isEmpty : DomC → Bool
   | .bounds lo hi => decide (hi < lo)
   | .bitset _ words => words.all (fun w => w == 0)
   | .boundsHoles lo hi _ => decide (hi < lo)
+  | .sparse values => values.isEmpty
 
 /-! ## Membership -/
 
@@ -104,6 +88,7 @@ def DomC.mem : DomC → Value → Bool
       if k < 0 then false else bitsetMem words k.toNat
   | .boundsHoles lo hi holes, .int v =>
       decide (lo ≤ v) && decide (v ≤ hi) && !(memHoleRange holes v)
+  | .sparse values, .int v => memHoleRange values v
   | _, _ => false
 
 /-- Integer-view membership: Booleans count as 0/1, and no other integer
@@ -115,6 +100,51 @@ def DomC.memIntView (d : DomC) (v : Int) : Bool :=
       else if v == 1 then d.mem (.bool true)
       else false
   | _ => d.mem (.int v)
+
+/-- `true` when the compact domain carries integer values rather than
+Booleans.  Order literals are only used on these domains. -/
+def DomC.intKindB : DomC → Bool
+  | .bool _ => false
+  | _ => true
+
+/-- An integer-kind compact domain has only integer members.  This is the
+kind bridge used by Hall-interval explanations. -/
+theorem DomC.mem_int_of_intKindB {d : DomC} (hk : d.intKindB = true)
+    {v : Value} (hm : d.mem v = true) : ∃ i, v = .int i := by
+  cases d with
+  | bool _ => simp [DomC.intKindB] at hk
+  | bounds lo hi =>
+      cases v with
+      | int i => exact ⟨i, rfl⟩
+      | bool b => simp [DomC.mem] at hm
+      | setOfInt xs => simp [DomC.mem] at hm
+      | array xs => simp [DomC.mem] at hm
+  | bitset lo words =>
+      cases v with
+      | int i => exact ⟨i, rfl⟩
+      | bool b => simp [DomC.mem] at hm
+      | setOfInt xs => simp [DomC.mem] at hm
+      | array xs => simp [DomC.mem] at hm
+  | boundsHoles lo hi holes =>
+      cases v with
+      | int i => exact ⟨i, rfl⟩
+      | bool b => simp [DomC.mem] at hm
+      | setOfInt xs => simp [DomC.mem] at hm
+      | array xs => simp [DomC.mem] at hm
+  | sparse values =>
+      cases v with
+      | int i => exact ⟨i, rfl⟩
+      | bool b => simp [DomC.mem] at hm
+      | setOfInt xs => simp [DomC.mem] at hm
+      | array xs => simp [DomC.mem] at hm
+
+/-- First element of an array, if nonempty. -/
+def arrayHead? (a : Array Int) : Option Int :=
+  if h : 0 < a.size then some (a[0]'h) else none
+
+/-- Last element of an array, if nonempty. -/
+def arrayLast? (a : Array Int) : Option Int :=
+  if h : 0 < a.size then some (a[a.size - 1]'(by omega)) else none
 
 /-! ## Lo/hi and fixed values -/
 
@@ -143,6 +173,21 @@ def DomC.lo? : DomC → Option Int
           else if v ≤ hi then some v else none
         termination_by holes.size - k
         goHoleLo lo 0
+  | .sparse values => arrayHead? values
+
+/-- Highest member of a bit-set domain, scanning the words from the top.
+    The forward scan in `hi?` walks every word even when the top word is
+    nonempty; this twin stops at the first nonzero word. -/
+def bitsetHiGo (lo : Int) (words : Array UInt64) : Option Int :=
+  match h : words.back? with
+  | none => none
+  | some w =>
+      if w == 0 then bitsetHiGo lo words.pop
+      else some (lo + (((words.size - 1) * 64 + highestBit w : Nat) : Int))
+termination_by words.size
+decreasing_by
+  obtain ⟨ys, rfl⟩ := Array.back?_eq_some_iff.1 h
+  simp [Array.size_pop]
 
 def DomC.hi? : DomC → Option Int
   | .bool bits =>
@@ -171,6 +216,93 @@ def DomC.hi? : DomC → Option Int
           else if lo ≤ v then some v else none
         termination_by holes.size - k
         goHoleHi hi 0
+  | .sparse values => arrayLast? values
+
+private theorem goHi_push (lo : Int) (xs : Array UInt64) (w : UInt64) :
+    ∀ (i : Nat) (acc : Option Int), i ≤ xs.size →
+      DomC.hi?.goHi lo (xs.push w) i acc =
+        if w == 0 then DomC.hi?.goHi lo xs i acc
+        else some (lo + (((xs.size * 64 + highestBit w : Nat)) : Int)) := by
+  intro i
+  induction h : (xs.size - i) using Nat.strongRecOn generalizing i with
+  | ind m ih =>
+    intro acc hi
+    by_cases hlt : i < xs.size
+    · have hsize : i < (xs.push w).size := by simp [Array.size_push]; omega
+      rw [DomC.hi?.goHi.eq_1, dif_pos hsize]
+      rw [Array.getElem?_push_lt hlt]
+      simp only
+      by_cases hw : (xs[i]'hlt == 0) = true
+      · simp only [if_pos hw]
+        conv => rhs; rw [DomC.hi?.goHi.eq_1, dif_pos hlt,
+          Array.getElem?_eq_some_getElem xs i hlt]
+        simp only [if_pos hw]
+        exact ih (xs.size - (i + 1)) (by omega) (i + 1) (by omega) acc (by omega)
+      · simp only [if_neg hw]
+        conv => rhs; rw [DomC.hi?.goHi.eq_1, dif_pos hlt,
+          Array.getElem?_eq_some_getElem xs i hlt]
+        simp only [if_neg hw]
+        exact ih (xs.size - (i + 1)) (by omega) (i + 1) (by omega) _ (by omega)
+    · have hieq : i = xs.size := by omega
+      subst hieq
+      have hsize : xs.size < (xs.push w).size := by simp [Array.size_push]
+      conv => lhs; rw [DomC.hi?.goHi.eq_1, dif_pos hsize, Array.getElem?_push_size]
+      simp only
+      by_cases hw : (w == 0) = true
+      · simp only [if_pos hw]
+        conv => lhs; rw [DomC.hi?.goHi.eq_1, dif_neg (by simp [Array.size_push])]
+        conv => rhs; rw [DomC.hi?.goHi.eq_1, dif_neg (by simp [Array.size_push])]
+      · simp only [if_neg hw]
+        conv => lhs; rw [DomC.hi?.goHi.eq_1, dif_neg (by simp [Array.size_push])]
+
+private theorem bitsetHiGo_push (lo : Int) (xs : Array UInt64) (w : UInt64) :
+    bitsetHiGo lo (xs.push w) =
+      if w == 0 then bitsetHiGo lo xs
+      else some (lo + (((xs.size * 64 + highestBit w : Nat)) : Int)) := by
+  conv => lhs; rw [bitsetHiGo.eq_1]
+  rw [Array.back?_push]
+  simp only
+  by_cases hw : (w == 0) = true
+  · simp only [if_pos hw, Array.pop_push]
+  · simp only [if_neg hw, Array.size_push, Nat.add_sub_cancel]
+
+private theorem bitsetHiGo_eq_goHi (lo : Int) (words : Array UInt64) :
+    bitsetHiGo lo words = DomC.hi?.goHi lo words 0 none := by
+  let P (n : Nat) := ∀ (words : Array UInt64), words.size = n →
+    bitsetHiGo lo words = DomC.hi?.goHi lo words 0 none
+  have hP : ∀ n, P n := by
+    intro n
+    induction n using Nat.strongRecOn with
+    | ind n ih =>
+      intro words hn
+      by_cases h0 : words.size = 0
+      · have hempty : words = #[] := Array.eq_empty_of_size_eq_zero h0
+        subst hempty
+        conv => lhs; rw [bitsetHiGo.eq_1]
+        rw [DomC.hi?.goHi.eq_1, dif_neg (by simp)]
+        rfl
+      · obtain ⟨xs, w, rfl⟩ := Array.eq_push_of_size_ne_zero h0
+        rw [bitsetHiGo_push, goHi_push lo xs w 0 none (by omega)]
+        rw [ih xs.size (by simp [Array.size_push] at hn ⊢; omega) xs rfl]
+  exact hP words.size words rfl
+
+/-- Compiled-code twin of `hi?`: the bitset branch scans downward. -/
+def DomC.hiFast (d : DomC) : Option Int :=
+  match d with
+  | .bitset lo words => bitsetHiGo lo words
+  | _ => DomC.hi? d
+
+theorem DomC.hiFast_eq (d : DomC) : d.hiFast = d.hi? := by
+  cases d with
+  | bool bits => rfl
+  | bounds lo hi => rfl
+  | bitset lo words => exact bitsetHiGo_eq_goHi lo words
+  | boundsHoles lo hi holes => rfl
+  | sparse values => rfl
+
+@[csimp] theorem DomC.hi?_eq_fast : @DomC.hi? = @DomC.hiFast := by
+  funext d
+  exact (DomC.hiFast_eq d).symm
 
 def DomC.fixedValue : DomC → Option Value
   | .bool bits =>
@@ -188,6 +320,10 @@ def DomC.fixedValue : DomC → Option Value
             DomC.hi? (.boundsHoles lo hi holes) with
       | some a, some b => if a == b then some (.int a) else none
       | _, _ => none
+  | .sparse values =>
+      match arrayHead? values, arrayLast? values with
+      | some lo, some hi => if lo == hi then some (.int lo) else none
+      | _, _ => none
 
 /-! ## Size -/
 
@@ -198,6 +334,7 @@ def DomC.size : DomC → Nat
   | .boundsHoles lo hi holes =>
       if hi < lo then 0
       else ((hi - lo + 1).toNat - holes.size)
+  | .sparse values => values.size
 
 def DomC.isFixed (d : DomC) : Bool := d.size == 1
 
@@ -220,18 +357,13 @@ def DomC.setLe : DomC → Int → DomC
         else
           let last := if wi < kept.size then kept[wi]! &&& u64maskLe bi else kept[kept.size - 1]!
           let kept := if wi < kept.size then kept.set! wi last else kept
-          let kept :=
-            let rec trim (a : Array UInt64) : Array UInt64 :=
-              if h : a.size > 0 then
-                if a[a.size - 1]! == 0 then trim (a.extract 0 (a.size - 1)) else a
-              else a
-            termination_by a.size
-            trim kept
           if kept.isEmpty then .bounds 1 0 else .bitset lo kept
   | .boundsHoles lo hi holes, k =>
       let hi' := if k < hi then k else hi
       if hi' < lo then .bounds 1 0
       else .boundsHoles lo hi' (holes.filter (fun h => decide (h ≤ hi')))
+  | .sparse values, k =>
+      .sparse (values.filter (fun v => decide (v ≤ k)))
 
 def DomC.setGe : DomC → Int → DomC
   | .bool bits, k =>
@@ -262,6 +394,8 @@ def DomC.setGe : DomC → Int → DomC
       let lo' := if lo < k then k else lo
       if hi < lo' then .bounds 1 0
       else .boundsHoles lo' hi (holes.filter (fun h => decide (lo' ≤ h)))
+  | .sparse values, k =>
+      .sparse (values.filter (fun v => decide (k ≤ v)))
 
 /-- Insert `v` into a sorted hole array. -/
 def insertHole (holes : Array Int) (v : Int) : Array Int :=
@@ -302,6 +436,8 @@ def DomC.remove : DomC → Value → DomC
       else if v == lo then .boundsHoles (lo + 1) hi holes
       else if v == hi then .boundsHoles lo (hi - 1) holes
       else .boundsHoles lo hi (insertHole holes v)
+  | .sparse values, .int v =>
+      .sparse (values.filter (fun x => decide (x ≠ v)))
   | d, _ => d
 
 def DomC.removeIntView (d : DomC) (v : Int) : DomC :=
@@ -356,6 +492,114 @@ def DomC.evalLit (d : DomC) (l : Literal) : Option Bool :=
       | some (.bool actual) => some (if l.positive then actual == b else actual != b)
       | _ => none
 
+/-- A cheap falsity test, equivalent to `evalLit l = some false` but
+    computing only the endpoint that the literal needs: a positive
+    `intLe` only reads the lower bound, a negative `intLe` only the upper
+    bound, and a negative `intNe` only membership.  (A positive `intNe`
+    needs to know whether the domain is fixed; it then reads membership.)
+    This is the hot-path replacement for `evalLit` in explanation search,
+    where the upper endpoint of a bitset would otherwise be scanned for
+    every positive `posLe` literal. -/
+def DomC.falsifiesLit (d : DomC) (l : Literal) : Bool :=
+  match l.atom with
+  | .intNe _ v =>
+      if l.positive then
+        match d.fixedValue with
+        | some _ => d.memIntView v
+        | none => false
+      else !(d.memIntView v)
+  | .intLe _ k =>
+      if l.positive then
+        match d.lo? with
+        | some lo =>
+            if k < lo then
+              match d.hi? with
+              | some hi => decide (k < hi)
+              | none => false
+            else false
+        | none => false
+      else
+        match d.hi? with
+        | some hi =>
+            if hi ≤ k then
+              match d.lo? with
+              | some lo => decide (lo ≤ k)
+              | none => false
+            else false
+        | none => false
+  | .boolEq _ b =>
+      match d.fixedValue with
+      | some (.bool actual) =>
+          !(if l.positive then actual == b else actual != b)
+      | _ => false
+
+/-- `falsifiesLit` is exactly the falsity case of `evalLit`.  The theorem
+    is purely structural: it needs no well-formedness hypothesis, because
+    both predicates read the same `lo?`/`hi?`/`fixedValue` results. -/
+theorem DomC.falsifiesLit_eq (d : DomC) (l : Literal) :
+    d.falsifiesLit l = true ↔ d.evalLit l = some false := by
+  obtain ⟨atom, pos⟩ := l
+  cases atom with
+  | intNe s v =>
+      cases pos <;>
+        simp only [DomC.falsifiesLit, DomC.evalLit] <;>
+        (cases hf : d.fixedValue <;> simp [hf])
+  | intLe s k =>
+      cases pos
+      · simp only [DomC.falsifiesLit, DomC.evalLit]
+        cases hlo : d.lo? with
+        | none =>
+            cases hhi : d.hi? <;> simp [hlo, hhi]
+        | some lo =>
+            cases hhi : d.hi? with
+            | none => simp [hlo, hhi]
+            | some hi =>
+                by_cases hq : k < lo
+                · by_cases hp : k < hi
+                  · have h1 : ¬ hi ≤ k := by omega
+                    have h2 : lo > k := by omega
+                    simp [hlo, hhi, hq, hp, h1, h2]
+                  · have h1 : hi ≤ k := by omega
+                    simp [hlo, hhi, hq, hp, h1]
+                · have h2 : ¬ lo > k := by omega
+                  by_cases hp : hi ≤ k <;> simp [hlo, hhi, hq, h2, hp] <;> omega
+      · simp only [DomC.falsifiesLit, DomC.evalLit]
+        cases hlo : d.lo? with
+        | none =>
+            cases hhi : d.hi? <;> simp [hlo, hhi]
+        | some lo =>
+            cases hhi : d.hi? with
+            | none => simp [hlo, hhi]
+            | some hi =>
+                by_cases h1 : hi ≤ k
+                · by_cases h2 : lo ≤ k
+                  · have h3 : ¬ lo > k := by omega
+                    simp [hlo, hhi, h1, h2, h3]
+                  · have h3 : lo > k := by omega
+                    simp [hlo, hhi, h1, h2, h3]
+                · have h1' : ¬ hi ≤ k := by omega
+                  by_cases h3 : lo > k <;> simp [hlo, hhi, h1, h1', h3] <;> omega
+  | boolEq s b =>
+      cases pos
+      · simp only [DomC.falsifiesLit, DomC.evalLit]
+        cases hf : d.fixedValue with
+        | none => simp [hf]
+        | some v =>
+            cases v with
+            | bool actual => simp [hf]
+            | int i => simp [hf]
+            | setOfInt xs => simp [hf]
+            | array xs => simp [hf]
+      · simp only [DomC.falsifiesLit, DomC.evalLit]
+        cases hf : d.fixedValue with
+        | none => simp [hf]
+        | some v =>
+            cases v with
+            | bool actual => simp [hf]
+            | int i => simp [hf]
+            | setOfInt xs => simp [hf]
+            | array xs => simp [hf]
+
 /-- Apply a literal to a compact domain.  The result may be empty. -/
 def DomC.applyLit (d : DomC) (l : Literal) : DomC :=
   match l.atom with
@@ -385,14 +629,6 @@ def sortUniqueInts : List Int → List Int
 /-- Sorted, duplicate-free form of an integer array (entry only). -/
 def sortedUniqueInts (a : Array Int) : Array Int := (sortUniqueInts a.toList).toArray
 
-/-- First element of an array, if nonempty. -/
-def arrayHead? (a : Array Int) : Option Int :=
-  if h : 0 < a.size then some (a[0]'h) else none
-
-/-- Last element of an array, if nonempty. -/
-def arrayLast? (a : Array Int) : Option Int :=
-  if h : 0 < a.size then some (a[a.size - 1]'(by omega)) else none
-
 /-- The complement of `vs` inside `[lo, hi]`, ascending.  `vs` is expected
     strictly ascending with all elements in `[lo, hi]`; the result is exactly
     the set of values of `[lo, hi]` missing from `vs`.  Entry only: the scan
@@ -401,6 +637,29 @@ def complementHoles (lo hi : Int) (vs : Array Int) : Array Int :=
   ((List.range (hi - lo + 1).toNat).filterMap (fun (k : Nat) =>
     if memHoleRange vs (lo + (k : Int)) then none
     else some (lo + (k : Int)))).toArray
+
+/-! ### Multi-word bitset construction (entry only) -/
+
+/-- Number of 64-bit words needed for `span` bits. -/
+def bitsetWordCount (span : Nat) : Nat := (span + 63) / 64
+
+/-- Set bit `k` in a little-endian word array, when its word exists. -/
+def setBitWord (words : Array UInt64) (k : Nat) : Array UInt64 :=
+  let wi := k / 64
+  if h : wi < words.size then
+    words.set! wi (words[wi]! ||| u64bit (k % 64))
+  else words
+
+/-- Multi-word bitset for the given values relative to `lo`.  The array has
+    `nwords` words; values outside the represented window are ignored. -/
+def bitsetOfValues (lo : Int) (nwords : Nat) (vs : List Int) : Array UInt64 :=
+  vs.foldl (fun a v => setBitWord a (v - lo).toNat) (Array.replicate nwords 0)
+
+/-- Multi-word bitset for the interval `[lo, hi]` minus `holes`.  The scan
+    runs over the (at most 4096) interval values, so this is entry-only. -/
+def bitsetOfHoles (lo hi : Int) (holes : Array Int) : Array UInt64 :=
+  bitsetOfValues lo (bitsetWordCount (hi - lo + 1).toNat)
+    (complementHoles lo hi holes).toList
 
 /-- Bits of a Boolean domain assembled from a value list: bit 0 for
     `.bool false`, bit 1 for `.bool true`.  Non-Boolean values are ignored
@@ -421,9 +680,9 @@ def intValues (vs : List Value) : Array Int :=
     and represents them as the interval `[min, max]` minus the complement of
     the set.  The guards keep the result complement small (at most 4096
     holes): either the span itself is at most 4096, or the complement inside
-    the span is.  Wide sparse sets (huge spans with few values) are a
-    give-up (`none`), so entry conversion never materializes a wide
-    complement from a sparse input.  A wide dense input is still scanned in
+    the span is.  Wider sparse sets keep their sorted values in `.sparse`, so
+    entry conversion never materializes a wide complement and never allocates
+    storage proportional to the span.  A wide dense input is still scanned in
     time proportional to its already-materialized list, which the entry
     conversion is allowed to traverse. -/
 def DomC.ofDom? (d : Dom) : Option DomC :=
@@ -432,7 +691,10 @@ def DomC.ofDom? (d : Dom) : Option DomC :=
   | .small false off bits => some (.bitset off #[bits])
   | .holes lo hi hs =>
       let arr := hs.toArray.filter (fun h => decide (lo ≤ h) && decide (h ≤ hi))
-      some (.boundsHoles lo hi (sortedUniqueInts arr))
+      let holes := sortedUniqueInts arr
+      if _ : 0 < hi - lo + 1 ∧ hi - lo + 1 ≤ 4096 then
+        some (.bitset lo (bitsetOfHoles lo hi holes))
+      else some (.boundsHoles lo hi holes)
   | .general vs =>
       match vs with
       | [] => none
@@ -447,10 +709,11 @@ def DomC.ofDom? (d : Dom) : Option DomC :=
             | some lo, some hi =>
                 let span := hi - lo + 1
                 if span ≤ 4096 then
-                  some (.boundsHoles lo hi (complementHoles lo hi uq))
+                  some (.bitset lo
+                    (bitsetOfValues lo (bitsetWordCount span.toNat) uq.toList))
                 else if span.toNat - uq.size ≤ 4096 then
                   some (.boundsHoles lo hi (complementHoles lo hi uq))
-                else none
+                else some (.sparse uq)
             | _, _ => none
           else none
       | _ => none
@@ -484,6 +747,7 @@ def DomC.toValueList : DomC → List Value
         else go (v + 1) (.int v :: acc)
       termination_by (hi - v + 1).toNat
       (go lo []).reverse
+  | .sparse values => values.toList.map (fun v => .int v)
 
 /-! ## Well-formedness (runtime predicate; N3 proves the bridge) -/
 
@@ -494,6 +758,7 @@ def DomC.WF : DomC → Prop
   | .boundsHoles lo hi holes =>
       holes.toList.Pairwise (fun a b => a < b) ∧
         ∀ h ∈ holes.toList, lo ≤ h ∧ h ≤ hi
+  | .sparse values => values.toList.Pairwise (fun a b => a < b)
 
 /-! ## Proof lemmas for the entry conversion -/
 
@@ -635,46 +900,6 @@ theorem nat_testBit_and_three (n j : Nat) (hj : j < 2) :
   have h3 : Nat.testBit 3 j = true := by
     rcases (show j = 0 ∨ j = 1 by omega) with rfl | rfl <;> decide
   rw [Nat.testBit_and, h3, Bool.and_true]
-
-theorem nat_and_two_pow_ne_zero {n k : Nat} :
-    n &&& 2 ^ k ≠ 0 ↔ n.testBit k = true := by
-  constructor
-  · intro h
-    obtain ⟨i, hi⟩ := Nat.exists_testBit_of_ne_zero h
-    rw [Nat.testBit_and, Nat.testBit_two_pow] at hi
-    by_cases hik : k = i
-    · subst hik
-      simpa using hi
-    · simp [hik] at hi
-  · intro h hz
-    have hfalse : Nat.testBit (n &&& 2 ^ k) k = false := by rw [hz, Nat.zero_testBit]
-    rw [Nat.testBit_and, Nat.testBit_two_pow] at hfalse
-    simp [h] at hfalse
-
-theorem uint64_ne_zero_iff_toNat_ne_zero (x : UInt64) : x ≠ 0 ↔ x.toNat ≠ 0 := by
-  constructor
-  · intro h hz
-    exact h (UInt64.toNat_inj.mp (by simpa using hz))
-  · intro h hz
-    exact h (by rw [hz]; rfl)
-
-/-- The one-bit mask `u64bit k` has Nat value `2^k` for a position `k < 64`. -/
-theorem u64bit_toNat {k : Nat} (hk : k < 64) : (u64bit k).toNat = 2 ^ k := by
-  unfold u64bit
-  rw [UInt64.toNat_shiftLeft, UInt64.toNat_one]
-  have hkmod : k % 64 = k := Nat.mod_eq_of_lt hk
-  have hof : (UInt64.ofNat (k % 64)).toNat = k := by
-    rw [UInt64.toNat_ofNat', hkmod, Nat.mod_eq_of_lt]
-    omega
-  rw [hof, hkmod, Nat.one_shiftLeft]
-  rw [Nat.mod_eq_of_lt]
-  exact Nat.pow_lt_pow_right (by decide : 1 < 2) hk
-
-theorem uint64_and_u64bit_ne_zero_iff (x : UInt64) {k : Nat} (hk : k < 64) :
-    (x &&& u64bit k) != 0 ↔ x.toNat.testBit k = true := by
-  rw [bne_iff_ne, uint64_ne_zero_iff_toNat_ne_zero, UInt64.toNat_and,
-    u64bit_toNat hk]
-  exact nat_and_two_pow_ne_zero
 
 theorem bitsetMem_singleton (bits : UInt64) (n : Nat) :
     bitsetMem #[bits] n = (if n < 64 then bits.toNat.testBit n else false) := by
@@ -1139,6 +1364,223 @@ theorem mem_holes_ofDom {lo hi : Int} {hs : List Int} {v : Value} :
         obtain ⟨i, hi⟩ := Dom.eq_int_of_mem_holes_enum (v := .array a) h
         cases hi
 
+/-! ### Multi-word bitset membership -/
+
+theorem bitsetMem_replicate_zero (nwords n : Nat) :
+    bitsetMem (Array.replicate nwords (0 : UInt64)) n = false := by
+  unfold bitsetMem
+  rw [Array.getElem?_replicate]
+  by_cases h : n / 64 < nwords <;> simp [h]
+
+/-- Membership in a word array written through `get!`. -/
+theorem bitsetMem_eq_getWord (words : Array UInt64) (n : Nat) :
+    bitsetMem words n =
+      bne ((words[n / 64]!) &&& u64bit (n % 64)) 0 := by
+  unfold bitsetMem
+  rw [Array.getElem!_eq_getD]
+  unfold Array.getD
+  cases h : words[n / 64]?
+  · have hge : ¬ n / 64 < words.size := by
+      intro hlt
+      have hsome := Array.getElem?_eq_getElem hlt
+      rw [h] at hsome
+      cases hsome
+    simp [hge]
+    change ((0 : UInt64) &&& u64bit (n % 64)) = 0
+    simp
+  · obtain ⟨hlt, heq⟩ := Array.getElem?_eq_some_iff.mp h
+    rw [dif_pos hlt]
+    rw [Array.getInternal_eq_getElem]
+    rw [heq]
+
+theorem bitsetMem_set!_local {words : Array UInt64} {wi : Nat} (hwi : wi < words.size)
+    (w : UInt64) (n : Nat) :
+    bitsetMem (words.set! wi w) n =
+      if n / 64 = wi then (w &&& u64bit (n % 64)) != 0 else bitsetMem words n := by
+  unfold bitsetMem
+  rw [Array.set!_eq_setIfInBounds]
+  rw [Array.getElem?_setIfInBounds]
+  by_cases h : wi = n / 64
+  · rw [if_pos h, if_pos hwi, if_pos h.symm]
+  · rw [if_neg h, if_neg (fun hn => h hn.symm)]
+
+theorem uint64_or_u64bit_and_u64bit_ne_zero_iff (w : UInt64) {k n : Nat}
+    (hk : k < 64) (hn : n < 64) :
+    ((w ||| u64bit k) &&& u64bit n) != 0 ↔ k = n ∨ (w &&& u64bit n) != 0 := by
+  rw [uint64_and_u64bit_ne_zero_iff _ hn, UInt64.toNat_or, Nat.testBit_or,
+      u64bit_toNat hk, Nat.testBit_two_pow, uint64_and_u64bit_ne_zero_iff w hn]
+  by_cases h : k = n
+  · subst h; simp
+  · simp [h]
+
+theorem bitsetMem_setBit_iff {words : Array UInt64} {k n : Nat}
+    (hk : k / 64 < words.size) :
+    bitsetMem (setBitWord words k) n = true ↔ n = k ∨ bitsetMem words n = true := by
+  unfold setBitWord
+  rw [dif_pos hk]
+  rw [bitsetMem_set!_local hk]
+  by_cases hb : n / 64 = k / 64
+  · rw [if_pos hb]
+    rw [uint64_or_u64bit_and_u64bit_ne_zero_iff _ (Nat.mod_lt _ (by decide))
+      (Nat.mod_lt _ (by decide))]
+    rw [bitsetMem_eq_getWord words n]
+    have hword : (words[k / 64]!) = (words[n / 64]!) := by rw [hb]
+    rw [hword]
+    constructor
+    · rintro (hmod | hbit)
+      · left
+        have hn := Nat.div_add_mod n 64
+        have hk' := Nat.div_add_mod k 64
+        omega
+      · right; exact hbit
+    · rintro (hkn | hbit)
+      · subst hkn; left; simp
+      · right; exact hbit
+  · rw [if_neg hb]
+    constructor
+    · intro h; exact Or.inr h
+    · rintro (hkn | h)
+      · subst hkn; exact absurd rfl hb
+      · exact h
+
+/-- Folding `setBitWord` over a value list sets exactly those bits.  The
+    `hsize`/`hb` hypotheses keep every written word inside the array. -/
+theorem bitsetMem_foldl_setBit {lo : Int} {nwords : Nat} (vs : List Int)
+    (init : Array UInt64) (hsize : init.size = nwords)
+    (hb : ∀ v ∈ vs, (v - lo).toNat / 64 < nwords) (n : Nat) :
+    bitsetMem (vs.foldl (fun a v => setBitWord a (v - lo).toNat) init) n = true ↔
+      (∃ v ∈ vs, (v - lo).toNat = n) ∨ bitsetMem init n = true := by
+  induction vs generalizing init with
+  | nil => simp
+  | cons v rest ih =>
+      rw [List.foldl_cons]
+      have hb' : ∀ w ∈ rest, (w - lo).toNat / 64 < nwords :=
+        fun w hw => hb w (by simp [hw])
+      have hk : (v - lo).toNat / 64 < init.size := by
+        rw [hsize]; exact hb v (by simp)
+      have hsize' : (setBitWord init (v - lo).toNat).size = nwords := by
+        unfold setBitWord
+        rw [dif_pos hk, Array.size_set!]
+        exact hsize
+      rw [ih (setBitWord init (v - lo).toNat) hsize' hb']
+      rw [bitsetMem_setBit_iff (words := init) (k := (v - lo).toNat) (n := n) ?_]
+      · constructor
+        · rintro (⟨w, hw, hwk⟩ | hvn | hinit)
+          · exact Or.inl ⟨w, by simp [hw], hwk⟩
+          · exact Or.inl ⟨v, by simp, hvn.symm⟩
+          · exact Or.inr hinit
+        · rintro (⟨w, hw, hwk⟩ | hinit)
+          · rcases List.mem_cons.mp hw with rfl | hw'
+            · exact Or.inr (Or.inl hwk.symm)
+            · exact Or.inl ⟨w, hw', hwk⟩
+          · exact Or.inr (Or.inr hinit)
+      · rw [hsize]; exact hb v (by simp)
+
+/-- Membership of the multi-word bitset conversion of a medium interval with
+    holes.  This is the `bitset` counterpart of `mem_holes_ofDom`. -/
+theorem mem_holes_bitset_ofDom {lo hi : Int} {hs : List Int} {v : Value}
+    (hspanlo : 0 < hi - lo + 1) (hspanhi : hi - lo + 1 ≤ 4096) :
+    (DomC.bitset lo (bitsetOfHoles lo hi
+      (sortedUniqueInts (hs.toArray.filter
+        (fun h => decide (lo ≤ h) && decide (h ≤ hi)))))).mem v = true ↔
+      v ∈ Dom.enum ⟨.holes lo hi hs⟩ := by
+  have hpair : (sortedUniqueInts (hs.toArray.filter
+      (fun h => decide (lo ≤ h) && decide (h ≤ hi)))).toList.Pairwise
+      (fun a b => a < b) := pairwise_sortedUniqueInts _
+  have hmem : ∀ x : Int, x ∈ (sortedUniqueInts (hs.toArray.filter
+      (fun h => decide (lo ≤ h) && decide (h ≤ hi)))).toList ↔
+      x ∈ hs ∧ lo ≤ x ∧ x ≤ hi := by
+    intro x
+    rw [mem_sortedUniqueInts, mem_filter_window]
+  have hcompmem : ∀ x : Int, x ∈ (complementHoles lo hi
+      (sortedUniqueInts (hs.toArray.filter
+        (fun h => decide (lo ≤ h) && decide (h ≤ hi))))).toList ↔
+      lo ≤ x ∧ x ≤ hi ∧ x ∉ hs := by
+    intro x
+    rw [mem_complementHoles hpair]
+    constructor
+    · rintro ⟨h1, h2, h3⟩
+      exact ⟨h1, h2, fun hx => h3 ((hmem x).mpr ⟨hx, h1, h2⟩)⟩
+    · rintro ⟨h1, h2, h3⟩
+      exact ⟨h1, h2, fun hx => h3 ((hmem x).mp hx).1⟩
+  have hb : ∀ x ∈ (complementHoles lo hi
+      (sortedUniqueInts (hs.toArray.filter
+        (fun h => decide (lo ≤ h) && decide (h ≤ hi))))).toList,
+      (x - lo).toNat / 64 < bitsetWordCount (hi - lo + 1).toNat := by
+    intro x hx
+    have hx' := (hcompmem x).mp hx
+    have hklt : (x - lo).toNat < (hi - lo + 1).toNat :=
+      (Int.toNat_lt_toNat hspanlo).mpr (by omega)
+    have hdiv := Nat.div_add_mod ((hi - lo + 1).toNat + 63) 64
+    have hmod := Nat.mod_lt ((hi - lo + 1).toNat + 63) (by decide : 0 < 64)
+    have hle : (hi - lo + 1).toNat ≤ bitsetWordCount (hi - lo + 1).toNat * 64 := by
+      unfold bitsetWordCount
+      omega
+    exact Nat.div_lt_of_lt_mul (by omega)
+  cases v with
+  | int i =>
+      by_cases hlt : i - lo < 0
+      · have hlt' : i < lo := by omega
+        simp only [DomC.mem]
+        rw [if_pos hlt, Dom.mem_holes_enum_int]
+        simp only [Bool.false_eq_true, false_iff]
+        intro hcon
+        exact absurd hcon.1 (by omega)
+      · simp only [DomC.mem]
+        rw [if_neg hlt]
+        rw [Dom.mem_holes_enum_int]
+        have hfold := bitsetMem_foldl_setBit (lo := lo)
+          (nwords := bitsetWordCount (hi - lo + 1).toNat)
+          (complementHoles lo hi (sortedUniqueInts (hs.toArray.filter
+            (fun h => decide (lo ≤ h) && decide (h ≤ hi))))).toList
+          (Array.replicate (bitsetWordCount (hi - lo + 1).toNat) 0) (by simp) hb
+          (i - lo).toNat
+        rw [bitsetMem_replicate_zero] at hfold
+        simp only [or_false, Bool.false_eq_true] at hfold
+        have hge : lo ≤ i := by omega
+        have hwords : bitsetMem (bitsetOfHoles lo hi
+            (sortedUniqueInts (hs.toArray.filter
+              (fun h => decide (lo ≤ h) && decide (h ≤ hi))))) (i - lo).toNat =
+            bitsetMem ((complementHoles lo hi (sortedUniqueInts (hs.toArray.filter
+              (fun h => decide (lo ≤ h) && decide (h ≤ hi))))).toList.foldl
+              (fun a v => setBitWord a (v - lo).toNat)
+              (Array.replicate (bitsetWordCount (hi - lo + 1).toNat) 0))
+              (i - lo).toNat := by
+          unfold bitsetOfHoles bitsetOfValues
+          rfl
+        rw [hwords, hfold]
+        constructor
+        · rintro ⟨x, hx, hxeq⟩
+          have hx' := (hcompmem x).mp hx
+          have heq : x = i := by
+            have h1 : ((x - lo).toNat : Int) = x - lo :=
+              Int.toNat_of_nonneg (by omega)
+            have h2 : ((i - lo).toNat : Int) = i - lo :=
+              Int.toNat_of_nonneg (by omega)
+            omega
+          subst heq
+          exact ⟨hx'.1, hx'.2.1, hx'.2.2⟩
+        · rintro ⟨hli, hhi, hnot⟩
+          exact ⟨i, (hcompmem i).mpr ⟨hli, hhi, hnot⟩, rfl⟩
+  | bool b =>
+      constructor
+      · intro h; simp [DomC.mem] at h
+      · intro h
+        obtain ⟨i, hi⟩ := Dom.eq_int_of_mem_holes_enum (v := .bool b) h
+        cases hi
+  | setOfInt s =>
+      constructor
+      · intro h; simp [DomC.mem] at h
+      · intro h
+        obtain ⟨i, hi⟩ := Dom.eq_int_of_mem_holes_enum (v := .setOfInt s) h
+        cases hi
+  | array a =>
+      constructor
+      · intro h; simp [DomC.mem] at h
+      · intro h
+        obtain ⟨i, hi⟩ := Dom.eq_int_of_mem_holes_enum (v := .array a) h
+        cases hi
+
 theorem pairwise_complementHoles (lo hi : Int) (vs : Array Int) :
     (complementHoles lo hi vs).toList.Pairwise (fun a b => a < b) := by
   unfold complementHoles
@@ -1228,6 +1670,103 @@ theorem mem_general_int {vs : List Value} {i : Int} {lo hi : Int}
       (memHoleRange_eq_false_iff hcomp_pair).mpr hcomp
     simp [hmr]
 
+/-- Membership of the sorted sparse conversion of a wide integer
+enumeration.  This is the span-independent counterpart of `mem_general_int`. -/
+theorem mem_general_sparse {vs : List Value} {i : Int} :
+    (DomC.sparse (sortedUniqueInts (intValues vs))).mem (.int i) = true ↔
+      .int i ∈ Dom.enum ⟨.general vs⟩ := by
+  have hpair : (sortedUniqueInts (intValues vs)).toList.Pairwise (fun a b => a < b) :=
+    pairwise_sortedUniqueInts _
+  have hmem : ∀ x : Int, x ∈ (sortedUniqueInts (intValues vs)).toList ↔ .int x ∈ vs := by
+    intro x
+    rw [mem_sortedUniqueInts]
+    exact mem_intValues
+  simp only [DomC.mem, Dom.enum]
+  rw [memHoleRange_eq_true_iff hpair]
+  exact hmem i
+
+/-- Membership of the multi-word bitset conversion of a dense integer
+enumeration.  This is the `bitset` counterpart of `mem_general_int`. -/
+theorem mem_general_bitset {vs : List Value} {i : Int} {lo hi : Int}
+    (hshape : vs.all (fun v => match v with | .int _ => true | _ => false) = true)
+    (hhead : arrayHead? (sortedUniqueInts (intValues vs)) = some lo)
+    (hlast : arrayLast? (sortedUniqueInts (intValues vs)) = some hi)
+    (hspan : hi - lo + 1 ≤ 4096) :
+    (DomC.bitset lo
+      (bitsetOfValues lo (bitsetWordCount (hi - lo + 1).toNat)
+        (sortedUniqueInts (intValues vs)).toList)).mem (.int i) = true ↔
+      .int i ∈ Dom.enum ⟨.general vs⟩ := by
+  have hpair : (sortedUniqueInts (intValues vs)).toList.Pairwise (fun a b => a < b) :=
+    pairwise_sortedUniqueInts _
+  have hmem : ∀ x : Int, x ∈ (sortedUniqueInts (intValues vs)).toList ↔ .int x ∈ vs := by
+    intro x
+    rw [mem_sortedUniqueInts]
+    exact mem_intValues
+  have hbounds : ∀ x : Int, .int x ∈ vs → lo ≤ x ∧ x ≤ hi := by
+    intro x hx
+    have hxq : x ∈ (sortedUniqueInts (intValues vs)).toList := (hmem x).mpr hx
+    exact ⟨arrayHead?_le hhead hpair hxq, le_arrayLast? hlast hpair hxq⟩
+  have hhi_mem : hi ∈ (sortedUniqueInts (intValues vs)).toList := by
+    obtain ⟨hpos, hlast0⟩ := arrayLast?_eq_some hlast
+    refine List.mem_iff_getElem.mpr ⟨(sortedUniqueInts (intValues vs)).size - 1, ?_, ?_⟩
+    · simp
+      omega
+    · rw [Array.getElem_toList]
+      exact hlast0
+  have hlo_le_hi : lo ≤ hi :=
+    arrayHead?_le hhead hpair hhi_mem
+  have hspanpos : 0 < hi - lo + 1 := by omega
+  have hnatpos : 0 < (hi - lo + 1).toNat := by
+    have hcast : ((hi - lo + 1).toNat : Int) = hi - lo + 1 :=
+      Int.toNat_of_nonneg (by omega)
+    omega
+  have hb : ∀ x ∈ (sortedUniqueInts (intValues vs)).toList,
+      (x - lo).toNat / 64 < bitsetWordCount (hi - lo + 1).toNat := by
+    intro x hx
+    have hxmem := hmem x |>.mp hx
+    obtain ⟨hxlo, hxhi⟩ := hbounds x hxmem
+    have hklt : (x - lo).toNat < (hi - lo + 1).toNat :=
+      (Int.toNat_lt_toNat hspanpos).mpr (by omega)
+    have hle : (hi - lo + 1).toNat ≤ bitsetWordCount (hi - lo + 1).toNat * 64 := by
+      unfold bitsetWordCount
+      omega
+    exact Nat.div_lt_of_lt_mul (by omega)
+  by_cases hlt : i - lo < 0
+  · simp only [DomC.mem]
+    rw [if_pos hlt, Dom.enum]
+    simp only [Bool.false_eq_true, false_iff]
+    intro hv
+    exact absurd (hbounds i hv).1 (by omega)
+  · simp only [DomC.mem]
+    rw [if_neg hlt, Dom.enum]
+    have hfold := bitsetMem_foldl_setBit (lo := lo)
+      (nwords := bitsetWordCount (hi - lo + 1).toNat)
+      (sortedUniqueInts (intValues vs)).toList
+      (Array.replicate (bitsetWordCount (hi - lo + 1).toNat) 0) (by simp) hb
+      (i - lo).toNat
+    rw [bitsetMem_replicate_zero] at hfold
+    simp only [or_false, Bool.false_eq_true] at hfold
+    have hwords : bitsetMem (bitsetOfValues lo
+        (bitsetWordCount (hi - lo + 1).toNat)
+        (sortedUniqueInts (intValues vs)).toList) (i - lo).toNat =
+        bitsetMem ((sortedUniqueInts (intValues vs)).toList.foldl
+          (fun a v => setBitWord a (v - lo).toNat)
+          (Array.replicate (bitsetWordCount (hi - lo + 1).toNat) 0))
+          (i - lo).toNat := rfl
+    rw [hwords, hfold]
+    constructor
+    · rintro ⟨x, hx, hxeq⟩
+      have hxlo : lo ≤ x := (hbounds x (hmem x |>.mp hx)).1
+      have heq : x = i := by
+        have h1 : ((x - lo).toNat : Int) = x - lo :=
+          Int.toNat_of_nonneg (by omega)
+        have h2 : ((i - lo).toNat : Int) = i - lo :=
+          Int.toNat_of_nonneg (by omega)
+        omega
+      simpa [heq] using (hmem x).mp hx
+    · intro hv
+      exact ⟨i, (hmem i).mpr hv, rfl⟩
+
 theorem ofDom?_general_bool_eq {vs : List Value} {c : DomC}
     (hshape : vs.all (fun v => match v with | .bool _ => true | _ => false) = true)
     (h : DomC.ofDom? ⟨.general vs⟩ = some c) :
@@ -1256,13 +1795,21 @@ theorem ofDom?_general_bool_eq {vs : List Value} {c : DomC}
             (List.all_eq_true.mp hshape) (.array a) (by simp)
           simp at hv0
 
-theorem ofDom?_general_int_eq {vs : List Value} {c : DomC}
+/-- Shape of the conversion of an all-integer enumeration: the head and last
+values, plus the two possible compact representations (a medium-span bitset
+or a wide interval minus its complement holes). -/
+theorem ofDom?_general_int_cases {vs : List Value} {c : DomC}
     (hshape : vs.all (fun v => match v with | .int _ => true | _ => false) = true)
     (h : DomC.ofDom? ⟨.general vs⟩ = some c) :
-    ∃ lo hi, c = .boundsHoles lo hi
-        (complementHoles lo hi (sortedUniqueInts (intValues vs)))
-      ∧ arrayHead? (sortedUniqueInts (intValues vs)) = some lo
-      ∧ arrayLast? (sortedUniqueInts (intValues vs)) = some hi := by
+    ∃ lo hi, arrayHead? (sortedUniqueInts (intValues vs)) = some lo
+      ∧ arrayLast? (sortedUniqueInts (intValues vs)) = some hi
+      ∧ ((hi - lo + 1 ≤ 4096 ∧ c = .bitset lo
+            (bitsetOfValues lo
+              (bitsetWordCount (hi - lo + 1).toNat)
+              (sortedUniqueInts (intValues vs)).toList))
+         ∨ c = .boundsHoles lo hi
+            (complementHoles lo hi (sortedUniqueInts (intValues vs)))
+         ∨ c = .sparse (sortedUniqueInts (intValues vs))) := by
   cases vs with
   | nil => simp [DomC.ofDom?] at h
   | cons v0 rest =>
@@ -1276,16 +1823,17 @@ theorem ofDom?_general_int_eq {vs : List Value} {c : DomC}
               by_cases hspan : b - a + 1 ≤ 4096
               · rw [if_pos hspan] at h
                 cases h
-                exact ⟨a, b, rfl, hhead, hlast⟩
+                exact ⟨a, b, hhead, hlast, Or.inl ⟨hspan, rfl⟩⟩
               · rw [if_neg hspan] at h
                 by_cases hdense :
                     (b - a + 1).toNat -
                       (sortedUniqueInts (intValues (Value.int i0 :: rest))).size ≤ 4096
                 · rw [if_pos hdense] at h
                   cases h
-                  exact ⟨a, b, rfl, hhead, hlast⟩
+                  exact ⟨a, b, hhead, hlast, Or.inr (Or.inl rfl)⟩
                 · rw [if_neg hdense] at h
                   cases h
+                  exact ⟨a, b, hhead, hlast, Or.inr (Or.inr rfl)⟩
             · simp at h
           · rename_i hneg
             exact absurd hshape hneg
@@ -1345,8 +1893,12 @@ theorem DomC.mem_iff (d : Dom) (c : DomC) (h : DomC.ofDom? d = some c) (v : Valu
                   cases hx
     | holes lo hi hs =>
         simp only [DomC.ofDom?] at h
-        cases h
-        exact mem_holes_ofDom
+        split at h
+        · rename_i hspan
+          cases h
+          exact mem_holes_bitset_ofDom hspan.1 hspan.2
+        · cases h
+          exact mem_holes_ofDom
     | general vs =>
         cases vs with
         | nil =>
@@ -1368,29 +1920,72 @@ theorem DomC.mem_iff (d : Dom) (c : DomC) (h : DomC.ofDom? d = some c) (v : Valu
             | int i0 =>
                 by_cases hall : (Value.int i0 :: rest).all
                     (fun v => match v with | .int _ => true | _ => false) = true
-                · obtain ⟨lo, hi, hc, hhead, hlast⟩ :=
-                    ofDom?_general_int_eq hall h
-                  rw [hc]
-                  cases v with
-                  | int i => exact mem_general_int hhead hlast
-                  | bool b =>
-                      constructor
-                      · intro hh; simp [DomC.mem] at hh
-                      · intro hh
-                        obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
-                        cases hi'
-                  | setOfInt s =>
-                      constructor
-                      · intro hh; simp [DomC.mem] at hh
-                      · intro hh
-                        obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
-                        cases hi'
-                  | array a =>
-                      constructor
-                      · intro hh; simp [DomC.mem] at hh
-                      · intro hh
-                        obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
-                        cases hi'
+                · obtain ⟨lo, hi, hhead, hlast, hc | hc | hc⟩ :=
+                    ofDom?_general_int_cases hall h
+                  · obtain ⟨hspan, hc⟩ := hc
+                    rw [hc]
+                    cases v with
+                    | int i => exact mem_general_bitset hall hhead hlast hspan
+                    | bool b =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
+                    | setOfInt s =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
+                    | array a =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
+                  · rw [hc]
+                    cases v with
+                    | int i => exact mem_general_int hhead hlast
+                    | bool b =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
+                    | setOfInt s =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
+                    | array a =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
+                  · rw [hc]
+                    cases v with
+                    | int i => exact mem_general_sparse
+                    | bool b =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
+                    | setOfInt s =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
+                    | array a =>
+                        constructor
+                        · intro hh; simp [DomC.mem] at hh
+                        · intro hh
+                          obtain ⟨i, hi'⟩ := eq_int_of_mem_all_int hall hh
+                          cases hi'
                 · simp only [DomC.ofDom?] at h
                   split at h
                   · rename_i hhall
@@ -1421,13 +2016,16 @@ theorem DomC.ofDom?_wf (d : Dom) (c : DomC) (h : DomC.ofDom? d = some c) :
             simp [DomC.WF]
     | holes lo hi hs =>
         simp only [DomC.ofDom?] at h
-        cases h
-        refine ⟨pairwise_sortedUniqueInts _, ?_⟩
-        intro x hx
-        have hx' : x ∈ (hs.toArray.filter
-            (fun h => decide (lo ≤ h) && decide (h ≤ hi))).toList :=
-          (mem_sortedUniqueInts).mp hx
-        exact (mem_filter_window.mp hx').2
+        split at h
+        · cases h
+          simp [DomC.WF]
+        · cases h
+          refine ⟨pairwise_sortedUniqueInts _, ?_⟩
+          intro x hx
+          have hx' : x ∈ (hs.toArray.filter
+              (fun h => decide (lo ≤ h) && decide (h ≤ hi))).toList :=
+            (mem_sortedUniqueInts).mp hx
+          exact (mem_filter_window.mp hx').2
     | general vs =>
         cases vs with
         | nil =>
@@ -1450,14 +2048,19 @@ theorem DomC.ofDom?_wf (d : Dom) (c : DomC) (h : DomC.ofDom? d = some c) :
             | int i0 =>
                 by_cases hall : (Value.int i0 :: rest).all
                     (fun v => match v with | .int _ => true | _ => false) = true
-                · obtain ⟨lo, hi, hc, -, -⟩ := ofDom?_general_int_eq hall h
-                  rw [hc]
-                  refine ⟨pairwise_complementHoles lo hi _, ?_⟩
-                  intro x hx
-                  have hx' := (mem_complementHoles (lo := lo) (hi := hi)
-                    (vs := sortedUniqueInts (intValues (Value.int i0 :: rest)))
-                    (hs := pairwise_sortedUniqueInts _)).mp hx
-                  exact ⟨hx'.1, hx'.2.1⟩
+                · obtain ⟨lo, hi, -, -, hc | hc | hc⟩ := ofDom?_general_int_cases hall h
+                  · obtain ⟨-, hc⟩ := hc
+                    rw [hc]
+                    simp [DomC.WF]
+                  · rw [hc]
+                    refine ⟨pairwise_complementHoles lo hi _, ?_⟩
+                    intro x hx
+                    have hx' := (mem_complementHoles (lo := lo) (hi := hi)
+                      (vs := sortedUniqueInts (intValues (Value.int i0 :: rest)))
+                      (hs := pairwise_sortedUniqueInts _)).mp hx
+                    exact ⟨hx'.1, hx'.2.1⟩
+                  · rw [hc]
+                    exact pairwise_sortedUniqueInts _
                 · simp only [DomC.ofDom?] at h
                   split at h
                   · rename_i hhall
