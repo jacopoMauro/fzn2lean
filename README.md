@@ -30,9 +30,9 @@ incumbents remain valid; no UNSAT or optimality marker is emitted for an
 incomplete run. Options Core does not implement are usage errors, with no
 implicit engine switching.
 
-The language reference is **MiniZinc 2.10.0**, pinned to commit
-`c9f9b649b2a251a40aa427a84d7cce73a8807fea`. See the
-[vendor reference](specification/minizinc-2.10.0/README.md) and
+The language reference is **MiniZinc 2.10.1**, pinned to commit
+`c3448c48e7f05f13805616cfd1b9e94972eef58c`. See the
+[vendor reference](specification/minizinc-2.10.1/README.md) and
 [formalization assumptions](specification/flatzinc_specification_assumptions.md).
 Float syntax and semantics are outside the supported fragment; strings are
 supported in annotations.
@@ -53,7 +53,7 @@ run budget; generated logs under `tmp/` are local artifacts.
 ## Using LeanFzn from MiniZinc
 
 [minizinc-wrapper/](minizinc-wrapper/README.md) registers LeanFzn as a MiniZinc
-solver. The primary route is the Docker image (MiniZinc 2.10.0 with LeanFzn as
+solver. The primary route is the Docker image (MiniZinc 2.10.1 with LeanFzn as
 the default solver):
 
 ```bash
@@ -62,7 +62,7 @@ docker run --rm -v "$PWD:/work" leanfzn-minizinc model.mzn data.dzn
 ```
 
 To add it to an existing MiniZinc instead, run `minizinc-wrapper/install.sh`
-(it also installs the pinned MiniZinc 2.10.0 if needed) or follow the manual
+(it also installs the pinned MiniZinc 2.10.1 if needed) or follow the manual
 steps in that README, then `minizinc --solver leanfzn model.mzn`. The
 wrapper is not part of the certified code: it translates flags and output and
 passes on only the verdicts `leanfzn solve` prints.

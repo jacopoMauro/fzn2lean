@@ -7,7 +7,7 @@ open LeanFzn.Semantics
 
 Mathematical interpretations (`regularInterp`) and executable Boolean
 twins (`regularInterpB`) for the `regular` family of the pinned MiniZinc
-2.10.0 tree, per the decompositions recorded in
+2.10.1 tree, per the decompositions recorded in
 `specification/flatzinc_specification_assumptions.md`, G27–G28:
 
 * `fzn_regular(xs, Q, S, d, q0, F)` (`fzn_regular.mzn`): DFA

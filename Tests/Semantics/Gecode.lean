@@ -21,7 +21,7 @@ Gecode's tests exercise the LeanFzn.Solver end-to-end; here we exercise the
 condition of `Satisfies` under `fullInterp`, which is exactly what
 `checkSolutionFull` decides (per `checkSolutionFull_correct`).
 
-Adaptations for the pinned MiniZinc 2.10.0 grammar of this project:
+Adaptations for the pinned MiniZinc 2.10.1 grammar of this project:
 
 * array variable declarations carry an initializer (the grammar's
   `<array-var-type>` rule requires `= <array-literal>`), where Gecode

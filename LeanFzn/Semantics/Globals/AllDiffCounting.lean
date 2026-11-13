@@ -7,7 +7,7 @@ open LeanFzn.Semantics
 
 Mathematical interpretations (`allDiffInterp`) and executable Boolean
 twins (`allDiffInterpB`) for the all-different family of global
-constraints of the pinned MiniZinc 2.10.0 FlatZinc tree:
+constraints of the pinned MiniZinc 2.10.1 FlatZinc tree:
 `fzn_all_different_int`, `fzn_all_different_set`, `fzn_all_disjoint`,
 `fzn_all_equal_int`, `fzn_all_equal_set`, `fzn_alldifferent_except`,
 `fzn_alldifferent_except_0` and `fzn_symmetric_all_different`.  Each
@@ -22,7 +22,7 @@ the `except` variants, and the involutive form of
 `symmetric_all_different`) are recorded in
 `specification/flatzinc_specification_assumptions.md`, G7–G9.
 
-Semantics per the MiniZinc 2.10.0 handbook, Section 4.2.2.1
+Semantics per the MiniZinc 2.10.1 handbook, Section 4.2.2.1
 ("All-Different and related constraints"):
 
 * `all_different` — "Constrain the elements in the array xs to be

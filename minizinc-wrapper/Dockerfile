@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# MiniZinc 2.10.0 with LeanFzn installed as a solver (and the default one).
+# MiniZinc 2.10.1 with LeanFzn installed as a solver (and the default one).
 # Build from the repository root, which is the build context:
 #
 #   docker build -f minizinc-wrapper/Dockerfile -t leanfzn-minizinc .
@@ -27,16 +27,16 @@ COPY . .
 RUN lake build leanfzn
 
 # ---------------------------------------------------------------------------
-# 2. Fetch MiniZinc 2.10.0, the version LeanFzn's FlatZinc semantics are
+# 2. Fetch MiniZinc 2.10.1, the version LeanFzn's FlatZinc semantics are
 #    pinned to (specification/). Same bundle and checksum as install.sh.
 FROM ${UBUNTU} AS minizinc
-ARG MZN_VERSION=2.10.0
-ARG MZN_SHA256=1781daef871a52bebc992b21049ed514cfcdf7cc652ce26df8c9fa82aca1a852
+ARG MZN_VERSION=2.10.1
+ARG MZN_SHA256=b63dd88491d47b05d0eb0ff4aa1112d1e6f77292c023800b20b98851458ce01c
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL -o /tmp/mzn.tgz \
-      "https://github.com/MiniZinc/MiniZincIDE/releases/download/${MZN_VERSION}/MiniZincIDE-${MZN_VERSION}-bundle-linux-x86_64.tgz" \
+      "https://github.com/MiniZinc/MiniZincIDE/releases/download/${MZN_VERSION}/MiniZincIDE-${MZN_VERSION}-x86_64-linux-gnu.tgz" \
  && echo "${MZN_SHA256}  /tmp/mzn.tgz" | sha256sum -c - \
  && mkdir /opt/minizinc \
  && tar xzf /tmp/mzn.tgz -C /opt/minizinc --strip-components=1 \
@@ -58,7 +58,7 @@ COPY minizinc-wrapper /opt/leanfzn/minizinc-wrapper
 ENV PATH=/opt/minizinc/bin:$PATH
 
 # Register the solver in MiniZinc's own solver directory (absolute paths:
-# MiniZinc 2.10.0 does not resolve a relative "executable") and make it the
+# MiniZinc 2.10.1 does not resolve a relative "executable") and make it the
 # default solver, so `minizinc model.mzn` runs LeanFzn.
 RUN python3 - <<'EOF'
 import json

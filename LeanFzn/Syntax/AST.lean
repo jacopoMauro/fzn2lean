@@ -2,7 +2,7 @@
 # FlatZinc Abstract Syntax Tree
 
 Formalization of the vendored FlatZinc grammar
-(`specification/minizinc-2.10.0/fzn-grammar.mzn`) as Lean 4 inductive types.
+(`specification/minizinc-2.10.1/fzn-grammar.mzn`) as Lean 4 inductive types.
 
 Each BNF non-terminal corresponds to one Lean type.  The ordering constraint
 of `<model>` (predicate items, then parameter declarations, then variable

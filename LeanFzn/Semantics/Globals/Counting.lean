@@ -7,7 +7,7 @@ open LeanFzn.Semantics
 
 Mathematical interpretations (`countingInterp`) and executable Boolean
 twins (`countingInterpB`) for the counting family of global
-constraints of the pinned MiniZinc 2.10.0 FlatZinc tree (32
+constraints of the pinned MiniZinc 2.10.1 FlatZinc tree (32
 `fzn_*` names), following the `lexSortInterp` pattern of
 `LexSort.lean`.  Each predicate name gets a per-name agreement theorem
 `fzn_<name>_iff` proving that the Boolean twin is `true` exactly when
@@ -20,7 +20,7 @@ closedness distinctions of the `global_cardinality` family) are
 recorded in `specification/flatzinc_specification_assumptions.md`,
 G10–G11.
 
-Semantics per the MiniZinc 2.10.0 handbook, Section 4.2.2.4 ("Counting
+Semantics per the MiniZinc 2.10.1 handbook, Section 4.2.2.4 ("Counting
 Constraints", `lib-globals-counting.html`), cross-checked against the
 pinned stdlib decompositions (`share/minizinc/std/fzn_*.mzn`) and the
 deprecated-globals page for the `at_least/at_most/exactly` int

@@ -15,7 +15,7 @@ the current LeanFzn build.
 
 ## Regenerating inputs
 
-Run from this directory, with MiniZinc 2.10.0 on `PATH` (or set
+Run from this directory, with MiniZinc 2.10.1 on `PATH` (or set
 `MINIZINC_BIN` to its executable):
 
 ```bash

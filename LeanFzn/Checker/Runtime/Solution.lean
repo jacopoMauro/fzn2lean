@@ -15,7 +15,7 @@ open LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation
 # Solution checking
 
 An *executable* checker that decides whether a FlatZinc solution string
-(Section 4.3.3.1 of the MiniZinc 2.10.0 handbook: lines of the form
+(Section 4.3.3.1 of the MiniZinc 2.10.1 handbook: lines of the form
 `x = <literal>;` or `xs = array1d(1..n, [ ... ]);`) solves a given
 FlatZinc model, together with a machine-checked proof of its correctness
 (`checkSolutionFull_correct`, proved in `FznGlobals.lean` on the full

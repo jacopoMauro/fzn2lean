@@ -8,7 +8,7 @@ open LeanFzn.Semantics
 
 Mathematical interpretations (`setMathInterp`) and executable Boolean
 twins (`setMathInterpB`) for the set-related and mathematical families
-of global constraints of the pinned MiniZinc 2.10.0 FlatZinc tree:
+of global constraints of the pinned MiniZinc 2.10.1 FlatZinc tree:
 
 set family — `fzn_disjoint`, `fzn_set_member`, `fzn_partition_set`,
 `fzn_at_most1`, `fzn_array_set_union`, `fzn_array_set_intersect`;
@@ -21,7 +21,7 @@ proving that the Boolean twin is `true` exactly when the mathematical
 interpretation holds, following the `lexSortInterp` pattern of
 `LexSort.lean` and the `allDiffInterp` pattern of `AllDiffCounting.lean`.
 
-Semantics per the MiniZinc 2.10.0 handbook, Sections 4.2.2.7
+Semantics per the MiniZinc 2.10.1 handbook, Sections 4.2.2.7
 ("Set-related constraints"), 4.2.2.5 ("Counting constraints":
 `at_most1`, `sliding_among`) and 4.2.2.8 ("Mathematical constraints"),
 and per the pinned `share/minizinc/std/fzn_*.mzn` decompositions:

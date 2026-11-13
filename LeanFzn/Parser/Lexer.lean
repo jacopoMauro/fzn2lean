@@ -3,7 +3,7 @@
 
 A total tokenizer for the non-float fragment of FlatZinc source text,
 following the lexical rules of the vendored FlatZinc specification
-(`specification/minizinc-2.10.0/fzn-spec.md`):
+(`specification/minizinc-2.10.1/fzn-spec.md`):
 
 - Comments start with `%` and extend to the end of the line; they can appear
   anywhere.

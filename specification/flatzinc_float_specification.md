@@ -19,9 +19,9 @@ Scope of this proposed extension (not implemented by the current code):
 Companion document: `flatzinc_specification_assumptions.md` ("the assumption
 spec").  Decision records there use the R/A/G series.  The decisions recorded
 here use the **F series**, and where a float decision amends an earlier record
-it says so explicitly.  The MiniZinc 2.10.0 sources are pinned at commit
-`c9f9b649b2a251a40aa427a84d7cce73a8807fea` (vendored under
-`specification/minizinc-2.10.0/`), as in the assumption spec.
+it says so explicitly.  The MiniZinc 2.10.1 sources are pinned at commit
+`c3448c48e7f05f13805616cfd1b9e94972eef58c` (vendored under
+`specification/minizinc-2.10.1/`), as in the assumption spec.
 
 Project references below use module paths and declaration names; line numbers
 are retained only for the pinned upstream reference. This remains a proposal: the
@@ -104,7 +104,7 @@ rounding anywhere.
 The pinned `.g4`/`.mzn` grammar already admits floats; the change is purely on
 the lexical side plus token plumbing.  No grammar production is added.
 
-**Facts pinned from `fzn-grammar.mzn` (MiniZinc 2.10.0):**
+**Facts pinned from `fzn-grammar.mzn` (MiniZinc 2.10.1):**
 
 * `<float-literal>` (lines 73–75) — three alternatives:
   `[-]?[0-9]+.[0-9]+`, `[-]?[0-9]+.[0-9]+[Ee][-+]?[0-9]+`,
@@ -212,8 +212,8 @@ family extend with the float cases, exactly as the int twins.
 ## 5. Standard-predicate inventory
 
 Sources: handbook pages `lib-flatzinc-float.html` (base float builtins,
-2.10.0) and `lib-flatzinc-2*.html` (versioned additions), cross-checked
-against `minizinc-2.10.0/predicates_and_globals_report.md`.  Signatures below
+2.10.1) and `lib-flatzinc-2*.html` (versioned additions), cross-checked
+against `minizinc-2.10.1/predicates_and_globals_report.md`.  Signatures below
 were copied from the vendored pages.
 
 **Totals: 53 float family names documented by the report

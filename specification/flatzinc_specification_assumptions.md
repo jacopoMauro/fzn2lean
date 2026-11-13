@@ -5,9 +5,9 @@ changes accepted inputs, satisfying assignments, or the checker's treatment of
 a candidate solution. It distinguishes ambiguities in FlatZinc from choices
 in the checker interface, which FlatZinc does not specify.
 
-The reference is MiniZinc 2.10.0 at immutable commit
-`c9f9b649b2a251a40aa427a84d7cce73a8807fea`; see
-[minizinc-2.10.0/README.md](minizinc-2.10.0/README.md). The entries below
+The reference is MiniZinc 2.10.1 at immutable commit
+`c3448c48e7f05f13805616cfd1b9e94972eef58c`; see
+[minizinc-2.10.1/README.md](minizinc-2.10.1/README.md). The entries below
 concern the integer/Boolean/set fragment. Float-specific decisions are recorded
 in [flatzinc_float_specification.md](flatzinc_float_specification.md).
 
@@ -22,7 +22,7 @@ techniques, supported-name inventories, version pinning, and implementation
 bugs are not assumptions. Predicate definitions and their source citations
 belong in `LeanFzn/Semantics/StdLib.lean` and the `LeanFzn/Semantics/Globals/*` modules;
 the inventory belongs in
-[minizinc-2.10.0/predicates_and_globals_report.md](minizinc-2.10.0/predicates_and_globals_report.md).
+[minizinc-2.10.1/predicates_and_globals_report.md](minizinc-2.10.1/predicates_and_globals_report.md).
 Agreement between a Boolean checker and its project-defined proposition does
 not, by itself, establish agreement with the upstream specification.
 

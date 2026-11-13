@@ -7,7 +7,7 @@ open LeanFzn.Semantics
 
 Mathematical interpretations (`sched2Interp`) and executable Boolean
 twins (`sched2InterpB`) for the remaining encodable predicates of the
-pinned MiniZinc 2.10.0 tree, per the decompositions recorded in
+pinned MiniZinc 2.10.1 tree, per the decompositions recorded in
 `specification/flatzinc_specification_assumptions.md`, G26, G30–G32:
 
 * `fzn_cumulatives(start, duration, resource, machine, bound,

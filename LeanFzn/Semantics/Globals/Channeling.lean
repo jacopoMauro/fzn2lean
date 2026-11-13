@@ -7,13 +7,13 @@ open LeanFzn.Semantics
 
 Mathematical interpretations (`channelingInterp`) and executable Boolean
 twins (`channelingInterpB`) for the channeling and array-related
-member/write global-constraint predicates of the pinned MiniZinc 2.10.0
+member/write global-constraint predicates of the pinned MiniZinc 2.10.1
 FlatZinc tree.  Each predicate name gets a per-name agreement theorem
 `fzn_<name>_iff` proving that the Boolean twin is `true` exactly when
 the mathematical interpretation holds, following the `lexSortInterp`
 pattern of `LexSort.lean`.
 
-Semantics per the MiniZinc 2.10.0 handbook, Section 4.2.2.4
+Semantics per the MiniZinc 2.10.1 handbook, Section 4.2.2.4
 ("Channeling constraints"), 4.2.2.6 ("Array-related constraints") and
 4.2.2.8 ("Mathematical constraints"), cross-checked against the pinned
 tree's decompositions (`share/minizinc/std/fzn_*.mzn`):

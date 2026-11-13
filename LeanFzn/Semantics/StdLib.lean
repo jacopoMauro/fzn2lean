@@ -7,9 +7,9 @@ open LeanFzn.Semantics
 
 Signatures (`stdSig`) and mathematical interpretations (`stdInterp`) for the
 standard FlatZinc builtins of the integer/Boolean/set fragment (no floats),
-following the MiniZinc 2.10.0 FlatZinc specification's standard-predicate
+following the MiniZinc 2.10.1 FlatZinc specification's standard-predicate
 table (the vendored `lib-flatzinc-*.html` pages, inventoried in
-`specification/minizinc-2.10.0/predicates_and_globals_report.md`).
+`specification/minizinc-2.10.1/predicates_and_globals_report.md`).
 
 `stdSig` is a `SigEnv`: it can be passed to `wellFormedB` so that models
 using standard predicates are statically checked against their official
@@ -587,7 +587,7 @@ theorem lexLtB_iff (xs ys : List Int) :
 
 /-- Signature environment for the standard FlatZinc predicates of the
     integer/Boolean/set fragment.  Parameter types follow the MiniZinc
-    2.10.0 FlatZinc specification (the vendored `lib-flatzinc-*.html`
+    2.10.1 FlatZinc specification (the vendored `lib-flatzinc-*.html`
     pages): par parameters (e.g. the coefficient arrays of the linear
     predicates, the right-hand side of `int_lin_*_reif`, `bool_lin_le`
     and the exponent of `int_pow_fixed`) accept only fixed arguments,

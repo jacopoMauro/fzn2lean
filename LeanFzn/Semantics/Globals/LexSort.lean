@@ -8,11 +8,11 @@ open LeanFzn.Semantics
 Mathematical interpretations (`lexSortInterp`) and executable Boolean
 twins (`lexSortInterpB`) for the lex, sort, argsort, maximum/minimum-arg,
 and value-precedence global-constraint predicates of the pinned MiniZinc
-2.10.0 FlatZinc tree.  Each predicate name gets a per-name agreement
+2.10.1 FlatZinc tree.  Each predicate name gets a per-name agreement
 theorem `<name>_iff` proving that the Boolean twin is `true` exactly
 when the mathematical interpretation holds.
 
-Semantics per the MiniZinc 2.10.0 handbook, Section 4.2.2.3
+Semantics per the MiniZinc 2.10.1 handbook, Section 4.2.2.3
 ("Lexicographic constraints") and 4.2.2.12 ("Sorting constraints"),
 cross-checked against the pinned stdlib decompositions.  The
 interpretive decisions specific to this family (prefix order for lex,

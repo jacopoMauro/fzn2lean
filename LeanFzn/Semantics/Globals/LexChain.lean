@@ -7,7 +7,7 @@ open LeanFzn.Semantics
 
 Mathematical interpretations (`lexChainInterp`) and executable Boolean
 twins (`lexChainInterpB`) for the reverse lexicographic predicates and
-the chain/matrix lexicographic family of the pinned MiniZinc 2.10.0
+the chain/matrix lexicographic family of the pinned MiniZinc 2.10.1
 tree.
 
 Per the pinned decompositions (recorded in

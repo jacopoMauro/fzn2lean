@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # Register LeanFzn as a MiniZinc solver, and install the pinned MiniZinc
-# 2.10.0 if the `minizinc` on PATH is a different version.
+# 2.10.1 if the `minizinc` on PATH is a different version.
 #
 #   ./install.sh                 update leanfzn, install MiniZinc
-#                                2.10.0 if needed, register the solver
+#                                2.10.1 if needed, register the solver
 #   ./install.sh --skip-minizinc register only; keep whatever minizinc is on PATH
 #   ./install.sh --uninstall     remove the solver registration and, if this
-#                                script installed it, the MiniZinc 2.10.0 link
+#                                script installed it, the MiniZinc 2.10.1 link
 #
 # Everything goes into the user's home directory; nothing needs root:
 #   ~/.minizinc/solvers/leanfzn.msc          solver registration
-#   ~/.local/opt/MiniZincIDE-2.10.0-bundle-linux-x86_64/   MiniZinc 2.10.0
+#   ~/.local/opt/MiniZincIDE-2.10.1-x86_64-linux-gnu/   MiniZinc 2.10.1
 #   ~/.local/bin/minizinc -> .../bin/minizinc                 (symlink)
 set -euo pipefail
 
-MZN_VERSION=2.10.0
-MZN_BUNDLE="MiniZincIDE-${MZN_VERSION}-bundle-linux-x86_64"
+MZN_VERSION=2.10.1
+MZN_BUNDLE="MiniZincIDE-${MZN_VERSION}-x86_64-linux-gnu"
 MZN_URL="https://github.com/MiniZinc/MiniZincIDE/releases/download/${MZN_VERSION}/${MZN_BUNDLE}.tgz"
-MZN_SHA256=1781daef871a52bebc992b21049ed514cfcdf7cc652ce26df8c9fa82aca1a852
+MZN_SHA256=b63dd88491d47b05d0eb0ff4aa1112d1e6f77292c023800b20b98851458ce01c
 
 WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$WRAPPER_DIR/.." && pwd)"
@@ -52,7 +52,7 @@ fi
 say "updating leanfzn (lake build leanfzn)"
 (cd "$REPO_DIR" && lake build leanfzn)
 
-# 2. MiniZinc 2.10.0, the version LeanFzn's FlatZinc semantics are pinned to.
+# 2. MiniZinc 2.10.1, the version LeanFzn's FlatZinc semantics are pinned to.
 current_version() { "$1" --version 2>/dev/null | sed -n 's/.*version \([0-9.]*\).*/\1/p' | head -1; }
 if [ "$skip_minizinc" = 0 ]; then
   have=""

@@ -13,7 +13,7 @@ and MiniZinc prints the solutions in the model's own output format.
 
 There are two ways to set it up:
 
-- **Docker (recommended):** an image with MiniZinc 2.10.0 and LeanFzn as its
+- **Docker (recommended):** an image with MiniZinc 2.10.1 and LeanFzn as its
   default solver. It needs nothing on the host except Docker.
 - **An existing MiniZinc installation:** add LeanFzn to a MiniZinc you already
   have, either with `install.sh` or by hand.
@@ -32,7 +32,7 @@ The build has three stages:
    It builds the verified library from scratch. On 8 cores this takes about
    10 minutes and peaks at about 11 GB of memory. Docker Desktop's default
    memory limit may be lower, so raise it if the build is killed.
-2. It downloads the official MiniZinc 2.10.0 bundle, checks it against the
+2. It downloads the official MiniZinc 2.10.1 bundle, checks it against the
    same pinned SHA-256 as `install.sh`, and keeps only the command-line tools.
 3. It assembles the runtime image. LeanFzn is registered in MiniZinc's own
    solver directory and set as the **default solver**, and the image runs
@@ -69,7 +69,7 @@ Inside the image, the files are laid out as follows:
 
 | Path | Contents |
 | --- | --- |
-| `/opt/minizinc/` | MiniZinc 2.10.0 (`bin/` is on `PATH`) |
+| `/opt/minizinc/` | MiniZinc 2.10.1 (`bin/` is on `PATH`) |
 | `/opt/minizinc/share/minizinc/solvers/leanfzn.msc` | Solver registration |
 | `/opt/minizinc/share/minizinc/Preferences.json` | Makes LeanFzn the default solver |
 | `/opt/leanfzn/minizinc-wrapper/` | This directory |
@@ -81,7 +81,7 @@ toolchain and MiniZinc layers.
 ## Adding LeanFzn to an existing MiniZinc installation
 
 Use this when MiniZinc is already installed, for example with the IDE or
-other solvers, and LeanFzn should appear next to them. Use MiniZinc 2.10.0:
+other solvers, and LeanFzn should appear next to them. Use MiniZinc 2.10.1:
 LeanFzn's FlatZinc semantics are pinned to its standard library
 (`specification/`).
 
@@ -90,7 +90,7 @@ LeanFzn's FlatZinc semantics are pinned to its standard library
 From the repository root:
 
 ```bash
-minizinc-wrapper/install.sh                  # also installs MiniZinc 2.10.0 if needed
+minizinc-wrapper/install.sh                  # also installs MiniZinc 2.10.1 if needed
 minizinc-wrapper/install.sh --skip-minizinc  # keep the minizinc you already have
 ```
 
@@ -98,11 +98,11 @@ This does three things, all inside your home directory (no root):
 
 1. Updates `leanfzn` with `lake build leanfzn`, using the incremental build
    to ensure that an existing binary matches the source.
-2. Installs **MiniZinc 2.10.0** if the `minizinc` on your `PATH` is another
-   version. LeanFzn's FlatZinc semantics are pinned to the MiniZinc 2.10.0
+2. Installs **MiniZinc 2.10.1** if the `minizinc` on your `PATH` is another
+   version. LeanFzn's FlatZinc semantics are pinned to the MiniZinc 2.10.1
    standard library (`specification/`), so use that version. The official
    release bundle is downloaded, verified against a pinned SHA-256, unpacked
-   into `~/.local/opt/MiniZincIDE-2.10.0-bundle-linux-x86_64/`, and linked as
+   into `~/.local/opt/MiniZincIDE-2.10.1-x86_64-linux-gnu/`, and linked as
    `~/.local/bin/minizinc`. That directory must come before `/usr/bin` on your
    `PATH`; the script tells you if it does not.
 3. Registers the solver by writing `~/.minizinc/solvers/leanfzn.msc` with
@@ -112,7 +112,7 @@ This does three things, all inside your home directory (no root):
 Check it:
 
 ```bash
-minizinc --version                  # ... version 2.10.0
+minizinc --version                  # ... version 2.10.1
 minizinc --solvers | grep LeanFzn   # LeanFzn 0.1.0 (org.leanfzn.leanfzn, leanfzn, int)
 minizinc --solver leanfzn minizinc-wrapper/examples/queens.mzn
 minizinc-wrapper/test.sh            # smoke test, see below
@@ -140,7 +140,7 @@ directory that MiniZinc searches. To register LeanFzn yourself:
    `<repo>/.lake/build/bin/leanfzn`, set `LEANFZN_BIN=/path/to/leanfzn` in
    the environment MiniZinc runs in.
 2. **Write the configuration:** copy `leanfzn.msc` and make `executable` and
-   `mznlib` absolute paths. MiniZinc 2.10.0 does not resolve a relative
+   `mznlib` absolute paths. MiniZinc 2.10.1 does not resolve a relative
    `executable`. With the repository at `/path/to/fzn2lean`:
 
    ```json
@@ -189,9 +189,9 @@ the solver configuration's extra options.
 ### Without installing
 
 The in-tree `leanfzn.msc` uses paths relative to itself. MiniZinc 2.9.3
-resolves them, but **2.10.0 does not resolve a relative `executable`** (with
+resolves them, but **2.10.1 does not resolve a relative `executable`** (with
 `--solver path/to/leanfzn.msc` or `MZN_SOLVER_PATH`, it fails with "Error
-occurred when executing FZN solver"). On 2.10.0, use `install.sh
+occurred when executing FZN solver"). On 2.10.1, use `install.sh
 --skip-minizinc`, which writes a copy with absolute paths, or put the
 wrapper directory on `PATH`:
 
@@ -310,7 +310,7 @@ The directory is **empty on purpose**. `leanfzn solve` does not yet compile any
 `fzn_*` global. It also rejects the `predicate` declaration MiniZinc emits for
 a kept global, so the file above would turn every model using
 `all_different` into `=====UNSUPPORTED=====`. LeanFzn's semantics and checker
-already define the 138 `fzn_*` globals of the 2.10.0 library
+already define the 138 `fzn_*` globals of the 2.10.1 library
 (`LeanFzn/Semantics/Globals.lean`), but solving one needs, per global:
 
 1. acceptance of the matching bodiless `predicate` item in the compiler;
@@ -330,9 +330,9 @@ the certified FlatZinc.
 | --- | --- |
 | `fzn-leanfzn` | The wrapper MiniZinc calls (Python 3, standard library only) |
 | `leanfzn.msc` | Solver configuration with paths relative to this directory |
-| `Dockerfile` | Image with MiniZinc 2.10.0 and LeanFzn as default solver (build from the repository root) |
+| `Dockerfile` | Image with MiniZinc 2.10.1 and LeanFzn as default solver (build from the repository root) |
 | `Dockerfile.dockerignore` | Keeps `.git`, `.lake`, `tmp/` and the challenge files out of the build context |
-| `install.sh` | Build, MiniZinc 2.10.0 install and solver registration |
+| `install.sh` | Build, MiniZinc 2.10.1 install and solver registration |
 | `test.sh` | Smoke test: `./test.sh [path/to/minizinc]` |
 | `challenge_test.py` | End-to-end run over `minizinc-challenge/<year>mzn` with witness and challenge-oracle checks (dev tool; see below) |
 | `mznlib/` | Solver-specific global library (currently empty) |
@@ -347,7 +347,7 @@ the certified FlatZinc.
   or set `LEANFZN_BIN=/path/to/leanfzn`.
 - **Wrong MiniZinc version:** `which minizinc` should be
   `~/.local/bin/minizinc`. Put `~/.local/bin` first on `PATH`, or call
-  `~/.local/opt/MiniZincIDE-2.10.0-bundle-linux-x86_64/bin/minizinc` directly.
+  `~/.local/opt/MiniZincIDE-2.10.1-x86_64-linux-gnu/bin/minizinc` directly.
 - **`=====UNSUPPORTED=====`:** the model needs a construct outside LeanFzn's
   certified fragment (floats, general set constraints and so on; see "Supported
   FlatZinc" in the repository `README.md`). The reason is on stderr.

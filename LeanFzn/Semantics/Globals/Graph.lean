@@ -7,7 +7,7 @@ open LeanFzn.Semantics
 
 Mathematical interpretations (`graphInterp`) and executable Boolean
 twins (`graphInterpB`) for the circuit and graph predicates of the
-pinned MiniZinc 2.10.0 tree, per the decompositions recorded in
+pinned MiniZinc 2.10.1 tree, per the decompositions recorded in
 `specification/flatzinc_specification_assumptions.md`, G25 and G29:
 
 * `fzn_circuit(xs)` / `fzn_subcircuit(xs)` (`fzn_circuit.mzn`,

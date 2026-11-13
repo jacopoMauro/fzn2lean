@@ -8,12 +8,12 @@ open LeanFzn.Semantics
 Mathematical interpretations (`packSchedInterp`) and executable Boolean
 twins (`packSchedInterpB`) for the packing, scheduling, extensional and
 if-then-else families of global-constraint predicates of the pinned
-MiniZinc 2.10.0 FlatZinc tree (17 `fzn_*` names), following the
+MiniZinc 2.10.1 FlatZinc tree (17 `fzn_*` names), following the
 `lexSortInterp` pattern of `LexSort.lean`.  Each predicate name gets a
 per-name agreement theorem `fzn_<name>_iff` proving that the Boolean
 twin is `true` exactly when the mathematical interpretation holds.
 
-Semantics per the MiniZinc 2.10.0 handbook, Section 4.2.2.9 ("Packing
+Semantics per the MiniZinc 2.10.1 handbook, Section 4.2.2.9 ("Packing
 constraints": `bin_packing`, `bin_packing_capa`, `bin_packing_load`,
 `knapsack`, `diffn`, `diffn_nonstrict`), 4.2.2.10 ("Scheduling
 constraints": `disjunctive`, `disjunctive_strict`, `cumulative`),

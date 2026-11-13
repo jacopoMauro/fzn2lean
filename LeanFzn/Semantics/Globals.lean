@@ -20,8 +20,8 @@ open LeanFzn.Semantics
 The MiniZinc standard library decomposes each global constraint into a
 `fzn_<name>_<type>` LeanFzn.Solver predicate that appears verbatim in compiled
 FlatZinc (the library layout of MiniZinc >= 2.3).  This module adds, for
-the non-float fragment of the pinned MiniZinc 2.10.0 tree (commit
-`c9f9b649b2a251a40aa427a84d7cce73a8807fea`, `share/minizinc/std/`):
+the non-float fragment of the pinned MiniZinc 2.10.1 tree (commit
+`c3448c48e7f05f13805616cfd1b9e94972eef58c`, `share/minizinc/std/`):
 
 * `globalsSig` — a `SigEnv` with the FlatZinc signatures of all
   `fzn_*` global-constraint predicates of the fragment, so models using
