@@ -6,11 +6,11 @@ changes: **Section 5 (the predicate inventory) and Section 9 (out of scope) are
 the part that must be implemented later**; everything else pins the decisions
 that implementation must conform to.
 
-Scope constraints inherited from `PLAN.md` item 3:
+Scope of this proposed extension (not implemented by the current code):
 
 * This is a **specification-only** task.  No `.lean` file is modified, and
   nothing here licenses adding executable float predicates yet.
-* Float support is **checker-only** (phase 0).  The search layer (`solver/`)
+* Float support is **checker-only** (phase 0).  The search layer (`LeanFzn/Engine/`)
   remains int/bool; float decision variables are never enumerated (see §9).
 * The numerical model, the rounding/serialization rules, and the predicate
   inventory are all fixed here, so that a later implementation phase has no
@@ -23,8 +23,9 @@ it says so explicitly.  The MiniZinc 2.10.0 sources are pinned at commit
 `c9f9b649b2a251a40aa427a84d7cce73a8807fea` (vendored under
 `specification/minizinc-2.10.0/`), as in the assumption spec.
 
-Lean file:line references below point at the current corpus
-(lean 4.35.0, core-only — the project has **no mathlib dependency**).
+Project references below use module paths and declaration names; line numbers
+are retained only for the pinned upstream reference. This remains a proposal: the
+current Lean 4.35.0 implementation has no float support or mathlib dependency.
 
 ---
 
@@ -121,28 +122,27 @@ the lexical side plus token plumbing.  No grammar production is added.
   `<float-literal> ".." <float-literal>` (lines 80–81) — **dead syntax**, see
   F-gap-A1 in §5.
 
-**Lexer (`LeanFzn/FznLexer.lean`):**
+**Lexer (`LeanFzn/Parser/Lexer.lean`):**
 
-* `Token` (line 27; doc "non-float fragment" at line 26 is thereby outdated):
-  add `floatLit (q : Rat)`.  Currently only `intLit (i : Int)` exists (line 44).
-* `"float"` currently sits in `reservedNonFzn` (line 52); it must move to
-  `keywordToken` (line 58) as `"float" => some .kwFloat`, with a new `kwFloat`
+* `Token`:
+  add `floatLit (q : Rat)`.  Currently only `intLit (i : Int)` exists.
+* `"float"` currently sits in `reservedNonFzn`; it must move to
+  `keywordToken` as `"float" => some .kwFloat`, with a new `kwFloat`
   token.  The word is reserved either way, so **no new reserved-word conflict
   arises** — this is why `"float"` was already reserved.
-* Number scanning: `lexInt` (line 304) and the dispatch at `isDigit`/`'-'`
-  (line 477) grow into a `lexNumber` that consumes the `<float-literal>`
+* Number scanning: `lexInt` and the dispatch at `isDigit`/`'-'` grow into a `lexNumber` that consumes the `<float-literal>`
   alternatives: after `[-]?digits`, if the next char is `.` followed by a
   digit, consume the fraction and an optional `[Ee][-+]?digits`; else if it is
   `[Ee][-+]?digits` directly, consume the exponent.  The current lone-`.` path
   (an error for any stray `.`) stays for isolated dots; the `..` token is
   unaffected.
 * Value construction: mantissa digits → `M : Int`, fractional scale `f`, signed
-  exponent `e ∈ ℤ`; `q = Rat.normalize (M div (10^f))` shifted by `10^e`,
-  i.e. build `Rat.normalize m (10^d)` with sign folded, exactly as the grammar
-  defines.  `1e-3` therefore lexes to the single token `floatLit (1/1000)`, not
+  exponent `e ∈ ℤ`; form the exact rational `M / 10^f`, then multiply by
+  `10^e` when `e ≥ 0` or divide by `10^(-e)` otherwise. Normalize the
+  resulting numerator/denominator pair; never truncate with integer division.  `1e-3` therefore lexes to the single token `floatLit (1/1000)`, not
   `intLit 1` + `ident "e"`... (today's failure), and `1.50` to `floatLit (3/2)`.
 
-**Grammar relation (`LeanFzn/FznGrammar.lean`):** `GrBasicLiteral` gains the
+**Grammar relation (`LeanFzn/Parser/Grammar.lean`):** `GrBasicLiteral` gains the
 `floatLit` case; the par/var/pred-param range productions map to the new AST
 constructors of §3.  `GrIntAtom`/`GrBasicParType.deterministic` theorems gain
 their float twins.
@@ -151,62 +151,61 @@ their float twins.
 
 ## 3. AST changes
 
-All in `LeanFzn/FznAST.lean`:
+All in `LeanFzn/Syntax/AST.lean`:
 
-* `BasicLiteral` (line 39): add constructor `float (q : Rat)`.
-* `BasicParType` (line 64): add `float`.
-* `BasicVarType` (line 71): add `floatRange (lo hi : Rat)` for
+* `BasicLiteral`: add constructor `float (q : Rat)`.
+* `BasicParType`: add `float`.
+* `BasicVarType`: add `floatRange (lo hi : Rat)` for
   `var <float-literal> ".." <float-literal>`.
-* `BasicPredParamType` (line 91): add `floatRange (lo hi : Rat)`.
-* `SetLiteral` (line 33): **unchanged** — stays `intSet | intRange`; float set
+* `BasicPredParamType`: add `floatRange (lo hi : Rat)`.
+* `SetLiteral`: **unchanged** — stays `intSet | intRange`; float set
   literals are statically rejected (§5, F-gap-A1) and get no constructor.
-* Pretty printer `FznPretty.lean`: `BasicLiteral.pp` gains the `float` case,
+* Pretty printer `LeanFzn/Parser/Pretty.lean`: `BasicLiteral.pp` gains the `float` case,
   printing with the F2 canonical form; all other pp cases unchanged.
 
 ---
 
 ## 4. Semantics changes
 
-**`LeanFzn/FznSemantics.lean`:**
+**`LeanFzn/Semantics/Model.lean`:**
 
-* `BaseType` (line 13): add `float`.
-* `Value` (line 27): add `float (q : Rat)`.  Extend the instance line
-  (currently `deriving Repr, Inhabited`, line 32) with `DecidableEq` — core
-  `Rat` has decidable equality, so `Value` keeps it.
-* `BasicLiteral.denote` (line 46) / `.type` (line 51):
+* `BaseType`: add `float`.
+* `Value`: add `float (q : Rat)` and extend its equality support. Preserve
+  the `BEq` instance and the structural `DecidableEq` instance proved in
+  `LeanFzn/Semantics/ValueEquality.lean`; core `Rat` has decidable equality.
+* `BasicLiteral.denote` / `.type`:
   `| .float q => .float q`, `| .float q => .float`.
-* `BasicParType.base` (line 56): `| .float => .float`.
-* `BasicVarType.base` (line 76): `| .floatRange lo hi => .float`;
-  `BasicVarType.contains` (line 81): `| .floatRange lo hi => lo ≤ q ∧ q ≤ hi`.
-* `BasicPredParamType.baseType` / `isPar` / `accepts` (lines 167/176/182):
+* `BasicParType.base`: `| .float => .float`.
+* `BasicVarType.base`: `| .floatRange lo hi => .float`;
+  `BasicVarType.contains`: `| .floatRange lo hi => lo ≤ q ∧ q ≤ hi`.
+* `BasicPredParamType.baseType` / `isPar` / `accepts`:
   add the `floatRange` cases (`isPar` = false).
-* `SolveItem.objective` (line 98) currently returns `Option Int`.  The grammar
+* `SolveItem.objective` currently returns `Option Int`.  The grammar
   allows any `<basic-literal-expr>` as the minimize/maximize object,
   `<float-literal>` included — so **R7 (int objective) is amended**:
   the objective becomes a float-compatible value, e.g. `Option (BasicLiteral)`
   (carrying a `.float` or `.int`) or `Option (MValue)` with a suitable
-  well-formedness predicate `isNumericValue`.  `solveObjB_iff` (line 504)
+  well-formedness predicate `isNumericValue`.  `solveObjB_iff`
   generalizes accordingly.  Optimality remains *out* of the checker's scope
   (§9), as before — the checker validates assignments and compares declared
   objectives for ties only insofar as existing behavior does.
 
-**`LeanFzn/FznStdLib.lean`:**
+**`LeanFzn/Semantics/StdLib.lean`:**
 
-* `Value.eqB` (line 77): add the `.float q₁ · float q₂` case = `q₁ = q₂`
+* `Value.eqB`: add the `.float q₁ · float q₂` case = `q₁ = q₂`
   via `decide`.
-* `stdSig` (line 588), `stdInterp` (line 801), `stdInterpB` (line ~1181) and
+* `stdSig`, `stdInterp`, `stdInterpB` and
   their `wellFormedB_iff` / agreement layers gain exactly the predicates of
   §5's in-scope table.  The float element and array-maximum predicates reuse
-  the `valuesGet1` (line 458) and `maxValue`/`minValue` (lines 1136–1143)
+  the `valuesGet1` and `maxValue`/`minValue`
   scaffolding; float twins `maxFloatValue`/`minFloatValue` mirror the int ones.
 * Type relation `HasType`/`contains`/`acceptedValues` for float types as in §4
   (semantics), with the float-range bounds comparisons decidable.
 
-**Checker (`LeanFzn/FznSolution.lean`/`FznCheck.lean`):** `parseScalarEntry`
-(line 244) and `parseArray1d` (line 223) accept a `floatLit` token, and the
-solution grammar doc (lines 11, 55) mentions `x = 0.5;` /
+**Checker (`LeanFzn/Checker/Runtime/Solution.lean`/`LeanFzn/Checker/Runtime/Check.lean`):** `parseScalarEntry` and `parseArray1d` accept a `floatLit` token, and the
+solution grammar documentation should mention `x = 0.5;` /
 `xs = array1d(1..n, [0.25, 1.5]);`.  `interpB` and the `stdInterpB_agree`
-family (line ~1200) extend with the float cases, exactly as the int twins.
+family extend with the float cases, exactly as the int twins.
 
 ---
 
@@ -214,7 +213,7 @@ family (line ~1200) extend with the float cases, exactly as the int twins.
 
 Sources: handbook pages `lib-flatzinc-float.html` (base float builtins,
 2.10.0) and `lib-flatzinc-2*.html` (versioned additions), cross-checked
-against `predicates_and_globals_report.md` lines 110–161.  Signatures below
+against `minizinc-2.10.0/predicates_and_globals_report.md`.  Signatures below
 were copied from the vendored pages.
 
 **Totals: 53 float family names documented by the report
@@ -284,7 +283,7 @@ matching every existing element twin.
 * 2.0.2 (1): `array_var_float_element_nonshifted(var int: idx, array [int] of
   var float: xs, var float: y)` — coincides with `array_var_float_element`
   under the project's `1..n` index-sets convention (as the int `_nonshifted`
-  twins already do, FznStdLib.lean lines 1166–1170).
+  twins already do, `LeanFzn/Semantics/StdLib.lean`).
 * 2.1.0 (2): `float_in(var float: x, float: l, float: u)` — `l ≤ x ≤ u`;
   `float_dom(var float: x, array [int] of float: as)` — `x ∈ ⋃ᵢ [as[2i−1], as[2i]]`
   (pairs-of-ranges domain form; out-of-range/non-pair arguments are false).
@@ -343,9 +342,8 @@ environment behavior already used for the int/bool fragment.
 
 ## 6. Solution format
 
-* `ParseTokens`/solution parser (`FznSolution.lean`): the solution grammar
-  (lines 11, 51–57) gains `floatLit`.  `parseScalarEntry` (line 244)
-  and `parseArray1d` (line 223) produce `Value.float b` entries.
+* `ParseTokens`/solution parser (`LeanFzn/Checker/Runtime/Solution.lean`): the solution grammar
+  gains `floatLit`. `parseScalarEntry` and `parseArray1d` produce `Value.float b` entries.
 * Entries still assign **variables** only (A7/A10 unchanged); a float entry is
   exactly `x = 0.5;` / `xs = array1d(1..n, [0.25, 1.5]);`.
 * Round-trip: the F2 canonical printer is injective into the solution token
@@ -358,7 +356,7 @@ environment behavior already used for the int/bool fragment.
 
 ## 7. Globals impact
 
-`globalsUnsupported` (`FznGlobals.lean`, line 590) currently lists
+`globalsUnsupported` (`LeanFzn/Semantics/Globals.lean`) currently lists
 `fzn_alternative`, `fzn_span`, `fzn_neural_net`, `fzn_piecewise_linear`,
 `fzn_piecewise_linear_non_continuous`.  The float decision changes the status
 of the three float-argument entries:
@@ -377,7 +375,7 @@ of the three float-argument entries:
 * No `fzn_*float*` globals exist anywhere in the catalog (grep negative); the
   float extension adds none.
 
-The `fzn_*` decomposition families in `LeanFzn/FznGlobals/` are untouched.
+The `fzn_*` decomposition families in `LeanFzn/Semantics/Globals/` are untouched.
 
 ---
 
@@ -424,7 +422,7 @@ mirrors an already-existing int/bool proof and reuses its scaffolding.
   exact-with-mandatory-`0` fractional ("rounding" only exists in
   `float_round`'s *definition*, F6, and in the F2 output padding).
 * **Non-terminating-decimal float values** (F3) — printable fragment only.
-* **Float decision-variable search** (`solver/*.lean`): float domains are
+* **Float decision-variable search** (`LeanFzn/Engine/*.lean`): float domains are
   infinite; the solver stack remains int/bool.  Checker-only float support.
 * **Optimality over float objectives** — the checker validates assignments,
   it does not decide optimality (unchanged from the int fragment).

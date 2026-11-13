@@ -11,12 +11,11 @@
 # Usage: ./compile_fzn.sh [YEAR]
 #   e.g. ./compile_fzn.sh 2025   or   ./compile_fzn.sh 2026   or both (default)
 set -u
-MZNbin="$(dirname "$0")/../../MiniZincIDE-2.10.1-x86_64-linux-gnu/bin"
-[ -d "$MZNbin" ] || MZNbin="$HOME/MiniZincIDE-2.10.1-x86_64-linux-gnu/bin"
-export PATH="$MZNbin:$PATH"
+MZN="${MINIZINC_BIN:-minizinc}"
 BASE="$(cd "$(dirname "$0")" && pwd)"
 YEARS="${1:-2025 2026}"
 PER_FILE_TIMEOUT=300
+any_failed=0
 
 for Y in $YEARS; do
   INDIR="$BASE/${Y}mzn"
@@ -31,20 +30,22 @@ for Y in $YEARS; do
     # find the model file (first .mzn sorted) and each data file (.dzn/.json)
     mzn="$(find "$d" -maxdepth 1 -name '*.mzn' | sort | head -1)"
     [ -z "$mzn" ] && { echo "  [SKIP] $prob: no model file"; continue; }
-    for data in $(find "$d" -maxdepth 1 \( -name '*.dzn' -o -name '*.json' \) | sort); do
+    while IFS= read -r data; do
       # strip directory and extension
       base="$(basename "$data")"
       base="${base%.*}"
       out="$OUTDIR/$prob/$base.fzn"
-      if timeout "$PER_FILE_TIMEOUT" minizinc --solver Gecode -G std -c --no-output-ozn \
+      if timeout "$PER_FILE_TIMEOUT" "$MZN" --solver Gecode -G std -c --no-output-ozn \
           -o "$out" "$mzn" "$data" > "/tmp/fzn_${prob}_${base}.log" 2>&1; then
         ok=$((ok+1))
       else
         rm -f "$out"
         failed=$((failed+1))
+        any_failed=1
         echo "  [FAIL] $prob/$base : log /tmp/fzn_${prob}_${base}.log"
       fi
-    done
+    done < <(find "$d" -maxdepth 1 \( -name '*.dzn' -o -name '*.json' \) | sort)
   done
   echo "=== $Y done: $ok compiled, $failed failed ==="
 done
+exit "$any_failed"

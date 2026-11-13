@@ -42,7 +42,6 @@ def extract(year: str, json_path: str, out_path: str) -> None:
     scores = r["scores"]                    # [solver][opponent][benchmark] pairwise score
     scores_loc = r.get("scores_loc")       # incomplete-scoring counterpart, if present
     n_solvers = len(solvers)
-    n_bench = len(benchmarks)
 
     # benchmark index -> problem
     bench_problem = []

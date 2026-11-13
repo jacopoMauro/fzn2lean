@@ -20,7 +20,7 @@ An assumption belongs here only if:
 Specified predicate meanings, equivalent mathematical formulations, proof
 techniques, supported-name inventories, version pinning, and implementation
 bugs are not assumptions. Predicate definitions and their source citations
-belong in `LeanFzn/Semantics/StdLib.lean` and the `LeanFzn/FznGlobals/*` modules;
+belong in `LeanFzn/Semantics/StdLib.lean` and the `LeanFzn/Semantics/Globals/*` modules;
 the inventory belongs in
 [minizinc-2.10.0/predicates_and_globals_report.md](minizinc-2.10.0/predicates_and_globals_report.md).
 Agreement between a Boolean checker and its project-defined proposition does
