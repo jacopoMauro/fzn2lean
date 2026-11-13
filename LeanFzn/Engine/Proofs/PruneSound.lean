@@ -321,6 +321,58 @@ theorem boolEqPropWith_pruneSound (i j : Nat)
   intro view ps hWF hrun q hq
   exact boolEqPropWith_prune_lit_none p T i j hmem view hrun hq
 
+theorem boolSupportDupPropWith_pruneSound (R : List Bool → Bool)
+    (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args → ∀ b, b ∈ allAssigns p.domains →
+        accepts p b = true → R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args → ∀ b, b ∈ allAssigns p.domains →
+        accepts p b = true → ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v)) :
+    (boolSupportDupPropWith p T R slots hR hbool).PruneSound := by
+  intro view ps hWF hrun q hq
+  exact boolSupportDupPropWith_prune_lit_none p T R slots hR hbool view hrun hq
+
+theorem boolNotPropChoice_pruneSound (i j : Nat)
+    (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) :
+    (boolNotPropChoice p T i j hmem).PruneSound := by
+  unfold boolNotPropChoice
+  by_cases hd : BArgs.hasDupSlots [i, j] = true
+  · simp only [hd, if_true]
+    exact boolSupportDupPropWith_pruneSound boolNotR [i, j] _ _
+  · simp only [hd, Bool.false_eq_true, if_false]
+    exact boolNotPropWith_pruneSound i j hmem
+
+theorem boolAndPropChoice_pruneSound (i j k : Nat)
+    (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) :
+    (boolAndPropChoice p T i j k hmem).PruneSound := by
+  unfold boolAndPropChoice
+  by_cases hd : BArgs.hasDupSlots [i, j, k] = true
+  · simp only [hd, if_true]
+    exact boolSupportDupPropWith_pruneSound boolAndR [i, j, k] _ _
+  · simp only [hd, Bool.false_eq_true, if_false]
+    exact boolAndPropWith_pruneSound i j k hmem
+
+theorem boolOrPropChoice_pruneSound (i j k : Nat)
+    (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) :
+    (boolOrPropChoice p T i j k hmem).PruneSound := by
+  unfold boolOrPropChoice
+  by_cases hd : BArgs.hasDupSlots [i, j, k] = true
+  · simp only [hd, if_true]
+    exact boolSupportDupPropWith_pruneSound boolOrR [i, j, k] _ _
+  · simp only [hd, Bool.false_eq_true, if_false]
+    exact boolOrPropWith_pruneSound i j k hmem
+
+theorem boolEqPropChoice_pruneSound (i j : Nat)
+    (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) :
+    (boolEqPropChoice p T i j hmem).PruneSound := by
+  unfold boolEqPropChoice
+  by_cases hd : BArgs.hasDupSlots [i, j] = true
+  · simp only [hd, if_true]
+    exact boolSupportDupPropWith_pruneSound boolEqR [i, j] _ _
+  · simp only [hd, Bool.false_eq_true, if_false]
+    exact boolEqPropWith_pruneSound i j hmem
+
 /-! ## Element families -/
 
 theorem arrayIntElementPropWith_pruneSound (xs : List Int) (i k : Nat)

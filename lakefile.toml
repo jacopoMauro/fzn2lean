@@ -1,5 +1,6 @@
 name = "fzn2lean"
 version = "0.1.0"
+moreLeancArgs = ["-fprofile-use=pgo/default.profdata", "-Wno-profile-instr-unprofiled", "-Wno-profile-instr-out-of-date"]
 
 [[lean_lib]]
 name = "LeanFzn.Syntax"

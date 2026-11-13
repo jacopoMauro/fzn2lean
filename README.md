@@ -37,39 +37,35 @@ The language reference is **MiniZinc 2.10.0**, pinned to commit
 Float syntax and semantics are outside the supported fragment; strings are
 supported in annotations.
 
-## Working-tree status (2026-11-10)
+## Implementation status
 
-The latest local commit is `0246b07` (`port to lean 4.35`). This checkout
-contains substantial additional **uncommitted** implementation, proofs, tests
-and tooling. The source and documentation here describe that working tree;
-a checkout of the commit alone does not contain all of these additions.
+The public solver uses the Core engine; historical implementations are isolated
+under `LeanFzn/Legacy/` for proofs and development comparisons. The compiler
+includes literal folding, checked integer bounds and finite-set expansion.
+The engine supports certified propagation, learned clauses, optimization,
+LNS and parallel portfolios. Unsupported inputs and incomplete searches are
+reported explicitly; see the scope and exit-code tables below.
 
-- Compiler additions include literal folding, scalar parameter substitution,
-  checked bounds for otherwise unbounded integers, finite-set shape expansion,
-  fragment checks and optional compiled-constraint deduplication.
-- Engine changes include domain/literal representations, propagation and
-  all-different work, root-entailment proofs, filtered learned clauses and
-  revalidated packed-literal hints. Public integration adds LNS and portfolio
-  support alongside optimization and configuration changes.
-- New development infrastructure includes regression suites, CI, architecture
-  and axiom audits, frozen benchmark cohorts, profiling and oracle/fuzz tools.
+Use [Tests/README.md](Tests/README.md) and [audits/README.md](audits/README.md)
+for validation commands. Benchmark reports depend on their source snapshot and
+run budget; generated logs under `tmp/` are local artifacts.
 
-[PLAN.md](PLAN.md) records the M9 gate on 2026-11-09 as passing, including
-3,353 axiom queries, and a 167-model, 60-second cohort with 17 proved outcomes,
-2 complete SAT outcomes, 74 timeouts with incumbents, 73 timeouts without a
-solution and one memory error (`i07`). The 37 formerly unsupported cohort
-models reach search; this is compile coverage, not completion of every model.
-The separate `i09` model remains unconfirmed because of memory exhaustion.
-Recorded performance trade-offs and external comparisons are in the plan.
+## Using LeanFzn from MiniZinc
 
-Those historical logs under `tmp/` are absent from this checkout, and the
-plan's feature-branch commit IDs are not established by the current local
-history. Treat its measurements as recorded results, not a fresh validation
-of this snapshot. A fresh build attempt could not reach compilation because
-the pinned Lean toolchain required a download, which was stopped during this
-review. The documentation review reproduced the boundary audit
-(555 modules) and all 22 architecture/audit Python tests. Full Lean/native,
-axiom and benchmark validation must be rerun for a reproducible release.
+[minizinc-wrapper/](minizinc-wrapper/README.md) registers LeanFzn as a MiniZinc
+solver. The primary route is the Docker image (MiniZinc 2.10.0 with LeanFzn as
+the default solver):
+
+```bash
+docker build -f minizinc-wrapper/Dockerfile -t leanfzn-minizinc .
+docker run --rm -v "$PWD:/work" leanfzn-minizinc model.mzn data.dzn
+```
+
+To add it to an existing MiniZinc instead, run `minizinc-wrapper/install.sh`
+(it also installs the pinned MiniZinc 2.10.0 if needed) or follow the manual
+steps in that README, then `minizinc --solver leanfzn model.mzn`. The
+wrapper is not part of the certified code: it translates flags and output and
+passes on only the verdicts `leanfzn solve` prints.
 
 ## Guarantees and supported scope
 
@@ -121,7 +117,7 @@ Unsupported declaration or constraint forms are reported explicitly.
 the final `==========` marker is backed by UNSAT under the improving bound.
 A verified rank-decomposition checker replays Gecode's `circuit` flattening
 for the `tsptw` family; its 2-cycle seed clauses are not registered by the
-default engine (T3 was rejected), so search behavior is unchanged. See
+default engine. See
 [RankCircuit.lean](LeanFzn/Compiler/RankCircuit.lean) and
 [Proofs/RankCircuit.lean](LeanFzn/Engine/Proofs/RankCircuit.lean).
 
@@ -282,8 +278,8 @@ and canonical reading paths.
 ## Building and running
 
 Requires Lean 4.35.0; `elan` uses the version specified in `lean-toolchain`.
-The package build applies the local LLVM PGO profile in `audits/pgo/`
-(see `audits/pgo/README.md` for provenance and regeneration).
+The package build applies the committed LLVM PGO profile in `pgo/`
+(see `pgo/README.md` for provenance and regeneration).
 
 ```sh
 # Build the library and CLI.
@@ -345,6 +341,7 @@ optimization and restarts.
 | `--presolve=none` | Skip a separate presolve phase. Normal Core propagation still runs during search. This is the default. |
 | `--presolve=dedup` | Remove syntactically duplicate compiled constraints while preserving the search box, objective slot and source reconstruction. Rejected with `--opt=seeded`. |
 | `--stats` | Print search counters (including the deepest decision level reached), linear-optimization compile/search timing, and completion/give-up status to stderr. Counters that are unavailable are shown as `-`. |
+| `--phase-stats` | Dev diagnostic: print one stderr line per compiler/search phase with this phase's wall time, cumulative wall time, current `VmRSS` and peak `VmHWM`. It never changes stdout, exit codes or counters; specialized seeded/LNS/portfolio paths print a note and run the ordinary driver. |
 
 Presets are applied first; explicit flags override their settings. Without a
 preset or portfolio, a Core run fills `--var` and `--val` independently:
@@ -365,9 +362,7 @@ flushed immediately; external timeouts can therefore retain partial progress.
 
 ## Tests and audits
 
-The ordered solver performance tasks and current status are in
-[PLAN.md](PLAN.md). [Tests/README.md](Tests/README.md) maps test suites to the
-source components. Current tests build with `lake build Tests`; historical
+[Tests/README.md](Tests/README.md) maps test suites to the source components. Current tests build with `lake build Tests`; historical
 solver tests are isolated under `Tests/Legacy` and build with
 `lake build Tests.Legacy`.
 

@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+"""MiniZinc solver wrapper for LeanFzn.
+
+MiniZinc flattens a model to FlatZinc with this directory's `mznlib`, then
+calls this script as
+
+    fzn-leanfzn [MiniZinc standard flags] [LeanFzn flags] model.fzn
+
+The script translates the flags, runs `leanfzn solve`, and rewrites the
+output into the form MiniZinc's solution processor (solns2out) expects:
+
+* only variables annotated `output_var`/`output_array` are printed (leanfzn
+  prints every variable, which solns2out rejects);
+* leanfzn exit codes become MiniZinc status markers (unsupported model ->
+  `=====UNSUPPORTED=====`, unknown/incomplete without a solution ->
+  `=====UNKNOWN=====`);
+* `-t` is enforced here, because the Core engine has no wall-clock limit;
+  solutions are streamed, so incumbents found before the limit are kept;
+* `-s` turns leanfzn's `--stats` line into `%%%mzn-stat:` lines.
+
+The wrapper never prints a verdict leanfzn did not print: `==========` and
+`=====UNSATISFIABLE=====` are passed through only as leanfzn emits them.
+
+Environment: LEANFZN_BIN overrides the solver binary (default: the repo
+build at ../.lake/build/bin/leanfzn relative to this script).
+FZN_LEANFZN_SAVE_DIR, if set, receives a copy of the FlatZinc (`model.fzn`)
+and leanfzn's unfiltered stdout (`raw.sol`), so the solutions can be
+re-verified with `leanfzn check model.fzn raw.sol` (used by
+`challenge_test.py`).
+"""
+
+import ctypes
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+DEFAULT_BIN = os.path.join(SCRIPT_DIR, "..", ".lake", "build", "bin", "leanfzn")
+
+# LeanFzn options that MiniZinc may pass as `--name value` (from the .msc
+# extraFlags) or that the user may pass as `--name=value` (via --fzn-flags).
+VALUE_OPTIONS = {
+    "--var", "--val", "--opt", "--restart", "--restart-base", "--primal",
+    "--primal-time", "--prop", "--presolve", "--conflict-limit", "--strategy",
+    "--engine",
+}
+BOOL_OPTIONS = {"--heur-obj-prio", "--heur-obj-bias", "--heur-act", "--phase-stats"}
+
+DECL_RE = re.compile(
+    r"^\s*(?:array\s*\[[^\]]*\]\s*of\s+)?var\b[^:]*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*::([^=;]*)")
+SOLVE_OPT_RE = re.compile(r"^\s*solve\b.*\b(minimize|maximize)\b", re.S)
+ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=")
+STATS_PREFIX = "leanfzn: stats: "
+TIMING_PREFIX = "leanfzn: timing: "
+PARSE_ERROR_PREFIX = "leanfzn: parse error"
+STAT_FIELD_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
+
+# leanfzn counter -> MiniZinc standard statistic name (others keep their name).
+STAT_NAMES = {"decisions": "nodes", "conflicts": "failures"}
+
+
+def die(msg, code=2):
+    sys.stderr.write(f"fzn-leanfzn: {msg}\n")
+    print("=====ERROR=====", flush=True)
+    sys.exit(code)
+
+
+def note(msg):
+    sys.stderr.write(f"fzn-leanfzn: {msg}\n")
+
+
+def parse_args(argv):
+    o = {"all": False, "nsol": None, "stats": False, "time_ms": None,
+         "threads": 1, "verbose": False, "extra": [], "fzn": None}
+    i = 0
+
+    def value(flag):
+        nonlocal i
+        if i + 1 >= len(argv):
+            die(f"option '{flag}' needs a value")
+        i += 1
+        return argv[i]
+
+    def int_value(flag):
+        v = value(flag)
+        try:
+            return int(v)
+        except ValueError:
+            die(f"option '{flag}' needs an integer, got '{v}'")
+
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-a", "--all-solutions"):
+            o["all"] = True
+        elif a in ("-i", "--intermediate", "--intermediate-solutions"):
+            pass  # leanfzn always streams improving solutions
+        elif a in ("-f", "--free-search"):
+            pass  # leanfzn's default search ignores annotations already
+        elif a in ("-n", "--num-solutions"):
+            o["nsol"] = int_value(a)
+        elif a in ("-s", "--statistics"):
+            o["stats"] = True
+        elif a in ("-v", "--verbose"):
+            o["verbose"] = True
+        elif a in ("-t", "--time-limit", "--solver-time-limit"):
+            o["time_ms"] = int_value(a)
+        elif a in ("-p", "--parallel"):
+            o["threads"] = int_value(a)
+        elif a in ("-r", "--seed", "--random-seed"):
+            value(a)  # Core search is deterministic; a seed is not supported
+        elif a in VALUE_OPTIONS:
+            o["extra"].append(f"{a}={value(a)}")
+        elif a in BOOL_OPTIONS:
+            o["extra"].append(a)
+        elif a.startswith("--") and "=" in a and a.split("=", 1)[0] in VALUE_OPTIONS:
+            o["extra"].append(a)
+        elif a.startswith("-") and a != "-":
+            die(f"unsupported option '{a}'")
+        else:
+            if o["fzn"] is not None:
+                die(f"more than one model file ('{o['fzn']}', '{a}')")
+            o["fzn"] = a
+        i += 1
+    if o["fzn"] is None:
+        die("no FlatZinc model given")
+    return o
+
+
+def scan_model(path):
+    """Return (output variable names, is_optimization)."""
+    names = set()
+    is_opt = False
+    try:
+        with open(path, encoding="utf-8") as f:
+            # A FlatZinc item can span lines, and several items can share a
+            # line. Mask strings/comments before splitting on semicolons so
+            # annotation text cannot masquerade as syntax or a delimiter.
+            text = re.sub(r'"(?:\\.|[^"\\])*"|%[^\n]*', ' ', f.read())
+            for line in text.split(';'):
+                m = DECL_RE.match(line)
+                if m and re.search(r"\boutput_(var|array)\b", m.group(2)):
+                    names.add(m.group(1))
+                elif line.lstrip().startswith("solve") and SOLVE_OPT_RE.match(line):
+                    is_opt = True
+    except OSError as e:
+        die(f"cannot read '{path}': {e}")
+    return names, is_opt
+
+
+def die_with_parent():
+    """Make the solver receive SIGKILL if this wrapper dies (Linux only)."""
+    try:
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def main():
+    o = parse_args(sys.argv[1:])
+    binary = os.environ.get("LEANFZN_BIN", DEFAULT_BIN)
+    if not os.access(binary, os.X_OK):
+        die(f"leanfzn binary not found at '{binary}'; run 'lake build leanfzn' "
+            "in the repository or set LEANFZN_BIN")
+    outputs, is_opt = scan_model(o["fzn"])
+
+    cmd = [binary, "solve"] + o["extra"]
+    if o["threads"] > 1:
+        picks_strategy = any(a.split("=", 1)[0] in ("--var", "--val", "--strategy", "--primal")
+                             or a == "--opt=seeded" for a in o["extra"])
+        if picks_strategy:
+            note("-p is ignored: the portfolio picks its own strategies, "
+                 "so it cannot be combined with --var/--val/--strategy/--primal/--opt=seeded")
+        else:
+            cmd.append(f"--threads={min(o['threads'], 8)}")
+    if o["all"] and not is_opt:
+        note("-a: leanfzn reports one solution per satisfaction model; "
+             "it cannot enumerate all solutions")
+    if o["stats"]:
+        cmd.append("--stats")
+    cmd.append(o["fzn"])
+    if o["verbose"]:
+        note("running " + " ".join(cmd))
+
+    save_dir = os.environ.get("FZN_LEANFZN_SAVE_DIR")
+    raw = None
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        shutil.copyfile(o["fzn"], os.path.join(save_dir, "model.fzn"))
+        raw = open(os.path.join(save_dir, "raw.sol"), "w")
+
+    start = time.monotonic()
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, bufsize=1, preexec_fn=die_with_parent)
+    stopped = {"by": None}
+
+    def stop(reason):
+        if proc.poll() is None:
+            stopped["by"] = reason
+            proc.kill()
+
+    def on_signal(signum, _frame):
+        stop("signal")
+        sys.exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+    timer = None
+    if o["time_ms"] is not None and o["time_ms"] > 0:
+        timer = threading.Timer(o["time_ms"] / 1000.0, stop, args=("time limit",))
+        timer.daemon = True
+        timer.start()
+
+    stats_fields = []
+    parse_error = []
+
+    def pump_stderr():
+        for line in proc.stderr:
+            if line.startswith(STATS_PREFIX):
+                stats_fields.extend(STAT_FIELD_RE.findall(line[len(STATS_PREFIX):]))
+            elif line.startswith(TIMING_PREFIX) and o["stats"]:
+                stats_fields.extend(STAT_FIELD_RE.findall(line[len(TIMING_PREFIX):]))
+            else:
+                if line.startswith(PARSE_ERROR_PREFIX):
+                    parse_error.append(line)
+                sys.stderr.write(line)
+                sys.stderr.flush()
+
+    err_thread = threading.Thread(target=pump_stderr, daemon=True)
+    err_thread.start()
+
+    solutions = 0
+    terminal = False
+    for line in proc.stdout:
+        if raw:
+            raw.write(line)
+            raw.flush()
+        s = line.rstrip("\n")
+        if s == "----------":
+            solutions += 1
+            print(s, flush=True)
+            if o["nsol"] is not None and solutions >= o["nsol"]:
+                stop("solution limit")
+                # leanfzn may already have finished; the solution limit still
+                # ends the run here, so no later verdict is printed.
+                stopped["by"] = "solution limit"
+                break
+        elif s.startswith("=====") and s.endswith("====="):
+            terminal = True
+            print(s, flush=True)
+        else:
+            m = ASSIGN_RE.match(s)
+            if m:
+                if m.group(1) in outputs:
+                    print(s)
+            elif s:
+                sys.stderr.write(line)
+    rc = proc.wait()
+    if timer:
+        timer.cancel()
+    err_thread.join(timeout=5)
+    elapsed = time.monotonic() - start
+
+    if stopped["by"] is not None:
+        if o["verbose"]:
+            note(f"stopped leanfzn: {stopped['by']}")
+        if solutions == 0 and not terminal:
+            print("=====UNKNOWN=====", flush=True)
+        status = 0
+    elif rc in (0, 1):  # SAT/optimum or certified UNSAT: leanfzn printed the verdict
+        status = 0
+    elif rc == 3:  # outside the certified fragment
+        print("=====UNSUPPORTED=====", flush=True)
+        status = 0
+    elif rc == 4:  # unknown or incomplete: incumbents (if any) were streamed
+        if solutions == 0:
+            print("=====UNKNOWN=====", flush=True)
+        status = 0
+    elif rc == 2 and parse_error:
+        # MiniZinc produced FlatZinc outside leanfzn's parser (e.g. floats):
+        # the model is outside the supported fragment, not malformed.
+        print("=====UNSUPPORTED=====", flush=True)
+        status = 0
+    elif rc == 2:
+        print("=====ERROR=====", flush=True)
+        status = 2
+    else:
+        note(f"leanfzn exited with status {rc}")
+        if solutions == 0:
+            print("=====ERROR=====", flush=True)
+        status = 1
+
+    if o["stats"]:
+        print(f"%%%mzn-stat: solveTime={elapsed:.3f}")
+        for k, v in stats_fields:
+            if v == "-" or k == "steps":
+                continue
+            print(f"%%%mzn-stat: {STAT_NAMES.get(k, k)}={v}")
+        print("%%%mzn-stat-end", flush=True)
+    sys.exit(status)
+
+
+if __name__ == "__main__":
+    main()

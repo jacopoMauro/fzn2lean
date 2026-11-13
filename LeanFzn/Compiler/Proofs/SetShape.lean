@@ -719,14 +719,47 @@ theorem ShapeAux.defined_update {a : ShapeAux} {s : Store} {y : Ident} {v : Opti
 def ShapeState.Holds (s : Store) (st : ShapeState) : Prop :=
   ∀ c ∈ st.cons, c.Holds fullInterp s
 
-/-- Every auxiliary's functional definition holds in the store. -/
-def ShapeState.DefHolds (s : Store) (st : ShapeState) : Prop :=
-  ∀ a ∈ st.aux, a.definition.Holds fullInterp s
+/-- The cache stores the canonical name of an auxiliary that is already
+    present in the state, with exactly the kind (and hence type) that was
+    cached. -/
+def ShapeState.CacheOk (st : ShapeState) : Prop :=
+  ∀ k n, st.cache.get? k = some n →
+    ∃ a ∈ st.aux, a.name = n ∧ a.kind = k ∧ a.ty = k.ty
 
-/-- Definition satisfaction is inherited by older states. -/
+/-- Cache lookups are preserved: every entry of the older cache is still
+    mapped to the same name. -/
+def ShapeState.CacheLe (st st' : ShapeState) : Prop :=
+  ∀ k n, st.cache.get? k = some n → st'.cache.get? k = some n
+
+theorem ShapeState.CacheLe.refl (st : ShapeState) : st.CacheLe st :=
+  fun _ _ h => h
+
+theorem ShapeState.CacheLe.trans {st st' st'' : ShapeState}
+    (h1 : st.CacheLe st') (h2 : st'.CacheLe st'') : st.CacheLe st'' :=
+  fun k n hk => h2 k n (h1 k n hk)
+
+/-- Every auxiliary's functional definition holds in the store, and the
+    definition of every auxiliary named by the cache holds as well. -/
+def ShapeState.DefHolds (s : Store) (st : ShapeState) : Prop :=
+  (∀ a ∈ st.aux, a.definition.Holds fullInterp s) ∧
+    (∀ (k : ShapeKind) (n : String), st.cache.get? k = some n →
+      (⟨n, k.ty, k⟩ : ShapeAux).definition.Holds fullInterp s)
+
+/-- Definition satisfaction is inherited by older states.  Auxiliary
+    definitions transfer along the auxiliary subset, cache definitions
+    along the cache lookup inclusion. -/
 theorem ShapeState.DefHolds.mono {st st' : ShapeState} {s : Store}
-    (hsub : ∀ a ∈ st.aux, a ∈ st'.aux) (h : st'.DefHolds s) : st.DefHolds s :=
-  fun a ha => h a (hsub a ha)
+    (hsub : ∀ a ∈ st.aux, a ∈ st'.aux) (hcache : st.CacheLe st')
+    (h : st'.DefHolds s) : st.DefHolds s :=
+  ⟨fun a ha => h.1 a (hsub a ha),
+   fun k n hk => h.2 k n (hcache k n hk)⟩
+
+/-- The definition of a cached auxiliary holds in a `DefHolds` state. -/
+theorem ShapeState.DefHolds.cache_def {s : Store} {st : ShapeState}
+    (h : st.DefHolds s) {k : ShapeKind} {n : String}
+    (hk : st.cache.get? k = some n) :
+    (⟨n, k.ty, k⟩ : ShapeAux).definition.Holds fullInterp s :=
+  h.2 k n hk
 
 /-- Every auxiliary is functionally defined in the store. -/
 def ShapeState.Defined (s : Store) (st : ShapeState) : Prop :=
@@ -863,12 +896,23 @@ structure ShapeState.WF (taken : List String) (m : Model) (st : ShapeState) : Pr
   kindDeps : ShapeAux.KindDeps taken st.aux
   tyOk : st.TyOk
   wellKind : ∀ a ∈ st.aux, a.WellKind m
+  cacheOk : st.CacheOk
 
 /-- State satisfaction gives every auxiliary definition. -/
 theorem ShapeState.DefHolds.of_holds {taken : List String} {m : Model}
     {st : ShapeState} {s : Store} (hwf : st.WF taken m) (h : st.Holds s) :
     st.DefHolds s :=
-  fun a ha => h _ (hwf.defs a ha)
+  ⟨fun a ha => h _ (hwf.defs a ha),
+   fun k n hk => by
+     obtain ⟨a, ha, hname, hkind, hty⟩ := hwf.cacheOk k n hk
+     have hdef := h _ (hwf.defs a ha)
+     cases a with
+     | mk an aty ak =>
+         simp only at hname hkind hty
+         subst hname
+         subst hkind
+         rw [hty] at hdef
+         simpa [ShapeAux.definition] using hdef⟩
 
 /-- Interpret a newest-first auxiliary list: older auxiliaries first, then
     each newer auxiliary by its functional value. -/
@@ -1104,7 +1148,7 @@ theorem ShapeState.emit_wf {taken : List String} {m : Model} {st : ShapeState}
     (st.emit c).WF taken m := by
   have hcons : (st.emit c).cons = c :: st.cons := rfl
   have haux : (st.emit c).aux = st.aux := rfl
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · unfold ShapeState.Defs
     rw [hcons, haux]
     intro a ha
@@ -1116,6 +1160,7 @@ theorem ShapeState.emit_wf {taken : List String} {m : Model} {st : ShapeState}
   · exact hwf.kindDeps
   · exact hwf.tyOk
   · exact hwf.wellKind
+  · exact hwf.cacheOk
 
 /-- Emitting a list of constraints preserves well-formedness. -/
 theorem ShapeState.emitList_wf {taken : List String} {m : Model} {st : ShapeState}
@@ -1123,7 +1168,7 @@ theorem ShapeState.emitList_wf {taken : List String} {m : Model} {st : ShapeStat
     (st.emitList cs).WF taken m := by
   have hcons : (st.emitList cs).cons = cs.reverse ++ st.cons := rfl
   have haux : (st.emitList cs).aux = st.aux := rfl
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · unfold ShapeState.Defs
     rw [hcons, haux]
     intro a ha
@@ -1135,80 +1180,225 @@ theorem ShapeState.emitList_wf {taken : List String} {m : Model} {st : ShapeStat
   · exact hwf.kindDeps
   · exact hwf.tyOk
   · exact hwf.wellKind
+  · exact hwf.cacheOk
 
-/-- A fresh Boolean auxiliary preserves well-formedness, given that its
+/-- A cache hit leaves the state and preserves all its invariants. -/
+theorem ShapeState.freshAux_hit {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} (h : st.cache.get? kind = some n) :
+    st.freshAux taken kind = (n, st) := by
+  simp only [ShapeState.freshAux, h]
+
+/-- A cache miss allocates unconditionally. -/
+theorem ShapeState.freshAux_miss {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} (h : st.cache.get? kind = none) :
+    st.freshAux taken kind = st.allocAux taken kind := by
+  simp only [ShapeState.freshAux, h]
+
+/-! ## Unconditional allocation -/
+
+/-- The defining constraint allocated by `allocAux` is the head of the
+    new constraint list. -/
+theorem ShapeState.allocAux_cons {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    st'.cons = (⟨n, kind.ty, kind⟩ : ShapeAux).definition :: st.cons := by
+  simp only [ShapeState.allocAux, ShapeState.freshDecl, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl⟩ := h
+  rfl
+
+/-- The auxiliary list allocated by `allocAux` gains one head. -/
+theorem ShapeState.allocAux_aux {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    st'.aux = (⟨n, kind.ty, kind⟩ : ShapeAux) :: st.aux := by
+  simp only [ShapeState.allocAux, ShapeState.freshDecl, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl⟩ := h
+  rfl
+
+/-- The declaration list allocated by `allocAux` gains one head. -/
+theorem ShapeState.allocAux_decls {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    st'.decls = VarDeclItem.basic kind.ty (Ident.mk n) [] none :: st.decls := by
+  simp only [ShapeState.allocAux, ShapeState.freshDecl, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl⟩ := h
+  rfl
+
+/-- Allocation advances the counter by one. -/
+theorem ShapeState.allocAux_next {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    st'.next = st.next + 1 := by
+  simp only [ShapeState.allocAux, ShapeState.freshDecl, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl⟩ := h
+  rfl
+
+/-- Allocation does not change the cached maximum name length. -/
+theorem ShapeState.allocAux_maxLen {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    st'.maxLen = st.maxLen := by
+  simp only [ShapeState.allocAux, ShapeState.freshDecl, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl⟩ := h
+  rfl
+
+/-- Allocation extends the cache at the allocated kind. -/
+theorem ShapeState.allocAux_cache {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    st'.cache = st.cache.insert kind n := by
+  simp only [ShapeState.allocAux, ShapeState.freshDecl, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl⟩ := h
+  rfl
+
+/-- The allocated kind is present in the new cache. -/
+theorem ShapeState.allocAux_get? {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    st'.cache.get? kind = some n := by
+  rw [ShapeState.allocAux_cache h]
+  simp
+
+/-- `allocAux` keeps every old auxiliary. -/
+theorem ShapeState.allocAux_aux_subset {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    ∀ a ∈ st.aux, a ∈ st'.aux := by
+  intro a ha
+  rw [ShapeState.allocAux_aux h]
+  exact List.mem_cons_of_mem _ ha
+
+/-- `allocAux` keeps every old constraint. -/
+theorem ShapeState.allocAux_cons_subset {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) :
+    ∀ c ∈ st.cons, c ∈ st'.cons := by
+  intro c hc
+  rw [ShapeState.allocAux_cons h]
+  exact List.mem_cons_of_mem _ hc
+
+/-- `allocAux` preserves cache lookups of old keys. -/
+theorem ShapeState.allocAux_cacheLe {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (hmiss : st.cache.get? kind = none) (h : st.allocAux taken kind = (n, st')) :
+    st.CacheLe st' := by
+  intro k m hk
+  rw [ShapeState.allocAux_cache h, Std.HashMap.get?_insert]
+  by_cases hkk : kind == k
+  · have hkeq : kind = k := beq_iff_eq.mp hkk
+    subst hkeq
+    rw [hmiss] at hk
+    cases hk
+  · rw [if_neg hkk]
+    exact hk
+
+/-- A fresh auxiliary preserves well-formedness, given that its
     dependencies are taken names or existing auxiliary names and that it
     reads only well-kinded source variables. -/
+theorem ShapeState.freshAux_wf {taken : List String} {m : Model} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (hwf : st.WF taken m) (h : st.freshAux taken kind = (n, st'))
+    (hdeps : ∀ d ∈ kind.deps, d ∈ taken ∨ d ∈ st.aux.map (fun a => a.name))
+    (hsrc : ∀ d ∈ kind.sourceDeps, d ∈ taken)
+    (hauxdeps : ∀ d ∈ kind.auxDeps,
+      ∃ c ∈ st.aux, c.name = d ∧ c.ty = .par .bool)
+    (hkind : ShapeKind.WellKind m kind) :
+    st'.WF taken m := by
+  rcases hc : st.cache.get? kind with _ | m0
+  · rw [ShapeState.freshAux_miss hc] at h
+    have haux : st'.aux = (⟨n, kind.ty, kind⟩ : ShapeAux) :: st.aux :=
+      ShapeState.allocAux_aux h
+    have hcons : st'.cons = (⟨n, kind.ty, kind⟩ : ShapeAux).definition :: st.cons :=
+      ShapeState.allocAux_cons h
+    have hdecls : st'.decls = VarDeclItem.basic kind.ty (Ident.mk n) [] none :: st.decls :=
+      ShapeState.allocAux_decls h
+    have hnext : st'.next = st.next + 1 := ShapeState.allocAux_next h
+    have hcacheEq : st'.cache = st.cache.insert kind n := ShapeState.allocAux_cache h
+    have hn : n = shapeAuxName st.maxLen st.next := by
+      have h' := h
+      simp only [ShapeState.allocAux, ShapeState.freshDecl, Prod.mk.injEq] at h'
+      exact h'.1.symm
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    · unfold ShapeState.Defs
+      rw [haux, hcons]
+      intro b hb
+      rcases List.mem_cons.mp hb with rfl | hbold
+      · exact List.mem_cons_self ..
+      · exact List.mem_cons_of_mem _ (hwf.defs b hbold)
+    · unfold ShapeState.AuxDecls
+      rw [haux, hdecls, hwf.auxDecls]
+      rfl
+    · unfold ShapeState.AuxIdx
+      obtain ⟨js, hjs, hlt, heq⟩ := hwf.auxIdx
+      refine ⟨st.next :: js, ?_, ?_, ?_⟩
+      · rw [List.nodup_cons]
+        exact ⟨fun hmem => absurd (hlt st.next hmem) (by omega), hjs⟩
+      · intro j hj
+        rw [hnext]
+        rcases List.mem_cons.mp hj with rfl | hj
+        · omega
+        · have := hlt j hj; omega
+      · rw [haux]
+        show n :: st.aux.map (fun a => a.name) =
+          shapeAuxName (maxStrLength taken) st.next ::
+            js.map (fun j => shapeAuxName (maxStrLength taken) j)
+        rw [hn, heq, hwf.maxLen]
+    · rw [ShapeState.allocAux_maxLen h, hwf.maxLen]
+    · unfold ShapeAux.depsOk
+      rw [haux]
+      refine ⟨?_, hwf.depsOk⟩
+      intro d hd
+      exact hdeps d (ShapeAux.deps_mk n kind.ty kind ▸ hd)
+    · unfold ShapeAux.KindDeps
+      rw [haux]
+      refine ⟨?_, ?_, hwf.kindDeps⟩
+      · intro d hd
+        exact hsrc d (by simpa using hd)
+      · intro d hd
+        obtain ⟨c, hc, hcname, hcty⟩ := hauxdeps d (by simpa using hd)
+        exact ⟨c, hc, hcname, hcty⟩
+    · unfold ShapeState.TyOk
+      rw [haux]
+      intro b hb
+      rcases List.mem_cons.mp hb with rfl | hbold
+      · cases kind <;> simp [ShapeAux.TyOk, ShapeKind.ty]
+      · exact hwf.tyOk b hbold
+    · unfold ShapeAux.WellKind
+      rw [haux]
+      intro b hb
+      rcases List.mem_cons.mp hb with rfl | hbold
+      · simpa [ShapeAux.WellKind] using hkind
+      · exact hwf.wellKind b hbold
+    · intro k m hk
+      rw [hcacheEq, Std.HashMap.get?_insert] at hk
+      by_cases hkk : kind == k
+      · rw [if_pos hkk] at hk
+        have hkeq : kind = k := beq_iff_eq.mp hkk
+        subst hkeq
+        have hm : n = m := by simpa using hk
+        subst hm
+        exact ⟨_, by rw [haux]; exact List.mem_cons_self .., rfl, rfl, rfl⟩
+      · rw [if_neg hkk] at hk
+        obtain ⟨b, hb, hname, hkind', hty⟩ := hwf.cacheOk k m hk
+        exact ⟨b, by rw [haux]; exact List.mem_cons_of_mem _ hb,
+          hname, hkind', hty⟩
+  · rw [ShapeState.freshAux_hit hc] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact hwf
+
+/-- A fresh Boolean auxiliary preserves well-formedness. -/
 theorem ShapeState.freshBool_wf {taken : List String} {m : Model} {st : ShapeState}
     (hwf : st.WF taken m) (kind : ShapeKind)
     (hdeps : ∀ d ∈ kind.deps, d ∈ taken ∨ d ∈ st.aux.map (fun a => a.name))
     (hsrc : ∀ d ∈ kind.sourceDeps, d ∈ taken)
     (hauxdeps : ∀ d ∈ kind.auxDeps,
       ∃ c ∈ st.aux, c.name = d ∧ c.ty = .par .bool)
-    (hty : ShapeAux.TyOk
+    (_hty : ShapeAux.TyOk
       { name := shapeAuxName st.maxLen st.next, ty := .par .bool, kind := kind })
     (hkind : ShapeKind.WellKind m kind) :
     (st.freshBool taken kind).2.WF taken m := by
-  let n := shapeAuxName st.maxLen st.next
-  let a : ShapeAux := { name := n, ty := .par .bool, kind := kind }
-  have haux : (st.freshBool taken kind).2.aux = a :: st.aux := rfl
-  have hcons : (st.freshBool taken kind).2.cons = a.definition :: st.cons := rfl
-  have hdecls : (st.freshBool taken kind).2.decls =
-      VarDeclItem.basic a.ty (Ident.mk a.name) [] none :: st.decls := rfl
-  have hnext : (st.freshBool taken kind).2.next = st.next + 1 := rfl
-  have hadeps : a.deps = kind.deps := ShapeAux.deps_mk n (.par .bool) kind
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · unfold ShapeState.Defs
-    rw [haux, hcons]
-    intro b hb
-    rcases List.mem_cons.mp hb with rfl | hbold
-    · exact List.mem_cons_self ..
-    · exact List.mem_cons_of_mem _ (hwf.defs b hbold)
-  · unfold ShapeState.AuxDecls
-    rw [haux, hdecls, hwf.auxDecls]
-    rfl
-  · unfold ShapeState.AuxIdx
-    obtain ⟨js, hjs, hlt, heq⟩ := hwf.auxIdx
-    refine ⟨st.next :: js, ?_, ?_, ?_⟩
-    · rw [List.nodup_cons]
-      exact ⟨fun h => absurd (hlt st.next h) (by omega), hjs⟩
-    · intro j hj
-      rw [hnext]
-      rcases List.mem_cons.mp hj with rfl | hj
-      · omega
-      · have := hlt j hj; omega
-    · rw [haux]
-      show shapeAuxName st.maxLen st.next :: st.aux.map (fun a => a.name) =
-        shapeAuxName (maxStrLength taken) st.next ::
-          js.map (fun j => shapeAuxName (maxStrLength taken) j)
-      rw [heq, hwf.maxLen]
-  · exact hwf.maxLen
-  · unfold ShapeAux.depsOk
-    rw [haux]
-    refine ⟨?_, hwf.depsOk⟩
-    intro d hd
-    have hdepeq : a.deps = kind.deps := ShapeAux.deps_mk n a.ty kind
-    exact hdeps d (hdepeq ▸ hd)
-  · unfold ShapeAux.KindDeps
-    rw [haux]
-    refine ⟨?_, ?_, hwf.kindDeps⟩
-    · intro d hd
-      exact hsrc d (by simpa [a] using hd)
-    · intro d hd
-      obtain ⟨c, hc, hcname, hcty⟩ := hauxdeps d (by simpa [a] using hd)
-      exact ⟨c, hc, hcname, hcty⟩
-  · unfold ShapeState.TyOk
-    rw [haux]
-    intro b hb
-    rcases List.mem_cons.mp hb with rfl | hbold
-    · simpa [a] using hty
-    · exact hwf.tyOk b hbold
-  · unfold ShapeAux.WellKind
-    rw [haux]
-    intro b hb
-    rcases List.mem_cons.mp hb with rfl | hbold
-    · simpa [a, ShapeAux.WellKind] using hkind
-    · exact hwf.wellKind b hbold
+  cases h : st.freshBool taken kind with
+  | mk n st' => exact ShapeState.freshAux_wf hwf h hdeps hsrc hauxdeps hkind
 
 /-- A fresh `0..1` integer auxiliary preserves well-formedness. -/
 theorem ShapeState.freshInt01_wf {taken : List String} {m : Model} {st : ShapeState}
@@ -1217,71 +1407,12 @@ theorem ShapeState.freshInt01_wf {taken : List String} {m : Model} {st : ShapeSt
     (hsrc : ∀ d ∈ kind.sourceDeps, d ∈ taken)
     (hauxdeps : ∀ d ∈ kind.auxDeps,
       ∃ c ∈ st.aux, c.name = d ∧ c.ty = .par .bool)
-    (hty : ShapeAux.TyOk
+    (_hty : ShapeAux.TyOk
       { name := shapeAuxName st.maxLen st.next, ty := .intRange 0 1, kind := kind })
     (hkind : ShapeKind.WellKind m kind) :
     (st.freshInt01 taken kind).2.WF taken m := by
-  let n := shapeAuxName st.maxLen st.next
-  let a : ShapeAux := { name := n, ty := .intRange 0 1, kind := kind }
-  have haux : (st.freshInt01 taken kind).2.aux = a :: st.aux := rfl
-  have hcons : (st.freshInt01 taken kind).2.cons = a.definition :: st.cons := rfl
-  have hdecls : (st.freshInt01 taken kind).2.decls =
-      VarDeclItem.basic a.ty (Ident.mk a.name) [] none :: st.decls := rfl
-  have hnext : (st.freshInt01 taken kind).2.next = st.next + 1 := rfl
-  have hadeps : a.deps = kind.deps := ShapeAux.deps_mk n (.intRange 0 1) kind
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · unfold ShapeState.Defs
-    rw [haux, hcons]
-    intro b hb
-    rcases List.mem_cons.mp hb with rfl | hbold
-    · exact List.mem_cons_self ..
-    · exact List.mem_cons_of_mem _ (hwf.defs b hbold)
-  · unfold ShapeState.AuxDecls
-    rw [haux, hdecls, hwf.auxDecls]
-    rfl
-  · unfold ShapeState.AuxIdx
-    obtain ⟨js, hjs, hlt, heq⟩ := hwf.auxIdx
-    refine ⟨st.next :: js, ?_, ?_, ?_⟩
-    · rw [List.nodup_cons]
-      exact ⟨fun h => absurd (hlt st.next h) (by omega), hjs⟩
-    · intro j hj
-      rw [hnext]
-      rcases List.mem_cons.mp hj with rfl | hj
-      · omega
-      · have := hlt j hj; omega
-    · rw [haux]
-      show shapeAuxName st.maxLen st.next :: st.aux.map (fun a => a.name) =
-        shapeAuxName (maxStrLength taken) st.next ::
-          js.map (fun j => shapeAuxName (maxStrLength taken) j)
-      rw [heq, hwf.maxLen]
-  · exact hwf.maxLen
-  · unfold ShapeAux.depsOk
-    rw [haux]
-    refine ⟨?_, hwf.depsOk⟩
-    intro d hd
-    have hdepeq : a.deps = kind.deps := ShapeAux.deps_mk n a.ty kind
-    exact hdeps d (hdepeq ▸ hd)
-  · unfold ShapeAux.KindDeps
-    rw [haux]
-    refine ⟨?_, ?_, hwf.kindDeps⟩
-    · intro d hd
-      exact hsrc d (by simpa [a] using hd)
-    · intro d hd
-      obtain ⟨c, hc, hcname, hcty⟩ := hauxdeps d (by simpa [a] using hd)
-      exact ⟨c, hc, hcname, hcty⟩
-  · unfold ShapeState.TyOk
-    rw [haux]
-    intro b hb
-    rcases List.mem_cons.mp hb with rfl | hbold
-    · simpa [a] using hty
-    · exact hwf.tyOk b hbold
-  · unfold ShapeAux.WellKind
-    rw [haux]
-    intro b hb
-    rcases List.mem_cons.mp hb with rfl | hbold
-    · simpa [a, ShapeAux.WellKind] using hkind
-    · exact hwf.wellKind b hbold
-
+  cases h : st.freshInt01 taken kind with
+  | mk n st' => exact ShapeState.freshAux_wf hwf h hdeps hsrc hauxdeps hkind
 
 /-! ## Evaluating source expressions under the auxiliary store -/
 
@@ -1834,104 +1965,6 @@ theorem holds_of_names_agree {s t : Store} {pred : PredicateInterpretation}
   unfold ConstraintItem.Holds
   rw [hargs]
 
-/-- Every constraint accumulated in a state mentions a taken name or one
-    of the state's auxiliary names. -/
-def ShapeState.MentionsWithin (taken : List String) (st : ShapeState) : Prop :=
-  ∀ c ∈ st.cons, ∀ x ∈ constraintNames c,
-    x ∈ taken ∨ x ∈ st.aux.map (fun a => a.name)
-
-/-- Emitting one constraint preserves the mention invariant. -/
-theorem ShapeState.mentionsWithin_emit {taken : List String} {st : ShapeState}
-    (h : ShapeState.MentionsWithin taken st) {c : ConstraintItem}
-    (hc : ∀ x ∈ constraintNames c, x ∈ taken ∨ x ∈ st.aux.map (fun a => a.name)) :
-    ShapeState.MentionsWithin taken (st.emit c) := by
-  intro c' hc' x hx
-  have hcons : (st.emit c).cons = c :: st.cons := rfl
-  rw [hcons] at hc'
-  rcases List.mem_cons.mp hc' with rfl | hc''
-  · exact hc x hx
-  · exact h c' hc'' x hx
-
-/-- Emitting a list of constraints preserves the mention invariant. -/
-theorem ShapeState.mentionsWithin_emitList {taken : List String} {st : ShapeState}
-    (h : ShapeState.MentionsWithin taken st) {cs : List ConstraintItem}
-    (hcs : ∀ c ∈ cs, ∀ x ∈ constraintNames c,
-      x ∈ taken ∨ x ∈ st.aux.map (fun a => a.name)) :
-    ShapeState.MentionsWithin taken (st.emitList cs) := by
-  intro c' hc' x hx
-  have hcons : (st.emitList cs).cons = cs.reverse ++ st.cons := rfl
-  rw [hcons] at hc'
-  rcases List.mem_append.mp hc' with hin | hin
-  · exact hcs c' (List.mem_reverse.mp hin) x hx
-  · exact h c' hin x hx
-
-/-- Allocating a fresh Boolean preserves the mention invariant. -/
-theorem ShapeState.freshBool_mentionsWithin {taken : List String} {st : ShapeState}
-    (h : ShapeState.MentionsWithin taken st) (kind : ShapeKind)
-    (hdeps : ∀ d ∈ kind.deps, d ∈ taken ∨ d ∈ st.aux.map (fun a => a.name)) :
-    ShapeState.MentionsWithin taken (st.freshBool taken kind).2 := by
-  let n := shapeAuxName st.maxLen st.next
-  let a : ShapeAux := { name := n, ty := .par .bool, kind := kind }
-  have haux : (st.freshBool taken kind).2.aux = a :: st.aux := rfl
-  have hcons : (st.freshBool taken kind).2.cons = a.definition :: st.cons := rfl
-  have hadeps : a.deps = kind.deps := ShapeAux.deps_mk n (.par .bool) kind
-  intro c hc x hx
-  rw [hcons] at hc
-  rcases List.mem_cons.mp hc with rfl | hc''
-  · have hnames : constraintNames a.definition = a.deps ++ [a.name] :=
-      constraintNames_definition a
-    rw [hnames] at hx
-    rcases List.mem_append.mp hx with hin | hin
-    · rcases hdeps x (hadeps ▸ hin) with htake | hold
-      · exact Or.inl htake
-      · exact Or.inr (by rw [haux]; exact List.mem_cons_of_mem _ hold)
-    · rw [List.mem_singleton] at hin
-      exact Or.inr (by rw [haux, hin]; exact List.mem_cons_self ..)
-  · rcases h c hc'' x hx with htake | hold
-    · exact Or.inl htake
-    · exact Or.inr (by rw [haux]; exact List.mem_cons_of_mem _ hold)
-
-/-- Allocating a fresh `0..1` integer preserves the mention invariant. -/
-theorem ShapeState.freshInt01_mentionsWithin {taken : List String} {st : ShapeState}
-    (h : ShapeState.MentionsWithin taken st) (kind : ShapeKind)
-    (hdeps : ∀ d ∈ kind.deps, d ∈ taken ∨ d ∈ st.aux.map (fun a => a.name)) :
-    ShapeState.MentionsWithin taken (st.freshInt01 taken kind).2 := by
-  let n := shapeAuxName st.maxLen st.next
-  let a : ShapeAux := { name := n, ty := .intRange 0 1, kind := kind }
-  have haux : (st.freshInt01 taken kind).2.aux = a :: st.aux := rfl
-  have hcons : (st.freshInt01 taken kind).2.cons = a.definition :: st.cons := rfl
-  have hadeps : a.deps = kind.deps := ShapeAux.deps_mk n (.intRange 0 1) kind
-  intro c hc x hx
-  rw [hcons] at hc
-  rcases List.mem_cons.mp hc with rfl | hc''
-  · have hnames : constraintNames a.definition = a.deps ++ [a.name] :=
-      constraintNames_definition a
-    rw [hnames] at hx
-    rcases List.mem_append.mp hx with hin | hin
-    · rcases hdeps x (hadeps ▸ hin) with htake | hold
-      · exact Or.inl htake
-      · exact Or.inr (by rw [haux]; exact List.mem_cons_of_mem _ hold)
-    · rw [List.mem_singleton] at hin
-      exact Or.inr (by rw [haux, hin]; exact List.mem_cons_self ..)
-  · rcases h c hc'' x hx with htake | hold
-    · exact Or.inl htake
-    · exact Or.inr (by rw [haux]; exact List.mem_cons_of_mem _ hold)
-
-/-- The mention invariant transfers a given satisfaction to the newer
-    interpreted store. -/
-theorem ShapeState.holds_mono_encStore {taken : List String} {m : Model}
-    {st st' : ShapeState} {s : Store}
-    (haux : ∃ extra, st'.aux = extra ++ st.aux)
-    (hidx : st'.AuxIdx taken)
-    (hmono : ShapeState.MentionsWithin taken st)
-    (hholds : st.Holds (st.encStore s)) :
-    st.Holds (st'.encStore s) := by
-  intro c hc
-  apply (holds_of_names_agree (s := st'.encStore s) (t := st.encStore s)
-    (pred := fullInterp) (c := c) ?_).mpr (hholds c hc)
-  intro x hx
-  exact ShapeState.encodeStore_extends haux hidx (hmono c hc x hx)
-
 
 /-! ## Newly emitted constraints -/
 
@@ -1939,6 +1972,18 @@ theorem ShapeState.holds_mono_encStore {taken : List String} {m : Model}
     store. -/
 def ShapeState.NewHolds (st st' : ShapeState) (s : Store) : Prop :=
   ∀ c ∈ st'.cons, c ∈ st.cons ∨ c.Holds fullInterp s
+
+/-- `allocAux` only adds its own defining constraint. -/
+theorem ShapeState.allocAux_newHolds {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState} {s : Store}
+    (h : st.allocAux taken kind = (n, st'))
+    (hdef : (⟨n, kind.ty, kind⟩ : ShapeAux).definition.Holds fullInterp s) :
+    st.NewHolds st' s := by
+  intro c hc
+  rw [ShapeState.allocAux_cons h] at hc
+  rcases List.mem_cons.mp hc with rfl | hc
+  · exact Or.inr hdef
+  · exact Or.inl hc
 
 /-- Old satisfaction and newly emitted constraints give satisfaction of
     the extended state. -/
@@ -2058,81 +2103,216 @@ theorem holds_bool_clause_shape_of {s : Store} {pos neg : List String}
     rw [fullInterp_bool_clause, stdInterp_bool_clause_apply]
     exact hany
 
-/-- The defining constraint allocated by `freshBool` is the head of the
-    new constraint list. -/
-theorem ShapeState.freshBool_cons {taken : List String} {st : ShapeState} {kind : ShapeKind}
-    {n : String} {st' : ShapeState} (h : st.freshBool taken kind = (n, st')) :
-    st'.cons = (⟨n, .par .bool, kind⟩ : ShapeAux).definition :: st.cons := by
-  simp only [ShapeState.freshBool, ShapeState.freshDecl, Prod.mk.injEq] at h
-  obtain ⟨rfl, rfl⟩ := h
-  rfl
+/-- The realised cache entry of `freshAux` is present in the new cache. -/
+theorem ShapeState.freshAux_get? {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) :
+    st'.cache.get? kind = some n := by
+  rcases hc : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc] at h
+    exact ShapeState.allocAux_get? h
+  · rw [ShapeState.freshAux_hit hc] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact hc
 
-/-- The defining constraint allocated by `freshInt01` is the head of the
-    new constraint list. -/
-theorem ShapeState.freshInt01_cons {taken : List String} {st : ShapeState} {kind : ShapeKind}
-    {n : String} {st' : ShapeState} (h : st.freshInt01 taken kind = (n, st')) :
-    st'.cons = (⟨n, .intRange 0 1, kind⟩ : ShapeAux).definition :: st.cons := by
-  simp only [ShapeState.freshInt01, ShapeState.freshDecl, Prod.mk.injEq] at h
-  obtain ⟨rfl, rfl⟩ := h
-  rfl
+/-- The definition of the realised auxiliary holds in a `DefHolds` state. -/
+theorem ShapeState.freshAux_def {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState} {s : Store}
+    (h : st.freshAux taken kind = (n, st')) (hdefs : st'.DefHolds s) :
+    (⟨n, kind.ty, kind⟩ : ShapeAux).definition.Holds fullInterp s :=
+  ShapeState.DefHolds.cache_def hdefs (ShapeState.freshAux_get? h)
 
-/-- The auxiliary list allocated by `freshBool` gains one head. -/
-theorem ShapeState.freshBool_aux {taken : List String} {st : ShapeState} {kind : ShapeKind}
-    {n : String} {st' : ShapeState} (h : st.freshBool taken kind = (n, st')) :
-    st'.aux = (⟨n, .par .bool, kind⟩ : ShapeAux) :: st.aux := by
-  simp only [ShapeState.freshBool, ShapeState.freshDecl, Prod.mk.injEq] at h
-  obtain ⟨rfl, rfl⟩ := h
-  rfl
+/-- The realised auxiliary is present in the new state. -/
+theorem ShapeState.freshAux_mem {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) (hcache : st'.CacheOk) :
+    (⟨n, kind.ty, kind⟩ : ShapeAux) ∈ st'.aux := by
+  obtain ⟨a, ha, hname, hkind, hty⟩ := hcache kind n (ShapeState.freshAux_get? h)
+  cases a with
+  | mk an aty ak =>
+      simp only at hname hkind hty
+      subst hname
+      subst hkind
+      subst hty
+      exact ha
 
-/-- The auxiliary list allocated by `freshInt01` gains one head. -/
-theorem ShapeState.freshInt01_aux {taken : List String} {st : ShapeState} {kind : ShapeKind}
-    {n : String} {st' : ShapeState} (h : st.freshInt01 taken kind = (n, st')) :
-    st'.aux = (⟨n, .intRange 0 1, kind⟩ : ShapeAux) :: st.aux := by
-  simp only [ShapeState.freshInt01, ShapeState.freshDecl, Prod.mk.injEq] at h
-  obtain ⟨rfl, rfl⟩ := h
-  rfl
+/-- `freshAux` keeps every old auxiliary. -/
+theorem ShapeState.freshAux_aux_subset {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) :
+    ∀ a ∈ st.aux, a ∈ st'.aux := by
+  rcases hc : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc] at h
+    exact ShapeState.allocAux_aux_subset h
+  · rw [ShapeState.freshAux_hit hc] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact fun a ha => ha
+
+/-- `freshAux` keeps every old constraint. -/
+theorem ShapeState.freshAux_cons_subset {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) :
+    ∀ c ∈ st.cons, c ∈ st'.cons := by
+  rcases hc : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc] at h
+    exact ShapeState.allocAux_cons_subset h
+  · rw [ShapeState.freshAux_hit hc] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact fun c hc' => hc'
+
+/-- `freshAux` only adds its own defining constraint. -/
+theorem ShapeState.freshAux_newHolds {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState} {s : Store}
+    (h : st.freshAux taken kind = (n, st')) (hdefs : st'.DefHolds s) :
+    st.NewHolds st' s := by
+  rcases hc : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc] at h
+    exact ShapeState.allocAux_newHolds h
+      (ShapeState.DefHolds.cache_def hdefs (ShapeState.allocAux_get? h))
+  · rw [ShapeState.freshAux_hit hc] at h
+    obtain ⟨rfl, rfl⟩ := h
+    intro c hc'
+    exact Or.inl hc'
+
+/-- `freshAux` preserves old cache lookups. -/
+theorem ShapeState.freshAux_cacheLe {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) : st.CacheLe st' := by
+  rcases hc : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc] at h
+    exact ShapeState.allocAux_cacheLe hc h
+  · rw [ShapeState.freshAux_hit hc] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact ShapeState.CacheLe.refl st
+
+/-- `allocAux` preserves the cache invariant. -/
+theorem ShapeState.allocAux_cacheOk {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.allocAux taken kind = (n, st')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  intro k m hk
+  rw [ShapeState.allocAux_cache h, Std.HashMap.get?_insert] at hk
+  by_cases hkk : kind == k
+  · rw [if_pos hkk] at hk
+    have hkeq : kind = k := beq_iff_eq.mp hkk
+    subst hkeq
+    have hm : n = m := by simpa using hk
+    subst hm
+    exact ⟨⟨n, kind.ty, kind⟩,
+      by rw [ShapeState.allocAux_aux h]; exact List.mem_cons_self .., rfl, rfl, rfl⟩
+  · rw [if_neg hkk] at hk
+    obtain ⟨a, ha, hname, hkind, hty⟩ := hc k m hk
+    exact ⟨a, by rw [ShapeState.allocAux_aux h]; exact List.mem_cons_of_mem _ ha,
+      hname, hkind, hty⟩
+
+/-- `freshAux` preserves the cache invariant. -/
+theorem ShapeState.freshAux_cacheOk {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  rcases hc' : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc'] at h
+    exact ShapeState.allocAux_cacheOk h hc
+  · rw [ShapeState.freshAux_hit hc'] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact hc
+
+/-- The realised auxiliary of `freshAux` is present in the new state,
+    provided the old cache was consistent. -/
+theorem ShapeState.freshAux_aux_mem {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) (hc : st.CacheOk) :
+    (⟨n, kind.ty, kind⟩ : ShapeAux) ∈ st'.aux := by
+  rcases hc' : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc'] at h
+    rw [ShapeState.allocAux_aux h]
+    exact List.mem_cons_self ..
+  · rw [ShapeState.freshAux_hit hc'] at h
+    obtain ⟨rfl, rfl⟩ := h
+    obtain ⟨a, ha, hname, hkind, hty⟩ := hc kind n hc'
+    cases a with
+    | mk an aty ak =>
+        simp only at hname hkind hty
+        subst hname
+        subst hkind
+        subst hty
+        exact ha
+
+/-- A fresh auxiliary either was already present or is the canonical
+    definition of the requested kind. -/
+theorem ShapeState.freshAux_cons_eq_or {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) :
+    ∀ c ∈ st'.cons, c ∈ st.cons ∨
+      c = (⟨n, kind.ty, kind⟩ : ShapeAux).definition := by
+  rcases hc : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc] at h
+    intro c hc'
+    rw [ShapeState.allocAux_cons h] at hc'
+    rcases List.mem_cons.mp hc' with rfl | hc''
+    · exact Or.inr rfl
+    · exact Or.inl hc''
+  · rw [ShapeState.freshAux_hit hc] at h
+    obtain ⟨rfl, rfl⟩ := h
+    intro c hc'
+    exact Or.inl hc'
+
+/-- `freshAux` only adds a constraint that holds in the store, given the
+    canonical definition directly. -/
+theorem ShapeState.freshAux_newHolds_def {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState} {s : Store}
+    (h : st.freshAux taken kind = (n, st'))
+    (hdef : (⟨n, kind.ty, kind⟩ : ShapeAux).definition.Holds fullInterp s) :
+    st.NewHolds st' s := by
+  rcases hc : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc] at h
+    exact ShapeState.allocAux_newHolds h hdef
+  · rw [ShapeState.freshAux_hit hc] at h
+    obtain ⟨rfl, rfl⟩ := h
+    intro c hc'
+    exact Or.inl hc'
 
 /-- `freshBool` keeps every old auxiliary. -/
 theorem ShapeState.freshBool_aux_subset {taken : List String} {st : ShapeState}
     {kind : ShapeKind} {n : String} {st' : ShapeState}
     (h : st.freshBool taken kind = (n, st')) :
-    ∀ a ∈ st.aux, a ∈ st'.aux := by
-  intro a ha
-  rw [ShapeState.freshBool_aux h]
-  exact List.mem_cons_of_mem _ ha
+    ∀ a ∈ st.aux, a ∈ st'.aux :=
+  ShapeState.freshAux_aux_subset h
 
 /-- `freshInt01` keeps every old auxiliary. -/
 theorem ShapeState.freshInt01_aux_subset {taken : List String} {st : ShapeState}
     {kind : ShapeKind} {n : String} {st' : ShapeState}
     (h : st.freshInt01 taken kind = (n, st')) :
-    ∀ a ∈ st.aux, a ∈ st'.aux := by
-  intro a ha
-  rw [ShapeState.freshInt01_aux h]
-  exact List.mem_cons_of_mem _ ha
+    ∀ a ∈ st.aux, a ∈ st'.aux :=
+  ShapeState.freshAux_aux_subset h
+
+/-- `freshBool` keeps every old constraint. -/
+theorem ShapeState.freshBool_cons_subset {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshBool taken kind = (n, st')) :
+    ∀ c ∈ st.cons, c ∈ st'.cons :=
+  ShapeState.freshAux_cons_subset h
+
+/-- `freshInt01` keeps every old constraint. -/
+theorem ShapeState.freshInt01_cons_subset {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshInt01 taken kind = (n, st')) :
+    ∀ c ∈ st.cons, c ∈ st'.cons :=
+  ShapeState.freshAux_cons_subset h
 
 /-- `freshBool` only adds its own defining constraint. -/
 theorem ShapeState.freshBool_newHolds {taken : List String} {st : ShapeState}
     {kind : ShapeKind} {n : String} {st' : ShapeState} {s : Store}
-    (h : st.freshBool taken kind = (n, st'))
-    (hdef : (⟨n, .par .bool, kind⟩ : ShapeAux).definition.Holds fullInterp s) :
-    st.NewHolds st' s := by
-  intro c hc
-  rw [ShapeState.freshBool_cons h] at hc
-  rcases List.mem_cons.mp hc with rfl | hc
-  · exact Or.inr hdef
-  · exact Or.inl hc
+    (h : st.freshBool taken kind = (n, st')) (hdefs : st'.DefHolds s) :
+    st.NewHolds st' s :=
+  ShapeState.freshAux_newHolds h hdefs
 
 /-- `freshInt01` only adds its own defining constraint. -/
 theorem ShapeState.freshInt01_newHolds {taken : List String} {st : ShapeState}
     {kind : ShapeKind} {n : String} {st' : ShapeState} {s : Store}
-    (h : st.freshInt01 taken kind = (n, st'))
-    (hdef : (⟨n, .intRange 0 1, kind⟩ : ShapeAux).definition.Holds fullInterp s) :
-    st.NewHolds st' s := by
-  intro c hc
-  rw [ShapeState.freshInt01_cons h] at hc
-  rcases List.mem_cons.mp hc with rfl | hc
-  · exact Or.inr hdef
-  · exact Or.inl hc
+    (h : st.freshInt01 taken kind = (n, st')) (hdefs : st'.DefHolds s) :
+    st.NewHolds st' s :=
+  ShapeState.freshAux_newHolds h hdefs
 
 /-! ## The Boolean result target -/
 
@@ -2140,7 +2320,7 @@ theorem ShapeState.freshInt01_newHolds {taken : List String} {st : ShapeState}
 theorem resultTarget_eval {taken : List String} {st : ShapeState}
     {r : BasicExpr} {n : String} {st' : ShapeState} {s' : Store}
     (h : resultTarget taken st r = some (n, st'))
-    (hholds : st'.Holds s') :
+    (hdefs : st'.DefHolds s') :
     ∀ v, r.eval s' = some v → s' (Ident.mk n) = some v := by
   intro v hv
   cases r with
@@ -2153,10 +2333,9 @@ theorem resultTarget_eval {taken : List String} {st : ShapeState}
       | bool bb =>
           cases bb
           · simp only [resultTarget, Option.some.injEq] at h
-            have hcons := ShapeState.freshBool_cons h
             have hpin : (⟨n, .par .bool, .const false⟩ : ShapeAux).definition.Holds
                 fullInterp s' :=
-              hholds _ (by rw [hcons]; exact List.mem_cons_self)
+              ShapeState.freshAux_def h hdefs
             have hn := (ShapeAux.holds_const false n s').mp (by
               simpa [ShapeAux.definition] using hpin)
             have hv' : (.bool false) = v := by
@@ -2164,10 +2343,9 @@ theorem resultTarget_eval {taken : List String} {st : ShapeState}
             subst hv'
             exact hn
           · simp only [resultTarget, Option.some.injEq] at h
-            have hcons := ShapeState.freshBool_cons h
             have hpin : (⟨n, .par .bool, .const true⟩ : ShapeAux).definition.Holds
                 fullInterp s' :=
-              hholds _ (by rw [hcons]; exact List.mem_cons_self)
+              ShapeState.freshAux_def h hdefs
             have hn := (ShapeAux.holds_const true n s').mp (by
               simpa [ShapeAux.definition] using hpin)
             have hv' : (.bool true) = v := by
@@ -2190,12 +2368,11 @@ def setArgContains (s : Store) : Expr → Int → Prop
 theorem freshBool_member_holds {taken : List String} {st : ShapeState}
     {S : String} {v : Int} {n : String} {st' : ShapeState} {s' : Store}
     (h : st.freshBool taken (.member S v) = (n, st'))
-    (hholds : st'.Holds s') :
+    (hdefs : st'.DefHolds s') :
     ∃ sv, s' (Ident.mk S) = some (.setOfInt sv) ∧
       s' (Ident.mk n) = some (.bool (decide (sv.Contains v))) := by
-  have hcons := ShapeState.freshBool_cons h
   have hdef : (⟨n, .par .bool, .member S v⟩ : ShapeAux).definition.Holds fullInterp s' :=
-    hholds _ (by rw [hcons]; exact List.mem_cons_self)
+    ShapeState.freshAux_def h hdefs
   exact (ShapeAux.holds_member S v n s').mp (by
     simpa [ShapeAux.definition] using hdef)
 
@@ -2203,11 +2380,10 @@ theorem freshBool_member_holds {taken : List String} {st : ShapeState}
 theorem freshBool_const_holds {taken : List String} {st : ShapeState}
     {v : Bool} {n : String} {st' : ShapeState} {s' : Store}
     (h : st.freshBool taken (.const v) = (n, st'))
-    (hholds : st'.Holds s') :
+    (hdefs : st'.DefHolds s') :
     s' (Ident.mk n) = some (.bool v) := by
-  have hcons := ShapeState.freshBool_cons h
   have hdef : (⟨n, .par .bool, .const v⟩ : ShapeAux).definition.Holds fullInterp s' :=
-    hholds _ (by rw [hcons]; exact List.mem_cons_self)
+    ShapeState.freshAux_def h hdefs
   exact (ShapeAux.holds_const v n s').mp (by
     simpa [ShapeAux.definition] using hdef)
 
@@ -2228,7 +2404,7 @@ theorem setArgContains_ident_iff {s : Store} {S : Ident} {sv : IntSetValue} {v :
 theorem memberTerm_sound {taken : List String} {m : Model} {st : ShapeState}
     {sa : Expr} {v : Int} {n : String} {st' : ShapeState} {s' : Store}
     (h : memberTerm taken m st sa v = some (n, st'))
-    (hholds : st'.Holds s')
+    (hdefs : st'.DefHolds s')
     (hdecl : ∀ S us, modelSetUniverse? m S = some us →
       ∀ sv, s' (Ident.mk S) = some (.setOfInt sv) → ∀ w, sv.Contains w → w ∈ us) :
     (setArgContains s' sa v ∧ s' (Ident.mk n) = some (.bool true)) ∨
@@ -2242,7 +2418,7 @@ theorem memberTerm_sound {taken : List String} {m : Model} {st : ShapeState}
           | some us =>
               by_cases hv : v ∈ us
               · simp only [memberTerm, hus, if_pos hv, Option.some.injEq] at h
-                obtain ⟨sv, hsv, hn⟩ := freshBool_member_holds h hholds
+                obtain ⟨sv, hsv, hn⟩ := freshBool_member_holds h hdefs
                 by_cases hc : sv.Contains v
                 · left
                   refine ⟨(setArgContains_ident_iff hsv).mpr hc, ?_⟩
@@ -2251,7 +2427,7 @@ theorem memberTerm_sound {taken : List String} {m : Model} {st : ShapeState}
                   refine ⟨fun hcont => hc ((setArgContains_ident_iff hsv).mp hcont), ?_⟩
                   simpa [hc] using hn
               · simp only [memberTerm, hus, if_neg hv, Option.some.injEq] at h
-                have hn := freshBool_const_holds h hholds
+                have hn := freshBool_const_holds h hdefs
                 have hnot : ¬ setArgContains s' (.basic (.ident S)) v := by
                   rintro ⟨sv, hsv, hcont⟩
                   exact hv (hdecl S.name us hus sv hsv v hcont)
@@ -2262,7 +2438,7 @@ theorem memberTerm_sound {taken : List String} {m : Model} {st : ShapeState}
           | int i => simp [memberTerm] at h
           | set sl =>
               simp only [memberTerm, Option.some.injEq] at h
-              have hn := freshBool_const_holds h hholds
+              have hn := freshBool_const_holds h hdefs
               by_cases hc : sl.denote.Contains v
               · left
                 exact ⟨by simpa [setArgContains] using hc, by simpa [hc] using hn⟩
@@ -2317,11 +2493,8 @@ theorem resultTarget_eval_iff {taken : List String} {st : ShapeState}
           cases bb
           · simp only [resultTarget, Option.some.injEq] at h
             have hn : s' (Ident.mk n) = some (.bool false) := by
-              have haux : (⟨n, .par .bool, .const false⟩ : ShapeAux) ∈ st'.aux := by
-                rw [ShapeState.freshBool_aux h]
-                exact List.mem_cons_self ..
               have hdef : (⟨n, .par .bool, .const false⟩ : ShapeAux).definition.Holds
-                  fullInterp s' := hdefs _ haux
+                  fullInterp s' := ShapeState.freshAux_def h hdefs
               exact (ShapeAux.holds_const false n s').mp (by
                 simpa [ShapeAux.definition] using hdef)
             constructor
@@ -2337,11 +2510,8 @@ theorem resultTarget_eval_iff {taken : List String} {st : ShapeState}
               simp [BasicExpr.eval, BasicLiteral.denote]
           · simp only [resultTarget, Option.some.injEq] at h
             have hn : s' (Ident.mk n) = some (.bool true) := by
-              have haux : (⟨n, .par .bool, .const true⟩ : ShapeAux) ∈ st'.aux := by
-                rw [ShapeState.freshBool_aux h]
-                exact List.mem_cons_self ..
               have hdef : (⟨n, .par .bool, .const true⟩ : ShapeAux).definition.Holds
-                  fullInterp s' := hdefs _ haux
+                  fullInterp s' := ShapeState.freshAux_def h hdefs
               exact (ShapeAux.holds_const true n s').mp (by
                 simpa [ShapeAux.definition] using hdef)
             constructor
@@ -2374,12 +2544,30 @@ theorem resultTarget_aux_subset {taken : List String} {st : ShapeState}
           cases bb
           · simp only [resultTarget, Option.some.injEq] at h
             intro a ha
-            rw [ShapeState.freshBool_aux h]
-            exact List.mem_cons_of_mem _ ha
+            exact ShapeState.freshAux_aux_subset h a ha
           · simp only [resultTarget, Option.some.injEq] at h
             intro a ha
-            rw [ShapeState.freshBool_aux h]
-            exact List.mem_cons_of_mem _ ha
+            exact ShapeState.freshAux_aux_subset h a ha
+      | int i => simp [resultTarget] at h
+      | set sl => simp [resultTarget] at h
+
+/-- `resultTarget` keeps every old cache lookup. -/
+theorem resultTarget_cacheLe {taken : List String} {st : ShapeState}
+    {r : BasicExpr} {n : String} {st' : ShapeState}
+    (h : resultTarget taken st r = some (n, st')) : st.CacheLe st' := by
+  cases r with
+  | ident b =>
+      simp only [resultTarget, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+  | lit l =>
+      cases l with
+      | bool bb =>
+          cases bb
+          · simp only [resultTarget, Option.some.injEq] at h
+            exact ShapeState.freshAux_cacheLe h
+          · simp only [resultTarget, Option.some.injEq] at h
+            exact ShapeState.freshAux_cacheLe h
       | int i => simp [resultTarget] at h
       | set sl => simp [resultTarget] at h
 
@@ -2400,27 +2588,85 @@ theorem resultTarget_newHolds {taken : List String} {st : ShapeState}
       | bool bb =>
           cases bb
           · simp only [resultTarget, Option.some.injEq] at h
-            have haux : (⟨n, .par .bool, .const false⟩ : ShapeAux) ∈ st'.aux := by
-              rw [ShapeState.freshBool_aux h]
-              exact List.mem_cons_self ..
             intro c hc
-            rw [ShapeState.freshBool_cons h] at hc
-            rcases List.mem_cons.mp hc with rfl | hc
-            · exact Or.inr (hdefs _ haux)
-            · exact Or.inl hc
+            rcases ShapeState.freshAux_cons_eq_or h c hc with hc' | rfl
+            · exact Or.inl hc'
+            · exact Or.inr (ShapeState.DefHolds.cache_def hdefs
+                (ShapeState.freshAux_get? h))
           · simp only [resultTarget, Option.some.injEq] at h
-            have haux : (⟨n, .par .bool, .const true⟩ : ShapeAux) ∈ st'.aux := by
-              rw [ShapeState.freshBool_aux h]
-              exact List.mem_cons_self ..
             intro c hc
-            rw [ShapeState.freshBool_cons h] at hc
-            rcases List.mem_cons.mp hc with rfl | hc
-            · exact Or.inr (hdefs _ haux)
-            · exact Or.inl hc
+            rcases ShapeState.freshAux_cons_eq_or h c hc with hc' | rfl
+            · exact Or.inl hc'
+            · exact Or.inr (ShapeState.DefHolds.cache_def hdefs
+                (ShapeState.freshAux_get? h))
+      | int i => simp [resultTarget] at h
+      | set sl => simp [resultTarget] at h
+
+/-- `resultTarget` preserves well-formedness. -/
+theorem resultTarget_wf {taken : List String} {m : Model} {st : ShapeState}
+    {r : BasicExpr} {n : String} {st' : ShapeState}
+    (hwf : st.WF taken m) (h : resultTarget taken st r = some (n, st')) :
+    st'.WF taken m := by
+  cases r with
+  | ident b =>
+      simp only [resultTarget, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hwf
+  | lit l =>
+      cases l with
+      | bool bb =>
+          cases bb
+          · simp only [resultTarget, Option.some.injEq] at h
+            have hsnd : st' = (st.freshBool taken (.const false)).2 := by rw [h]
+            rw [hsnd]
+            refine ShapeState.freshBool_wf hwf (.const false) ?_ ?_ ?_ ?_ trivial
+            · intro d hd
+              simp [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] at hd
+            · intro d hd
+              simp [ShapeKind.sourceDeps] at hd
+            · intro d hd
+              simp [ShapeKind.auxDeps] at hd
+            · simp [ShapeAux.TyOk]
+          · simp only [resultTarget, Option.some.injEq] at h
+            have hsnd : st' = (st.freshBool taken (.const true)).2 := by rw [h]
+            rw [hsnd]
+            refine ShapeState.freshBool_wf hwf (.const true) ?_ ?_ ?_ ?_ trivial
+            · intro d hd
+              simp [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] at hd
+            · intro d hd
+              simp [ShapeKind.sourceDeps] at hd
+            · intro d hd
+              simp [ShapeKind.auxDeps] at hd
+            · simp [ShapeAux.TyOk]
       | int i => simp [resultTarget] at h
       | set sl => simp [resultTarget] at h
 
 /-! ## Linking a target to a disjunction -/
+
+/-- `linkOr` does not allocate auxiliaries. -/
+theorem linkOr_aux (st : ShapeState) (terms : List String) (target : String) :
+    (linkOr st terms target).aux = st.aux := by
+  cases terms <;> rfl
+
+/-- `linkOr` does not change the cache. -/
+theorem linkOr_cache (st : ShapeState) (terms : List String) (target : String) :
+    (linkOr st terms target).cache = st.cache := by
+  cases terms <;> rfl
+
+/-- `linkOr` preserves cache lookups. -/
+theorem linkOr_cacheLe (st : ShapeState) (terms : List String) (target : String) :
+    st.CacheLe (linkOr st terms target) := by
+  intro k n hk
+  rw [linkOr_cache]
+  exact hk
+
+/-- `linkOr` preserves well-formedness. -/
+theorem linkOr_wf {taken : List String} {m : Model} {st : ShapeState}
+    {terms : List String} {target : String} (hwf : st.WF taken m) :
+    (linkOr st terms target).WF taken m := by
+  cases terms with
+  | nil => exact ShapeState.emit_wf hwf
+  | cons t ts => exact ShapeState.emitList_wf hwf
 
 /-- The constraints emitted by `linkOr` all hold.  In a store where the
     terms are Booleans, the target is Boolean and is their disjunction. -/
@@ -2618,24 +2864,6 @@ theorem ShapeState.holds_mono {st st' : ShapeState} {s : Store}
     (hsub : ∀ c ∈ st.cons, c ∈ st'.cons) (h : st'.Holds s) : st.Holds s :=
   fun c hc => h c (hsub c hc)
 
-/-- `freshBool` keeps every old constraint. -/
-theorem ShapeState.freshBool_cons_subset {taken : List String} {st : ShapeState}
-    {kind : ShapeKind} {n : String} {st' : ShapeState}
-    (h : st.freshBool taken kind = (n, st')) :
-    ∀ c ∈ st.cons, c ∈ st'.cons := by
-  intro c hc
-  rw [ShapeState.freshBool_cons h]
-  exact List.mem_cons_of_mem _ hc
-
-/-- `freshInt01` keeps every old constraint. -/
-theorem ShapeState.freshInt01_cons_subset {taken : List String} {st : ShapeState}
-    {kind : ShapeKind} {n : String} {st' : ShapeState}
-    (h : st.freshInt01 taken kind = (n, st')) :
-    ∀ c ∈ st.cons, c ∈ st'.cons := by
-  intro c hc
-  rw [ShapeState.freshInt01_cons h]
-  exact List.mem_cons_of_mem _ hc
-
 /-- `emit` keeps every old constraint. -/
 theorem ShapeState.emit_cons_subset {st : ShapeState} {c : ConstraintItem} :
     ∀ c' ∈ st.cons, c' ∈ (st.emit c).cons := by
@@ -2647,6 +2875,18 @@ theorem ShapeState.emitList_cons_subset {st : ShapeState} {cs : List ConstraintI
     ∀ c' ∈ st.cons, c' ∈ (st.emitList cs).cons := by
   intro c' hc'
   exact List.mem_append_right _ hc'
+
+/-- `emit` preserves cache lookups. -/
+theorem ShapeState.emit_cacheLe (st : ShapeState) (c : ConstraintItem) :
+    st.CacheLe (st.emit c) := by
+  intro k n hk
+  exact hk
+
+/-- `emitList` preserves cache lookups. -/
+theorem ShapeState.emitList_cacheLe (st : ShapeState) (cs : List ConstraintItem) :
+    st.CacheLe (st.emitList cs) := by
+  intro k n hk
+  exact hk
 
 /-! ## Membership terms -/
 
@@ -2665,11 +2905,8 @@ theorem memberTerm_holds {taken : List String} {m : Model} {st : ShapeState}
   by_cases hv : v ∈ us
   · rw [if_pos hv] at h
     have h' : st.freshBool taken (.member S v) = (n, st') := Option.some.inj h
-    have haux : (⟨n, .par .bool, .member S v⟩ : ShapeAux) ∈ st'.aux := by
-      rw [ShapeState.freshBool_aux h']
-      exact List.mem_cons_self ..
     have hdef : (⟨n, .par .bool, .member S v⟩ : ShapeAux).definition.Holds fullInterp s' :=
-      hdefs _ haux
+      ShapeState.freshAux_def h' hdefs
     obtain ⟨sv', hsv', hn⟩ := (ShapeAux.holds_member S v n s').mp hdef
     have hsv : sv' = sv := by
       have h := Option.some.inj (hsv'.symm.trans hS)
@@ -2678,11 +2915,8 @@ theorem memberTerm_holds {taken : List String} {m : Model} {st : ShapeState}
     exact hn
   · rw [if_neg hv] at h
     have h' : st.freshBool taken (.const false) = (n, st') := Option.some.inj h
-    have haux : (⟨n, .par .bool, .const false⟩ : ShapeAux) ∈ st'.aux := by
-      rw [ShapeState.freshBool_aux h']
-      exact List.mem_cons_self ..
     have hdef : (⟨n, .par .bool, .const false⟩ : ShapeAux).definition.Holds fullInterp s' :=
-      hdefs _ haux
+      ShapeState.freshAux_def h' hdefs
     have hn : s' (Ident.mk n) = some (.bool false) :=
       (ShapeAux.holds_const false n s').mp hdef
     have hnc : ¬ sv.Contains v := hdecl v hv
@@ -2704,12 +2938,10 @@ theorem memberTerm_aux_subset {taken : List String} {m : Model} {st : ShapeState
               by_cases hv : v ∈ us
               · simp only [memberTerm, hus, if_pos hv] at h
                 intro a ha
-                rw [ShapeState.freshBool_aux (Option.some.inj h)]
-                exact List.mem_cons_of_mem _ ha
+                exact ShapeState.freshAux_aux_subset (Option.some.inj h) a ha
               · simp only [memberTerm, hus, if_neg hv] at h
                 intro a ha
-                rw [ShapeState.freshBool_aux (Option.some.inj h)]
-                exact List.mem_cons_of_mem _ ha
+                exact ShapeState.freshAux_aux_subset (Option.some.inj h) a ha
       | lit l =>
           cases l with
           | bool bb => simp [memberTerm] at h
@@ -2717,8 +2949,32 @@ theorem memberTerm_aux_subset {taken : List String} {m : Model} {st : ShapeState
           | set sl =>
               simp only [memberTerm] at h
               intro a ha
-              rw [ShapeState.freshBool_aux (Option.some.inj h)]
-              exact List.mem_cons_of_mem _ ha
+              exact ShapeState.freshAux_aux_subset (Option.some.inj h) a ha
+  | array es => simp [memberTerm] at h
+
+/-- A membership term keeps every old cache lookup. -/
+theorem memberTerm_cacheLe {taken : List String} {m : Model} {st : ShapeState}
+    {sa : Expr} {v : Int} {n : String} {st' : ShapeState}
+    (h : memberTerm taken m st sa v = some (n, st')) : st.CacheLe st' := by
+  cases sa with
+  | basic b =>
+      cases b with
+      | ident S =>
+          cases hus : modelSetUniverse? m S.name with
+          | none => simp [memberTerm, hus] at h
+          | some us =>
+              by_cases hv : v ∈ us
+              · simp only [memberTerm, hus, if_pos hv] at h
+                exact ShapeState.freshAux_cacheLe (Option.some.inj h)
+              · simp only [memberTerm, hus, if_neg hv] at h
+                exact ShapeState.freshAux_cacheLe (Option.some.inj h)
+      | lit l =>
+          cases l with
+          | bool bb => simp [memberTerm] at h
+          | int i => simp [memberTerm] at h
+          | set sl =>
+              simp only [memberTerm] at h
+              exact ShapeState.freshAux_cacheLe (Option.some.inj h)
   | array es => simp [memberTerm] at h
 
 /-- A membership term only adds its own definition. -/
@@ -2729,14 +2985,8 @@ theorem memberTerm_newHolds {taken : List String} {m : Model} {st : ShapeState}
     st.NewHolds st' s' := by
   have step : ∀ {kind : ShapeKind}, st.freshBool taken kind = (n, st') →
       st.NewHolds st' s' := by
-    intro kind hf c hc
-    have haux : (⟨n, .par .bool, kind⟩ : ShapeAux) ∈ st'.aux := by
-      rw [ShapeState.freshBool_aux hf]
-      exact List.mem_cons_self ..
-    rw [ShapeState.freshBool_cons hf] at hc
-    rcases List.mem_cons.mp hc with rfl | hc
-    · exact Or.inr (hdefs _ haux)
-    · exact Or.inl hc
+    intro kind hf
+    exact ShapeState.freshAux_newHolds hf hdefs
   cases sa with
   | basic b =>
       cases b with
@@ -2866,6 +3116,23 @@ theorem varMemberTerms_aux_subset {taken : List String} {m : Model} {x s : Strin
           (memberTerm_aux_subset hm b
             (ShapeState.freshBool_aux_subset hfb b hb)))
 
+/-- `varMemberTerms` keeps every old cache lookup. -/
+theorem varMemberTerms_cacheLe {taken : List String} {m : Model} {x s : String}
+    {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
+    (h : varMemberTerms taken m x s st vals = some (terms, st')) :
+    st.CacheLe st' := by
+  induction vals generalizing st terms st' with
+  | nil =>
+      simp only [varMemberTerms, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+  | cons v vs ih =>
+      obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hm, ha, hr, rfl, rfl⟩ :=
+        varMemberTerms_cons_decomp h
+      exact (ShapeState.freshAux_cacheLe hfb).trans
+        ((memberTerm_cacheLe hm).trans
+          ((ShapeState.freshAux_cacheLe ha).trans (ih hr)))
+
 /-- `varMemberTerms` only adds definitions. -/
 theorem varMemberTerms_newHolds {taken : List String} {m : Model} {x s : String}
     {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
@@ -2882,26 +3149,28 @@ theorem varMemberTerms_newHolds {taken : List String} {m : Model} {x s : String}
   | cons v vs ih =>
       obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hm, ha, hr, rfl, rfl⟩ :=
         varMemberTerms_cons_decomp h
-      have hax2 : ∀ b ∈ st2.aux, b ∈ st'.aux := by
-        intro b hb
-        exact varMemberTerms_aux_subset hr b
-          (ShapeState.freshBool_aux_subset ha b hb)
-      have hep : (⟨e, .par .bool, .eq x v⟩ : ShapeAux) ∈ st'.aux := by
-        apply varMemberTerms_aux_subset hr
-        apply ShapeState.freshBool_aux_subset ha
-        apply memberTerm_aux_subset hm
-        rw [ShapeState.freshBool_aux hfb]
-        exact List.mem_cons_self ..
-      have htp : (⟨t, .par .bool, .and e a⟩ : ShapeAux) ∈ st'.aux := by
-        apply varMemberTerms_aux_subset hr
-        rw [ShapeState.freshBool_aux ha]
-        exact List.mem_cons_self ..
+      have hcache12 : st1.CacheLe st2 := memberTerm_cacheLe hm
+      have hcache23 : st2.CacheLe st3 := ShapeState.freshAux_cacheLe ha
+      have hcache3' : st3.CacheLe st' := varMemberTerms_cacheLe hr
+      have hdefs1 : st1.DefHolds s' :=
+        ShapeState.DefHolds.mono
+          (fun b hb => varMemberTerms_aux_subset hr b
+            (ShapeState.freshBool_aux_subset ha b
+              (memberTerm_aux_subset hm b hb)))
+          (hcache12.trans (hcache23.trans hcache3')) hdefs
+      have hdefs2 : st2.DefHolds s' :=
+        ShapeState.DefHolds.mono
+          (fun b hb => varMemberTerms_aux_subset hr b
+            (ShapeState.freshBool_aux_subset ha b hb))
+          (hcache23.trans hcache3') hdefs
+      have hdefs3 : st3.DefHolds s' :=
+        ShapeState.DefHolds.mono (varMemberTerms_aux_subset hr) hcache3' hdefs
       exact ShapeState.newHolds_trans
-        (ShapeState.freshBool_newHolds hfb (hdefs _ hep))
+        (ShapeState.freshBool_newHolds hfb hdefs1)
         (ShapeState.newHolds_trans
-          (memberTerm_newHolds hm (ShapeState.DefHolds.mono hax2 hdefs))
+          (memberTerm_newHolds hm hdefs2)
           (ShapeState.newHolds_trans
-            (ShapeState.freshBool_newHolds ha (hdefs _ htp))
+            (ShapeState.freshBool_newHolds ha hdefs3)
             (ih hr hdefs)))
 
 /-- The terms allocated for the finite values of a variable integer read
@@ -2925,23 +3194,23 @@ theorem varMemberTerms_sound {taken : List String} {m : Model} {x s : String}
   | cons v vs ih =>
       obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hm, ha, hr, rfl, rfl⟩ :=
         varMemberTerms_cons_decomp h
-      have hax2 : ∀ b ∈ st2.aux, b ∈ st'.aux := by
-        intro b hb
-        exact varMemberTerms_aux_subset hr b
-          (ShapeState.freshBool_aux_subset ha b hb)
-      have hep : (⟨e, .par .bool, .eq x v⟩ : ShapeAux) ∈ st'.aux := by
-        apply varMemberTerms_aux_subset hr
-        apply ShapeState.freshBool_aux_subset ha
-        apply memberTerm_aux_subset hm
-        rw [ShapeState.freshBool_aux hfb]
-        exact List.mem_cons_self ..
-      have htp : (⟨t, .par .bool, .and e a⟩ : ShapeAux) ∈ st'.aux := by
-        apply varMemberTerms_aux_subset hr
-        rw [ShapeState.freshBool_aux ha]
-        exact List.mem_cons_self ..
+      have hcache12 : st1.CacheLe st2 := memberTerm_cacheLe hm
+      have hcache23 : st2.CacheLe st3 := ShapeState.freshAux_cacheLe ha
+      have hcache3' : st3.CacheLe st' := varMemberTerms_cacheLe hr
+      have hdefs1 : st1.DefHolds s' :=
+        ShapeState.DefHolds.mono
+          (fun b hb => varMemberTerms_aux_subset hr b
+            (ShapeState.freshBool_aux_subset ha b
+              (memberTerm_aux_subset hm b hb)))
+          (hcache12.trans (hcache23.trans hcache3')) hdefs
+      have hdefs2 : st2.DefHolds s' :=
+        ShapeState.DefHolds.mono
+          (fun b hb => varMemberTerms_aux_subset hr b
+            (ShapeState.freshBool_aux_subset ha b hb))
+          (hcache23.trans hcache3') hdefs
       -- the equality bit reads `x = v`
       have hedef : (⟨e, .par .bool, .eq x v⟩ : ShapeAux).definition.Holds fullInterp s' :=
-        hdefs _ hep
+        ShapeState.freshAux_def hfb hdefs1
       obtain ⟨j, hxj, hej⟩ := (ShapeAux.holds_eq x v e s').mp hedef
       have hji : j = i := by
         have h := Option.some.inj (hxj.symm.trans hx)
@@ -2950,10 +3219,11 @@ theorem varMemberTerms_sound {taken : List String} {m : Model} {x s : String}
         rw [hej, hji]
       -- the membership bit reads `v ∈ S`
       have ham : s' (Ident.mk a) = some (.bool (decide (sv.Contains v))) :=
-        memberTerm_holds hus hm (ShapeState.DefHolds.mono hax2 hdefs) hS hdecl
+        memberTerm_holds hus hm hdefs2 hS hdecl
       -- the conjunction
       have htdef : (⟨t, .par .bool, .and e a⟩ : ShapeAux).definition.Holds fullInterp s' :=
-        hdefs _ htp
+        ShapeState.freshAux_def ha
+          (ShapeState.DefHolds.mono (varMemberTerms_aux_subset hr) hcache3' hdefs)
       obtain ⟨pe, pa, hep', hap, htp'⟩ := (ShapeAux.holds_and e a t s').mp htdef
       have hpe : pe = decide (i = v) := by
         rw [hej'] at hep'
@@ -2971,7 +3241,8 @@ theorem varMemberTerms_sound {taken : List String} {m : Model} {x s : String}
 /-- A membership term is a Boolean auxiliary of the resulting state. -/
 theorem memberTerm_aux {taken : List String} {m : Model} {st : ShapeState}
     {sa : Expr} {v : Int} {n : String} {st' : ShapeState}
-    (h : memberTerm taken m st sa v = some (n, st')) :
+    (h : memberTerm taken m st sa v = some (n, st'))
+    (hc : st.CacheOk) :
     ∃ c ∈ st'.aux, c.name = n ∧ c.ty = .par .bool := by
   cases sa with
   | basic b =>
@@ -2983,12 +3254,10 @@ theorem memberTerm_aux {taken : List String} {m : Model} {st : ShapeState}
               by_cases hv : v ∈ us
               · simp only [memberTerm, hus, if_pos hv, Option.some.injEq] at h
                 refine ⟨⟨n, .par .bool, .member S.name v⟩, ?_, rfl, rfl⟩
-                rw [ShapeState.freshBool_aux h]
-                exact List.mem_cons_self ..
+                exact ShapeState.freshAux_aux_mem h hc
               · simp only [memberTerm, hus, if_neg hv, Option.some.injEq] at h
                 refine ⟨⟨n, .par .bool, .const false⟩, ?_, rfl, rfl⟩
-                rw [ShapeState.freshBool_aux h]
-                exact List.mem_cons_self ..
+                exact ShapeState.freshAux_aux_mem h hc
       | lit l =>
           cases l with
           | bool bb => simp [memberTerm] at h
@@ -2996,8 +3265,7 @@ theorem memberTerm_aux {taken : List String} {m : Model} {st : ShapeState}
           | set sl =>
               simp only [memberTerm, Option.some.injEq] at h
               refine ⟨⟨n, .par .bool, .const (decide (sl.denote.Contains v))⟩, ?_, rfl, rfl⟩
-              rw [ShapeState.freshBool_aux h]
-              exact List.mem_cons_self ..
+              exact ShapeState.freshAux_aux_mem h hc
   | array es => simp [memberTerm] at h
 
 /-- A membership term preserves well-formedness when its source name is
@@ -3039,32 +3307,6 @@ theorem memberTerm_wf_ident {taken : List String} {m : Model} {st : ShapeState}
           simp [ShapeKind.auxDeps] at hd
         · simp [ShapeAux.TyOk]
 
-/-- A membership term preserves the mention invariant. -/
-theorem memberTerm_mentionsWithin_ident {taken : List String} {m : Model}
-    {st : ShapeState} {S : String} {v : Int} {n : String} {st' : ShapeState}
-    (hm : ShapeState.MentionsWithin taken st) (hS : S ∈ taken)
-    (h : memberTerm taken m st (.basic (.ident (Ident.mk S))) v = some (n, st')) :
-    ShapeState.MentionsWithin taken st' := by
-  cases hus : modelSetUniverse? m S with
-  | none => simp [memberTerm, hus] at h
-  | some us =>
-      by_cases hv : v ∈ us
-      · simp only [memberTerm, hus, if_pos hv, Option.some.injEq] at h
-        have hsnd : st' = (st.freshBool taken (.member S v)).2 := by rw [h]
-        rw [hsnd]
-        refine ShapeState.freshBool_mentionsWithin hm (.member S v) ?_
-        intro d hd
-        simp only [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps,
-          List.append_nil, List.mem_singleton] at hd
-        subst hd
-        exact Or.inl hS
-      · simp only [memberTerm, hus, if_neg hv, Option.some.injEq] at h
-        have hsnd : st' = (st.freshBool taken (.const false)).2 := by rw [h]
-        rw [hsnd]
-        refine ShapeState.freshBool_mentionsWithin hm (.const false) ?_
-        intro d hd
-        simp [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] at hd
-
 /-- `varMemberTerms` preserves well-formedness. -/
 theorem varMemberTerms_wf {taken : List String} {m : Model} {x s : String}
     {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
@@ -3103,11 +3345,10 @@ theorem varMemberTerms_wf {taken : List String} {m : Model} {x s : String}
       obtain ⟨ce, hce, hcename, hcety⟩ : ∃ c ∈ st2.aux,
           c.name = e ∧ c.ty = .par .bool := by
         refine ⟨⟨e, .par .bool, .eq x v⟩, ?_, rfl, rfl⟩
-        apply memberTerm_aux_subset hm
-        rw [ShapeState.freshBool_aux hfb]
-        exact List.mem_cons_self ..
+        exact memberTerm_aux_subset hm _
+          (ShapeState.freshAux_aux_mem hfb hwf.cacheOk)
       obtain ⟨ca, hca, hcaname, hcaty⟩ : ∃ c ∈ st2.aux,
-          c.name = a ∧ c.ty = .par .bool := memberTerm_aux hm
+          c.name = a ∧ c.ty = .par .bool := memberTerm_aux hm hwf1.cacheOk
       have hwf3 : st3.WF taken m := by
         have hsnd : st3 = (st2.freshBool taken (.and e a)).2 := by rw [ha]
         rw [hsnd]
@@ -3129,304 +3370,6 @@ theorem varMemberTerms_wf {taken : List String} {m : Model} {x s : String}
         · simp [ShapeAux.TyOk]
       exact ih hwf3 hr
 
-/-- `varMemberTerms` preserves the mention invariant. -/
-theorem varMemberTerms_mentionsWithin {taken : List String} {m : Model} {x s : String}
-    {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
-    (hm : ShapeState.MentionsWithin taken st) (hx : x ∈ taken) (hs : s ∈ taken)
-    (h : varMemberTerms taken m x s st vals = some (terms, st')) :
-    ShapeState.MentionsWithin taken st' := by
-  induction vals generalizing st terms st' with
-  | nil =>
-      simp only [varMemberTerms, Option.some.injEq, Prod.mk.injEq] at h
-      obtain ⟨rfl, rfl⟩ := h
-      exact hm
-  | cons v vs ih =>
-      obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hmem, ha, hr, rfl, rfl⟩ :=
-        varMemberTerms_cons_decomp h
-      have hm1 : ShapeState.MentionsWithin taken st1 := by
-        have hsnd : st1 = (st.freshBool taken (.eq x v)).2 := by rw [hfb]
-        rw [hsnd]
-        refine ShapeState.freshBool_mentionsWithin hm (.eq x v) ?_
-        intro d hd
-        have hd' : d = x := by
-          simpa [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] using hd
-        subst hd'
-        exact Or.inl hx
-      have hm2 : ShapeState.MentionsWithin taken st2 :=
-        memberTerm_mentionsWithin_ident hm1 hs hmem
-      obtain ⟨ce, hce, hcename, _⟩ : ∃ c ∈ st2.aux,
-          c.name = e ∧ c.ty = .par .bool := by
-        refine ⟨⟨e, .par .bool, .eq x v⟩, ?_, rfl, rfl⟩
-        apply memberTerm_aux_subset hmem
-        rw [ShapeState.freshBool_aux hfb]
-        exact List.mem_cons_self ..
-      obtain ⟨ca, hca, hcaname, _⟩ : ∃ c ∈ st2.aux,
-          c.name = a ∧ c.ty = .par .bool := memberTerm_aux hmem
-      have hm3 : ShapeState.MentionsWithin taken st3 := by
-        have hsnd : st3 = (st2.freshBool taken (.and e a)).2 := by rw [ha]
-        rw [hsnd]
-        refine ShapeState.freshBool_mentionsWithin hm2 (.and e a) ?_
-        intro d hd
-        have hd' : d = e ∨ d = a := by
-          simpa [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] using hd
-        rcases hd' with rfl | rfl
-        · exact Or.inr (List.mem_map.mpr ⟨ce, hce, hcename⟩)
-        · exact Or.inr (List.mem_map.mpr ⟨ca, hca, hcaname⟩)
-      exact ih hm3 hr
-
-/-- Every term allocated by `varMemberTerms` is an auxiliary of the
-    resulting state. -/
-theorem varMemberTerms_terms_aux {taken : List String} {m : Model} {x s : String}
-    {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
-    (h : varMemberTerms taken m x s st vals = some (terms, st')) :
-    ∀ t ∈ terms, t ∈ st'.aux.map (fun a => a.name) := by
-  induction vals generalizing st terms st' with
-  | nil =>
-      simp only [varMemberTerms, Option.some.injEq, Prod.mk.injEq] at h
-      obtain ⟨rfl, rfl⟩ := h
-      intro t ht
-      cases ht
-  | cons v vs ih =>
-      obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hmem, ha, hr, rfl, rfl⟩ :=
-        varMemberTerms_cons_decomp h
-      intro u hu
-      rcases List.mem_cons.mp hu with rfl | hu
-      · have haux : (⟨u, .par .bool, .and e a⟩ : ShapeAux) ∈ st'.aux := by
-          apply varMemberTerms_aux_subset hr
-          rw [ShapeState.freshBool_aux ha]
-          exact List.mem_cons_self ..
-        exact List.mem_map.mpr ⟨_, haux, rfl⟩
-      · exact ih hr u hu
-
-/-- `varMemberTerms` with an empty value list returns the terms in order. -/
-theorem varMemberTerms_nil_inv {taken : List String} {m : Model} {x s : String}
-    {st : ShapeState} {terms : List String} {st' : ShapeState}
-    (h : varMemberTerms taken m x s st [] = some (terms, st')) :
-    terms = [] ∧ st' = st := by
-  simp only [varMemberTerms, Option.some.injEq, Prod.mk.injEq] at h
-  exact ⟨h.1.symm, h.2.symm⟩
-
-
-/-! ## The result target: invariants -/
-
-/-- `resultTarget` preserves well-formedness. -/
-theorem resultTarget_wf {taken : List String} {m : Model} {st : ShapeState}
-    {r : BasicExpr} {n : String} {st' : ShapeState}
-    (hwf : st.WF taken m) (h : resultTarget taken st r = some (n, st')) :
-    st'.WF taken m := by
-  cases r with
-  | ident b =>
-      simp only [resultTarget, Option.some.injEq, Prod.mk.injEq] at h
-      obtain ⟨rfl, rfl⟩ := h
-      exact hwf
-  | lit l =>
-      cases l with
-      | bool bb =>
-          cases bb
-          · simp only [resultTarget, Option.some.injEq] at h
-            have hsnd : st' = (st.freshBool taken (.const false)).2 := by rw [h]
-            rw [hsnd]
-            refine ShapeState.freshBool_wf hwf (.const false) ?_ ?_ ?_ ?_ trivial
-            · intro d hd; simp [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] at hd
-            · intro d hd; simp [ShapeKind.sourceDeps] at hd
-            · intro d hd; simp [ShapeKind.auxDeps] at hd
-            · simp [ShapeAux.TyOk]
-          · simp only [resultTarget, Option.some.injEq] at h
-            have hsnd : st' = (st.freshBool taken (.const true)).2 := by rw [h]
-            rw [hsnd]
-            refine ShapeState.freshBool_wf hwf (.const true) ?_ ?_ ?_ ?_ trivial
-            · intro d hd; simp [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] at hd
-            · intro d hd; simp [ShapeKind.sourceDeps] at hd
-            · intro d hd; simp [ShapeKind.auxDeps] at hd
-            · simp [ShapeAux.TyOk]
-      | int i => simp [resultTarget] at h
-      | set sl => simp [resultTarget] at h
-
-/-- `resultTarget` preserves the mention invariant. -/
-theorem resultTarget_mentionsWithin {taken : List String} {st : ShapeState}
-    {r : BasicExpr} {n : String} {st' : ShapeState}
-    (hm : ShapeState.MentionsWithin taken st) (h : resultTarget taken st r = some (n, st')) :
-    ShapeState.MentionsWithin taken st' := by
-  cases r with
-  | ident b =>
-      simp only [resultTarget, Option.some.injEq, Prod.mk.injEq] at h
-      obtain ⟨rfl, rfl⟩ := h
-      exact hm
-  | lit l =>
-      cases l with
-      | bool bb =>
-          cases bb
-          · simp only [resultTarget, Option.some.injEq] at h
-            have hsnd : st' = (st.freshBool taken (.const false)).2 := by rw [h]
-            rw [hsnd]
-            refine ShapeState.freshBool_mentionsWithin hm (.const false) ?_
-            intro d hd
-            simp [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] at hd
-          · simp only [resultTarget, Option.some.injEq] at h
-            have hsnd : st' = (st.freshBool taken (.const true)).2 := by rw [h]
-            rw [hsnd]
-            refine ShapeState.freshBool_mentionsWithin hm (.const true) ?_
-            intro d hd
-            simp [ShapeKind.deps, ShapeKind.sourceDeps, ShapeKind.auxDeps] at hd
-      | int i => simp [resultTarget] at h
-      | set sl => simp [resultTarget] at h
-
-/-- The result target is a taken name or an auxiliary of the new state. -/
-theorem resultTarget_target_mem {taken : List String} {st : ShapeState}
-    {r : BasicExpr} {n : String} {st' : ShapeState}
-    (h : resultTarget taken st r = some (n, st'))
-    (hsrc : ∀ d ∈ basicNames r, d ∈ taken) :
-    n ∈ taken ∨ n ∈ st'.aux.map (fun a => a.name) := by
-  cases r with
-  | ident b =>
-      simp only [resultTarget, Option.some.injEq, Prod.mk.injEq] at h
-      obtain ⟨rfl, rfl⟩ := h
-      exact Or.inl (hsrc b.name (by simp [basicNames]))
-  | lit l =>
-      cases l with
-      | bool bb =>
-          cases bb
-          · simp only [resultTarget, Option.some.injEq] at h
-            right
-            rw [ShapeState.freshBool_aux h]
-            exact List.mem_map.mpr ⟨_, List.mem_cons_self .., rfl⟩
-          · simp only [resultTarget, Option.some.injEq] at h
-            right
-            rw [ShapeState.freshBool_aux h]
-            exact List.mem_map.mpr ⟨_, List.mem_cons_self .., rfl⟩
-      | int i => simp [resultTarget] at h
-      | set sl => simp [resultTarget] at h
-
-/-! ## Linking a target to a disjunction: invariants -/
-
-/-- `linkOr` does not allocate auxiliaries. -/
-theorem linkOr_aux (st : ShapeState) (terms : List String) (target : String) :
-    (linkOr st terms target).aux = st.aux := by
-  cases terms <;> rfl
-
-/-- `linkOr` preserves well-formedness. -/
-theorem linkOr_wf {taken : List String} {m : Model} {st : ShapeState}
-    {terms : List String} {target : String} (hwf : st.WF taken m) :
-    (linkOr st terms target).WF taken m := by
-  cases terms with
-  | nil => exact ShapeState.emit_wf hwf
-  | cons t ts => exact ShapeState.emitList_wf hwf
-
-/-- The names of a list of shape identifiers. -/
-theorem flatMap_basicNames_map_shapeName (xs : List String) :
-    (xs.map shapeName).flatMap basicNames = xs := by
-  induction xs with
-  | nil => rfl
-  | cons x xs ih => simp [shapeName, basicNames, ih]
-
-/-- The names of a `bool_clause` constraint. -/
-theorem constraintNames_bool_clause (pos neg : List String) :
-    constraintNames (shapeConstraint "bool_clause"
-      [.array (pos.map shapeName), .array (neg.map shapeName)]) = pos ++ neg := by
-  simp [constraintNames, exprNames, shapeConstraint, flatMap_basicNames_map_shapeName]
-
-/-- The name of a pinned Boolean constraint. -/
-theorem constraintNames_pinBool (n : String) (v : Bool) :
-    constraintNames (pinBoolConstraint n v) = [n] := by
-  simp [pinBoolConstraint, constraintNames, exprNames, basicNames]
-
-/-- `linkOr` preserves the mention invariant. -/
-theorem linkOr_mentionsWithin {taken : List String} {st : ShapeState}
-    {terms : List String} {target : String}
-    (hm : ShapeState.MentionsWithin taken st)
-    (hnames : ∀ x ∈ terms ++ [target],
-      x ∈ taken ∨ x ∈ st.aux.map (fun a => a.name)) :
-    ShapeState.MentionsWithin taken (linkOr st terms target) := by
-  cases terms with
-  | nil =>
-      apply ShapeState.mentionsWithin_emit hm
-      intro x hx
-      rw [constraintNames_pinBool] at hx
-      exact hnames x (by simpa using hx)
-  | cons t ts =>
-      show ShapeState.MentionsWithin taken (st.emitList
-        (shapeConstraint "bool_clause"
-            [.array ((t :: ts).map shapeName), .array ([target].map shapeName)] ::
-          (t :: ts).map (fun u => shapeConstraint "bool_clause"
-            [.array ([target].map shapeName), .array ([u].map shapeName)])))
-      apply ShapeState.mentionsWithin_emitList hm
-      intro c hc x hx
-      have hxall : x ∈ (t :: ts) ++ [target] := by
-        simp only [List.mem_cons, List.mem_map] at hc
-        rcases hc with rfl | ⟨u, hu, rfl⟩
-        · simpa only [constraintNames_bool_clause] using hx
-        · have hx' : x ∈ [target] ++ [u] := by
-            simpa only [constraintNames_bool_clause] using hx
-          have hx'' : x = target ∨ x = u := by
-            simpa only [List.mem_append, List.mem_singleton] using hx'
-          rcases hx'' with rfl | rfl
-          · simp
-          · rcases hu with rfl | hu
-            · simp
-            · exact List.mem_append_left _ (List.mem_cons_of_mem _ hu)
-      exact hnames x hxall
-
-/-! ## Variable membership rewrite -/
-
-/-- Decompose a successful `rewriteVarMember`. -/
-theorem rewriteVarMember_decomp {taken : List String} {m : Model} {st : ShapeState}
-    {x s : String} {vals : List Int} {r : BasicExpr} {st' : ShapeState}
-    {cs' : List ConstraintItem}
-    (h : rewriteVarMember taken m st x s vals r = some (st', cs')) :
-    ∃ tms st1 target st2,
-      varMemberTerms taken m x s st vals = some (tms, st1) ∧
-      resultTarget taken st1 r = some (target, st2) ∧
-      st' = linkOr st2 tms target ∧ cs' = [] := by
-  unfold rewriteVarMember at h
-  cases hterms : varMemberTerms taken m x s st vals with
-  | none => simp [hterms] at h
-  | some p =>
-      obtain ⟨tms, st1⟩ := p
-      cases hres : resultTarget taken st1 r with
-      | none => simp [hterms, hres] at h
-      | some q =>
-          obtain ⟨target, st2⟩ := q
-          simp only [hterms, hres, Option.some.injEq, Prod.mk.injEq] at h
-          obtain ⟨rfl, rfl⟩ := h
-          exact ⟨tms, st1, target, st2, rfl, hres, rfl, rfl⟩
-
-/-- `rewriteVarMember` preserves well-formedness. -/
-theorem rewriteVarMember_wf {taken : List String} {m : Model} {st : ShapeState}
-    {x s : String} {vals : List Int} {r : BasicExpr} {st' : ShapeState}
-    {cs' : List ConstraintItem}
-    (hwf : st.WF taken m) (hx : x ∈ taken) (hs : s ∈ taken)
-    (hvals : ∃ vs, modelIntValues? m x = some vs)
-    (hus : modelSetUniverse? m s = some us)
-    (h : rewriteVarMember taken m st x s vals r = some (st', cs')) :
-    st'.WF taken m := by
-  obtain ⟨terms, st1, target, st2, hterms, hres, rfl, rfl⟩ :=
-    rewriteVarMember_decomp h
-  exact linkOr_wf (resultTarget_wf (varMemberTerms_wf hwf hx hs hvals hus hterms) hres)
-
-/-- `rewriteVarMember` preserves the mention invariant. -/
-theorem rewriteVarMember_mentionsWithin {taken : List String} {m : Model}
-    {st : ShapeState} {x s : String} {vals : List Int} {r : BasicExpr}
-    {st' : ShapeState} {cs' : List ConstraintItem}
-    (hm : ShapeState.MentionsWithin taken st) (hx : x ∈ taken) (hs : s ∈ taken)
-    (hr : ∀ d ∈ basicNames r, d ∈ taken)
-    (h : rewriteVarMember taken m st x s vals r = some (st', cs')) :
-    ShapeState.MentionsWithin taken st' := by
-  obtain ⟨terms, st1, target, st2, hterms, hres, rfl, rfl⟩ :=
-    rewriteVarMember_decomp h
-  have hm1 := varMemberTerms_mentionsWithin hm hx hs hterms
-  have hm2 := resultTarget_mentionsWithin hm1 hres
-  have hterms_aux : ∀ t ∈ terms, t ∈ st2.aux.map (fun a => a.name) := by
-    intro t ht
-    obtain ⟨a, ha, han⟩ := List.mem_map.mp (varMemberTerms_terms_aux hterms t ht)
-    exact List.mem_map.mpr ⟨a, resultTarget_aux_subset hres a ha, han⟩
-  have htarget := resultTarget_target_mem hres hr
-  refine linkOr_mentionsWithin hm2 ?_
-  intro y hy
-  rcases List.mem_append.mp hy with hyt | hyt
-  · exact Or.inr (hterms_aux y hyt)
-  · simp only [List.mem_singleton] at hyt
-    subst hyt
-    exact htarget
 
 /-! ## Reified membership at an arbitrary first argument -/
 
@@ -3591,6 +3534,41 @@ theorem shapeLinEq_pairs_holds_iff {s : Store} {ps : List (Int × Ident)} {rhs :
     · simp [shapeE, shapeInt, Expr.eval, BasicExpr.eval, BasicLiteral.denote]
     · simpa [stdInterp] using hdot
 
+/-- Decompose a successful `rewriteVarMember`. -/
+theorem rewriteVarMember_decomp {taken : List String} {m : Model} {st : ShapeState}
+    {x s : String} {vals : List Int} {r : BasicExpr} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : rewriteVarMember taken m st x s vals r = some (st', cs')) :
+    ∃ tms st1 target st2,
+      varMemberTerms taken m x s st vals = some (tms, st1) ∧
+      resultTarget taken st1 r = some (target, st2) ∧
+      st' = linkOr st2 tms target ∧ cs' = [] := by
+  unfold rewriteVarMember at h
+  cases hterms : varMemberTerms taken m x s st vals with
+  | none => simp [hterms] at h
+  | some p =>
+      obtain ⟨tms, st1⟩ := p
+      cases hres : resultTarget taken st1 r with
+      | none => simp [hterms, hres] at h
+      | some q =>
+          obtain ⟨target, st2⟩ := q
+          simp only [hterms, hres, Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ⟨tms, st1, target, st2, rfl, hres, rfl, rfl⟩
+
+/-- `rewriteVarMember` preserves well-formedness. -/
+theorem rewriteVarMember_wf {taken : List String} {m : Model} {st : ShapeState}
+    {x s : String} {vals : List Int} {r : BasicExpr} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (hwf : st.WF taken m) (hx : x ∈ taken) (hs : s ∈ taken)
+    (hvals : ∃ vs, modelIntValues? m x = some vs)
+    (hus : modelSetUniverse? m s = some us)
+    (h : rewriteVarMember taken m st x s vals r = some (st', cs')) :
+    st'.WF taken m := by
+  obtain ⟨terms, st1, target, st2, hterms, hres, rfl, rfl⟩ :=
+    rewriteVarMember_decomp h
+  exact linkOr_wf (resultTarget_wf (varMemberTerms_wf hwf hx hs hvals hus hterms) hres)
+
 /-! ## Variable membership rewrite: soundness and completeness -/
 
 /-- Right-to-left membership for the local `Forall2`. -/
@@ -3638,11 +3616,13 @@ theorem rewriteVarMember_sound {taken : List String} {m : Model} {st : ShapeStat
     rewriteVarMember_decomp h
   obtain ⟨i, hi⟩ := hx
   obtain ⟨sv, hsv⟩ := hS
-  have hdefs2 : st2.DefHolds str := by
-    intro a ha
-    exact hdefs a (by rw [linkOr_aux]; exact ha)
+  have hdefs2 : st2.DefHolds str :=
+    ShapeState.DefHolds.mono
+      (fun a ha => by rw [linkOr_aux]; exact ha)
+      (linkOr_cacheLe st2 terms target) hdefs
   have hdefs1 : st1.DefHolds str :=
-    ShapeState.DefHolds.mono (fun a ha => resultTarget_aux_subset hres a ha) hdefs2
+    ShapeState.DefHolds.mono (fun a ha => resultTarget_aux_subset hres a ha)
+      (resultTarget_cacheLe hres) hdefs2
   have htsound := varMemberTerms_sound hterms hdefs1 hi hsv hus
     (by intro w hw hc; exact hdecl sv hsv w hw hc)
   -- every term reads a Boolean
@@ -3721,11 +3701,13 @@ theorem rewriteVarMember_newHolds {taken : List String} {m : Model} {st : ShapeS
     st.NewHolds (st'.emitList cs') s' := by
   obtain ⟨terms, st1, target, st2, hterms, hres, rfl, rfl⟩ :=
     rewriteVarMember_decomp h
-  have hdefs2 : st2.DefHolds s' := by
-    intro a ha
-    exact hdefs a (by rw [linkOr_aux]; exact ha)
+  have hdefs2 : st2.DefHolds s' :=
+    ShapeState.DefHolds.mono
+      (fun a ha => by rw [linkOr_aux]; exact ha)
+      (linkOr_cacheLe st2 terms target) hdefs
   have hdefs1 : st1.DefHolds s' :=
-    ShapeState.DefHolds.mono (fun a ha => resultTarget_aux_subset hres a ha) hdefs2
+    ShapeState.DefHolds.mono (fun a ha => resultTarget_aux_subset hres a ha)
+      (resultTarget_cacheLe hres) hdefs2
   obtain ⟨i, hi⟩ := hxval
   obtain ⟨sv, hsv⟩ := hSval
   have hi' : s' (Ident.mk x) = some (.int i) := by rw [hxagg]; exact hi
@@ -3922,6 +3904,33 @@ theorem cardBits_aux_subset {taken : List String} {m : Model} {s : String}
                     ShapeState.freshInt01_aux_subset hb
                   exact ih hr b (h2 b (h1 b hb'))
 
+/-- `cardBits` keeps every old cache lookup. -/
+theorem cardBits_cacheLe {taken : List String} {m : Model} {s : String}
+    {st : ShapeState} {vals : List Int} {cs : List String} {st' : ShapeState}
+    (h : cardBits taken m s st vals = some (cs, st')) :
+    st.CacheLe st' := by
+  induction vals generalizing st cs st' with
+  | nil =>
+      simp only [cardBits, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+  | cons v vs ih =>
+      simp only [cardBits] at h
+      cases hm : memberTerm taken m st (.basic (.ident (Ident.mk s))) v with
+      | none => simp [hm] at h
+      | some p =>
+          obtain ⟨a, st1⟩ := p
+          cases hb : st1.freshInt01 taken (.bit a) with
+          | mk c st2 =>
+              cases hr : cardBits taken m s st2 vs with
+              | none => simp [hm, hb, hr] at h
+              | some q =>
+                  obtain ⟨cs, st3⟩ := q
+                  simp only [hm, hb, hr, Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact (memberTerm_cacheLe hm).trans
+                    ((ShapeState.freshAux_cacheLe hb).trans (ih hr))
+
 /-- The Boolean-to-integer aliases of a cardinality rewrite read the
     membership indicators of the declared universe. -/
 theorem cardBits_sound {taken : List String} {m : Model} {st : ShapeState}
@@ -3954,20 +3963,19 @@ theorem cardBits_sound {taken : List String} {m : Model} {st : ShapeState}
                   simp only [hm, hb, hr, Option.some.injEq, Prod.mk.injEq] at h
                   obtain ⟨rfl, rfl⟩ := h
                   have hdefs2 : st2.DefHolds s' :=
-                    ShapeState.DefHolds.mono (cardBits_aux_subset hr) hdefs
+                    ShapeState.DefHolds.mono (cardBits_aux_subset hr)
+                      (cardBits_cacheLe hr) hdefs
                   have hsubf := ShapeState.freshInt01_aux_subset hb
                   have hdefs1 : st1.DefHolds s' :=
-                    ShapeState.DefHolds.mono hsubf hdefs2
+                    ShapeState.DefHolds.mono hsubf
+                      (ShapeState.freshAux_cacheLe hb) hdefs2
                   have hval : s' (Ident.mk a) =
                       some (.bool (decide (sv.Contains v))) :=
                     memberTerm_holds hus hm hdefs1 hS hdecl
                   have hbit : s' (Ident.mk c) =
                       some (.int (if sv.Contains v then 1 else 0)) := by
-                    have haux : (⟨c, .intRange 0 1, .bit a⟩ : ShapeAux) ∈ st2.aux := by
-                      rw [ShapeState.freshInt01_aux hb]
-                      exact List.mem_cons_self ..
                     have hdef : (⟨c, .intRange 0 1, .bit a⟩ : ShapeAux).definition.Holds
-                        fullInterp s' := hdefs2 _ haux
+                        fullInterp s' := ShapeState.freshAux_def hb hdefs2
                     obtain ⟨p, hp, hc⟩ :=
                       (ShapeAux.holds_bit a c s').mp (by
                         simpa [ShapeAux.definition] using hdef)
@@ -4008,19 +4016,18 @@ theorem cardBits_newHolds {taken : List String} {m : Model} {s : String}
                   simp only [hm, hb, hr, Option.some.injEq, Prod.mk.injEq] at h
                   obtain ⟨rfl, rfl⟩ := h
                   have hdefs2 : st2.DefHolds s' :=
-                    ShapeState.DefHolds.mono (cardBits_aux_subset hr) hdefs
+                    ShapeState.DefHolds.mono (cardBits_aux_subset hr)
+                      (cardBits_cacheLe hr) hdefs
                   have hsubf := ShapeState.freshInt01_aux_subset hb
                   have hdefs1 : st1.DefHolds s' :=
-                    ShapeState.DefHolds.mono hsubf hdefs2
-                  have haux : (⟨c, .intRange 0 1, .bit a⟩ : ShapeAux) ∈ st2.aux := by
-                    rw [ShapeState.freshInt01_aux hb]
-                    exact List.mem_cons_self ..
+                    ShapeState.DefHolds.mono hsubf
+                      (ShapeState.freshAux_cacheLe hb) hdefs2
                   have hd : (⟨c, .intRange 0 1, .bit a⟩ : ShapeAux).definition.Holds
-                      fullInterp s' := hdefs2 _ haux
+                      fullInterp s' := ShapeState.freshAux_def hb hdefs2
                   exact ShapeState.newHolds_trans
                     (memberTerm_newHolds hm hdefs1)
                     (ShapeState.newHolds_trans
-                      (ShapeState.freshInt01_newHolds hb hd)
+                      (ShapeState.freshAux_newHolds_def hb hd)
                       (ih hr hdefs))
 
 /-- `cardBits` preserves well-formedness. -/
@@ -4059,14 +4066,14 @@ theorem cardBits_wf {taken : List String} {m : Model} {s : String}
                       have hd' : d = a := by simpa [ShapeKind.deps, ShapeKind.sourceDeps,
                         ShapeKind.auxDeps] using hd
                       subst hd'
-                      obtain ⟨ca, hca, hcname, _⟩ := memberTerm_aux hm
+                      obtain ⟨ca, hca, hcname, _⟩ := memberTerm_aux hm hwf.cacheOk
                       exact Or.inr (List.mem_map.mpr ⟨ca, hca, hcname⟩)
                     · intro d hd
                       simp [ShapeKind.sourceDeps] at hd
                     · intro d hd
                       have hd' : d = a := by simpa [ShapeKind.auxDeps] using hd
                       subst hd'
-                      exact memberTerm_aux hm
+                      exact memberTerm_aux hm hwf.cacheOk
                     · simp [ShapeAux.TyOk]
                   exact ih hwf2 hr
 
@@ -4587,19 +4594,6 @@ theorem memberTerm_wf {taken : List String} {m : Model} {st : ShapeState}
               · simp [ShapeAux.TyOk]
   | array es => simp [memberTerm] at h
 
-/-- A membership term's Boolean value decides its source membership. -/
-theorem memberTerm_value_iff {taken : List String} {m : Model} {st : ShapeState}
-    {sa : Expr} {v : Int} {n : String} {st' : ShapeState} {s' : Store}
-    (h : memberTerm taken m st sa v = some (n, st'))
-    (hholds : st'.Holds s')
-    (hdecl : ∀ S us, modelSetUniverse? m S = some us →
-      ∀ sv, s' (Ident.mk S) = some (.setOfInt sv) → ∀ w, sv.Contains w → w ∈ us) :
-    ∃ b : Bool, s' (Ident.mk n) = some (.bool b) ∧
-      (b = true ↔ setArgContains s' sa v) := by
-  rcases memberTerm_sound h hholds hdecl with ⟨hc, hn⟩ | ⟨hnc, hn⟩
-  · exact ⟨true, hn, by simp [hc]⟩
-  · exact ⟨false, hn, by simp [hnc]⟩
-
 /-- A membership term's Boolean value decides its source membership,
     using the functional definitions of the state's auxiliaries. -/
 theorem memberTerm_value_defs {taken : List String} {m : Model} {st : ShapeState}
@@ -4633,13 +4627,9 @@ theorem memberTerm_value_defs {taken : List String} {m : Model} {st : ShapeState
           | int i => simp [memberTerm] at h
           | set sl =>
               simp only [memberTerm, Option.some.injEq] at h
-              have haux : (⟨n, .par .bool,
-                  .const (decide (sl.denote.Contains v))⟩ : ShapeAux) ∈ st'.aux := by
-                rw [ShapeState.freshBool_aux h]
-                exact List.mem_cons_self ..
               have hdef : (⟨n, .par .bool,
                   .const (decide (sl.denote.Contains v))⟩ : ShapeAux).definition.Holds
-                  fullInterp s := hdefs _ haux
+                  fullInterp s := ShapeState.freshAux_def h hdefs
               have hn : s (Ident.mk n) =
                   some (.bool (decide (sl.denote.Contains v))) :=
                 (ShapeAux.holds_const (decide (sl.denote.Contains v)) n s).mp hdef
@@ -4840,12 +4830,31 @@ theorem unionRows_aux_subset {taken : List String} {m : Model}
       have h3 : x ∈ st3.aux := memberTerm_aux_subset hm3 x h2
       exact ih hr x h3
 
+/-- `unionRows` keeps every old cache lookup. -/
+theorem unionRows_cacheLe {taken : List String} {m : Model}
+    {a b c : Expr} {st : ShapeState} {vals : List Int} {st' : ShapeState}
+    (h : unionRows taken m a b c st vals = some st') :
+    st.CacheLe st' := by
+  induction vals generalizing st st' with
+  | nil =>
+      simp only [unionRows, Option.some.injEq] at h
+      subst h
+      exact ShapeState.CacheLe.refl st
+  | cons v vs ih =>
+      obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
+        unionRows_cons_decomp h
+      exact (memberTerm_cacheLe hm1).trans
+        ((memberTerm_cacheLe hm2).trans
+          ((memberTerm_cacheLe hm3).trans
+            ((ShapeState.emit_cacheLe st3 (unionRow av bv cv)).trans (ih hr))))
+
 /-- **Soundness of the union rows**: every emitted row forces the union
     relation at its value. -/
 theorem unionRows_sound {taken : List String} {m : Model} {a b c : Expr}
     {st st' : ShapeState} {vals : List Int} {s : Store}
     (h : unionRows taken m a b c st vals = some st')
     (hholds : st'.Holds s)
+    (hdefs : st'.DefHolds s)
     (hdecl : ∀ S us, modelSetUniverse? m S = some us →
       ∀ sv, s (Ident.mk S) = some (.setOfInt sv) → ∀ w, sv.Contains w → w ∈ us) :
     ∀ v ∈ vals,
@@ -4858,27 +4867,19 @@ theorem unionRows_sound {taken : List String} {m : Model} {a b c : Expr}
       intro w hw
       rcases List.mem_cons.mp hw with hwv | hw
       · rw [hwv]
-        have hsub1 : ∀ c' ∈ st1.cons, c' ∈ st'.cons := by
-          intro c' hc'
-          exact unionRows_cons_subset hr c'
-            (ShapeState.emit_cons_subset c'
-              (memberTerm_cons_subset hm3 c'
-                (memberTerm_cons_subset hm2 c' hc')))
-        have hsub2 : ∀ c' ∈ st2.cons, c' ∈ st'.cons := by
-          intro c' hc'
-          exact unionRows_cons_subset hr c'
-            (ShapeState.emit_cons_subset c'
-              (memberTerm_cons_subset hm3 c' hc'))
-        have hsub3 : ∀ c' ∈ st3.cons, c' ∈ st'.cons := by
-          intro c' hc'
-          exact unionRows_cons_subset hr c'
-            (ShapeState.emit_cons_subset c' hc')
-        have h1 := memberTerm_sound hm1
-          (ShapeState.holds_mono hsub1 hholds) hdecl
-        have h2 := memberTerm_sound hm2
-          (ShapeState.holds_mono hsub2 hholds) hdecl
-        have h3 := memberTerm_sound hm3
-          (ShapeState.holds_mono hsub3 hholds) hdecl
+        have hdefs3 : st3.DefHolds s :=
+          ShapeState.DefHolds.mono (fun x hx => unionRows_aux_subset hr x hx)
+            ((ShapeState.emit_cacheLe st3 (unionRow av bv cv)).trans
+              (unionRows_cacheLe hr)) hdefs
+        have hdefs2 : st2.DefHolds s :=
+          ShapeState.DefHolds.mono (memberTerm_aux_subset hm3)
+            (memberTerm_cacheLe hm3) hdefs3
+        have hdefs1 : st1.DefHolds s :=
+          ShapeState.DefHolds.mono (memberTerm_aux_subset hm2)
+            (memberTerm_cacheLe hm2) hdefs2
+        have h1 := memberTerm_sound hm1 hdefs1 hdecl
+        have h2 := memberTerm_sound hm2 hdefs2 hdecl
+        have h3 := memberTerm_sound hm3 hdefs3 hdecl
         have hrowmem : unionRow av bv cv ∈ st'.cons :=
           unionRows_cons_subset hr _ (by simp [unionRow, ShapeState.emit])
         have hrow := hholds _ hrowmem
@@ -4897,7 +4898,7 @@ theorem unionRows_sound {taken : List String} {m : Model} {a b c : Expr}
           rwa [hpa, hpb] at h
         rw [← hpc]
         exact hpr
-      · exact ih hr hholds w hw
+      · exact ih hr hholds hdefs w hw
 
 /-- The union rows only add auxiliary definitions and satisfied rows. -/
 theorem unionRows_newHolds {taken : List String} {m : Model} {a b c : Expr}
@@ -4925,11 +4926,15 @@ theorem unionRows_newHolds {taken : List String} {m : Model} {a b c : Expr}
       obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
         unionRows_cons_decomp h
       have hdefs3 : st3.DefHolds s :=
-        ShapeState.DefHolds.mono (fun x hx => unionRows_aux_subset hr x hx) hdefs
+        ShapeState.DefHolds.mono (fun x hx => unionRows_aux_subset hr x hx)
+          ((ShapeState.emit_cacheLe st3 (unionRow av bv cv)).trans
+            (unionRows_cacheLe hr)) hdefs
       have hdefs2 : st2.DefHolds s :=
-        ShapeState.DefHolds.mono (memberTerm_aux_subset hm3) hdefs3
+        ShapeState.DefHolds.mono (memberTerm_aux_subset hm3)
+          (memberTerm_cacheLe hm3) hdefs3
       have hdefs1 : st1.DefHolds s :=
-        ShapeState.DefHolds.mono (memberTerm_aux_subset hm2) hdefs2
+        ShapeState.DefHolds.mono (memberTerm_aux_subset hm2)
+          (memberTerm_cacheLe hm2) hdefs2
       obtain ⟨pa, hav, hpa⟩ := memberTerm_value_defs hm1 hdefs1 haVal hdecl
       obtain ⟨pb, hbv, hpb⟩ := memberTerm_value_defs hm2 hdefs2 hbVal hdecl
       obtain ⟨pc, hcv, hpc⟩ := memberTerm_value_defs hm3 hdefs3 hcVal hdecl
@@ -5116,7 +5121,7 @@ theorem rewriteUnion_sound {taken : List String} {m : Model} {st : ShapeState}
   intro i
   by_cases hi : i ∈ ua ++ ub ++ uc
   · have hrow := unionRows_sound hr (by simpa [ShapeState.emitList] using hholds)
-      hdecl i hi
+      hdefs hdecl i hi
     simpa only [setArgContains_iff_of_eval haE, setArgContains_iff_of_eval hbE,
       setArgContains_iff_of_eval hcE] using hrow
   · have hiaMem : i ∉ ua := by
@@ -5281,12 +5286,31 @@ theorem intersectRows_aux_subset {taken : List String} {m : Model}
       have h3 : x ∈ st3.aux := memberTerm_aux_subset hm3 x h2
       exact ih hr x h3
 
+/-- `intersectRows` keeps every old cache lookup. -/
+theorem intersectRows_cacheLe {taken : List String} {m : Model}
+    {a b c : Expr} {st : ShapeState} {vals : List Int} {st' : ShapeState}
+    (h : intersectRows taken m a b c st vals = some st') :
+    st.CacheLe st' := by
+  induction vals generalizing st st' with
+  | nil =>
+      simp only [intersectRows, Option.some.injEq] at h
+      subst h
+      exact ShapeState.CacheLe.refl st
+  | cons v vs ih =>
+      obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
+        intersectRows_cons_decomp h
+      exact (memberTerm_cacheLe hm1).trans
+        ((memberTerm_cacheLe hm2).trans
+          ((memberTerm_cacheLe hm3).trans
+            ((ShapeState.emit_cacheLe st3 (intersectRow av bv cv)).trans (ih hr))))
+
 /-- **Soundness of the intersection rows**: every emitted row forces the
     intersection relation at its value. -/
 theorem intersectRows_sound {taken : List String} {m : Model} {a b c : Expr}
     {st st' : ShapeState} {vals : List Int} {s : Store}
     (h : intersectRows taken m a b c st vals = some st')
     (hholds : st'.Holds s)
+    (hdefs : st'.DefHolds s)
     (hdecl : ∀ S us, modelSetUniverse? m S = some us →
       ∀ sv, s (Ident.mk S) = some (.setOfInt sv) → ∀ w, sv.Contains w → w ∈ us) :
     ∀ v ∈ vals,
@@ -5299,27 +5323,19 @@ theorem intersectRows_sound {taken : List String} {m : Model} {a b c : Expr}
       intro w hw
       rcases List.mem_cons.mp hw with hwv | hw
       · rw [hwv]
-        have hsub1 : ∀ c' ∈ st1.cons, c' ∈ st'.cons := by
-          intro c' hc'
-          exact intersectRows_cons_subset hr c'
-            (ShapeState.emit_cons_subset c'
-              (memberTerm_cons_subset hm3 c'
-                (memberTerm_cons_subset hm2 c' hc')))
-        have hsub2 : ∀ c' ∈ st2.cons, c' ∈ st'.cons := by
-          intro c' hc'
-          exact intersectRows_cons_subset hr c'
-            (ShapeState.emit_cons_subset c'
-              (memberTerm_cons_subset hm3 c' hc'))
-        have hsub3 : ∀ c' ∈ st3.cons, c' ∈ st'.cons := by
-          intro c' hc'
-          exact intersectRows_cons_subset hr c'
-            (ShapeState.emit_cons_subset c' hc')
-        have h1 := memberTerm_sound hm1
-          (ShapeState.holds_mono hsub1 hholds) hdecl
-        have h2 := memberTerm_sound hm2
-          (ShapeState.holds_mono hsub2 hholds) hdecl
-        have h3 := memberTerm_sound hm3
-          (ShapeState.holds_mono hsub3 hholds) hdecl
+        have hdefs3 : st3.DefHolds s :=
+          ShapeState.DefHolds.mono (fun x hx => intersectRows_aux_subset hr x hx)
+            ((ShapeState.emit_cacheLe st3 (intersectRow av bv cv)).trans
+              (intersectRows_cacheLe hr)) hdefs
+        have hdefs2 : st2.DefHolds s :=
+          ShapeState.DefHolds.mono (memberTerm_aux_subset hm3)
+            (memberTerm_cacheLe hm3) hdefs3
+        have hdefs1 : st1.DefHolds s :=
+          ShapeState.DefHolds.mono (memberTerm_aux_subset hm2)
+            (memberTerm_cacheLe hm2) hdefs2
+        have h1 := memberTerm_sound hm1 hdefs1 hdecl
+        have h2 := memberTerm_sound hm2 hdefs2 hdecl
+        have h3 := memberTerm_sound hm3 hdefs3 hdecl
         have hrowmem : intersectRow av bv cv ∈ st'.cons :=
           intersectRows_cons_subset hr _ (by simp [intersectRow, ShapeState.emit])
         have hrow := hholds _ hrowmem
@@ -5338,7 +5354,7 @@ theorem intersectRows_sound {taken : List String} {m : Model} {a b c : Expr}
           rwa [hpa, hpb] at h
         rw [← hpc]
         exact hpr
-      · exact ih hr hholds w hw
+      · exact ih hr hholds hdefs w hw
 
 /-- The intersection rows only add auxiliary definitions and satisfied rows. -/
 theorem intersectRows_newHolds {taken : List String} {m : Model} {a b c : Expr}
@@ -5367,11 +5383,15 @@ theorem intersectRows_newHolds {taken : List String} {m : Model} {a b c : Expr}
       obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
         intersectRows_cons_decomp h
       have hdefs3 : st3.DefHolds s :=
-        ShapeState.DefHolds.mono (fun x hx => intersectRows_aux_subset hr x hx) hdefs
+        ShapeState.DefHolds.mono (fun x hx => intersectRows_aux_subset hr x hx)
+          ((ShapeState.emit_cacheLe st3 (intersectRow av bv cv)).trans
+            (intersectRows_cacheLe hr)) hdefs
       have hdefs2 : st2.DefHolds s :=
-        ShapeState.DefHolds.mono (memberTerm_aux_subset hm3) hdefs3
+        ShapeState.DefHolds.mono (memberTerm_aux_subset hm3)
+          (memberTerm_cacheLe hm3) hdefs3
       have hdefs1 : st1.DefHolds s :=
-        ShapeState.DefHolds.mono (memberTerm_aux_subset hm2) hdefs2
+        ShapeState.DefHolds.mono (memberTerm_aux_subset hm2)
+          (memberTerm_cacheLe hm2) hdefs2
       obtain ⟨pa, hav, hpa⟩ := memberTerm_value_defs hm1 hdefs1 haVal hdecl
       obtain ⟨pb, hbv, hpb⟩ := memberTerm_value_defs hm2 hdefs2 hbVal hdecl
       obtain ⟨pc, hcv, hpc⟩ := memberTerm_value_defs hm3 hdefs3 hcVal hdecl
@@ -5498,7 +5518,7 @@ theorem rewriteIntersect_sound {taken : List String} {m : Model} {st : ShapeStat
   intro i
   by_cases hi : i ∈ (IntSetValue.enumeration (ua ++ ub ++ uc)).sortElems
   · have hrow := intersectRows_sound hr
-      (by simpa [ShapeState.emitList] using hholds) hdecl i hi
+      (by simpa [ShapeState.emitList] using hholds) hdefs hdecl i hi
     simpa only [setArgContains_iff_of_eval haE, setArgContains_iff_of_eval hbE,
       setArgContains_iff_of_eval hcE] using hrow
   · have hiaMem : i ∉ ua := by
@@ -5601,6 +5621,15 @@ theorem rewriteIntersect_aux_subset {taken : List String} {m : Model} {st : Shap
     ∀ x ∈ st.aux, x ∈ st'.aux := by
   obtain ⟨st1, hr, rfl, rfl⟩ := rewriteIntersect_decomp h
   exact intersectRows_aux_subset hr
+
+/-- `rewriteIntersect` preserves cache lookups. -/
+theorem rewriteIntersect_cacheLe {taken : List String} {m : Model} {st : ShapeState}
+    {a b c : Expr} {ua ub uc : List Int} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : rewriteIntersect taken m st a b c ua ub uc = some (st', cs')) :
+    st.CacheLe st' := by
+  obtain ⟨st1, hr, rfl, rfl⟩ := rewriteIntersect_decomp h
+  exact intersectRows_cacheLe hr
 
 /-- `rewriteIntersect` keeps every old constraint. -/
 theorem rewriteIntersect_cons_subset {taken : List String} {m : Model} {st : ShapeState}
@@ -6052,12 +6081,13 @@ theorem memberTerm_decide_eval {taken : List String} {m : Model} {st : ShapeStat
     {sa : Expr} {v : Int} {n : String} {st' stF : ShapeState} {s' : Store}
     (h : memberTerm taken m st sa v = some (n, st'))
     (hsub : ∀ a ∈ st'.aux, a ∈ stF.aux)
+    (hcache : st'.CacheLe stF)
     (hdefs : stF.DefHolds s')
     (hdecl : ∀ S us, modelSetUniverse? m S = some us →
       ∀ sv, s' (Ident.mk S) = some (.setOfInt sv) → ∀ w, sv.Contains w → w ∈ us) :
     ∀ sv : IntSetValue, sa.eval s' = some (.setOfInt sv) →
       s' (Ident.mk n) = some (.bool (decide (sv.Contains v))) := by
-  have hdefs' : st'.DefHolds s' := ShapeState.DefHolds.mono hsub hdefs
+  have hdefs' : st'.DefHolds s' := ShapeState.DefHolds.mono hsub hcache hdefs
   intro sv hev
   cases sa with
   | basic b =>
@@ -6073,11 +6103,9 @@ theorem memberTerm_decide_eval {taken : List String} {m : Model} {st : ShapeStat
                     (by simpa [Expr.eval, BasicExpr.eval] using hev) w hc))
               · simp only [memberTerm, hus, if_neg hv] at h
                 have h' : st.freshBool taken (.const false) = (n, st') := Option.some.inj h
-                have haux : (⟨n, .par .bool, .const false⟩ : ShapeAux) ∈ st'.aux := by
-                  rw [ShapeState.freshBool_aux h']
-                  exact List.mem_cons_self ..
                 have hn : s' (Ident.mk n) = some (.bool false) :=
-                  (ShapeAux.holds_const false n s').mp (hdefs' _ haux)
+                  (ShapeAux.holds_const false n s').mp
+                    (ShapeState.freshAux_def h' hdefs')
                 have hnc : ¬ sv.Contains v := by
                   intro hc
                   exact hv (hdecl S.name us hus sv
@@ -6092,14 +6120,10 @@ theorem memberTerm_decide_eval {taken : List String} {m : Model} {st : ShapeStat
               simp only [memberTerm] at h
               have h' : st.freshBool taken (.const (decide (sl.denote.Contains v))) =
                   (n, st') := Option.some.inj h
-              have haux : (⟨n, .par .bool,
-                  .const (decide (sl.denote.Contains v))⟩ : ShapeAux) ∈ st'.aux := by
-                rw [ShapeState.freshBool_aux h']
-                exact List.mem_cons_self ..
               have hn : s' (Ident.mk n) =
                   some (.bool (decide (sl.denote.Contains v))) :=
                 (ShapeAux.holds_const (decide (sl.denote.Contains v)) n s').mp
-                  (hdefs' _ haux)
+                  (ShapeState.freshAux_def h' hdefs')
               have hsl : sl.denote = sv := by
                 simpa [Expr.eval, BasicExpr.eval, BasicLiteral.denote,
                   SetLiteral.denote] using hev
@@ -6135,6 +6159,35 @@ theorem arrayElemBits_aux_subset {taken : List String} {m : Model} {v : Int} :
               obtain ⟨rfl, rfl⟩ := h
               exact ih st1 bs st2 hr a (memberTerm_aux_subset hm a ha)
 
+/-- `arrayElemBits` preserves cache lookups. -/
+theorem arrayElemBits_cacheLe {taken : List String} {m : Model} {v : Int} :
+    ∀ (es : List BasicExpr) (st : ShapeState) (bits : List String)
+      (st' : ShapeState),
+      arrayElemBits taken m es st v = some (bits, st') →
+      st.CacheLe st' := by
+  intro es
+  induction es with
+  | nil =>
+      intro st bits st' h
+      simp only [arrayElemBits, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+  | cons e rest ih =>
+      intro st bits st' h
+      simp only [arrayElemBits] at h
+      cases hm : memberTerm taken m st (.basic e) v with
+      | none => simp only [hm] at h; simp at h
+      | some p =>
+          obtain ⟨b, st1⟩ := p
+          simp only [hm] at h
+          cases hr : arrayElemBits taken m rest st1 v with
+          | none => simp only [hr] at h; simp at h
+          | some q =>
+              obtain ⟨bs, st2⟩ := q
+              simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h
+              exact (memberTerm_cacheLe hm).trans (ih st1 bs st2 hr)
+
 /-- The bits allocated for one value match the memberships of the element
     expressions. -/
 theorem arrayElemBits_spec {taken : List String} {m : Model} {v : Int}
@@ -6146,6 +6199,7 @@ theorem arrayElemBits_spec {taken : List String} {m : Model} {v : Int}
       (st' : ShapeState),
       arrayElemBits taken m es st v = some (bits, st') →
       (∀ a ∈ st'.aux, a ∈ stF.aux) →
+      st'.CacheLe stF →
       bits.length = es.length ∧
       ∀ (k : Nat) b, bits[k]? = some b → ∀ e sv, es[k]? = some e →
         BasicExpr.eval s' e = some (.setOfInt sv) →
@@ -6153,14 +6207,14 @@ theorem arrayElemBits_spec {taken : List String} {m : Model} {v : Int}
   intro es
   induction es with
   | nil =>
-      intro st bits st' h hsub
+      intro st bits st' h hsub hcache
       simp only [arrayElemBits, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       refine ⟨rfl, ?_⟩
       intro k b hb
       simp at hb
   | cons a rest ih =>
-      intro st bits st' h hsub
+      intro st bits st' h hsub hcache
       simp only [arrayElemBits] at h
       cases hm : memberTerm taken m st (.basic a) v with
       | none => simp only [hm] at h; simp at h
@@ -6177,7 +6231,9 @@ theorem arrayElemBits_spec {taken : List String} {m : Model} {v : Int}
               have hsub1 : ∀ x ∈ st1.aux, x ∈ stF.aux := by
                 intro x hx
                 exact hsub x (arrayElemBits_aux_subset rest st1 bs st2 hr x hx)
-              have hspec := ih st1 bs st2 hr hsub
+              have hcache1 : st1.CacheLe stF :=
+                (arrayElemBits_cacheLe rest st1 bs st2 hr).trans hcache
+              have hspec := ih st1 bs st2 hr hsub hcache
               refine ⟨by simp [hspec.1], ?_⟩
               intro k b hb e sv he hev
               cases k with
@@ -6186,7 +6242,7 @@ theorem arrayElemBits_spec {taken : List String} {m : Model} {v : Int}
                   have he0 : e = a := by simpa using he.symm
                   subst hb0
                   subst he0
-                  exact memberTerm_decide_eval hm hsub1 hdefs hdecl sv hev
+                  exact memberTerm_decide_eval hm hsub1 hcache1 hdefs hdecl sv hev
               | succ k =>
                   have hb' : bs[k]? = some b := by simpa using hb
                   have he' : rest[k]? = some e := by simpa using he
@@ -6442,6 +6498,43 @@ theorem arrayElemRows_aux_subset {taken : List String} {m : Model} {i : BasicExp
                     (memberTerm_aux_subset hm a
                       (arrayElemBits_aux_subset_mem es st bits st1 hb a ha))
 
+/-- `arrayElemRows` preserves cache lookups. -/
+theorem arrayElemRows_cacheLe {taken : List String} {m : Model} {i : BasicExpr}
+    {es : List BasicExpr} {T : String} :
+    ∀ (vals : List Int) (st : ShapeState)
+      (rows : List (Int × List String × String)) (st' : ShapeState),
+      arrayElemRows taken m i es T st vals = some (rows, st') →
+      st.CacheLe st' := by
+  intro vals
+  induction vals with
+  | nil =>
+      intro st rows st' h
+      simp only [arrayElemRows, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+  | cons v vs ih =>
+      intro st rows st' h
+      simp only [arrayElemRows] at h
+      cases hb : arrayElemBits taken m es st v with
+      | none => simp only [hb] at h; simp at h
+      | some p =>
+          obtain ⟨bits, st1⟩ := p
+          simp only [hb] at h
+          cases hm : memberTerm taken m st1 (.basic (.ident (Ident.mk T))) v with
+          | none => simp only [hm] at h; simp at h
+          | some q =>
+              obtain ⟨tv, st2⟩ := q
+              simp only [hm] at h
+              cases hr : arrayElemRows taken m i es T st2 vs with
+              | none => simp only [hr] at h; simp at h
+              | some r =>
+                  obtain ⟨rows', st3⟩ := r
+                  simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact (arrayElemBits_cacheLe es st bits st1 hb).trans
+                    ((memberTerm_cacheLe hm).trans
+                      (ih st2 rows' st3 hr))
+
 /-- `arrayElemBits` keeps every old constraint. -/
 theorem arrayElemBits_cons_subset_mem {taken : List String} {m : Model} {v : Int} :
     ∀ (es : List BasicExpr) (st : ShapeState) (bits : List String)
@@ -6535,6 +6628,7 @@ theorem arrayElemRows_spec {taken : List String} {m : Model} {i : BasicExpr}
       (rows : List (Int × List String × String)) (st' : ShapeState),
       arrayElemRows taken m i es T st vals = some (rows, st') →
       (∀ a ∈ st'.aux, a ∈ stF.aux) →
+      st'.CacheLe stF →
       rows.map (fun r => r.1) = vals ∧
       ∀ r ∈ rows,
         r.2.1.length = es.length ∧
@@ -6545,14 +6639,14 @@ theorem arrayElemRows_spec {taken : List String} {m : Model} {i : BasicExpr}
   intro vals
   induction vals with
   | nil =>
-      intro st rows st' h hsub
+      intro st rows st' h hsub hcache
       simp only [arrayElemRows, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       refine ⟨rfl, ?_⟩
       intro r hr
       simp at hr
   | cons v vs ih =>
-      intro st rows st' h hsub
+      intro st rows st' h hsub hcache
       simp only [arrayElemRows] at h
       cases hb : arrayElemBits taken m es st v with
       | none => simp only [hb] at h; simp at h
@@ -6575,10 +6669,14 @@ theorem arrayElemRows_spec {taken : List String} {m : Model} {i : BasicExpr}
                       (arrayElemRows_aux_subset vs st2 rows' st3 hr a ha)
                   have hsub1 : ∀ a ∈ st1.aux, a ∈ stF.aux :=
                     fun a ha => hsub2 a (memberTerm_aux_subset hm a ha)
+                  have hcache2 : st2.CacheLe stF :=
+                    (arrayElemRows_cacheLe vs st2 rows' st3 hr).trans hcache
+                  have hcache1 : st1.CacheLe stF :=
+                    (memberTerm_cacheLe hm).trans hcache2
                   have hbits := arrayElemBits_spec (taken := taken) (m := m)
                     (v := v) (stF := stF) (s' := s') hdefs hdecl
-                    es st bits st1 hb hsub1
-                  have hspec := ih st2 rows' st3 hr hsub
+                    es st bits st1 hb hsub1 hcache1
+                  have hspec := ih st2 rows' st3 hr hsub hcache
                   refine ⟨?_, ?_⟩
                   · simp [hspec.1]
                   · intro r hr
@@ -6586,7 +6684,7 @@ theorem arrayElemRows_spec {taken : List String} {m : Model} {i : BasicExpr}
                     · refine ⟨hbits.1, ?_, ?_⟩
                       · intro k b hbk e sv he hev
                         exact hbits.2 k b hbk e sv he hev
-                      · exact memberTerm_decide_eval hm hsub2 hdefs hdecl svT hT
+                      · exact memberTerm_decide_eval hm hsub2 hcache2 hdefs hdecl svT hT
                     · exact hspec.2 r hr'
 
 /-- The range checks of an element constraint force an integer index in
@@ -6746,7 +6844,8 @@ theorem arrayElemBits_newHolds {taken : List String} {m : Model} {v : Int} :
               obtain ⟨rfl, rfl⟩ := h
               have hdefs1 : st1.DefHolds s' :=
                 ShapeState.DefHolds.mono
-                  (arrayElemBits_aux_subset rest st1 bs st2 hr) hdefs
+                  (arrayElemBits_aux_subset rest st1 bs st2 hr)
+                  (arrayElemBits_cacheLe rest st1 bs st2 hr) hdefs
               exact ShapeState.newHolds_trans (memberTerm_newHolds hm hdefs1)
                 (ih st1 bs st2 s' hr hdefs) c hc
 
@@ -6787,10 +6886,13 @@ theorem arrayElemRows_newHolds {taken : List String} {m : Model} {i : BasicExpr}
                   have hdefs1 : st1.DefHolds s' :=
                     ShapeState.DefHolds.mono
                       (fun a ha => arrayElemRows_aux_subset vs st2 rows' st3 hr a
-                        (memberTerm_aux_subset hm a ha)) hdefs
+                        (memberTerm_aux_subset hm a ha))
+                      ((memberTerm_cacheLe hm).trans
+                        (arrayElemRows_cacheLe vs st2 rows' st3 hr)) hdefs
                   have hdefs2 : st2.DefHolds s' :=
                     ShapeState.DefHolds.mono
-                      (arrayElemRows_aux_subset vs st2 rows' st3 hr) hdefs
+                      (arrayElemRows_aux_subset vs st2 rows' st3 hr)
+                      (arrayElemRows_cacheLe vs st2 rows' st3 hr) hdefs
                   exact ShapeState.newHolds_trans
                     (arrayElemBits_newHolds es st bits st1 s' hb hdefs1)
                     (ShapeState.newHolds_trans (memberTerm_newHolds hm hdefs2)
@@ -6881,6 +6983,15 @@ theorem rewriteArrayElem_aux_subset {taken : List String} {m : Model}
     ∀ a ∈ st.aux, a ∈ st'.aux := by
   obtain ⟨vals, rows, hvals, hrows, hcs⟩ := rewriteArrayElem_decomp h
   exact arrayElemRows_aux_subset vals st rows st' hrows
+
+/-- `rewriteArrayElem` preserves cache lookups. -/
+theorem rewriteArrayElem_cacheLe {taken : List String} {m : Model}
+    {st : ShapeState} {i : BasicExpr} {es : List BasicExpr} {T : String}
+    {st' : ShapeState} {cs' : List ConstraintItem}
+    (h : rewriteArrayElem taken m st i es T = some (st', cs')) :
+    st.CacheLe st' := by
+  obtain ⟨vals, rows, hvals, hrows, hcs⟩ := rewriteArrayElem_decomp h
+  exact arrayElemRows_cacheLe vals st rows st' hrows
 
 /-- `rewriteArrayElem` keeps every old constraint. -/
 theorem rewriteArrayElem_cons_subset {taken : List String} {m : Model}
@@ -6989,7 +7100,7 @@ theorem rewriteArrayElem_sound {taken : List String} {m : Model}
   have hxslen : xs.length = es.length := mapM_length_option hxs
   have hrowspec := arrayElemRows_spec (taken := taken) (m := m) (i := i) (es := es)
     (T := T) (stF := st') (s' := str) (svT := svT) hdefs hset.2 hT
-    vals st rows st' hrows (fun a ha => ha)
+    vals st rows st' hrows (fun a ha => ha) (ShapeState.CacheLe.refl st')
   generalize hkdef : ii.toNat - 1 = k
   have hii0 : 0 ≤ ii := by omega
   have htoNat : (ii.toNat : Int) = ii := Int.toNat_of_nonneg hii0
@@ -7092,7 +7203,7 @@ theorem rewriteArrayElem_newHolds {taken : List String} {m : Model}
   have hxslen : xs.length = es.length := mapM_length_option hxs
   have hrowspec := arrayElemRows_spec (taken := taken) (m := m) (i := i) (es := es)
     (T := T) (stF := st') (s' := s') (svT := svT) hdefs hset'.2 hT'
-    vals st rows st' hrows (fun a ha => ha)
+    vals st rows st' hrows (fun a ha => ha) (ShapeState.CacheLe.refl st')
   have hi' : i.eval s' = some (.int ii) := by
     rw [basicNames_eval_agree (s := s') (t := s) (b := i) hagree]
     exact hi
@@ -7803,6 +7914,17 @@ theorem rewriteVarMember_aux_subset {taken : List String} {m : Model} {st : Shap
   rw [linkOr_aux]
   exact resultTarget_aux_subset hres a (varMemberTerms_aux_subset hterms a ha)
 
+/-- `rewriteVarMember` preserves cache lookups. -/
+theorem rewriteVarMember_cacheLe {taken : List String} {m : Model} {st : ShapeState}
+    {x s : String} {vals : List Int} {r : BasicExpr} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : rewriteVarMember taken m st x s vals r = some (st', cs')) :
+    st.CacheLe st' := by
+  obtain ⟨tms, st1, target, st2, hterms, hres, rfl, rfl⟩ :=
+    rewriteVarMember_decomp h
+  exact (varMemberTerms_cacheLe hterms).trans
+    ((resultTarget_cacheLe hres).trans (linkOr_cacheLe st2 tms target))
+
 /-- `rewriteVarMember` keeps every old constraint. -/
 theorem rewriteVarMember_cons_subset {taken : List String} {m : Model} {st : ShapeState}
     {x s : String} {vals : List Int} {r : BasicExpr} {st' : ShapeState}
@@ -7895,6 +8017,80 @@ theorem rewriteCard_aux_subset {taken : List String} {m : Model} {st : ShapeStat
                   | bool b => simp at h
                   | set sl => simp at h
 
+/-- `rewriteCard` preserves cache lookups. -/
+theorem rewriteCard_cacheLe {taken : List String} {m : Model} {st : ShapeState}
+    {S : String} {k : BasicExpr} {st' : ShapeState} {cs' : List ConstraintItem}
+    (h : rewriteCard taken m st S k = some (st', cs')) :
+    st.CacheLe st' := by
+  unfold rewriteCard at h
+  cases hm : modelSetUniverse? m S with
+  | none =>
+      simp only [hm, Option.getD_none, List.isEmpty_nil, ite_true] at h
+      cases k with
+      | ident kn =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ShapeState.CacheLe.refl st
+      | lit l =>
+          cases l with
+          | int j =>
+              by_cases hj : j = 0
+              · simp only [hj, ite_true] at h
+                simp only [Option.some.injEq, Prod.mk.injEq] at h
+                obtain ⟨rfl, rfl⟩ := h
+                exact ShapeState.CacheLe.refl st
+              · simp only [if_neg hj] at h
+                simp only [Option.some.injEq, Prod.mk.injEq] at h
+                obtain ⟨rfl, rfl⟩ := h
+                exact ShapeState.emit_cacheLe st falseConstraint
+          | bool b => simp at h
+          | set sl => simp at h
+  | some us' =>
+      rw [hm] at h
+      simp only [Option.getD_some] at h
+      cases us' with
+      | nil =>
+          simp only [List.isEmpty_nil, ite_true] at h
+          cases k with
+          | ident kn =>
+              simp only [Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h
+              exact ShapeState.emit_cacheLe st _
+          | lit l =>
+              cases l with
+              | int j =>
+                  by_cases hj : j = 0
+                  · simp only [hj, ite_true] at h
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h
+                    obtain ⟨rfl, rfl⟩ := h
+                    exact ShapeState.CacheLe.refl st
+                  · simp only [if_neg hj] at h
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h
+                    obtain ⟨rfl, rfl⟩ := h
+                    exact ShapeState.emit_cacheLe st falseConstraint
+              | bool b => simp at h
+              | set sl => simp at h
+      | cons u us =>
+          simp only [List.isEmpty_cons, Bool.false_eq_true, ite_false] at h
+          cases hb : cardBits taken m S st (u :: us) with
+          | none => simp [hb] at h
+          | some p =>
+              obtain ⟨cs, st1⟩ := p
+              simp only [hb] at h
+              cases k with
+              | ident kn =>
+                  simp only [Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact (cardBits_cacheLe hb).trans (ShapeState.emit_cacheLe st1 _)
+              | lit l =>
+                  cases l with
+                  | int j =>
+                      simp only [Option.some.injEq, Prod.mk.injEq] at h
+                      obtain ⟨rfl, rfl⟩ := h
+                      exact (cardBits_cacheLe hb).trans (ShapeState.emit_cacheLe st1 _)
+                  | bool b => simp at h
+                  | set sl => simp at h
+
 /-- `rewriteCard` keeps every old constraint. -/
 theorem rewriteCard_cons_subset {taken : List String} {m : Model} {st : ShapeState}
     {S : String} {k : BasicExpr} {st' : ShapeState} {cs' : List ConstraintItem}
@@ -7977,6 +8173,15 @@ theorem rewriteUnion_aux_subset {taken : List String} {m : Model} {st : ShapeSta
     ∀ x ∈ st.aux, x ∈ st'.aux := by
   obtain ⟨st1, hr, rfl, rfl⟩ := rewriteUnion_decomp h
   exact unionRows_aux_subset hr
+
+/-- `rewriteUnion` preserves cache lookups. -/
+theorem rewriteUnion_cacheLe {taken : List String} {m : Model} {st : ShapeState}
+    {a b c : Expr} {ua ub uc : List Int} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : rewriteUnion taken m st a b c ua ub uc = some (st', cs')) :
+    st.CacheLe st' := by
+  obtain ⟨st1, hr, rfl, rfl⟩ := rewriteUnion_decomp h
+  exact unionRows_cacheLe hr
 
 /-- `rewriteUnion` keeps every old constraint. -/
 theorem rewriteUnion_cons_subset {taken : List String} {m : Model} {st : ShapeState}
@@ -8353,6 +8558,183 @@ theorem shapeRewriteConstraint_aux_subset {taken : List String} {m : Model}
     obtain ⟨rfl, rfl⟩ := h
     exact fun a ha => ha
 
+/-- **The per-constraint rewrite preserves cache lookups.** -/
+theorem shapeRewriteConstraint_cacheLe {taken : List String} {m : Model}
+    {st : ShapeState} {c : ConstraintItem} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : shapeRewriteConstraint taken m st c = some (st', cs')) :
+    st.CacheLe st' := by
+  rcases c with ⟨nm, args, anns⟩
+  unfold shapeRewriteConstraint at h
+  split at h
+  case h_1 =>
+    rename_i xarg sarg rarg hnm hargs
+    have hnm' : nm = Ident.mk "set_in_reif" := ident_eq_of_name hnm
+    have hargs' : args = [.basic xarg, .basic sarg, .basic rarg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact ShapeState.CacheLe.refl st
+      case h_2 =>
+        rename_i us hus
+        split at h
+        case h_1 =>
+          rename_i x
+          split at h
+          case h_1 =>
+            rename_i vals hvals
+            exact rewriteVarMember_cacheLe h
+          case h_2 => simp at h
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ShapeState.CacheLe.refl st
+        case h_3 => simp at h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+    case h_3 => simp at h
+  case h_2 =>
+    rename_i xarg sarg hnm hargs
+    have hnm' : nm = Ident.mk "set_in" := ident_eq_of_name hnm
+    have hargs' : args = [.basic xarg, .basic sarg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact ShapeState.CacheLe.refl st
+      case h_2 =>
+        rename_i us hus
+        split at h
+        case h_1 =>
+          rename_i x
+          split at h
+          case h_1 =>
+            rename_i vals hvals
+            exact rewriteVarMember_cacheLe h
+          case h_2 => simp at h
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ShapeState.CacheLe.refl st
+        case h_3 => simp at h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+    case h_3 => simp at h
+  case h_3 =>
+    rename_i sarg karg hnm hargs
+    have hnm' : nm = Ident.mk "set_card" := ident_eq_of_name hnm
+    have hargs' : args = [.basic sarg, .basic karg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact ShapeState.CacheLe.refl st
+      case h_2 =>
+        rename_i us hus
+        exact rewriteCard_cacheLe h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+    case h_3 => simp at h
+  case h_4 =>
+    rename_i sa sb sc hnm hargs
+    have hnm' : nm = Ident.mk "set_union" := ident_eq_of_name hnm
+    have hargs' : args = [sa, sb, sc] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i ua ub uc hA hB hC
+      exact rewriteUnion_cacheLe h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+  case h_5 =>
+    rename_i iarg es targ hnm hargs
+    have hnm' : nm = Ident.mk "array_var_set_element" := ident_eq_of_name hnm
+    have hargs' : args = [.basic iarg, .array es, .basic targ] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i T
+      split at h
+      case h_1 =>
+        rename_i i
+        split at h
+        case h_1 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ShapeState.CacheLe.refl st
+        case h_2 =>
+          rename_i vals hvals
+          exact rewriteArrayElem_cacheLe h
+      case h_2 =>
+        rename_i x
+        split at h
+        case h_1 =>
+          rename_i vals hvals
+          split at h
+          case h_1 =>
+            simp only [Option.some.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl⟩ := h
+            exact ShapeState.CacheLe.refl st
+          case h_2 =>
+            rename_i us hus
+            exact rewriteArrayElem_cacheLe h
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ShapeState.CacheLe.refl st
+      case h_3 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact ShapeState.CacheLe.refl st
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+  case h_6 =>
+    rename_i sa sb sc hnm hargs
+    have hnm' : nm = Ident.mk "set_intersect" := ident_eq_of_name hnm
+    have hargs' : args = [sa, sb, sc] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i ua ub uc hA hB hC
+      exact rewriteIntersect_cacheLe h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.CacheLe.refl st
+  case h_7 =>
+    simp only [Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact ShapeState.CacheLe.refl st
+
 /-- **The per-constraint rewrite keeps every old constraint.** -/
 theorem shapeRewriteConstraint_cons_subset {taken : List String} {m : Model}
     {st : ShapeState} {c : ConstraintItem} {st' : ShapeState}
@@ -8532,14 +8914,10 @@ theorem shapeRewriteConstraint_cons_subset {taken : List String} {m : Model}
 
 /-! ## Traversal invariants and correctness -/
 
-/-- The initial shape state. -/
-def ShapeState.initial (taken : List String) : ShapeState :=
-  { next := 0, aux := [], decls := [], cons := [], maxLen := maxStrLength taken }
-
 /-- The initial shape state is well-formed. -/
 theorem ShapeState.initial_wf (taken : List String) (m : Model) :
     (ShapeState.initial taken).WF taken m := by
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · intro a ha; simp [ShapeState.initial] at ha
   · rfl
   · exact ⟨[], by simp, by simp, by simp [ShapeState.initial]⟩
@@ -8548,6 +8926,7 @@ theorem ShapeState.initial_wf (taken : List String) (m : Model) :
   · simp [ShapeState.initial, ShapeAux.KindDeps]
   · intro a ha; simp [ShapeState.initial] at ha
   · intro a ha; simp [ShapeState.initial] at ha
+  · intro k n hk; simp [ShapeState.initial] at hk
 
 /-- **The shape traversal preserves well-formedness.** -/
 theorem shapeExpandConstraints_wf {taken : List String} {m : Model}
@@ -8589,6 +8968,26 @@ theorem shapeExpandConstraints_aux_subset {taken : List String} {m : Model}
           simp only [hr, Option.bind_some] at h
           intro a ha
           exact ih h a (shapeRewriteConstraint_aux_subset hr a ha)
+
+/-- **The shape traversal preserves cache lookups.** -/
+theorem shapeExpandConstraints_cacheLe {taken : List String} {m : Model}
+    {cs : List ConstraintItem} {st stF : ShapeState}
+    (h : shapeExpandConstraints taken m cs st = some stF) :
+    st.CacheLe stF := by
+  induction cs generalizing st with
+  | nil =>
+      simp only [shapeExpandConstraints, Option.some.injEq] at h
+      subst h
+      exact ShapeState.CacheLe.refl st
+  | cons c cs ih =>
+      simp only [shapeExpandConstraints] at h
+      cases hr : shapeRewriteConstraint taken m st c with
+      | none => simp [hr] at h
+      | some p =>
+          obtain ⟨st1, cs'⟩ := p
+          simp only [hr, Option.bind_some] at h
+          exact (shapeRewriteConstraint_cacheLe hr).trans
+            ((ShapeState.emitList_cacheLe st1 cs').trans (ih h))
 
 /-- **The shape traversal keeps every old constraint.** -/
 theorem shapeExpandConstraints_cons_subset {taken : List String} {m : Model}
@@ -8634,7 +9033,10 @@ theorem shapeExpandConstraints_sound {taken : List String} {m : Model}
             shapeExpandConstraints_cons_subset (st := st1.emitList cs') h
           have hcons : ∀ c' ∈ st1.cons, c' ∈ stF.cons := fun c' hc' =>
             hcons' c' (ShapeState.emitList_cons_subset c' hc')
-          have hdefs1 : st1.DefHolds s := ShapeState.DefHolds.mono haux hdefs
+          have hcache : st1.CacheLe stF :=
+            (ShapeState.emitList_cacheLe st1 cs').trans
+              (shapeExpandConstraints_cacheLe h)
+          have hdefs1 : st1.DefHolds s := ShapeState.DefHolds.mono haux hcache hdefs
           have hholds1 : (st1.emitList cs').Holds s :=
             ShapeState.holds_mono hcons' hholds
           intro c' hc'
@@ -8669,7 +9071,10 @@ theorem shapeExpandConstraints_newHolds {taken : List String} {m : Model}
           simp only [hr, Option.bind_some] at h
           have hsub : ∀ a ∈ st1.aux, a ∈ stF.aux :=
             shapeExpandConstraints_aux_subset (st := st1.emitList cs') h
-          have hdefs1 : st1.DefHolds s' := ShapeState.DefHolds.mono hsub hdefs
+          have hcache : st1.CacheLe stF :=
+            (ShapeState.emitList_cacheLe st1 cs').trans
+              (shapeExpandConstraints_cacheLe h)
+          have hdefs1 : st1.DefHolds s' := ShapeState.DefHolds.mono hsub hcache hdefs
           exact ShapeState.newHolds_trans
             (shapeRewriteConstraint_newHolds hr hdefs1 (hsrc c (by simp)) hint hset
               hset' (fun x hx => hagree x (hnames c (by simp) x hx)))
@@ -8830,8 +9235,7 @@ theorem shapeExpandModelWith_inv {taken : List String} {m : Model}
     sh.Inv taken m := by
   unfold shapeExpandModelWith at h
   cases hc : shapeExpandConstraints taken m m.constraints
-      { next := 0, aux := [], decls := [], cons := [],
-        maxLen := maxStrLength taken } with
+      (ShapeState.initial taken) with
   | none => simp [hc] at h
   | some stF =>
       rw [hc] at h
@@ -8915,16 +9319,12 @@ theorem shapeExpand_sound {taken : List String} {m : Model}
     exact hdomSat d (hmemsub d hd)
   have hint : ShapeIntDomains m t := ShapeIntDomains.of_varDomains hnd hvdom
   have hset : ShapeSetDomains m t := ShapeSetDomains.of_varDomains hnd hvdom
-  have hdefs : stF.DefHolds t := by
-    intro a ha
-    exact hconsSat _ (by
-      rw [hcons]
-      exact List.mem_reverse.mpr (hstwf.defs a ha))
   have hholds : stF.Holds t := by
     intro c hc
     exact hconsSat c (by
       rw [hcons]
       exact List.mem_reverse.mpr hc)
+  have hdefs : stF.DefHolds t := ShapeState.DefHolds.of_holds hstwf hholds
   refine ⟨?_, hvdom, ?_⟩
   · intro c hc
     exact shapeExpandConstraints_sound hexp hdefs hholds hint hset c hc
@@ -8958,8 +9358,18 @@ theorem shapeExpand_complete {taken : List String} {m : Model}
     (fun d hd => hdomSat d hd)
   have hset' : ShapeSetDomains m (stF.encStore s) :=
     ShapeSetDomains.encStore hstwf hsup hset
-  have hdefs : stF.DefHolds (stF.encStore s) :=
-    fun a ha => ShapeState.aux_definition_holds hnd hsat' hstwf ha
+  have hdefs : stF.DefHolds (stF.encStore s) := by
+    refine ⟨fun a ha => ShapeState.aux_definition_holds hnd hsat' hstwf ha, ?_⟩
+    intro k n hk
+    obtain ⟨a, ha, hname, hkind, hty⟩ := hstwf.cacheOk k n hk
+    have hdef := ShapeState.aux_definition_holds hnd hsat' hstwf ha
+    cases a with
+    | mk an aty ak =>
+        simp only at hname hkind hty
+        subst hname
+        subst hkind
+        subst hty
+        simpa using hdef
   have hnew : (ShapeState.initial taken).NewHolds stF (stF.encStore s) :=
     shapeExpandConstraints_newHolds hexp hdefs hconsSat hint hset hset'
       (fun x hx => ShapeState.encStore_at_taken hstwf hx)

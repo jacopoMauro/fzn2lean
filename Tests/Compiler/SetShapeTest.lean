@@ -97,6 +97,20 @@ def main : IO UInt32 := do
     (containsName shm.model "bool_clause")
   st ← st.check "compileModelFull accepts a variable member model" (compileOk member)
 
+  -- Q3: a repeated membership shape reuses the canonical auxiliary for each
+  -- kind, so two identical constraints allocate no extra Booleans.
+  let member2 :=
+    "var 1..3: x :: output_var;\nvar set of 1..3: S :: output_var;\n\
+     var bool: b1 :: output_var;\nvar bool: b2 :: output_var;\n\
+     constraint set_in_reif(x, S, b1);\nconstraint set_in_reif(x, S, b2);\n\
+     solve satisfy;"
+  let shm2 := shape! member2
+  st ← st.check "repeated variable member shares auxiliaries"
+    (auxBools shm2 == auxBools shm)
+  st ← st.check "repeated variable member keeps both link rows"
+    ((shm2.model.constraints.filter (fun c => c.name.name == "bool_clause")).length ==
+     2 * (shm.model.constraints.filter (fun c => c.name.name == "bool_clause")).length)
+
   -- Cardinality: one membership bit and one bool2int alias per value.
   let card :=
     "var set of 1..4: S :: output_var;\nvar 0..4: k :: output_var;\n\
@@ -220,6 +234,15 @@ def main : IO UInt32 := do
   IO.FS.writeFile solPath "x = 2;\nS = {1};\nb = true;\n----------\n"
   let (badCode, _) ← runCli ["check", posPath.toString, solPath.toString]
   st ← st.check "checker rejects a mutated member witness" (badCode == 1)
+
+  -- Q3: the shared auxiliaries must carry one value satisfying both
+  -- repeated membership constraints, and the witness must check.
+  let (pos2Path, pos2Code, pos2Out) ← runModel dir "pos2" member2
+  st ← st.check "CLI solves the repeated membership model" (pos2Code == 0)
+  let sol2Path := dir / "pos2.sol"
+  IO.FS.writeFile sol2Path pos2Out
+  let (check2Code, _) ← runCli ["check", pos2Path.toString, sol2Path.toString]
+  st ← st.check "checker accepts the repeated membership witness" (check2Code == 0)
 
   -- Union with a result universe too small: the outer value is forced false,
   -- contradicting the required membership.  This must be certified UNSAT.

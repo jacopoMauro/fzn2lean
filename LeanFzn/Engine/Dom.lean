@@ -626,7 +626,225 @@ def sortUniqueInts : List Int → List Int
   | [] => []
   | x :: xs => insertSortedInt x (sortUniqueInts xs)
 
-/-- Sorted, duplicate-free form of an integer array (entry only). -/
+/-- Remove adjacent duplicate entries from a list.  On a list sorted by the
+    non-strict order this leaves exactly the strictly ascending form. -/
+def dedupAdjacent : List Int → List Int
+  | [] => []
+  | x :: xs =>
+      match dedupAdjacent xs with
+      | [] => [x]
+      | y :: ys => if x == y then y :: ys else x :: y :: ys
+
+/-- Merge sort with duplicate removal.  This is the compiled implementation
+    of `sortUniqueInts` (wired by `@[csimp]` below), so entry conversion is
+    `O(n log n)` instead of the quadratic insertion sort. -/
+def mergeSortInts (xs : List Int) : List Int :=
+  dedupAdjacent (xs.mergeSort fun a b => decide (a ≤ b))
+
+/-! ## Proof lemmas for the entry conversion -/
+
+/-! ### Insertion sort -/
+
+theorem mem_insertSortedInt {v x : Int} {xs : List Int} :
+    x ∈ insertSortedInt v xs ↔ x = v ∨ x ∈ xs := by
+  induction xs with
+  | nil => simp [insertSortedInt]
+  | cons y ys ih =>
+      simp only [insertSortedInt]
+      by_cases h1 : v == y
+      · rw [if_pos h1]
+        rw [beq_iff_eq] at h1
+        subst h1
+        simp
+      · rw [if_neg h1]
+        by_cases h2 : v < y
+        · rw [if_pos h2]
+          simp [List.mem_cons]
+        · rw [if_neg h2]
+          simp [List.mem_cons, ih]
+          grind
+
+theorem pairwise_insertSortedInt {v : Int} {xs : List Int}
+    (h : xs.Pairwise (fun a b => a < b)) :
+    (insertSortedInt v xs).Pairwise (fun a b => a < b) := by
+  induction xs with
+  | nil => simp [insertSortedInt]
+  | cons y ys ih =>
+      simp only [insertSortedInt]
+      by_cases h1 : v == y
+      · rw [if_pos h1]
+        exact h
+      · rw [if_neg h1]
+        by_cases h2 : v < y
+        · rw [if_pos h2]
+          rw [List.pairwise_cons]
+          refine ⟨?_, h⟩
+          intro z hz
+          rcases List.mem_cons.mp hz with rfl | hz'
+          · exact h2
+          · have hyz : y < z := (List.pairwise_cons.mp h).1 z hz'
+            omega
+        · rw [if_neg h2]
+          rw [List.pairwise_cons]
+          have hne : ¬(v = y) := by
+            intro he
+            exact h1 (by simpa [he])
+          have hyv : y < v := by omega
+          refine ⟨?_, ih (List.pairwise_cons.mp h).2⟩
+          intro z hz
+          rw [mem_insertSortedInt] at hz
+          rcases hz with rfl | hz'
+          · exact hyv
+          · exact (List.pairwise_cons.mp h).1 z hz'
+
+theorem pairwise_sortUniqueInts (xs : List Int) :
+    (sortUniqueInts xs).Pairwise (fun a b => a < b) := by
+  induction xs with
+  | nil => simp [sortUniqueInts]
+  | cons x xs ih => simpa [sortUniqueInts] using pairwise_insertSortedInt (v := x) ih
+
+theorem mem_sortUniqueInts {x : Int} {xs : List Int} :
+    x ∈ sortUniqueInts xs ↔ x ∈ xs := by
+  induction xs with
+  | nil => simp [sortUniqueInts]
+  | cons y ys ih =>
+      simp [sortUniqueInts, mem_insertSortedInt, ih, List.mem_cons]
+
+/-! ### Merge-sort twin of the insertion sort -/
+
+theorem mem_dedupAdjacent {x : Int} {xs : List Int} :
+    x ∈ dedupAdjacent xs ↔ x ∈ xs := by
+  induction xs generalizing x with
+  | nil => simp [dedupAdjacent]
+  | cons y ys ih =>
+      rw [dedupAdjacent]
+      cases h : dedupAdjacent ys with
+      | nil =>
+          dsimp only
+          rw [h] at ih
+          simp [ih, List.mem_cons]
+      | cons z zs =>
+          dsimp only
+          rw [h] at ih
+          by_cases hz : (y == z) = true
+          · rw [if_pos hz]
+            rw [beq_iff_eq] at hz
+            subst hz
+            have hmem : x ∈ y :: zs ↔ x ∈ ys := ih
+            have hy_mem : y ∈ ys := ih.mp (List.mem_cons_self ..)
+            simp only [List.mem_cons] at hmem ⊢
+            rw [hmem]
+            constructor
+            · intro hx
+              exact Or.inr hx
+            · rintro (rfl | hx)
+              · exact hy_mem
+              · exact hx
+          · rw [if_neg hz]
+            have hmem : x ∈ z :: zs ↔ x ∈ ys := ih
+            simp only [List.mem_cons] at hmem ⊢
+            rw [hmem]
+
+theorem pairwise_dedupAdjacent {xs : List Int}
+    (h : xs.Pairwise (fun a b => a ≤ b)) :
+    (dedupAdjacent xs).Pairwise (fun a b => a < b) := by
+  induction xs with
+  | nil => simp [dedupAdjacent]
+  | cons x xs ih =>
+      have hx := List.pairwise_cons.mp h
+      rw [dedupAdjacent]
+      cases hd : dedupAdjacent xs with
+      | nil =>
+          dsimp only
+          simp
+      | cons y ys =>
+          dsimp only
+          have ih' : (y :: ys).Pairwise (fun a b => a < b) := by
+            rw [← hd]
+            exact ih hx.2
+          by_cases heq : (x == y) = true
+          · rw [if_pos heq]
+            exact ih'
+          · rw [if_neg heq, List.pairwise_cons]
+            refine ⟨?_, ih'⟩
+            intro z hz
+            rcases List.mem_cons.mp hz with hzy | hz
+            · rw [hzy]
+              have hy_mem : y ∈ xs := by
+                have hy : y ∈ dedupAdjacent xs := by
+                  rw [hd]
+                  exact List.mem_cons_self ..
+                exact (mem_dedupAdjacent (x := y)).mp hy
+              have hxy : x ≤ y := hx.1 y hy_mem
+              have hne : x ≠ y := by
+                intro hEq
+                exact heq (by simp [hEq])
+              omega
+            · have hz_xs : z ∈ xs := by
+                have hz' : z ∈ dedupAdjacent xs := by
+                  rw [hd]
+                  exact List.mem_cons_of_mem y hz
+                exact (mem_dedupAdjacent (x := z)).mp hz'
+              have hy_mem : y ∈ xs := by
+                have hy : y ∈ dedupAdjacent xs := by
+                  rw [hd]
+                  exact List.mem_cons_self ..
+                exact (mem_dedupAdjacent (x := y)).mp hy
+              have hxy : x ≤ y := hx.1 y hy_mem
+              have hyz : y < z := List.rel_of_pairwise_cons ih' hz
+              omega
+
+theorem mem_mergeSortInts {x : Int} {xs : List Int} :
+    x ∈ mergeSortInts xs ↔ x ∈ xs := by
+  unfold mergeSortInts
+  rw [mem_dedupAdjacent, List.mem_mergeSort]
+
+theorem pairwise_mergeSortInts (xs : List Int) :
+    (mergeSortInts xs).Pairwise (fun a b => a < b) := by
+  unfold mergeSortInts
+  apply pairwise_dedupAdjacent
+  have h := List.pairwise_mergeSort (le := fun a b : Int => decide (a ≤ b))
+    (fun a b c hab hbc => by
+      rw [decide_eq_true_eq] at hab hbc ⊢
+      exact Int.le_trans hab hbc)
+    (fun a b => by
+      simp only [Bool.or_eq_true, decide_eq_true_eq]
+      exact Int.le_total a b)
+    xs
+  exact List.Pairwise.imp (fun {a b} hab => of_decide_eq_true hab) h
+
+theorem nodup_of_pairwise_lt {xs : List Int}
+    (h : xs.Pairwise (fun a b => a < b)) : xs.Nodup :=
+  List.nodup_iff_pairwise_ne.mpr
+    (List.Pairwise.imp (fun {a b} hab heq => by
+      rw [heq] at hab
+      exact Int.lt_irrefl b hab) h)
+
+theorem mergeSortInts_eq_sortUniqueInts (xs : List Int) :
+    mergeSortInts xs = sortUniqueInts xs := by
+  have h₁ := pairwise_mergeSortInts xs
+  have h₂ := pairwise_sortUniqueInts xs
+  have hp : (mergeSortInts xs).Perm (sortUniqueInts xs) :=
+    (List.perm_ext_iff_of_nodup (nodup_of_pairwise_lt h₁) (nodup_of_pairwise_lt h₂)).mpr
+      (fun a => by rw [mem_mergeSortInts, mem_sortUniqueInts])
+  exact List.Perm.eq_of_pairwise (le := fun a b => a < b)
+    (fun a b _ _ hab hba => absurd hba (Int.lt_asymm hab)) h₁ h₂ hp
+
+/-- The compiled implementation of `sortUniqueInts` is the merge sort.
+
+    This registration deliberately precedes `sortedUniqueInts`: `@[csimp]`
+    only rewrites calls in declarations compiled after the attribute is
+    registered, and `sortedUniqueInts` is the entry-conversion call site.
+    Its logical body stays on the reducible insertion sort so kernel
+    reduction (`decide` in tests) still works. -/
+@[csimp] theorem sortUniqueInts_eq_mergeSortInts :
+    @sortUniqueInts = @mergeSortInts := by
+  funext xs
+  exact (mergeSortInts_eq_sortUniqueInts xs).symm
+
+/-- Sorted, duplicate-free form of an integer array (entry only).  The
+    logical body is the insertion sort so kernel reduction works; `@[csimp]`
+    above makes compiled code use the `O(n log n)` merge-sort twin. -/
 def sortedUniqueInts (a : Array Int) : Array Int := (sortUniqueInts a.toList).toArray
 
 /-- The complement of `vs` inside `[lo, hi]`, ascending.  `vs` is expected
@@ -759,75 +977,6 @@ def DomC.WF : DomC → Prop
       holes.toList.Pairwise (fun a b => a < b) ∧
         ∀ h ∈ holes.toList, lo ≤ h ∧ h ≤ hi
   | .sparse values => values.toList.Pairwise (fun a b => a < b)
-
-/-! ## Proof lemmas for the entry conversion -/
-
-/-! ### Insertion sort -/
-
-theorem mem_insertSortedInt {v x : Int} {xs : List Int} :
-    x ∈ insertSortedInt v xs ↔ x = v ∨ x ∈ xs := by
-  induction xs with
-  | nil => simp [insertSortedInt]
-  | cons y ys ih =>
-      simp only [insertSortedInt]
-      by_cases h1 : v == y
-      · rw [if_pos h1]
-        rw [beq_iff_eq] at h1
-        subst h1
-        simp
-      · rw [if_neg h1]
-        by_cases h2 : v < y
-        · rw [if_pos h2]
-          simp [List.mem_cons]
-        · rw [if_neg h2]
-          simp [List.mem_cons, ih]
-          grind
-
-theorem pairwise_insertSortedInt {v : Int} {xs : List Int}
-    (h : xs.Pairwise (fun a b => a < b)) :
-    (insertSortedInt v xs).Pairwise (fun a b => a < b) := by
-  induction xs with
-  | nil => simp [insertSortedInt]
-  | cons y ys ih =>
-      simp only [insertSortedInt]
-      by_cases h1 : v == y
-      · rw [if_pos h1]
-        exact h
-      · rw [if_neg h1]
-        by_cases h2 : v < y
-        · rw [if_pos h2]
-          rw [List.pairwise_cons]
-          refine ⟨?_, h⟩
-          intro z hz
-          rcases List.mem_cons.mp hz with rfl | hz'
-          · exact h2
-          · have hyz : y < z := (List.pairwise_cons.mp h).1 z hz'
-            omega
-        · rw [if_neg h2]
-          rw [List.pairwise_cons]
-          have hne : ¬(v = y) := by
-            intro he
-            exact h1 (by simpa [he])
-          have hyv : y < v := by omega
-          refine ⟨?_, ih (List.pairwise_cons.mp h).2⟩
-          intro z hz
-          rw [mem_insertSortedInt] at hz
-          rcases hz with rfl | hz'
-          · exact hyv
-          · exact (List.pairwise_cons.mp h).1 z hz'
-
-theorem pairwise_sortUniqueInts (xs : List Int) :
-    (sortUniqueInts xs).Pairwise (fun a b => a < b) := by
-  induction xs with
-  | nil => simp [sortUniqueInts]
-  | cons x xs ih => simpa [sortUniqueInts] using pairwise_insertSortedInt (v := x) ih
-
-theorem mem_sortUniqueInts {x : Int} {xs : List Int} :
-    x ∈ sortUniqueInts xs ↔ x ∈ xs := by
-  induction xs with
-  | nil => simp [sortUniqueInts]
-  | cons y ys ih =>
-      simp [sortUniqueInts, mem_insertSortedInt, ih, List.mem_cons]
 
 theorem pairwise_sortedUniqueInts (a : Array Int) :
     (sortedUniqueInts a).toList.Pairwise (fun x y => x < y) := by

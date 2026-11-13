@@ -19,8 +19,4 @@ Historical regression tests and diagnostic tools mirror this layer under
 `Tests/Legacy/` and build with `lake build Tests.Legacy`. Current Core tests
 remain outside that directory and cannot import these historical APIs.
 
-As of the 2026-11-10 working-tree review, shared representation/configuration
-changes also update Legacy adapters and tests. These edits are uncommitted
-relative to `0246b07`. The current 555-module boundary audit confirms public
-Core/CLI independence from Legacy; the historical native suites were not rerun
-in this review. See [Tests/README.md](../../Tests/README.md) for validation.
+See [Tests/README.md](../../Tests/README.md) for validation commands.

@@ -68,6 +68,23 @@ def coreSolveFullPre (p : CompiledProblem DomConstraint) (o : SearchConfig)
     (prev : Option (List Value)) (fuel : Nat) : CoreResult × EngineStats :=
   coreSolveFullWith (presolveProblem o p) o prev fuel
 
+/-- Core's fuel-bounded entry after optional certified preprocessing, with an
+already converted domain array for the preprocessed problem. -/
+def coreSolveFullPrePrepared (p : CompiledProblem DomConstraint) (o : SearchConfig)
+    (prev : Option (List Value)) (fuel : Nat) (doms : Array DomC)
+    (hconv : convertDomains (presolveProblem o p).domains = some doms) :
+    CoreResult × EngineStats :=
+  coreSolveFullWithPrepared (presolveProblem o p) o prev fuel doms hconv
+
+/-- The prepared preprocessed entry equals the ordinary one. -/
+theorem coreSolveFullPrePrepared_eq (p : CompiledProblem DomConstraint)
+    (o : SearchConfig) (prev : Option (List Value)) (fuel : Nat)
+    (doms : Array DomC)
+    (hconv : convertDomains (presolveProblem o p).domains = some doms) :
+    coreSolveFullPrePrepared p o prev fuel doms hconv = coreSolveFullPre p o prev fuel := by
+  unfold coreSolveFullPrePrepared coreSolveFullPre
+  exact coreSolveFullWithPrepared_eq _ o prev fuel doms hconv
+
 /-- Core's verdict after optional certified preprocessing. -/
 def coreSolvePre (p : CompiledProblem DomConstraint) (o : SearchConfig)
     (prev : Option (List Value)) (fuel : Nat) : CoreResult :=

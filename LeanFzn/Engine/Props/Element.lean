@@ -309,6 +309,18 @@ def aieEntries (xs : List Int) (lo hi : Int) : List Int :=
     | some (.int v) => some v
     | _ => none
 
+/-- `aieEntries` with the table array already hoisted by the caller. -/
+def aieEntriesA (xa : Array Value) (lo hi : Int) : List Int :=
+  (List.range (hi - lo + 1).toNat).filterMap fun n =>
+    match valuesGet1A xa (lo + Int.ofNat n) with
+    | some (.int v) => some v
+    | _ => none
+
+theorem aieEntriesA_eq (xs : List Int) (lo hi : Int) :
+    aieEntriesA (xs.map Value.int).toArray lo hi = aieEntries xs lo hi := by
+  unfold aieEntriesA aieEntries
+  rfl
+
 /-- Every in-range table read belongs to the segment entry list. -/
 theorem mem_aieEntries {xs : List Int} {lo hi idx v : Int}
     (hlo : lo ≤ idx) (hhi : idx ≤ hi)
@@ -416,6 +428,42 @@ def aieHullPrunes (di dk : DomC) (xs : List Int) (i k : Nat) :
           let bps := aieHullBoundsPrunes di xs lo hi m M dk i k
           safePrunes dk
             (if xs.length ≤ 16 ∧ 0 < vps.length then vps else bps ++ vps)
+
+/-- `aieHullBase` with the table array hoisted. -/
+def aieHullBaseA (xa : Array Value) (di : DomC) :
+    Option (Int × Int × Int × Int × List Int) :=
+  di.lo?.bind fun lo =>
+    di.hi?.bind fun hi =>
+      if hi - lo + 1 ≤ 0 || 256 < hi - lo + 1 then none
+      else
+        let es := aieEntriesA xa lo hi
+        es.min?.bind fun m =>
+          es.max?.map fun M => (lo, hi, m, M, es)
+
+theorem aieHullBaseA_eq (xs : List Int) (di : DomC) :
+    aieHullBaseA (xs.map Value.int).toArray di = aieHullBase di xs := by
+  unfold aieHullBaseA aieHullBase
+  simp only [aieEntriesA_eq]
+
+/-- `aieHullPrunes` with the table array hoisted. -/
+def aieHullPrunesA (xa : Array Value) (xs : List Int) (di dk : DomC)
+    (i k : Nat) : List (Literal × Clause) :=
+  match dk.fixedValue with
+  | some _ => []
+  | none =>
+      match aieHullBaseA xa di with
+      | none => []
+      | some (lo, hi, m, M, es) =>
+          let vps := aieHullValuePrunes lo hi m M es dk i k
+          let bps := aieHullBoundsPrunes di xs lo hi m M dk i k
+          safePrunes dk
+            (if xs.length ≤ 16 ∧ 0 < vps.length then vps else bps ++ vps)
+
+theorem aieHullPrunesA_eq (xs : List Int) (di dk : DomC) (i k : Nat) :
+    aieHullPrunesA (xs.map Value.int).toArray xs di dk i k =
+      aieHullPrunes di dk xs i k := by
+  unfold aieHullPrunesA aieHullPrunes
+  simp only [aieHullBaseA_eq]
 
 /-- The base computation exposes the hull endpoints, image bounds, and
 entry list it used. -/
@@ -831,7 +879,7 @@ def aieOutA (xa : Array Value) (xs : List Int) (di dk : DomC) (i k : Nat) : AieO
       | none =>
           if aieHasGoodA xa di dk then
             let ps := aieBadIndexPrunesA xa di dk i k ++
-              aieHullPrunes di dk xs i k
+              aieHullPrunesA xa xs di dk i k
             if ps.isEmpty then .fix else .prune ps
           else
             match aieWipeoutA xa xs di dk i k with
@@ -841,8 +889,8 @@ def aieOutA (xa : Array Value) (xs : List Int) (di dk : DomC) (i k : Nat) : AieO
 theorem aieOutA_eq (xs : List Int) (di dk : DomC) (i k : Nat) :
     aieOutA (xs.map Value.int).toArray xs di dk i k = aieOut di dk xs i k := by
   unfold aieOutA aieOut
-  simp only [aieHasGoodA_eq, aieBadIndexPrunesA_eq, aieWipeoutA_eq,
-    valuesGet1A_toArray]
+  simp only [aieHasGoodA_eq, aieBadIndexPrunesA_eq, aieHullPrunesA_eq,
+    aieWipeoutA_eq, valuesGet1A_toArray]
 
 /-- Runtime twin of `aieOut` used by compiled code only. -/
 def aieOutFast (di dk : DomC) (xs : List Int) (i k : Nat) : AieOut :=
@@ -1394,16 +1442,20 @@ theorem aieOut_prune_cases {di dk : DomC} {xs : List Int} {i k : Nat}
 def arrayIntElementPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
     (xs : List Int) (i k : Nat)
     (hmem : DomConstraint.arrayIntElementSlot xs i k ∈ p.constraints) : PropV2 p T :=
+  let xa := (xs.map Value.int).toArray
   { vars := (dcSlotsFull (.arrayIntElementSlot xs i k)).toArray
     events := #[(i, .bounds), (k, .bounds), (i, .fix), (k, .fix)]
     run := fun view =>
       let di := view.doms.getD i DomC.empty
       let dk := view.doms.getD k DomC.empty
-      match hout : aieOut di dk xs i k with
+      match hout : aieOutA xa xs di dk i k with
       | .fix => .fix
       | .conflict ls =>
           .conflict (EClause.ofLiterals p T ls (by
-            rcases aieOut_conflict_cases hout with
+            have hout' : aieOut di dk xs i k = .conflict ls := by
+              rw [← aieOutA_eq]
+              exact hout
+            rcases aieOut_conflict_cases hout' with
               ⟨idx, hfix, hnone, rfl⟩ | ⟨idx, v, hfix, hent, hbad, rfl⟩ | hw
             · exact aie_entailed_out p xs i k hmem hnone
             · exact aie_entailed_noSupp p xs i k hmem hent
@@ -1414,7 +1466,10 @@ def arrayIntElementPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
           .prune (mkElemPruneArray p T pairs
             (fun l reason hlr =>
               aiePrunePairs_entailed p xs i k hmem di dk (by
-                have hp := (aieOut_prune_cases hout).1
+                have hout' : aieOut di dk xs i k = .prune pairs := by
+                  rw [← aieOutA_eq]
+                  exact hout
+                have hp := (aieOut_prune_cases hout').1
                 rwa [hp] at hlr))) }
 
 theorem arrayIntElementPropWith_run_conflict
@@ -1437,14 +1492,17 @@ theorem arrayIntElementPropWith_run_conflict
         aieWipeout (view.doms.getD i DomC.empty)
           (view.doms.getD k DomC.empty) xs i k = some ls ∧
         T.decodeClause ec.lits = ls) := by
-  unfold arrayIntElementPropWith at h
-  simp only [arrayIntElementPropWith] at h
+  dsimp only [arrayIntElementPropWith] at h
   split at h
   · cases h
   · rename_i ls hout
     injection h with hec
     subst hec
-    rcases aieOut_conflict_cases hout with
+    have hout' : aieOut (view.doms.getD i DomC.empty)
+        (view.doms.getD k DomC.empty) xs i k = .conflict ls := by
+      rw [← aieOutA_eq]
+      exact hout
+    rcases aieOut_conflict_cases hout' with
       ⟨idx, hfix, hnone, rfl⟩ | ⟨idx, v, hfix, hent, hbad, rfl⟩ | hw
     · exact Or.inl ⟨idx, hfix, hnone, LitTable.decodeClause_map_pLit T _⟩
     · exact Or.inr (Or.inl ⟨idx, v, hfix, hent, hbad,
@@ -1471,15 +1529,18 @@ theorem arrayIntElementPropWith_run_prune
             (view.doms.getD k DomC.empty) xs = true)) ∧
       (∀ q ∈ ps.toList, ∃ (l : Literal) (reason : Clause),
         (l, reason) ∈ pairs ∧ q.1.lit = l ∧ T.decodeClause q.2.lits = reason) := by
-  unfold arrayIntElementPropWith at h
-  simp only [arrayIntElementPropWith] at h
+  dsimp only [arrayIntElementPropWith] at h
   split at h
   · cases h
   · cases h
   · rename_i pairs hout
     injection h with hps
     subst hps
-    obtain ⟨hpairs, hsource⟩ := aieOut_prune_cases hout
+    have hout' : aieOut (view.doms.getD i DomC.empty)
+        (view.doms.getD k DomC.empty) xs i k = .prune pairs := by
+      rw [← aieOutA_eq]
+      exact hout
+    obtain ⟨hpairs, hsource⟩ := aieOut_prune_cases hout'
     exact ⟨pairs, hpairs, hsource,
       fun q hq => mkElemPruneArray_mem p T pairs _ hq⟩
 
@@ -1619,13 +1680,21 @@ theorem arrayIntElementPropWith_run_fix_of_bounds (p : CompiledProblem DomConstr
       (view.doms.getD k DomC.empty) xs i k = .fix := by
     unfold aieOut
     rw [hb]
-  simp only [arrayIntElementPropWith]
+  dsimp only [arrayIntElementPropWith]
   split
   · rfl
   · rename_i ls hout
-    exact absurd hout (by rw [ha]; simp)
+    have hout' : aieOut (view.doms.getD i DomC.empty)
+        (view.doms.getD k DomC.empty) xs i k = .conflict ls := by
+      rw [← aieOutA_eq]
+      exact hout
+    exact absurd hout' (by rw [ha]; simp)
   · rename_i pairs hout
-    exact absurd hout (by rw [ha]; simp)
+    have hout' : aieOut (view.doms.getD i DomC.empty)
+        (view.doms.getD k DomC.empty) xs i k = .prune pairs := by
+      rw [← aieOutA_eq]
+      exact hout
+    exact absurd hout' (by rw [ha]; simp)
 
 /-! ## Stage 2: the variable-table integer element -/
 
@@ -2120,6 +2189,14 @@ theorem avieOutOfFA_eq (doms : Array DomC) (is : List Nat) (i k : Nat)
   subst hdk
   unfold avieOutOfFA avieOutOf aviePrunePairs
   simp only [avieEntryA_eq, aviePrunePairsOfFA_eq]
+
+/-- The `avieOutFA` equation at the domains read by `avieOut`. -/
+theorem avieOutOfFA_getD_eq (doms : Array DomC) (is : List Nat) (i k : Nat) :
+    avieOutOfFA doms is.toArray is i k
+        (doms.getD i DomC.empty) (doms.getD k DomC.empty) =
+      avieOut doms is i k := by
+  unfold avieOut
+  exact avieOutOfFA_eq doms is i k _ _ rfl rfl
 
 /-- Runtime twin of `avieOut` used by compiled code only. -/
 def avieOutFast (doms : Array DomC) (is : List Nat) (i k : Nat) : AvieOut :=
@@ -2803,16 +2880,21 @@ theorem avieOut_prune_cases {doms : Array DomC} {is : List Nat} {i k : Nat}
 def arrayVarIntElementPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
     (is : List Nat) (i k : Nat)
     (hmem : DomConstraint.arrayVarIntElementSlot is i k ∈ p.constraints) : PropV2 p T :=
+  let isa := is.toArray
   { vars := (dcSlotsFull (.arrayVarIntElementSlot is i k)).toArray
     events := ((is.map fun j => (j, EventKind.bounds)) ++
       [(i, EventKind.bounds), (k, EventKind.bounds),
         (i, EventKind.fix), (k, EventKind.fix)]).toArray
     run := fun view =>
-      match hout : avieOut view.doms is i k with
+      match hout : avieOutOfFA view.doms isa is i k
+          (view.doms.getD i DomC.empty) (view.doms.getD k DomC.empty) with
       | .fix => .fix
       | .conflict ls =>
           .conflict (EClause.ofLiterals p T ls (by
-            rcases avieOut_conflict_cases hout with
+            have hout' : avieOut view.doms is i k = .conflict ls := by
+              rw [← avieOutOfFA_getD_eq view.doms is i k]
+              exact hout
+            rcases avieOut_conflict_cases hout' with
               ⟨idx, hfix, hnone, rfl⟩ |
               ⟨idx, j, jlo, jhi, klo, khi, hfix, hent, hbj, hbk, hlt, rfl⟩ |
               ⟨idx, j, jlo, jhi, klo, khi, hfix, hent, hbj, hbk, hlt, rfl⟩ |
@@ -2827,7 +2909,10 @@ def arrayVarIntElementPropWith (p : CompiledProblem DomConstraint) (T : LitTable
           .prune (mkElemPruneArray p T pairs
             (fun l reason hlr =>
               aviePrunePairs_entailed p is i k hmem view.doms (by
-                have hp := (avieOut_prune_cases hout).1
+                have hout' : avieOut view.doms is i k = .prune pairs := by
+                  rw [← avieOutOfFA_getD_eq view.doms is i k]
+                  exact hout
+                have hp := (avieOut_prune_cases hout').1
                 rwa [hp] at hlr))) }
 
 theorem arrayVarIntElementPropWith_run_conflict
@@ -2866,14 +2951,16 @@ theorem arrayVarIntElementPropWith_run_conflict
          (∃ w : Int, (view.doms.getD k DomC.empty).fixedValue = some (.int w) ∧
             (view.doms.getD j DomC.empty).memIntView w = false ∧
             T.decodeClause ec.lits = [posNe k w, posNe i idx, negNe j w]))) := by
-  unfold arrayVarIntElementPropWith at h
-  simp only [arrayVarIntElementPropWith] at h
+  dsimp only [arrayVarIntElementPropWith] at h
   split at h
   · cases h
   · rename_i ls hout
     injection h with hec
     subst hec
-    rcases avieOut_conflict_cases hout with
+    have hout' : avieOut view.doms is i k = .conflict ls := by
+      rw [← avieOutOfFA_getD_eq view.doms is i k]
+      exact hout
+    rcases avieOut_conflict_cases hout' with
       ⟨idx, hfix, hnone, rfl⟩ |
       ⟨idx, j, jlo, jhi, klo, khi, hfix, hent, hbj, hbk, hlt, rfl⟩ |
       ⟨idx, j, jlo, jhi, klo, khi, hfix, hent, hbj, hbk, hlt, rfl⟩ |
@@ -3034,15 +3121,17 @@ theorem arrayVarIntElementPropWith_run_prune
        (view.doms.getD i DomC.empty).fixedValue = none) ∧
       (∀ q ∈ ps.toList, ∃ (l : Literal) (reason : Clause),
         (l, reason) ∈ pairs ∧ q.1.lit = l ∧ T.decodeClause q.2.lits = reason) := by
-  unfold arrayVarIntElementPropWith at h
-  simp only [arrayVarIntElementPropWith] at h
+  dsimp only [arrayVarIntElementPropWith] at h
   split at h
   · cases h
   · cases h
   · rename_i pairs hout
     injection h with hps
     subst hps
-    obtain ⟨hpairs, hsource⟩ := avieOut_prune_cases hout
+    have hout' : avieOut view.doms is i k = .prune pairs := by
+      rw [← avieOutOfFA_getD_eq view.doms is i k]
+      exact hout
+    obtain ⟨hpairs, hsource⟩ := avieOut_prune_cases hout'
     exact ⟨pairs, hpairs, hsource,
       fun q hq => mkElemPruneArray_mem p T pairs _ hq⟩
 
@@ -3646,15 +3735,23 @@ theorem avbeOut_prune_cases {doms : Array DomC} {is : List Nat} {i k : Nat}
 def arrayVarBoolElementPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
     (is : List Nat) (i k : Nat)
     (hmem : DomConstraint.arrayVarBoolElementSlot is i k ∈ p.constraints) : PropV2 p T :=
+  let isa := is.toArray
   { vars := (dcSlotsFull (.arrayVarBoolElementSlot is i k)).toArray
     events := ((is.map fun j => (j, EventKind.fix)) ++
       [(i, EventKind.bounds), (i, EventKind.fix), (k, EventKind.fix)]).toArray
     run := fun view =>
-      match hout : avbeOut view.doms is i k with
+      let di := view.doms.getD i DomC.empty
+      let dk := view.doms.getD k DomC.empty
+      match hout : avbeOutFA view.doms isa i k di dk
+          (intBounds di) (intBounds dk) di.fixedValue dk.fixedValue
+          (avbeGuardB view.doms is i k) with
       | .fix => .fix
       | .conflict ls =>
           .conflict (EClause.ofLiterals p T ls (by
-            rcases avbeOut_conflict_cases hout with
+            have hout' : avbeOut view.doms is i k = .conflict ls := by
+              rw [← avbeOutFA_eq view.doms is i k]
+              exact hout
+            rcases avbeOut_conflict_cases hout' with
               ⟨idx, hfix, hnone, rfl⟩ |
               ⟨idx, j, v, b, hfix, hent, hfk, hfj, hne, rfl⟩
             · exact avbe_entailed_out p is i k hmem hnone
@@ -3663,7 +3760,10 @@ def arrayVarBoolElementPropWith (p : CompiledProblem DomConstraint) (T : LitTabl
           .prune (mkElemPruneArray p T pairs
             (fun l reason hlr =>
               avbePrunePairs_entailed p is i k hmem view.doms (by
-                have hp := (avbeOut_prune_cases hout).1
+                have hout' : avbeOut view.doms is i k = .prune pairs := by
+                  rw [← avbeOutFA_eq view.doms is i k]
+                  exact hout
+                have hp := (avbeOut_prune_cases hout').1
                 rwa [hp] at hlr))) }
 
 theorem arrayVarBoolElementPropWith_run_conflict
@@ -3685,13 +3785,16 @@ theorem arrayVarBoolElementPropWith_run_conflict
         b ≠ v ∧
         T.decodeClause ec.lits =
           [posNe i idx, posBool k (!v), posBool j v]) := by
-  simp only [arrayVarBoolElementPropWith] at h
+  dsimp only [arrayVarBoolElementPropWith] at h
   split at h
   · cases h
   · rename_i ls hout
     injection h with hec
     subst hec
-    rcases avbeOut_conflict_cases hout with
+    have hout' : avbeOut view.doms is i k = .conflict ls := by
+      rw [← avbeOutFA_eq view.doms is i k]
+      exact hout
+    rcases avbeOut_conflict_cases hout' with
       ⟨idx, hfix, hnone, rfl⟩ |
       ⟨idx, j, v, b, hfix, hent, hfk, hfj, hne, rfl⟩
     · exact Or.inl ⟨idx, hfix, hnone, LitTable.decodeClause_map_pLit T _⟩
@@ -3768,14 +3871,17 @@ theorem arrayVarBoolElementPropWith_run_prune
        (view.doms.getD i DomC.empty).fixedValue = none) ∧
       (∀ q ∈ ps.toList, ∃ (l : Literal) (reason : Clause),
         (l, reason) ∈ pairs ∧ q.1.lit = l ∧ T.decodeClause q.2.lits = reason) := by
-  simp only [arrayVarBoolElementPropWith] at h
+  dsimp only [arrayVarBoolElementPropWith] at h
   split at h
   · cases h
   · cases h
   · rename_i pairs hout
     injection h with hps
     subst hps
-    obtain ⟨hpairs, hsource⟩ := avbeOut_prune_cases hout
+    have hout' : avbeOut view.doms is i k = .prune pairs := by
+      rw [← avbeOutFA_eq view.doms is i k]
+      exact hout
+    obtain ⟨hpairs, hsource⟩ := avbeOut_prune_cases hout'
     exact ⟨pairs, hpairs, hsource,
       fun q hq => mkElemPruneArray_mem p T pairs _ hq⟩
 
@@ -3875,12 +3981,18 @@ theorem arrayVarBoolElementPropWith_run_fix_of_malformed
     · exact avbeOut_eq_fix_of_index_bounds_none h
     · exact avbeOut_eq_fix_of_result_bounds_none h
     · exact avbeOut_eq_fix_of_guard_false h
-  simp only [arrayVarBoolElementPropWith]
+  dsimp only [arrayVarBoolElementPropWith]
   split
   · rfl
   · rename_i ls hout
-    exact absurd hout (by rw [ha]; simp)
+    have hout' : avbeOut view.doms is i k = .conflict ls := by
+      rw [← avbeOutFA_eq view.doms is i k]
+      exact hout
+    exact absurd hout' (by rw [ha]; simp)
   · rename_i pairs hout
-    exact absurd hout (by rw [ha]; simp)
+    have hout' : avbeOut view.doms is i k = .prune pairs := by
+      rw [← avbeOutFA_eq view.doms is i k]
+      exact hout
+    exact absurd hout' (by rw [ha]; simp)
 
 end LeanFzn.Engine

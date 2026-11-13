@@ -22,6 +22,7 @@ DAG:
 -/
 import LeanFzn.Compiler.Compile
 import LeanFzn.Solver.Core.Enumerate
+import Std.Data.HashSet.Lemmas
 
 namespace LeanFzn.Compiler
 open LeanFzn.Solver.Propagation.DomainFiltering
@@ -40,15 +41,67 @@ instance : ReflBEq DomConstraint where
 instance : LawfulBEq DomConstraint where
   eq_of_beq := by intro a b h; simpa using h
 
+/-! ### Hashing vocabulary
+
+The linear-time deduplication needs a hash for each constraint and the values
+it contains.  The instances are derived here rather than on the model types so
+that `LeanFzn/Semantics` and the engine representation stay untouched. -/
+
+deriving instance Hashable for LeanFzn.Semantics.IntSetValue
+deriving instance Hashable for LeanFzn.Semantics.Value
+deriving instance Hashable for DomIntArg
+deriving instance Hashable for DomConstraint
+
+/-- Hash-set deduplication: `seen` holds the elements already emitted, `as` the
+elements still to visit.  This is the linear-time twin of `List.eraseDups`. -/
+def dedupGo (seen : Std.HashSet DomConstraint) : List DomConstraint → List DomConstraint
+  | [] => []
+  | a :: as => if a ∈ seen then dedupGo seen as else a :: dedupGo (seen.insert a) as
+
+/-- The hash-set loop emits exactly the elements of `as` that are not in
+`seen`, deduplicated in first-occurrence order. -/
+theorem dedupGo_eq (seen : Std.HashSet DomConstraint) (as : List DomConstraint) :
+    dedupGo seen as = (as.filter fun b => b ∉ seen).eraseDups := by
+  induction as generalizing seen with
+  | nil => rfl
+  | cons a as ih =>
+    rw [dedupGo]
+    by_cases h : a ∈ seen
+    · rw [ite_eq_left h, List.filter_cons_of_neg (by simpa using h), ih]
+    · rw [ite_eq_right h, ih (seen.insert a), List.filter_cons_of_pos (by simpa using h),
+        List.eraseDups_cons]
+      apply congrArg (List.cons a)
+      apply congrArg List.eraseDups
+      rw [List.filter_filter]
+      apply List.filter_congr
+      intro b _
+      by_cases hb : b = a
+      · subst hb
+        simp
+      · have hba : (b == a) = false := by simp [hb]
+        have hab : (a == b) = false := by simp [Ne.symm hb]
+        simp [Std.HashSet.mem_insert, hba, hab]
+
 /-- Remove later occurrences of an element, keeping the first occurrence in
 order. -/
 def dedupList (as : List DomConstraint) : List DomConstraint :=
-  as.eraseDups
+  dedupGo ∅ as
+
+/-- The hash-set implementation is extensionally the `List.eraseDups`
+specification: the same elements survive in the same order. -/
+theorem dedupList_eq (as : List DomConstraint) :
+    dedupList as = as.eraseDups := by
+  unfold dedupList
+  rw [dedupGo_eq]
+  apply congrArg List.eraseDups
+  rw [List.filter_eq_self]
+  intro b _
+  simp
 
 /-- Deduplication does not change membership. -/
 theorem mem_dedupList (as : List DomConstraint) (x : DomConstraint) :
     x ∈ dedupList as ↔ x ∈ as := by
-  unfold dedupList
+  rw [dedupList_eq]
   exact List.mem_eraseDups
 
 /-- A Boolean universal test is unchanged by deduplication. -/

@@ -14,7 +14,7 @@ the module-boundary audit enforces that rule transitively.
 | `Integration/Public/` | Core-only source solving, partial optimization, seed reuse, incumbent policies, LNS and the parallel portfolio |
 | `Cli/` | Python subprocess tests of exit codes, output, options and checked witnesses |
 | `Architecture/` | Imports, cycles, active proof holes and public/test independence from Legacy |
-| `Audits/` | Benchmark outcome classification and explicit incomplete allowances |
+| `Audits/` | Benchmark outcomes, incomplete allowances, validation failure paths and MiniZinc wrapper streaming/flags |
 | `Fixtures/Solver/` | Shared FlatZinc regressions used by current tests and the Legacy oracle |
 | `Legacy/Integration/` | Historical adapters, options, fallback behavior and the Core/Legacy differential tool |
 | `Legacy/Solver/` | Chronological, propagation and UIP historical regressions/harnesses |
@@ -24,15 +24,6 @@ the module-boundary audit enforces that rule transitively.
 library. Python tests are run separately. Existing executable names are retained
 so scripts can keep calling the same Lake targets; their `root` entries in
 `lakefile.toml` point to the new locations.
-
-## Review status (2026-11-10)
-
-The working tree adds suites beyond commit `0246b07`; preserve the untracked
-regressions together with their source modules and Lake target changes.
-The boundary audit passes for 555 modules, and the Python architecture suite
-(12 tests) and audit-tool suite (10 tests) pass. These checks do not establish
-Lean proof compilation or native solver correctness. The full M9 gate recorded
-in [PLAN.md](../PLAN.md) is historical; its logs are absent in this checkout.
 
 ## Current tests
 

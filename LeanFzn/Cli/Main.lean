@@ -135,17 +135,29 @@ selects another engine. The preserved old API lives in LeanFzn/Legacy.
 -/
 
 private def runSolve (args : List String) : IO UInt32 := do
+  -- Dev diagnostic only (PLAN E1): consumed before the option parser so it
+  -- never becomes part of the certified `SearchConfig`.
+  let phaseStats := args.elem "--phase-stats"
+  let args := args.filter (· != "--phase-stats")
   match LeanFzn.Core.parseSolveFlags args with
   | .error e =>
       IO.eprintln s!"leanfzn: {e}"
       return 2
   | .ok (o, srcArgs) =>
+      let ps? ← if phaseStats then some <$> LeanFzn.Core.PhaseCtx.new else pure none
+      let parseStart := match ps? with
+        | some ps => ps.startMs
+        | none => 0
       match ← parseModelSource srcArgs with
       | .error e =>
           IO.eprintln s!"leanfzn: {e}"
           return 2
       | .ok model =>
-          let rc ← LeanFzn.Core.runModel o model
+          let rc ← match ps? with
+            | some ps =>
+                ps.report "parse" parseStart
+                LeanFzn.Core.runModelPhased ps o model
+            | none => LeanFzn.Core.runModel o model
           if o.threads > 1 then
             -- The portfolio's other workers may still be inside a long pure
             -- search round; exit directly so a completed proof is reported at

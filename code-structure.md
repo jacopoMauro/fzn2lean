@@ -1,8 +1,7 @@
 # LeanFzn code and proof structure
 
-Updated 2026-11-04 for the Core-only public API. Actual imports and
-`lakefile.toml` are authoritative. [README.md](README.md) describes commands;
-[PLAN.md](PLAN.md) records the ordered Core performance work.
+The public API uses the Core engine. Actual imports and
+`lakefile.toml` are authoritative. [README.md](README.md) describes commands.
 
 ## Public dependency graph
 
@@ -76,7 +75,11 @@ value of the element/target universe. The shape pass and the set passes use
 precomputed hash-set name tables (`ShapeState.maxLen`, `setNameSet`,
 `setInSubjectNames`) and bounded fresh-name allocation so their cost is
 linear on the multi-million-constraint warehouse models; the twins are proved
-pointwise equal to the scanning specifications. `setExpandModel` (in
+pointwise equal to the scanning specifications. The shape state also caches
+auxiliaries by `ShapeKind` (`ShapeState.freshAux`), so repeated `x = v`,
+`v ∈ S` and const-false requests share one auxiliary; `CacheOk`/`DefHolds`
+prove that a hit names an auxiliary already present with exactly the requested
+kind and type, and that its defining constraint still holds. `setExpandModel` (in
 `Compiler/SetExpand.lean`) then replaces
 every bounded scalar set variable by one fresh Boolean per universe value,
 rewrites the supported `set_in`/`set_in_reif` literal-membership shapes, and
@@ -97,8 +100,7 @@ The TSP rank checker is deliberately outside `compileModelFull`.
 `Compiler/RankCircuit.lean` recognizes the Gecode `circuit` decomposition and
 checks a certificate for the rank recurrence; `Engine/Proofs/RankCircuit.lean`
 proves the generated 2-cycle clauses entailed. The default engine does not
-register these clauses (T3 was rejected; see
-`tmp/design/t2-rank-circuit.md`), and `Engine.Search` does not import the proof
+register these clauses, and `Engine.Search` does not import the proof
 module. `tests_rank_circuit` keeps the checker, the entailment theorem and the
 false-ground UNSAT case as offline evidence.
 
@@ -109,7 +111,7 @@ Integration/
   Config/         Types, Validate, Parse, Annotations
   Emit/           Basic, Model
   Optimization/   Basic, Partial
-  Public/         Solve, Optimize, Seed, Driver
+  Public/         Solve, Optimize, Seed, Driver, Preprocess, Lns, PhaseStats
 ```
 
 Declarations for the new public solver live in `LeanFzn.Core`. Shared generic
@@ -122,8 +124,11 @@ statements without making the old execution contract part of the public API.
 | --- | --- |
 | `Public/Solve` | `solveCompiled` maps Core `gaveUp` to `SearchResult.unknown`. `solveModel` compiles and transfers SAT/UNSAT to source stores. The stats twin performs the same single Core run. |
 | `Public/Optimize` | Raw Core SAT/UNSAT is sound; give-up becomes an incomplete round. Linear optimization reuses generic branch-and-bound and exact streaming proofs. |
+| `Public/Preprocess` | Applies the policy from `Compiler/Preprocess` before Core search and transports results through the proved acceptance equivalence. |
+| `Public/Lns` | Uses bounded neighborhood searches to propose improving incumbents; only the unrestricted bound search can certify completion. Depends on `Public/Optimize`. |
 | `Public/Seed` | Carries the certified clause database across stronger bounds using Engine.Incremental. Its invariant and streaming correspondence cover incomplete runs; no legacy fallback or unconditional completion theorem is used. |
 | `Public/Driver` | Validates Core-only options, prints valid incumbents immediately, uses exit 4 for unknown/incomplete, and emits terminal markers only on certified completion. For `--threads=N` it runs independent certified workers over the four measured strategies, sharing only the parsed model and a mutex-guarded incumbent/proof state; an optimization proof is reported only when its optimum equals the best checked printed incumbent, while a satisfaction run reports the first completed verdict after checking a SAT witness. |
+| `Public/PhaseStats` | Dev-only `--phase-stats` observation layer: it re-runs the same compiler composition and the same `initState`/`coreSolveFrom` calls as the certified entries, separated by stderr timestamps and `/proc/self/status` reads. It changes no verdict, solution or counter and is not on the ordinary path. |
 | `Config/Parse` | `parseCoreSolveFlags` disables implicit legacy routing and rejects the kernel engine. The older compatibility parser is used only by explicit legacy APIs. |
 | `Emit/Model` | Source-store rendering extracted from old source solving, with no backend dependency. |
 
@@ -143,8 +148,8 @@ The public `solveCompiled_sat`/`_unsat` and
 `solveModel_sat_correct`/`_unsat_correct` transport those claims to source
 models. Core's fuel-bounded search always returns computationally, but may
 return `gaveUp`. The public API intentionally makes no claim that every accepted
-finite input receives SAT/UNSAT. Wide sparse domains are one current give-up
-case; internal analysis failures are another.
+finite input receives SAT/UNSAT. Search limits and internal analysis failures
+can produce give-up results.
 
 `Optimization/Basic` preserves the existing `CertSolver`, generic loops,
 termination measure, solution/optimality theorems and streaming specifications.
@@ -164,9 +169,10 @@ proofs remain attached to the preserved legacy definitions.
 
 | Modules | Responsibility |
 | --- | --- |
+| `Bits` | Word-level set-bit scans, their native twins and equality proofs; depends only on Lean core and supports the engine domain/literal representations. |
 | `Types`, `Dom`, `Proofs/Dom` | State, literals, `DomC` operations and their domain laws |
 | `Lit`, `Trail`, `Clauses` | Denotation, entailment/resolution, assignments, restoration and watched clauses |
-| `Prop`, `Props/` | Generic and specialized certified propagators |
+| `Prop`, `Props/` | Generic and specialized certified propagators. `Props/BoolExt` carries two support plans for Boolean rows: duplicate-free rows keep the original plan, and rows with a repeated operand slot enumerate only distinct slots, expand the value vector positionally to evaluate the relation and prune each distinct slot once; `boolSupportDupPropWith` and its choice wrappers are proved sound. |
 | `Queue/{Types,Worklist,Apply,Run}` | Invariant specifications, event registration, pending prunings and fixpoint execution |
 | `Proofs/Queue/{History,Invariants,Bookkeeping,Soundness}` | Preservation and propagation soundness |
 | `Analyze`, `Reduce`, `Search` | Conflict analysis, clause reduction, variable/value policies, restarts and search; `Proofs/Queue/Root` supplies the root-entailment certificate used to erase level-zero literals from learned clauses, and learned clauses retain packed-literal intern hints (`CItem.pidx`) that `LitTable.internPacks` revalidates before reuse |
@@ -229,7 +235,7 @@ depending on Legacy directly or through historical test helpers. Details and
 commands are in [Tests/README.md](Tests/README.md).
 
 `tests_core_only` checks Core defaults, option rejection, SAT/UNSAT,
-unknown on sparse domains/zero fuel, linear and seeded min/max, clause reuse,
+sparse-domain solving and unknown on zero fuel, linear and seeded min/max, clause reuse,
 independent checker acceptance and retention of a streamed incumbent when a
 later round is incomplete. `Tests/Cli/test_solve.py` checks exit codes,
 markers, statistics and witness text. `Tests/Architecture/test_boundaries.py`
@@ -241,16 +247,15 @@ compares Core against the explicit legacy development oracle, fuzzes 3,000
 instances and runs the quick performance suite. Historical gate and benchmark
 records describe their source snapshots; they do not establish current Core-only
 decision coverage. Record new measurements with their own source snapshot and
-budget, following the ordered actions in [PLAN.md](PLAN.md).
+budget.
 
 Benchmark reports distinguish completed mathematical agreement from explicit
-migration allowances. The known UNSAT nonunit-jump fixture currently returns
-unknown; its allowlist entry does not change its expected truth. Unknown and
-incomplete-with-incumbent (exit 4) are separate outcomes, while false terminal
-markers are errors. The quick gate requires every case either to complete
-correctly or match its explicit incomplete allowance, with every witness checked.
+incomplete allowances, when a manifest declares one. The nonunit-jump fixture
+is expected to complete with UNSAT and has no incomplete allowance. Unknown
+and incomplete-with-incumbent (exit 4) are separate outcomes, while false
+terminal markers are errors. The quick gate requires every case either to
+complete correctly or match its explicit incomplete allowance, with every
+witness checked.
 
-Current validation results and the next performance tasks are recorded in
-[PLAN.md](PLAN.md). Gate logs and generated benchmark reports belong under
-ignored `tmp/`; input manifests, regression fixtures and audit programs remain
-in the repository.
+Gate logs and generated benchmark reports belong under ignored `tmp/`; input
+manifests, regression fixtures and audit programs remain in the repository.

@@ -409,8 +409,14 @@ def tokenizeAux (s : Input) (pos : Nat) (acc : Array Token) :
     return acc
 termination_by s.size - pos
 
-/-- Tokenize a FlatZinc source string. -/
+/-- Tokenize a FlatZinc source string.  The source is decoded directly to
+    the `Array Char` the lexer consumes: `String.toList.toArray` would build
+    an intermediate `List Char` and a second array, dominating the parse peak
+    on large inputs.  The direct decode is definitionally equal to the old
+    body (`String.toList` unfolds to `(String.Internal.toArray s).toList`,
+    and `Array.toArray_toList` is `rfl`), so the token sequence and every
+    parser proof are unchanged. -/
 def tokenize (src : String) : Except String (Array Token) :=
-  tokenizeAux src.toList.toArray 0 #[]
+  tokenizeAux (String.Internal.toArray src) 0 #[]
 
 end LeanFzn.Parser.Lexer

@@ -736,30 +736,529 @@ theorem ShapeState.newChecked_emitList {env : StaticEnv} {st : ShapeState}
   · exact Or.inr (hall c' hc')
   · exact Or.inl hc'
 
+/-- A fresh auxiliary (or a cache hit) adds only its checked defining
+    constraint. -/
+theorem ShapeState.freshAux_newChecked {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState} {env : StaticEnv}
+    (h : st.freshAux taken kind = (n, st'))
+    (hc : st.CacheOk)
+    (ha : ShapeAux.Checkable env ⟨n, kind.ty, kind⟩) :
+    st.NewChecked env st' := by
+  rcases hc' : st.cache.get? kind with _ | m
+  · rw [ShapeState.freshAux_miss hc'] at h
+    intro c hc''
+    rw [ShapeState.allocAux_cons h] at hc''
+    rcases List.mem_cons.mp hc'' with rfl | hc'''
+    · exact Or.inr ha
+    · exact Or.inl hc'''
+  · rw [ShapeState.freshAux_hit hc'] at h
+    obtain ⟨rfl, rfl⟩ := h
+    intro c hc''
+    exact Or.inl hc''
+
 theorem ShapeState.freshBool_newChecked {taken : List String} {st : ShapeState}
     {kind : ShapeKind} {n : String} {st' : ShapeState} {env : StaticEnv}
     (h : st.freshBool taken kind = (n, st'))
-    (ha : ShapeAux.Checkable env ⟨n, .par .bool, kind⟩) :
-    st.NewChecked env st' := by
-  intro c hc
-  rw [ShapeState.freshBool_cons h] at hc
-  rcases List.mem_cons.mp hc with rfl | hc
-  · exact Or.inr ha
-  · exact Or.inl hc
+    (hc : st.CacheOk)
+    (ha : ShapeAux.Checkable env ⟨n, kind.ty, kind⟩) :
+    st.NewChecked env st' :=
+  ShapeState.freshAux_newChecked h hc ha
 
 theorem ShapeState.freshInt01_newChecked {taken : List String} {st : ShapeState}
     {kind : ShapeKind} {n : String} {st' : ShapeState} {env : StaticEnv}
     (h : st.freshInt01 taken kind = (n, st'))
-    (ha : ShapeAux.Checkable env ⟨n, .intRange 0 1, kind⟩) :
-    st.NewChecked env st' := by
-  intro c hc
-  rw [ShapeState.freshInt01_cons h] at hc
-  rcases List.mem_cons.mp hc with rfl | hc
-  · exact Or.inr ha
-  · exact Or.inl hc
+    (hc : st.CacheOk)
+    (ha : ShapeAux.Checkable env ⟨n, kind.ty, kind⟩) :
+    st.NewChecked env st' :=
+  ShapeState.freshAux_newChecked h hc ha
 
-/-- Transfer a checked source constraint to an environment that agrees on
-    its names. -/
+/-- The empty cache of the initial shape state is consistent. -/
+theorem ShapeState.initial_cacheOk (taken : List String) :
+    (ShapeState.initial taken).CacheOk := by
+  intro k n hk
+  simp [ShapeState.initial] at hk
+
+/-- Emitting one constraint does not change the cache. -/
+theorem ShapeState.emit_cacheOk {st : ShapeState} {c : ConstraintItem}
+    (hc : st.CacheOk) : (st.emit c).CacheOk := hc
+
+/-- Emitting constraints does not change the cache. -/
+theorem ShapeState.emitList_cacheOk {st : ShapeState} {cs : List ConstraintItem}
+    (hc : st.CacheOk) : (st.emitList cs).CacheOk := hc
+
+/-- Linking terms does not change the cache. -/
+theorem ShapeState.linkOr_cacheOk {st : ShapeState} {terms : List String} {target : String}
+    (hc : st.CacheOk) : (linkOr st terms target).CacheOk := by
+  unfold linkOr
+  split
+  · exact hc
+  · exact hc
+
+/-! ### Cache-consistency of the allocating helpers -/
+
+theorem memberTerm_cacheOk {taken : List String} {m : Model} {st : ShapeState}
+    {sa : Expr} {v : Int} {n : String} {st' : ShapeState}
+    (h : memberTerm taken m st sa v = some (n, st')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  cases sa with
+  | basic b =>
+      cases b with
+      | ident S =>
+          cases hus : modelSetUniverse? m S.name with
+          | none => simp [memberTerm, hus] at h
+          | some us =>
+              by_cases hv : v ∈ us
+              · simp only [memberTerm, hus, if_pos hv] at h
+                exact ShapeState.freshAux_cacheOk (Option.some.inj h) hc
+              · simp only [memberTerm, hus, if_neg hv] at h
+                exact ShapeState.freshAux_cacheOk (Option.some.inj h) hc
+      | lit l =>
+          cases l with
+          | bool bb => simp [memberTerm] at h
+          | int i => simp [memberTerm] at h
+          | set sl =>
+              simp only [memberTerm] at h
+              exact ShapeState.freshAux_cacheOk (Option.some.inj h) hc
+  | array es => simp [memberTerm] at h
+
+theorem varMemberTerms_cacheOk {taken : List String} {m : Model} {x s : String}
+    {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
+    (h : varMemberTerms taken m x s st vals = some (terms, st')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  induction vals generalizing st terms st' with
+  | nil =>
+      simp only [varMemberTerms, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+  | cons v vs ih =>
+      obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hm, ha, hr, rfl, rfl⟩ :=
+        varMemberTerms_cons_decomp h
+      exact ih hr (ShapeState.freshAux_cacheOk ha
+        (memberTerm_cacheOk hm (ShapeState.freshAux_cacheOk hfb hc)))
+
+theorem resultTarget_cacheOk {taken : List String} {st : ShapeState}
+    {r : BasicExpr} {n : String} {st' : ShapeState}
+    (h : resultTarget taken st r = some (n, st')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  cases r with
+  | ident b =>
+      simp only [resultTarget, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨-, rfl⟩ := h
+      exact hc
+  | lit l =>
+      cases l with
+      | bool bb =>
+          cases bb
+          · exact ShapeState.freshAux_cacheOk
+              (Option.some.inj (by simpa [resultTarget] using h)) hc
+          · exact ShapeState.freshAux_cacheOk
+              (Option.some.inj (by simpa [resultTarget] using h)) hc
+      | int i => simp [resultTarget] at h
+      | set sl => simp [resultTarget] at h
+
+theorem cardBits_cacheOk {taken : List String} {m : Model} {s : String}
+    {st : ShapeState} {vals : List Int} {cs : List String} {st' : ShapeState}
+    (h : cardBits taken m s st vals = some (cs, st')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  induction vals generalizing st cs st' with
+  | nil =>
+      simp only [cardBits, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+  | cons v vs ih =>
+      simp only [cardBits] at h
+      cases hm : memberTerm taken m st (.basic (.ident (Ident.mk s))) v with
+      | none => simp [hm] at h
+      | some p =>
+          obtain ⟨a, st1⟩ := p
+          cases hb : st1.freshInt01 taken (.bit a) with
+          | mk c st2 =>
+              cases hr : cardBits taken m s st2 vs with
+              | none => simp [hm, hb, hr] at h
+              | some q =>
+                  obtain ⟨cs, st3⟩ := q
+                  simp only [hm, hb, hr, Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact ih hr (ShapeState.freshAux_cacheOk hb
+                    (memberTerm_cacheOk hm hc))
+
+theorem unionRows_cacheOk {taken : List String} {m : Model}
+    {a b c : Expr} {st : ShapeState} {vals : List Int} {st' : ShapeState}
+    (h : unionRows taken m a b c st vals = some st') (hc : st.CacheOk) :
+    st'.CacheOk := by
+  induction vals generalizing st st' with
+  | nil =>
+      simp only [unionRows, Option.some.injEq] at h
+      subst h
+      exact hc
+  | cons v vs ih =>
+      obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
+        unionRows_cons_decomp h
+      exact ih hr (ShapeState.emit_cacheOk (memberTerm_cacheOk hm3
+        (memberTerm_cacheOk hm2 (memberTerm_cacheOk hm1 hc))))
+
+theorem intersectRows_cacheOk {taken : List String} {m : Model}
+    {a b c : Expr} {st : ShapeState} {vals : List Int} {st' : ShapeState}
+    (h : intersectRows taken m a b c st vals = some st') (hc : st.CacheOk) :
+    st'.CacheOk := by
+  induction vals generalizing st st' with
+  | nil =>
+      simp only [intersectRows, Option.some.injEq] at h
+      subst h
+      exact hc
+  | cons v vs ih =>
+      obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
+        intersectRows_cons_decomp h
+      exact ih hr (ShapeState.emit_cacheOk (memberTerm_cacheOk hm3
+        (memberTerm_cacheOk hm2 (memberTerm_cacheOk hm1 hc))))
+
+theorem arrayElemBits_cacheOk {taken : List String} {m : Model} {v : Int} :
+    ∀ (es : List BasicExpr) (st : ShapeState) (bits : List String)
+      (st' : ShapeState),
+      arrayElemBits taken m es st v = some (bits, st') →
+      st.CacheOk → st'.CacheOk := by
+  intro es
+  induction es with
+  | nil =>
+      intro st bits st' h hc
+      simp only [arrayElemBits, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+  | cons e rest ih =>
+      intro st bits st' h hc
+      simp only [arrayElemBits] at h
+      cases hm : memberTerm taken m st (.basic e) v with
+      | none => simp only [hm] at h; simp at h
+      | some p =>
+          obtain ⟨b, st1⟩ := p
+          simp only [hm] at h
+          cases hr : arrayElemBits taken m rest st1 v with
+          | none => simp only [hr] at h; simp at h
+          | some q =>
+              obtain ⟨bs, st2⟩ := q
+              simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h
+              exact ih st1 bs st2 hr (memberTerm_cacheOk hm hc)
+
+theorem arrayElemRows_cacheOk {taken : List String} {m : Model} {i : BasicExpr}
+    {es : List BasicExpr} {T : String} :
+    ∀ (vals : List Int) (st : ShapeState)
+      (rows : List (Int × List String × String)) (st' : ShapeState),
+      arrayElemRows taken m i es T st vals = some (rows, st') →
+      st.CacheOk → st'.CacheOk := by
+  intro vals
+  induction vals with
+  | nil =>
+      intro st rows st' h hc
+      simp only [arrayElemRows, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+  | cons v vs ih =>
+      intro st rows st' h hc
+      simp only [arrayElemRows] at h
+      cases hb : arrayElemBits taken m es st v with
+      | none => simp only [hb] at h; simp at h
+      | some p =>
+          obtain ⟨bits, st1⟩ := p
+          simp only [hb] at h
+          cases hm : memberTerm taken m st1 (.basic (.ident (Ident.mk T))) v with
+          | none => simp only [hm] at h; simp at h
+          | some q =>
+              obtain ⟨tv, st2⟩ := q
+              simp only [hm] at h
+              cases hr : arrayElemRows taken m i es T st2 vs with
+              | none => simp only [hr] at h; simp at h
+              | some r =>
+                  obtain ⟨rows', st3⟩ := r
+                  simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact ih st2 rows' st3 hr (memberTerm_cacheOk hm
+                    (arrayElemBits_cacheOk es st bits st1 hb hc))
+
+theorem rewriteVarMember_cacheOk {taken : List String} {m : Model} {st : ShapeState}
+    {x s : String} {vals : List Int} {r : BasicExpr} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : rewriteVarMember taken m st x s vals r = some (st', cs')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  obtain ⟨tms, st1, target, st2, hterms, hres, rfl, rfl⟩ :=
+    rewriteVarMember_decomp h
+  exact ShapeState.linkOr_cacheOk (resultTarget_cacheOk hres
+    (varMemberTerms_cacheOk hterms hc))
+
+theorem rewriteCard_cacheOk {taken : List String} {m : Model} {st : ShapeState}
+    {S : String} {k : BasicExpr} {st' : ShapeState} {cs' : List ConstraintItem}
+    (h : rewriteCard taken m st S k = some (st', cs')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  unfold rewriteCard at h
+  cases hm : modelSetUniverse? m S with
+  | none =>
+      simp only [hm, Option.getD_none, List.isEmpty_nil, ite_true] at h
+      cases k with
+      | ident kn =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact hc
+      | lit l =>
+          cases l with
+          | int j =>
+              by_cases hj : j = 0
+              · simp only [hj, ite_true] at h
+                simp only [Option.some.injEq, Prod.mk.injEq] at h
+                obtain ⟨rfl, rfl⟩ := h
+                exact hc
+              · simp only [if_neg hj] at h
+                simp only [Option.some.injEq, Prod.mk.injEq] at h
+                obtain ⟨rfl, rfl⟩ := h
+                exact hc
+          | bool b => simp at h
+          | set sl => simp at h
+  | some us' =>
+      rw [hm] at h
+      simp only [Option.getD_some] at h
+      cases us' with
+      | nil =>
+          simp only [List.isEmpty_nil, ite_true] at h
+          cases k with
+          | ident kn =>
+              simp only [Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h
+              exact hc
+          | lit l =>
+              cases l with
+              | int j =>
+                  by_cases hj : j = 0
+                  · simp only [hj, ite_true] at h
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h
+                    obtain ⟨rfl, rfl⟩ := h
+                    exact hc
+                  · simp only [if_neg hj] at h
+                    simp only [Option.some.injEq, Prod.mk.injEq] at h
+                    obtain ⟨rfl, rfl⟩ := h
+                    exact hc
+              | bool b => simp at h
+              | set sl => simp at h
+      | cons u us =>
+          simp only [List.isEmpty_cons, Bool.false_eq_true, ite_false] at h
+          cases hb : cardBits taken m S st (u :: us) with
+          | none => simp [hb] at h
+          | some p =>
+              obtain ⟨cs, st1⟩ := p
+              simp only [hb] at h
+              cases k with
+              | ident kn =>
+                  simp only [Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact ShapeState.emit_cacheOk (cardBits_cacheOk hb hc)
+              | lit l =>
+                  cases l with
+                  | int j =>
+                      simp only [Option.some.injEq, Prod.mk.injEq] at h
+                      obtain ⟨rfl, rfl⟩ := h
+                      exact ShapeState.emit_cacheOk (cardBits_cacheOk hb hc)
+                  | bool b => simp at h
+                  | set sl => simp at h
+
+theorem rewriteUnion_cacheOk {taken : List String} {m : Model} {st : ShapeState}
+    {a b c : Expr} {ua ub uc : List Int} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : rewriteUnion taken m st a b c ua ub uc = some (st', cs')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  obtain ⟨st1, hr, rfl, rfl⟩ := rewriteUnion_decomp h
+  exact unionRows_cacheOk hr hc
+
+theorem rewriteIntersect_cacheOk {taken : List String} {m : Model} {st : ShapeState}
+    {a b c : Expr} {ua ub uc : List Int} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : rewriteIntersect taken m st a b c ua ub uc = some (st', cs'))
+    (hc : st.CacheOk) : st'.CacheOk := by
+  obtain ⟨st1, hr, rfl, rfl⟩ := rewriteIntersect_decomp h
+  exact intersectRows_cacheOk hr hc
+
+theorem rewriteArrayElem_cacheOk {taken : List String} {m : Model}
+    {st : ShapeState} {i : BasicExpr} {es : List BasicExpr} {T : String}
+    {st' : ShapeState} {cs' : List ConstraintItem}
+    (h : rewriteArrayElem taken m st i es T = some (st', cs')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  obtain ⟨vals, rows, hvals, hrows, hcs⟩ := rewriteArrayElem_decomp h
+  exact arrayElemRows_cacheOk vals st rows st' hrows hc
+
+theorem shapeRewriteConstraint_cacheOk {taken : List String} {m : Model}
+    {st : ShapeState} {c : ConstraintItem} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : shapeRewriteConstraint taken m st c = some (st', cs')) (hc : st.CacheOk) :
+    st'.CacheOk := by
+  rcases c with ⟨nm, args, anns⟩
+  unfold shapeRewriteConstraint at h
+  split at h
+  case h_1 =>
+    rename_i xarg sarg rarg hnm hargs
+    have hnm' : nm = Ident.mk "set_in_reif" := ident_eq_of_name hnm
+    have hargs' : args = [.basic xarg, .basic sarg, .basic rarg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact hc
+      case h_2 =>
+        rename_i us hus
+        split at h
+        case h_1 =>
+          rename_i x
+          split at h
+          case h_1 =>
+            rename_i vals hvals
+            exact rewriteVarMember_cacheOk h hc
+          case h_2 => simp at h
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact hc
+        case h_3 => simp at h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+    case h_3 => simp at h
+  case h_2 =>
+    rename_i xarg sarg hnm hargs
+    have hnm' : nm = Ident.mk "set_in" := ident_eq_of_name hnm
+    have hargs' : args = [.basic xarg, .basic sarg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact hc
+      case h_2 =>
+        rename_i us hus
+        split at h
+        case h_1 =>
+          rename_i x
+          split at h
+          case h_1 =>
+            rename_i vals hvals
+            exact rewriteVarMember_cacheOk h hc
+          case h_2 => simp at h
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact hc
+        case h_3 => simp at h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+    case h_3 => simp at h
+  case h_3 =>
+    rename_i sarg karg hnm hargs
+    have hnm' : nm = Ident.mk "set_card" := ident_eq_of_name hnm
+    have hargs' : args = [.basic sarg, .basic karg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact hc
+      case h_2 =>
+        rename_i us hus
+        exact rewriteCard_cacheOk h hc
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+    case h_3 => simp at h
+  case h_4 =>
+    rename_i sa sb sc hnm hargs
+    have hnm' : nm = Ident.mk "set_union" := ident_eq_of_name hnm
+    have hargs' : args = [sa, sb, sc] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i ua ub uc hA hB hC
+      exact rewriteUnion_cacheOk h hc
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+  case h_5 =>
+    rename_i iarg es targ hnm hargs
+    have hnm' : nm = Ident.mk "array_var_set_element" := ident_eq_of_name hnm
+    have hargs' : args = [.basic iarg, .array es, .basic targ] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i T
+      split at h
+      case h_1 =>
+        rename_i i
+        split at h
+        case h_1 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact hc
+        case h_2 =>
+          rename_i vals hvals
+          exact rewriteArrayElem_cacheOk h hc
+      case h_2 =>
+        rename_i x
+        split at h
+        case h_1 =>
+          rename_i vals hvals
+          split at h
+          case h_1 =>
+            simp only [Option.some.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl⟩ := h
+            exact hc
+          case h_2 =>
+            rename_i us hus
+            exact rewriteArrayElem_cacheOk h hc
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact hc
+      case h_3 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact hc
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+  case h_6 =>
+    rename_i sa sb sc hnm hargs
+    have hnm' : nm = Ident.mk "set_intersect" := ident_eq_of_name hnm
+    have hargs' : args = [sa, sb, sc] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i ua ub uc hA hB hC
+      exact rewriteIntersect_cacheOk h hc
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact hc
+  case h_7 =>
+    simp only [Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact hc
+
+/-! ## The per-shape checking lemmas -/
 theorem checked_of_source {m : Model} {c : ConstraintItem}
     {taken : List String} {env : StaticEnv}
     (hcheckM : ∃ params, fullSig c.name = some params ∧
@@ -779,6 +1278,7 @@ theorem checked_of_source {m : Model} {c : ConstraintItem}
 theorem memberTerm_newChecked {taken : List String} {m : Model} {st : ShapeState}
     {sa : Expr} {v : Int} {n : String} {st' : ShapeState} {env : StaticEnv}
     (h : memberTerm taken m st sa v = some (n, st'))
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ x ∈ setTaken m, x ∈ taken)
     (hsrcenv : ∀ x ∈ taken, env (Ident.mk x) = m.staticEnv (Ident.mk x))
@@ -798,17 +1298,15 @@ theorem memberTerm_newChecked {taken : List String} {m : Model} {st : ShapeState
                 have hf : st.freshBool taken (.member S.name v) = (n, st') :=
                   Option.some.inj h
                 have haux : (⟨n, .par .bool, .member S.name v⟩ : ShapeAux) ∈ st'.aux := by
-                  rw [ShapeState.freshBool_aux hf]
-                  exact List.mem_cons_self ..
-                exact ShapeState.freshBool_newChecked hf
+                  exact ShapeState.freshAux_aux_mem hf hc
+                exact ShapeState.freshBool_newChecked hf hc
                   (checkable_member ⟨true, hS⟩ ⟨true, env_bool_of_aux henvAux haux⟩)
               · simp only [memberTerm, hus, if_neg hv] at h
                 have hf : st.freshBool taken (.const false) = (n, st') :=
                   Option.some.inj h
                 have haux : (⟨n, .par .bool, .const false⟩ : ShapeAux) ∈ st'.aux := by
-                  rw [ShapeState.freshBool_aux hf]
-                  exact List.mem_cons_self ..
-                exact ShapeState.freshBool_newChecked hf
+                  exact ShapeState.freshAux_aux_mem hf hc
+                exact ShapeState.freshBool_newChecked hf hc
                   (checkable_const ⟨true, env_bool_of_aux henvAux haux⟩)
       | lit l =>
           cases l with
@@ -820,9 +1318,8 @@ theorem memberTerm_newChecked {taken : List String} {m : Model} {st : ShapeState
                   (n, st') := Option.some.inj h
               have haux : (⟨n, .par .bool, .const (decide (sl.denote.Contains v))⟩ :
                   ShapeAux) ∈ st'.aux := by
-                rw [ShapeState.freshBool_aux hf]
-                exact List.mem_cons_self ..
-              exact ShapeState.freshBool_newChecked hf
+                exact ShapeState.freshAux_aux_mem hf hc
+              exact ShapeState.freshBool_newChecked hf hc
                 (checkable_const ⟨true, env_bool_of_aux henvAux haux⟩)
   | array es => simp [memberTerm] at h
 
@@ -830,7 +1327,8 @@ theorem memberTerm_newChecked {taken : List String} {m : Model} {st : ShapeState
     the resulting state. -/
 theorem varMemberTerms_terms_ty {taken : List String} {m : Model} {x s : String}
     {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
-    (h : varMemberTerms taken m x s st vals = some (terms, st')) :
+    (h : varMemberTerms taken m x s st vals = some (terms, st'))
+    (hc : st.CacheOk) :
     ∀ t ∈ terms, ∃ c ∈ st'.aux, c.name = t ∧ c.ty = .par .bool := by
   induction vals generalizing st terms st' with
   | nil =>
@@ -841,18 +1339,21 @@ theorem varMemberTerms_terms_ty {taken : List String} {m : Model} {x s : String}
   | cons v vs ih =>
       obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hm, ha, hr, rfl, rfl⟩ :=
         varMemberTerms_cons_decomp h
+      have hc1 : st1.CacheOk := ShapeState.freshAux_cacheOk hfb hc
+      have hc2 : st2.CacheOk := memberTerm_cacheOk hm hc1
+      have hc3 : st3.CacheOk := ShapeState.freshAux_cacheOk ha hc2
       intro u hu
       rcases List.mem_cons.mp hu with rfl | hu
       · exact ⟨⟨u, .par .bool, .and e a⟩, by
           apply varMemberTerms_aux_subset hr
-          rw [ShapeState.freshBool_aux ha]
-          exact List.mem_cons_self .., rfl, rfl⟩
-      · exact ih hr u hu
+          exact ShapeState.freshAux_aux_mem ha hc2, rfl, rfl⟩
+      · exact ih hr hc3 u hu
 
 theorem varMemberTerms_newChecked {taken : List String} {m : Model} {x s : String}
     {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
     {env : StaticEnv}
     (h : varMemberTerms taken m x s st vals = some (terms, st'))
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -868,40 +1369,43 @@ theorem varMemberTerms_newChecked {taken : List String} {m : Model} {x s : Strin
   | cons v vs ih =>
       obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hm, ha, hr, rfl, rfl⟩ :=
         varMemberTerms_cons_decomp h
+      have hc1 : st1.CacheOk := ShapeState.freshAux_cacheOk hfb hc
+      have hc2 : st2.CacheOk := memberTerm_cacheOk hm hc1
+      have hc3 : st3.CacheOk := ShapeState.freshAux_cacheOk ha hc2
       have hep : (⟨e, .par .bool, .eq x v⟩ : ShapeAux) ∈ st'.aux := by
         apply varMemberTerms_aux_subset hr
         apply ShapeState.freshBool_aux_subset ha
         apply memberTerm_aux_subset hm
-        rw [ShapeState.freshBool_aux hfb]
-        exact List.mem_cons_self ..
+        exact ShapeState.freshAux_aux_mem hfb hc
       have heint : env (Ident.mk e) = some (.base .bool, true) :=
         env_bool_of_aux henvAux hep
       have hap : ∃ c ∈ st'.aux, c.name = a ∧ c.ty = .par .bool := by
-        obtain ⟨c, hc, hcn, hct⟩ := memberTerm_aux hm
+        obtain ⟨c, hc', hcn, hct⟩ := memberTerm_aux hm hc1
         exact ⟨c, varMemberTerms_aux_subset hr c
-          (ShapeState.freshBool_aux_subset ha c hc), hcn, hct⟩
+          (ShapeState.freshBool_aux_subset ha c hc'), hcn, hct⟩
       have haint : env (Ident.mk a) = some (.base .bool, true) :=
         env_bool_of_aux_name henvAux hap
       have htp : (⟨t, .par .bool, .and e a⟩ : ShapeAux) ∈ st'.aux := by
         apply varMemberTerms_aux_subset hr
-        rw [ShapeState.freshBool_aux ha]
-        exact List.mem_cons_self ..
+        exact ShapeState.freshAux_aux_mem ha hc2
       have htint : env (Ident.mk t) = some (.base .bool, true) :=
         env_bool_of_aux henvAux htp
       have henv2 : ∀ b ∈ st2.aux, env (Ident.mk b.name) = some (.base b.ty.base, true) :=
         fun b hb => henvAux b (varMemberTerms_aux_subset hr b
           (ShapeState.freshBool_aux_subset ha b hb))
       exact ShapeState.newChecked_trans
-        (ShapeState.freshBool_newChecked hfb (checkable_eq hxint ⟨true, heint⟩))
+        (ShapeState.freshBool_newChecked hfb hc (checkable_eq hxint ⟨true, heint⟩))
         (ShapeState.newChecked_trans
-          (memberTerm_newChecked hm hwf hsup hsrcenv henv2)
+          (memberTerm_newChecked hm hc1 hwf hsup hsrcenv henv2)
           (ShapeState.newChecked_trans
-            (ShapeState.freshBool_newChecked ha (checkable_and ⟨true, heint⟩ ⟨true, haint⟩ ⟨true, htint⟩))
-            (ih hr henvAux)))
+            (ShapeState.freshBool_newChecked ha hc2
+              (checkable_and ⟨true, heint⟩ ⟨true, haint⟩ ⟨true, htint⟩))
+            (ih hr hc3 henvAux)))
 
 theorem resultTarget_newChecked {taken : List String} {st : ShapeState}
     {r : BasicExpr} {n : String} {st' : ShapeState} {env : StaticEnv}
     (h : resultTarget taken st r = some (n, st'))
+    (hc : st.CacheOk)
     (henvAux : ∀ a ∈ st'.aux, env (Ident.mk a.name) = some (.base a.ty.base, true)) :
     st.NewChecked env st' := by
   cases r with
@@ -917,16 +1421,14 @@ theorem resultTarget_newChecked {taken : List String} {st : ShapeState}
           · simp only [resultTarget, Option.some.injEq] at h
             have hf : st.freshBool taken (.const false) = (n, st') := h
             have haux : (⟨n, .par .bool, .const false⟩ : ShapeAux) ∈ st'.aux := by
-              rw [ShapeState.freshBool_aux hf]
-              exact List.mem_cons_self ..
-            exact ShapeState.freshBool_newChecked hf
+              exact ShapeState.freshAux_aux_mem hf hc
+            exact ShapeState.freshBool_newChecked hf hc
               (checkable_const ⟨true, env_bool_of_aux henvAux haux⟩)
           · simp only [resultTarget, Option.some.injEq] at h
             have hf : st.freshBool taken (.const true) = (n, st') := h
             have haux : (⟨n, .par .bool, .const true⟩ : ShapeAux) ∈ st'.aux := by
-              rw [ShapeState.freshBool_aux hf]
-              exact List.mem_cons_self ..
-            exact ShapeState.freshBool_newChecked hf
+              exact ShapeState.freshAux_aux_mem hf hc
+            exact ShapeState.freshBool_newChecked hf hc
               (checkable_const ⟨true, env_bool_of_aux henvAux haux⟩)
       | int i => simp [resultTarget] at h
       | set sl => simp [resultTarget] at h
@@ -980,6 +1482,7 @@ theorem rewriteVarMember_newChecked {taken : List String} {m : Model} {st : Shap
     {x S : String} {vals : List Int} {r : BasicExpr} {st' : ShapeState}
     {cs' : List ConstraintItem} {env : StaticEnv}
     (h : rewriteVarMember taken m st x S vals r = some (st', cs'))
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -990,14 +1493,16 @@ theorem rewriteVarMember_newChecked {taken : List String} {m : Model} {st : Shap
     st.NewChecked env (st'.emitList cs') := by
   obtain ⟨tms, st1, target, st2, hterms, hres, rfl, rfl⟩ :=
     rewriteVarMember_decomp h
+  have hc1 : st1.CacheOk := varMemberTerms_cacheOk hterms hc
+  have hc2 : st2.CacheOk := resultTarget_cacheOk hres hc1
   have henvAux2 : ∀ a ∈ st2.aux, env (Ident.mk a.name) = some (.base a.ty.base, true) :=
     fun a ha => henvAux a (by rw [linkOr_aux]; exact ha)
   have henvAux1 : ∀ a ∈ st1.aux, env (Ident.mk a.name) = some (.base a.ty.base, true) :=
     fun a ha => henvAux2 a (resultTarget_aux_subset hres a ha)
   have htms : ∀ t ∈ tms, ∃ isVar, env (Ident.mk t) = some (.base .bool, isVar) := by
     intro t ht
-    obtain ⟨c, hc, hcn, hct⟩ := varMemberTerms_terms_ty hterms t ht
-    exact ⟨true, env_bool_of_aux_name henvAux1 ⟨c, hc, hcn, hct⟩⟩
+    obtain ⟨c, hc', hcn, hct⟩ := varMemberTerms_terms_ty hterms hc t ht
+    exact ⟨true, env_bool_of_aux_name henvAux1 ⟨c, hc', hcn, hct⟩⟩
   have htarget : ∃ isVar, env (Ident.mk target) = some (.base .bool, isVar) := by
     cases r with
     | ident b =>
@@ -1009,21 +1514,19 @@ theorem rewriteVarMember_newChecked {taken : List String} {m : Model} {st : Shap
         | bool bb =>
             cases bb
             · simp only [resultTarget, Option.some.injEq] at hres
-              have haux : (⟨target, .par .bool, .const false⟩ : ShapeAux) ∈ st2.aux := by
-                rw [ShapeState.freshBool_aux hres]
-                exact List.mem_cons_self ..
+              have haux : (⟨target, .par .bool, .const false⟩ : ShapeAux) ∈ st2.aux :=
+                ShapeState.freshAux_aux_mem hres hc1
               exact ⟨true, env_bool_of_aux henvAux2 haux⟩
             · simp only [resultTarget, Option.some.injEq] at hres
-              have haux : (⟨target, .par .bool, .const true⟩ : ShapeAux) ∈ st2.aux := by
-                rw [ShapeState.freshBool_aux hres]
-                exact List.mem_cons_self ..
+              have haux : (⟨target, .par .bool, .const true⟩ : ShapeAux) ∈ st2.aux :=
+                ShapeState.freshAux_aux_mem hres hc1
               exact ⟨true, env_bool_of_aux henvAux2 haux⟩
         | int i => simp [resultTarget] at hres
         | set sl => simp [resultTarget] at hres
   have hchain := ShapeState.newChecked_trans
-    (varMemberTerms_newChecked hterms hwf hsup hsrcenv hxint henvAux1)
+    (varMemberTerms_newChecked hterms hc hwf hsup hsrcenv hxint henvAux1)
     (ShapeState.newChecked_trans
-      (resultTarget_newChecked hres henvAux2)
+      (resultTarget_newChecked hres hc1 henvAux2)
       (linkOr_newChecked (st := st2) (terms := tms) (target := target)
         (fun y hy => by
           rcases List.mem_append.mp hy with hy | hy
@@ -1037,7 +1540,8 @@ theorem rewriteVarMember_newChecked {taken : List String} {m : Model} {st : Shap
     auxiliary of the resulting state. -/
 theorem cardBits_bits_ty {taken : List String} {m : Model} {s : String}
     {st : ShapeState} {vals : List Int} {cs : List String} {st' : ShapeState}
-    (h : cardBits taken m s st vals = some (cs, st')) :
+    (h : cardBits taken m s st vals = some (cs, st'))
+    (hc : st.CacheOk) :
     ∀ c ∈ cs, ∃ a ∈ st'.aux, a.name = c ∧ a.ty = .intRange 0 1 := by
   induction vals generalizing st cs st' with
   | nil =>
@@ -1059,20 +1563,22 @@ theorem cardBits_bits_ty {taken : List String} {m : Model} {s : String}
                   obtain ⟨cs0, st3⟩ := q
                   simp only [hm, hb, hr, Option.some.injEq, Prod.mk.injEq] at h
                   obtain ⟨rfl, rfl⟩ := h
-                  intro c hc
-                  rcases List.mem_cons.mp hc with hc | hc
-                  · rw [hc]
+                  have hc1 : st1.CacheOk := memberTerm_cacheOk hm hc
+                  have hc2 : st2.CacheOk := ShapeState.freshAux_cacheOk hb hc1
+                  intro c hmem
+                  rcases List.mem_cons.mp hmem with hmem | hmem
+                  · rw [hmem]
                     exact ⟨⟨c0, .intRange 0 1, .bit a⟩, by
                       apply cardBits_aux_subset hr
-                      rw [ShapeState.freshInt01_aux hb]
-                      exact List.mem_cons_self .., rfl, rfl⟩
-                  · exact ih hr c hc
+                      exact ShapeState.freshAux_aux_mem hb hc1, rfl, rfl⟩
+                  · exact ih hr hc2 c hmem
 
 /-- `cardBits` only adds checked auxiliary definitions. -/
 theorem cardBits_newChecked {taken : List String} {m : Model} {s : String}
     {st : ShapeState} {vals : List Int} {cs : List String} {st' : ShapeState}
     {env : StaticEnv}
     (h : cardBits taken m s st vals = some (cs, st'))
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -1098,6 +1604,8 @@ theorem cardBits_newChecked {taken : List String} {m : Model} {s : String}
                   obtain ⟨cs0, st3⟩ := q
                   simp only [hm, hb, hr, Option.some.injEq, Prod.mk.injEq] at h
                   obtain ⟨rfl, rfl⟩ := h
+                  have hc1 : st1.CacheOk := memberTerm_cacheOk hm hc
+                  have hc2 : st2.CacheOk := ShapeState.freshAux_cacheOk hb hc1
                   have henvAux2 : ∀ a' ∈ st2.aux,
                       env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
                     fun a' ha' => henvAux a' (cardBits_aux_subset hr a' ha')
@@ -1105,28 +1613,26 @@ theorem cardBits_newChecked {taken : List String} {m : Model} {s : String}
                       env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
                     fun a' ha' =>
                       henvAux2 a' (ShapeState.freshInt01_aux_subset hb a' ha')
-                  have haux : (⟨c0, .intRange 0 1, .bit a⟩ : ShapeAux) ∈ st2.aux := by
-                    rw [ShapeState.freshInt01_aux hb]
-                    exact List.mem_cons_self ..
-                  obtain ⟨ca, hca, hcan, hcat⟩ := memberTerm_aux hm
-                  have hca2 : ca ∈ st2.aux := by
-                    rw [ShapeState.freshInt01_aux hb]
-                    exact List.mem_cons_of_mem _ hca
+                  have haux : (⟨c0, .intRange 0 1, .bit a⟩ : ShapeAux) ∈ st2.aux :=
+                    ShapeState.freshAux_aux_mem hb hc1
+                  obtain ⟨ca, hca, hcan, hcat⟩ := memberTerm_aux hm hc
+                  have hca2 : ca ∈ st2.aux := ShapeState.freshInt01_aux_subset hb ca hca
                   have haint : env (Ident.mk a) = some (.base .bool, true) :=
                     env_bool_of_aux_name henvAux2 ⟨ca, hca2, hcan, hcat⟩
                   exact ShapeState.newChecked_trans
-                    (memberTerm_newChecked hm hwf hsup hsrcenv henvAux1)
+                    (memberTerm_newChecked hm hc hwf hsup hsrcenv henvAux1)
                     (ShapeState.newChecked_trans
-                      (ShapeState.freshInt01_newChecked hb
+                      (ShapeState.freshInt01_newChecked hb hc1
                         (checkable_bit ⟨true, haint⟩
                           ⟨true, env_int01_of_aux henvAux2 haux⟩))
-                      (ih hr henvAux))
+                      (ih hr hc2 henvAux))
 
 /-- `rewriteCard` introduces only checked constraints. -/
 theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeState}
     {S : String} {k : BasicExpr} {st' : ShapeState} {cs' : List ConstraintItem}
     {env : StaticEnv}
     (h : rewriteCard taken m st S k = some (st', cs'))
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -1184,7 +1690,7 @@ theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeStat
                 fun a ha => henvAux a (by simpa [ShapeState.emit] using ha)
               have hcs : ∀ x ∈ cs, ∃ isVar, env (Ident.mk x) = some (.base .int, isVar) := by
                 intro x hx
-                obtain ⟨a', ha', ha'n, ha't⟩ := cardBits_bits_ty hb x hx
+                obtain ⟨a', ha', ha'n, ha't⟩ := cardBits_bits_ty hb hc x hx
                 exact ⟨true, env_int01_of_aux_name henvAux1 ⟨a', ha', ha'n, ha't⟩⟩
               have hrow : ShapeState.ConstraintChecked env
                   (shapeLinEq (cs.map (fun _ => 1) ++ [-1]) (cs ++ [kn.name]) 0) := by
@@ -1196,7 +1702,7 @@ theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeStat
                   subst hx
                   exact hkty kn rfl
               exact ShapeState.newChecked_trans
-                (cardBits_newChecked hb hwf hsup hsrcenv henvAux1)
+                (cardBits_newChecked hb hc hwf hsup hsrcenv henvAux1)
                 (by simpa [ShapeState.emitList] using ShapeState.newChecked_emit hrow)
           | lit l =>
               cases l with
@@ -1208,14 +1714,14 @@ theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeStat
                     fun a ha => henvAux a (by simpa [ShapeState.emit] using ha)
                   have hcs : ∀ x ∈ cs, ∃ isVar, env (Ident.mk x) = some (.base .int, isVar) := by
                     intro x hx
-                    obtain ⟨a', ha', ha'n, ha't⟩ := cardBits_bits_ty hb x hx
+                    obtain ⟨a', ha', ha'n, ha't⟩ := cardBits_bits_ty hb hc x hx
                     exact ⟨true, env_int01_of_aux_name henvAux1 ⟨a', ha', ha'n, ha't⟩⟩
                   have hrow : ShapeState.ConstraintChecked env
                       (shapeLinEq (cs.map (fun _ => 1)) cs j) := by
                     refine ⟨_, fullSig_int_lin_eq, ?_⟩
                     exact intLinEq_check (fun x hx => hcs x hx)
                   exact ShapeState.newChecked_trans
-                    (cardBits_newChecked hb hwf hsup hsrcenv henvAux1)
+                    (cardBits_newChecked hb hc hwf hsup hsrcenv henvAux1)
                     (by simpa [ShapeState.emitList] using ShapeState.newChecked_emit hrow)
               | bool b => simp at h
               | set sl => simp at h
@@ -1225,6 +1731,7 @@ theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeStat
 theorem unionRows_newChecked {taken : List String} {m : Model} {a b c : Expr}
     {st st' : ShapeState} {vals : List Int} {env : StaticEnv}
     (h : unionRows taken m a b c st vals = some st')
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -1239,6 +1746,9 @@ theorem unionRows_newChecked {taken : List String} {m : Model} {a b c : Expr}
   | cons v vs ih =>
       obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
         unionRows_cons_decomp h
+      have hc1 : st1.CacheOk := memberTerm_cacheOk hm1 hc
+      have hc2 : st2.CacheOk := memberTerm_cacheOk hm2 hc1
+      have hc3 : st3.CacheOk := memberTerm_cacheOk hm3 hc2
       have henvAux3 : ∀ a' ∈ st3.aux,
           env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
         fun a' ha' => henvAux a' (unionRows_aux_subset hr a' ha')
@@ -1249,35 +1759,36 @@ theorem unionRows_newChecked {taken : List String} {m : Model} {a b c : Expr}
           env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
         fun a' ha' => henvAux2 a' (memberTerm_aux_subset hm2 a' ha')
       have hav : ∃ isVar, env (Ident.mk av) = some (.base .bool, isVar) := by
-        obtain ⟨ca, hca, hcan, hcat⟩ := memberTerm_aux hm1
+        obtain ⟨ca, hca, hcan, hcat⟩ := memberTerm_aux hm1 hc
         have hca3 : ca ∈ st3.aux :=
           memberTerm_aux_subset hm3 ca (memberTerm_aux_subset hm2 ca hca)
         exact ⟨true, env_bool_of_aux_name henvAux3 ⟨ca, hca3, hcan, hcat⟩⟩
       have hbv : ∃ isVar, env (Ident.mk bv) = some (.base .bool, isVar) := by
-        obtain ⟨cb, hcb, hcbn, hcbt⟩ := memberTerm_aux hm2
+        obtain ⟨cb, hcb, hcbn, hcbt⟩ := memberTerm_aux hm2 hc1
         have hcb3 : cb ∈ st3.aux := memberTerm_aux_subset hm3 cb hcb
         exact ⟨true, env_bool_of_aux_name henvAux3 ⟨cb, hcb3, hcbn, hcbt⟩⟩
       have hcv : ∃ isVar, env (Ident.mk cv) = some (.base .bool, isVar) := by
-        obtain ⟨cc, hcc, hccn, hcct⟩ := memberTerm_aux hm3
+        obtain ⟨cc, hcc, hccn, hcct⟩ := memberTerm_aux hm3 hc2
         exact ⟨true, env_bool_of_aux_name henvAux3 ⟨cc, hcc, hccn, hcct⟩⟩
       have hrow : ShapeState.ConstraintChecked env (unionRow av bv cv) := by
         refine ⟨_, fullSig_bool_or, ?_⟩
         simpa [unionRow, shapeConstraint] using boolOr_check hav hbv hcv
       exact ShapeState.newChecked_trans
-        (memberTerm_newChecked hm1 hwf hsup hsrcenv henvAux1)
+        (memberTerm_newChecked hm1 hc hwf hsup hsrcenv henvAux1)
         (ShapeState.newChecked_trans
-          (memberTerm_newChecked hm2 hwf hsup hsrcenv henvAux2)
+          (memberTerm_newChecked hm2 hc1 hwf hsup hsrcenv henvAux2)
           (ShapeState.newChecked_trans
-            (memberTerm_newChecked hm3 hwf hsup hsrcenv henvAux3)
+            (memberTerm_newChecked hm3 hc2 hwf hsup hsrcenv henvAux3)
             (ShapeState.newChecked_trans
               (ShapeState.newChecked_emit hrow)
-              (ih hr henvAux))))
+              (ih hr hc3 henvAux))))
 
 /-- `rewriteUnion` introduces only checked constraints. -/
 theorem rewriteUnion_newChecked {taken : List String} {m : Model}
     {st : ShapeState} {a b c : Expr} {ua ub uc : List Int}
     {st' : ShapeState} {cs' : List ConstraintItem} {env : StaticEnv}
     (h : rewriteUnion taken m st a b c ua ub uc = some (st', cs'))
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -1285,13 +1796,14 @@ theorem rewriteUnion_newChecked {taken : List String} {m : Model}
     st.NewChecked env (st'.emitList cs') := by
   obtain ⟨st1, hr, rfl, rfl⟩ := rewriteUnion_decomp h
   simpa [ShapeState.emitList] using
-    unionRows_newChecked hr hwf hsup hsrcenv henvAux
+    unionRows_newChecked hr hc hwf hsup hsrcenv henvAux
 
 /-- `intersectRows` only adds checked auxiliary definitions and `bool_and`
     rows. -/
 theorem intersectRows_newChecked {taken : List String} {m : Model} {a b c : Expr}
     {st st' : ShapeState} {vals : List Int} {env : StaticEnv}
     (h : intersectRows taken m a b c st vals = some st')
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -1306,6 +1818,9 @@ theorem intersectRows_newChecked {taken : List String} {m : Model} {a b c : Expr
   | cons v vs ih =>
       obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
         intersectRows_cons_decomp h
+      have hc1 : st1.CacheOk := memberTerm_cacheOk hm1 hc
+      have hc2 : st2.CacheOk := memberTerm_cacheOk hm2 hc1
+      have hc3 : st3.CacheOk := memberTerm_cacheOk hm3 hc2
       have henvAux3 : ∀ a' ∈ st3.aux,
           env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
         fun a' ha' => henvAux a' (intersectRows_aux_subset hr a' ha')
@@ -1316,35 +1831,36 @@ theorem intersectRows_newChecked {taken : List String} {m : Model} {a b c : Expr
           env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
         fun a' ha' => henvAux2 a' (memberTerm_aux_subset hm2 a' ha')
       have hav : ∃ isVar, env (Ident.mk av) = some (.base .bool, isVar) := by
-        obtain ⟨ca, hca, hcan, hcat⟩ := memberTerm_aux hm1
+        obtain ⟨ca, hca, hcan, hcat⟩ := memberTerm_aux hm1 hc
         have hca3 : ca ∈ st3.aux :=
           memberTerm_aux_subset hm3 ca (memberTerm_aux_subset hm2 ca hca)
         exact ⟨true, env_bool_of_aux_name henvAux3 ⟨ca, hca3, hcan, hcat⟩⟩
       have hbv : ∃ isVar, env (Ident.mk bv) = some (.base .bool, isVar) := by
-        obtain ⟨cb, hcb, hcbn, hcbt⟩ := memberTerm_aux hm2
+        obtain ⟨cb, hcb, hcbn, hcbt⟩ := memberTerm_aux hm2 hc1
         have hcb3 : cb ∈ st3.aux := memberTerm_aux_subset hm3 cb hcb
         exact ⟨true, env_bool_of_aux_name henvAux3 ⟨cb, hcb3, hcbn, hcbt⟩⟩
       have hcv : ∃ isVar, env (Ident.mk cv) = some (.base .bool, isVar) := by
-        obtain ⟨cc, hcc, hccn, hcct⟩ := memberTerm_aux hm3
+        obtain ⟨cc, hcc, hccn, hcct⟩ := memberTerm_aux hm3 hc2
         exact ⟨true, env_bool_of_aux_name henvAux3 ⟨cc, hcc, hccn, hcct⟩⟩
       have hrow : ShapeState.ConstraintChecked env (intersectRow av bv cv) := by
         refine ⟨_, fullSig_bool_and, ?_⟩
         simpa [intersectRow, shapeConstraint] using boolAnd_check hav hbv hcv
       exact ShapeState.newChecked_trans
-        (memberTerm_newChecked hm1 hwf hsup hsrcenv henvAux1)
+        (memberTerm_newChecked hm1 hc hwf hsup hsrcenv henvAux1)
         (ShapeState.newChecked_trans
-          (memberTerm_newChecked hm2 hwf hsup hsrcenv henvAux2)
+          (memberTerm_newChecked hm2 hc1 hwf hsup hsrcenv henvAux2)
           (ShapeState.newChecked_trans
-            (memberTerm_newChecked hm3 hwf hsup hsrcenv henvAux3)
+            (memberTerm_newChecked hm3 hc2 hwf hsup hsrcenv henvAux3)
             (ShapeState.newChecked_trans
               (ShapeState.newChecked_emit hrow)
-              (ih hr henvAux))))
+              (ih hr hc3 henvAux))))
 
 /-- `rewriteIntersect` introduces only checked constraints. -/
 theorem rewriteIntersect_newChecked {taken : List String} {m : Model}
     {st : ShapeState} {a b c : Expr} {ua ub uc : List Int}
     {st' : ShapeState} {cs' : List ConstraintItem} {env : StaticEnv}
     (h : rewriteIntersect taken m st a b c ua ub uc = some (st', cs'))
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -1352,7 +1868,7 @@ theorem rewriteIntersect_newChecked {taken : List String} {m : Model}
     st.NewChecked env (st'.emitList cs') := by
   obtain ⟨st1, hr, rfl, rfl⟩ := rewriteIntersect_decomp h
   simpa [ShapeState.emitList] using
-    intersectRows_newChecked hr hwf hsup hsrcenv henvAux
+    intersectRows_newChecked hr hc hwf hsup hsrcenv henvAux
 
 /-- Every membership bit allocated by `arrayElemBits` is a Boolean
     auxiliary of the resulting state. -/
@@ -1360,17 +1876,18 @@ theorem arrayElemBits_terms_ty {taken : List String} {m : Model} {v : Int} :
     ∀ (es : List BasicExpr) (st : ShapeState) (bits : List String)
       (st' : ShapeState),
       arrayElemBits taken m es st v = some (bits, st') →
+      st.CacheOk →
       ∀ b ∈ bits, ∃ c ∈ st'.aux, c.name = b ∧ c.ty = .par .bool := by
   intro es
   induction es with
   | nil =>
-      intro st bits st' h
+      intro st bits st' h hc
       simp only [arrayElemBits, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       intro b hb
       cases hb
   | cons e rest ih =>
-      intro st bits st' h
+      intro st bits st' h hc
       simp only [arrayElemBits] at h
       cases hm : memberTerm taken m st (.basic e) v with
       | none => simp only [hm] at h; simp at h
@@ -1383,11 +1900,13 @@ theorem arrayElemBits_terms_ty {taken : List String} {m : Model} {v : Int} :
               obtain ⟨bs, st2⟩ := q
               simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
               obtain ⟨rfl, rfl⟩ := h
-              intro c hc
-              rcases List.mem_cons.mp hc with rfl | hc
-              · obtain ⟨a, ha, han, hat⟩ := memberTerm_aux hm
+              have hc1 : st1.CacheOk := memberTerm_cacheOk hm hc
+              intro c hmem
+              rcases List.mem_cons.mp hmem with hmem | hmem
+              · rw [hmem]
+                obtain ⟨a, ha, han, hat⟩ := memberTerm_aux hm hc
                 exact ⟨a, arrayElemBits_aux_subset rest st1 bs st2 hr a ha, han, hat⟩
-              · exact ih st1 bs st2 hr c hc
+              · exact ih st1 bs st2 hr hc1 c hmem
 
 /-- `arrayElemBits` only adds checked auxiliary definitions. -/
 theorem arrayElemBits_newChecked {taken : List String} {m : Model} {v : Int}
@@ -1395,6 +1914,7 @@ theorem arrayElemBits_newChecked {taken : List String} {m : Model} {v : Int}
     ∀ (es : List BasicExpr) (st : ShapeState) (bits : List String)
       (st' : ShapeState),
       arrayElemBits taken m es st v = some (bits, st') →
+      st.CacheOk →
       WellFormed fullSig m →
       (∀ y ∈ setTaken m, y ∈ taken) →
       (∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y)) →
@@ -1403,13 +1923,13 @@ theorem arrayElemBits_newChecked {taken : List String} {m : Model} {v : Int}
   intro es
   induction es with
   | nil =>
-      intro st bits st' h hwf hsup hsrcenv henvAux
+      intro st bits st' h hc hwf hsup hsrcenv henvAux
       simp only [arrayElemBits, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       intro c hc
       exact Or.inl hc
   | cons e rest ih =>
-      intro st bits st' h hwf hsup hsrcenv henvAux
+      intro st bits st' h hc hwf hsup hsrcenv henvAux
       simp only [arrayElemBits] at h
       cases hm : memberTerm taken m st (.basic e) v with
       | none => simp only [hm] at h; simp at h
@@ -1422,13 +1942,14 @@ theorem arrayElemBits_newChecked {taken : List String} {m : Model} {v : Int}
               obtain ⟨bs, st2⟩ := q
               simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
               obtain ⟨rfl, rfl⟩ := h
+              have hc1 : st1.CacheOk := memberTerm_cacheOk hm hc
               have henvAux1 : ∀ a' ∈ st1.aux,
                   env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
                 fun a' ha' =>
                   henvAux a' (arrayElemBits_aux_subset rest st1 bs st2 hr a' ha')
               exact ShapeState.newChecked_trans
-                (memberTerm_newChecked hm hwf hsup hsrcenv henvAux1)
-                (ih st1 bs st2 hr hwf hsup hsrcenv henvAux)
+                (memberTerm_newChecked hm hc hwf hsup hsrcenv henvAux1)
+                (ih st1 bs st2 hr hc1 hwf hsup hsrcenv henvAux)
 
 /-- Every membership bit and target bit stored in a row of `arrayElemRows`
     is a Boolean auxiliary of the resulting state. -/
@@ -1437,19 +1958,20 @@ theorem arrayElemRows_terms_ty {taken : List String} {m : Model} {i : BasicExpr}
     ∀ (vals : List Int) (st : ShapeState)
       (rows : List (Int × List String × String)) (st' : ShapeState),
       arrayElemRows taken m i es T st vals = some (rows, st') →
+      st.CacheOk →
       ∀ r ∈ rows,
         (∀ b ∈ r.2.1, ∃ c ∈ st'.aux, c.name = b ∧ c.ty = .par .bool) ∧
         ∃ c ∈ st'.aux, c.name = r.2.2 ∧ c.ty = .par .bool := by
   intro vals
   induction vals with
   | nil =>
-      intro st rows st' h
+      intro st rows st' h hc
       simp only [arrayElemRows, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       intro r hr
       cases hr
   | cons v vs ih =>
-      intro st rows st' h
+      intro st rows st' h hc
       simp only [arrayElemRows] at h
       cases hb : arrayElemBits taken m es st v with
       | none => simp only [hb] at h; simp at h
@@ -1467,18 +1989,20 @@ theorem arrayElemRows_terms_ty {taken : List String} {m : Model} {i : BasicExpr}
                   obtain ⟨rows', st3⟩ := r'
                   simp only [hrec, Option.some.injEq, Prod.mk.injEq] at h
                   obtain ⟨rfl, rfl⟩ := h
+                  have hcb : st1.CacheOk := arrayElemBits_cacheOk es st bits st1 hb hc
+                  have hcm : st2.CacheOk := memberTerm_cacheOk hm hcb
                   intro r hr
                   rcases List.mem_cons.mp hr with rfl | hr'
                   · refine ⟨?_, ?_⟩
                     · intro b hbm
-                      obtain ⟨c, hc, hcn, hct⟩ :=
-                        arrayElemBits_terms_ty es st bits st1 hb b hbm
+                      obtain ⟨c, hc', hcn, hct⟩ :=
+                        arrayElemBits_terms_ty es st bits st1 hb hc b hbm
                       exact ⟨c, arrayElemRows_aux_subset vs st2 rows' st3 hrec c
-                        (memberTerm_aux_subset hm c hc), hcn, hct⟩
-                    · obtain ⟨c, hc, hcn, hct⟩ := memberTerm_aux hm
-                      exact ⟨c, arrayElemRows_aux_subset vs st2 rows' st3 hrec c hc,
+                        (memberTerm_aux_subset hm c hc'), hcn, hct⟩
+                    · obtain ⟨c, hc', hcn, hct⟩ := memberTerm_aux hm hcb
+                      exact ⟨c, arrayElemRows_aux_subset vs st2 rows' st3 hrec c hc',
                         hcn, hct⟩
-                  · exact ih st2 rows' st3 hrec r hr'
+                  · exact ih st2 rows' st3 hrec hcm r hr'
 
 /-- `arrayElemRows` only adds checked auxiliary definitions. -/
 theorem arrayElemRows_newChecked {taken : List String} {m : Model} {i : BasicExpr}
@@ -1486,6 +2010,7 @@ theorem arrayElemRows_newChecked {taken : List String} {m : Model} {i : BasicExp
     ∀ (vals : List Int) (st : ShapeState)
       (rows : List (Int × List String × String)) (st' : ShapeState),
       arrayElemRows taken m i es T st vals = some (rows, st') →
+      st.CacheOk →
       WellFormed fullSig m →
       (∀ y ∈ setTaken m, y ∈ taken) →
       (∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y)) →
@@ -1494,13 +2019,13 @@ theorem arrayElemRows_newChecked {taken : List String} {m : Model} {i : BasicExp
   intro vals
   induction vals with
   | nil =>
-      intro st rows st' h hwf hsup hsrcenv henvAux
+      intro st rows st' h hc hwf hsup hsrcenv henvAux
       simp only [arrayElemRows, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       intro c hc
       exact Or.inl hc
   | cons v vs ih =>
-      intro st rows st' h hwf hsup hsrcenv henvAux
+      intro st rows st' h hc hwf hsup hsrcenv henvAux
       simp only [arrayElemRows] at h
       cases hb : arrayElemBits taken m es st v with
       | none => simp only [hb] at h; simp at h
@@ -1518,6 +2043,8 @@ theorem arrayElemRows_newChecked {taken : List String} {m : Model} {i : BasicExp
                   obtain ⟨rows', st3⟩ := r'
                   simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
                   obtain ⟨rfl, rfl⟩ := h
+                  have hcb : st1.CacheOk := arrayElemBits_cacheOk es st bits st1 hb hc
+                  have hcm : st2.CacheOk := memberTerm_cacheOk hm hcb
                   have henvAux2 : ∀ a' ∈ st2.aux,
                       env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
                     fun a' ha' =>
@@ -1526,10 +2053,10 @@ theorem arrayElemRows_newChecked {taken : List String} {m : Model} {i : BasicExp
                       env (Ident.mk a'.name) = some (.base a'.ty.base, true) :=
                     fun a' ha' => henvAux2 a' (memberTerm_aux_subset hm a' ha')
                   exact ShapeState.newChecked_trans
-                    (arrayElemBits_newChecked es st bits st1 hb hwf hsup hsrcenv henvAux1)
+                    (arrayElemBits_newChecked es st bits st1 hb hc hwf hsup hsrcenv henvAux1)
                     (ShapeState.newChecked_trans
-                      (memberTerm_newChecked hm hwf hsup hsrcenv henvAux2)
-                      (ih st2 rows' st3 hr hwf hsup hsrcenv henvAux))
+                      (memberTerm_newChecked hm hcb hwf hsup hsrcenv henvAux2)
+                      (ih st2 rows' st3 hr hcm hwf hsup hsrcenv henvAux))
 
 /-- Every row in an `arrayElemRowList` is checked. -/
 theorem arrayElemRowList_checked {env : StaticEnv} {st : ShapeState} {i : BasicExpr}
@@ -1551,6 +2078,7 @@ theorem rewriteArrayElem_newChecked {taken : List String} {m : Model}
     {st : ShapeState} {i : BasicExpr} {es : List BasicExpr} {T : String}
     {st' : ShapeState} {cs' : List ConstraintItem} {env : StaticEnv}
     (h : rewriteArrayElem taken m st i es T = some (st', cs'))
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -1559,12 +2087,12 @@ theorem rewriteArrayElem_newChecked {taken : List String} {m : Model}
     st.NewChecked env (st'.emitList cs') := by
   obtain ⟨vals, rows, hvals, hrows, rfl⟩ := rewriteArrayElem_decomp h
   exact ShapeState.newChecked_trans
-    (arrayElemRows_newChecked vals st rows st' hrows hwf hsup hsrcenv henvAux)
-    (ShapeState.newChecked_emitList (fun c hc => by
-      rcases List.mem_append.mp hc with hc | hc
+    (arrayElemRows_newChecked vals st rows st' hrows hc hwf hsup hsrcenv henvAux)
+    (ShapeState.newChecked_emitList (fun c hc' => by
+      rcases List.mem_append.mp hc' with hc' | hc'
       · exact arrayElemRowList_checked hi henvAux
-          (arrayElemRows_terms_ty vals st rows st' hrows) c hc
-      · exact shapeRangeChecks_checked hi c hc))
+          (arrayElemRows_terms_ty vals st rows st' hrows hc) c hc'
+      · exact shapeRangeChecks_checked hi c hc'))
 
 /-- **Static checking of the per-constraint rewrite**: using the source
     constraint's signature check, every emitted constraint is checked in
@@ -1574,6 +2102,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
     {cs' : List ConstraintItem} {env : StaticEnv}
     (h : shapeRewriteConstraint taken m st c = some (st', cs'))
     (hcheck : ShapeState.ConstraintChecked env c)
+    (hc : st.CacheOk)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
     (hsrcenv : ∀ y ∈ taken, env (Ident.mk y) = m.staticEnv (Ident.mk y))
@@ -1615,7 +2144,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
             subst hparams
             simp only [Forall2] at hfor
             obtain ⟨hxchk, hschk, hrchk, -⟩ := hfor
-            exact rewriteVarMember_newChecked h hwf hsup hsrcenv
+            exact rewriteVarMember_newChecked h hc hwf hsup hsrcenv
               (staticEnv_int_of_checkArg hxchk)
               (fun b hb => by
                 cases hb
@@ -1672,7 +2201,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
             subst hparams
             simp only [Forall2] at hfor
             obtain ⟨hxchk, hschk, -⟩ := hfor
-            exact rewriteVarMember_newChecked h hwf hsup hsrcenv
+            exact rewriteVarMember_newChecked h hc hwf hsup hsrcenv
               (staticEnv_int_of_checkArg hxchk)
               (fun b hb => by cases hb)
               henvAux
@@ -1721,7 +2250,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
         subst hparams
         simp only [Forall2] at hfor
         obtain ⟨-, hkchk, -⟩ := hfor
-        refine rewriteCard_newChecked h hwf hsup hsrcenv (fun kn hk => ?_) henvAux
+        refine rewriteCard_newChecked h hc hwf hsup hsrcenv (fun kn hk => ?_) henvAux
         cases hk
         simpa using staticEnv_int_of_checkArg hkchk
     case h_2 =>
@@ -1742,7 +2271,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
     split at h
     case h_1 =>
       rename_i ua ub uc hA hB hC
-      exact rewriteUnion_newChecked h hwf hsup hsrcenv henvAux
+      exact rewriteUnion_newChecked h hc hwf hsup hsrcenv henvAux
     case h_2 =>
       simp only [Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
@@ -1780,7 +2309,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
           subst hparams
           simp only [Forall2] at hfor
           obtain ⟨hichk, -, -, -⟩ := hfor
-          exact rewriteArrayElem_newChecked h hwf hsup hsrcenv hichk henvAux
+          exact rewriteArrayElem_newChecked h hc hwf hsup hsrcenv hichk henvAux
       case h_2 =>
         rename_i x
         split at h
@@ -1804,7 +2333,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
             subst hparams
             simp only [Forall2] at hfor
             obtain ⟨hichk, -, -, -⟩ := hfor
-            exact rewriteArrayElem_newChecked h hwf hsup hsrcenv hichk henvAux
+            exact rewriteArrayElem_newChecked h hc hwf hsup hsrcenv hichk henvAux
         case h_2 =>
           simp only [Option.some.injEq, Prod.mk.injEq] at h
           obtain ⟨rfl, rfl⟩ := h
@@ -1835,7 +2364,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
     split at h
     case h_1 =>
       rename_i ua ub uc hA hB hC
-      exact rewriteIntersect_newChecked h hwf hsup hsrcenv henvAux
+      exact rewriteIntersect_newChecked h hc hwf hsup hsrcenv henvAux
     case h_2 =>
       simp only [Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
@@ -1857,6 +2386,7 @@ theorem shapeExpandConstraints_newChecked {taken : List String} {m : Model}
     {cs : List ConstraintItem} {st stF : ShapeState} {env : StaticEnv}
     (h : shapeExpandConstraints taken m cs st = some stF)
     (hchecked : st.CheckedIn env)
+    (hc : st.CacheOk)
     (hsource : ∀ c ∈ cs, ShapeState.ConstraintChecked env c)
     (hwf : WellFormed fullSig m)
     (hsup : ∀ y ∈ setTaken m, y ∈ taken)
@@ -1882,12 +2412,15 @@ theorem shapeExpandConstraints_newChecked {taken : List String} {m : Model}
           have henvAux1 : ∀ a ∈ st1.aux,
               env (Ident.mk a.name) = some (.base a.ty.base, true) :=
             fun a ha => henvAux a (hsub a ha)
+          have hc1 : st1.CacheOk := shapeRewriteConstraint_cacheOk hr hc
+          have hcE : (st1.emitList cs').CacheOk :=
+            ShapeState.emitList_cacheOk hc1
           have hnew := shapeRewriteConstraint_newChecked hr (hsource c (by simp))
-            hwf hsup hsrcenv henvAux1
+            hc hwf hsup hsrcenv henvAux1
           have hchecked' : (st1.emitList cs').CheckedIn env :=
             ShapeState.checkedIn_of_new hchecked hnew
           exact ShapeState.newChecked_trans hnew
-            (ih h hchecked' (fun c' hc' => hsource c' (List.mem_cons_of_mem _ hc')))
+            (ih h hchecked' hcE (fun c' hc' => hsource c' (List.mem_cons_of_mem _ hc')))
 
 /-- The final shape model's static environment is the state's environment. -/
 theorem ShapeExpansion.staticEnv_apply {m : Model} {sh : ShapeExpansion}
@@ -2056,7 +2589,8 @@ theorem wf_shapeExpand {taken : List String} {m : Model} {sh : ShapeExpansion}
     have henvAux : ∀ a ∈ stF.aux,
         (stF.env m) (Ident.mk a.name) = some (.base a.ty.base, true) :=
       fun a ha => ShapeState.env_aux hstwf hwf hsup ha
-    have hnew := shapeExpandConstraints_newChecked hexp hchecked0 hsource hwf hsup
+    have hnew := shapeExpandConstraints_newChecked hexp hchecked0
+      (ShapeState.initial_cacheOk taken) hsource hwf hsup
       (fun x hx => ShapeState.env_source hstwf hx) henvAux
     rcases hnew c' hc'F with hmem | hcc
     · simp [ShapeState.initial] at hmem

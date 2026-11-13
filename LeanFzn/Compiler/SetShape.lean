@@ -29,6 +29,7 @@ Dependencies:
 -/
 
 import LeanFzn.Compiler.SetExpand
+import Std.Data.HashMap.Lemmas
 
 namespace LeanFzn.Compiler
 open LeanFzn LeanFzn.Semantics LeanFzn.Semantics.Evaluation
@@ -45,7 +46,27 @@ inductive ShapeKind where
   | bit (a : String)
   /-- A fresh Boolean pinned to a literal: `bool_not(a,!v)`. -/
   | const (v : Bool)
-  deriving Repr
+  deriving Repr, DecidableEq
+
+/-- Comparison by structural equality.  The cache relies on this `BEq`
+    being lawful so a lookup hit returns the canonical auxiliary. -/
+instance : BEq ShapeKind := ⟨fun a b => decide (a = b)⟩
+
+instance : ReflBEq ShapeKind where
+  rfl := by intro a; simp
+
+instance : LawfulBEq ShapeKind where
+  eq_of_beq := by intro a b h; simpa using h
+
+/- The cache is keyed by `ShapeKind`; the hash only needs to agree with
+    the lawful `BEq`, which `LawfulHashable` derives from `LawfulBEq`. -/
+deriving instance Hashable for ShapeKind
+
+/-- The declared type dictated by a shape kind.  `bool2int` aliases are
+    the only `0..1` integer auxiliaries; every other shape is Boolean. -/
+def ShapeKind.ty : ShapeKind → BasicVarType
+  | .bit _ => .intRange 0 1
+  | _ => .par .bool
 
 /-- One fresh auxiliary declaration and its definition. -/
 structure ShapeAux where
@@ -67,6 +88,9 @@ structure ShapeState where
   decls : List VarDeclItem
   cons : List ConstraintItem
   maxLen : Nat
+  /-- Canonical name for every shape kind already emitted.  A hit returns
+      the existing auxiliary instead of allocating a duplicate. -/
+  cache : Std.HashMap ShapeKind String
   deriving Repr
 
 /-- The result of the shape pre-pass. -/
@@ -135,20 +159,43 @@ def ShapeState.freshDecl (taken : List String) (st : ShapeState)
         next := st.next + 1
         decls := .basic ty (Ident.mk n) [] none :: st.decls })
 
-/-- Allocate a fresh Boolean auxiliary, emitting its defining constraint. -/
-def ShapeState.freshBool (taken : List String) (st : ShapeState)
+/-- Allocate a fresh auxiliary for `kind`, unconditionally.  The cache
+    bookkeeping is separate so the proofs can reason about allocation and
+    reuse with one case split. -/
+def ShapeState.allocAux (taken : List String) (st : ShapeState)
     (kind : ShapeKind) : String × ShapeState :=
-  let (n, st') := st.freshDecl taken (.par .bool)
-  let a : ShapeAux := { name := n, ty := .par .bool, kind := kind }
-  (n, { st' with aux := a :: st'.aux, cons := a.definition :: st'.cons })
+  let (n, st') := st.freshDecl taken kind.ty
+  let a : ShapeAux := { name := n, ty := kind.ty, kind := kind }
+  (n, { st' with
+        aux := a :: st'.aux
+        cons := a.definition :: st'.cons
+        cache := st'.cache.insert kind n })
+
+/-- Allocate an auxiliary for `kind`, or return the canonical auxiliary
+    already recorded for that kind.  The type is fixed by the kind, so a
+    cache hit is always type-correct. -/
+def ShapeState.freshAux (taken : List String) (st : ShapeState)
+    (kind : ShapeKind) : String × ShapeState :=
+  match st.cache.get? kind with
+  | some n => (n, st)
+  | none => st.allocAux taken kind
+
+/-- The initial shape state. -/
+def ShapeState.initial (taken : List String) : ShapeState :=
+  { next := 0, aux := [], decls := [], cons := [], maxLen := maxStrLength taken,
+    cache := {} }
+
+/-- Allocate a fresh Boolean auxiliary, emitting its defining constraint
+    (or reuse the canonical one for the same kind). -/
+abbrev ShapeState.freshBool (taken : List String) (st : ShapeState)
+    (kind : ShapeKind) : String × ShapeState :=
+  st.freshAux taken kind
 
 /-- Allocate a fresh `0..1` integer auxiliary, emitting its defining
-    constraint. -/
-def ShapeState.freshInt01 (taken : List String) (st : ShapeState)
+    constraint (or reuse the canonical one for the same kind). -/
+abbrev ShapeState.freshInt01 (taken : List String) (st : ShapeState)
     (kind : ShapeKind) : String × ShapeState :=
-  let (n, st') := st.freshDecl taken (.intRange 0 1)
-  let a : ShapeAux := { name := n, ty := .intRange 0 1, kind := kind }
-  (n, { st' with aux := a :: st'.aux, cons := a.definition :: st'.cons })
+  st.freshAux taken kind
 
 /-- Emit one constraint. -/
 def ShapeState.emit (st : ShapeState) (c : ConstraintItem) : ShapeState :=
@@ -546,8 +593,7 @@ def shapeExpandConstraints (taken : List String) (m : Model) :
 
 /-- **The set-shape pre-pass**, avoiding the model's own declared names. -/
 def shapeExpandModelWith (taken : List String) (m : Model) : Option ShapeExpansion := do
-  let st ← shapeExpandConstraints taken m m.constraints
-    { next := 0, aux := [], decls := [], cons := [], maxLen := maxStrLength taken }
+  let st ← shapeExpandConstraints taken m m.constraints (ShapeState.initial taken)
   some { model := { m with
            variables := st.decls.reverse ++ m.variables,
            constraints := st.cons.reverse },

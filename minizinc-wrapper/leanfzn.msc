@@ -1,0 +1,26 @@
+{
+  "id": "org.leanfzn.leanfzn",
+  "name": "LeanFzn",
+  "description": "Verified FlatZinc solver (certified UNSAT and optimality claims)",
+  "version": "0.1.0",
+  "mznlib": "mznlib",
+  "executable": "fzn-leanfzn",
+  "tags": ["leanfzn", "int"],
+  "stdFlags": ["-a", "-i", "-n", "-f", "-p", "-r", "-s", "-t", "-v"],
+  "extraFlags": [
+    ["--var", "LeanFzn variable selection", "opt:act:minc:wdeg:domwdeg:annot", "act"],
+    ["--val", "LeanFzn value selection", "opt:incumbent:min:max:median:act:annot", "incumbent"],
+    ["--opt", "LeanFzn optimization driver", "opt:linear:seeded", "linear"],
+    ["--restart", "LeanFzn restart policy (default: Luby after the first incumbent)", "opt:none:luby:geom", "none"],
+    ["--restart-base", "LeanFzn restart base conflict threshold", "int", "100"],
+    ["--presolve", "LeanFzn presolve", "opt:none:dedup", "none"],
+    ["--conflict-limit", "LeanFzn conflict budget per optimization round (diagnostic)", "int", "0"],
+    ["--strategy", "LeanFzn search preset", "opt:default:annot:lns", "default"]
+  ],
+  "supportsMzn": false,
+  "supportsFzn": true,
+  "needsSolns2Out": true,
+  "needsMznExecutable": false,
+  "needsStdlibDir": false,
+  "isGUIApplication": false
+}

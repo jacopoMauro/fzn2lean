@@ -105,6 +105,58 @@ theorem coreSolveStatsWith_unsat {prev : Option (List Value)}
       | unsat => exact coreSolveFullPre_unsat hf
       | gaveUp => simp [hf] at h
 
+/-- Stats-aware round with an already converted domain array for the
+preprocessed round problem. -/
+def coreSolveStatsWithPrepared (prev : Option (List Value))
+    (p : CompiledProblem DomConstraint) (o : SearchConfig := {})
+    (fuel : Nat := coreFuel) (doms : Array DomC)
+    (hconv : convertDomains (presolveProblem (roundConfig o prev) p).domains = some doms) :
+    CertVerdict × EngineStats :=
+  match coreSolveFullPrePrepared p (roundConfig o prev) prev fuel doms hconv with
+  | (.sat a, st) => (.sat a, st)
+  | (.unsat, st) => (.unsat, st)
+  | (.gaveUp, st) => (.fail, st)
+
+theorem coreSolveStatsWithPrepared_eq {prev : Option (List Value)}
+    {p : CompiledProblem DomConstraint} {o : SearchConfig} {fuel : Nat}
+    {doms : Array DomC}
+    (hconv : convertDomains (presolveProblem (roundConfig o prev) p).domains = some doms) :
+    coreSolveStatsWithPrepared prev p o fuel doms hconv =
+      coreSolveStatsWith prev p o fuel := by
+  unfold coreSolveStatsWithPrepared coreSolveStatsWith
+  rw [coreSolveFullPrePrepared_eq]
+
+theorem coreSolveStatsWithPrepared_sat {prev : Option (List Value)}
+    {p : CompiledProblem DomConstraint} {o : SearchConfig} {fuel : Nat}
+    {doms : Array DomC}
+    {hconv : convertDomains (presolveProblem (roundConfig o prev) p).domains = some doms}
+    {a : List Value} {st : EngineStats}
+    (h : coreSolveStatsWithPrepared prev p o fuel doms hconv = (.sat a, st)) :
+    a ∈ allAssigns p.domains ∧ accepts p a = true := by
+  rw [coreSolveStatsWithPrepared_eq] at h
+  exact coreSolveStatsWith_sat h
+
+theorem coreSolveStatsWithPrepared_unsat {prev : Option (List Value)}
+    {p : CompiledProblem DomConstraint} {o : SearchConfig} {fuel : Nat}
+    {doms : Array DomC}
+    {hconv : convertDomains (presolveProblem (roundConfig o prev) p).domains = some doms}
+    {st : EngineStats}
+    (h : coreSolveStatsWithPrepared prev p o fuel doms hconv = (.unsat, st)) :
+    ∀ b ∈ allAssigns p.domains, accepts p b = false := by
+  rw [coreSolveStatsWithPrepared_eq] at h
+  exact coreSolveStatsWith_unsat h
+
+/-- Every round problem has the same domains as the initial problem, so one
+conversion result is valid for every round. -/
+theorem convertDomains_presolve_round (o : SearchConfig)
+    (p0 : CompiledProblem DomConstraint) (spec : ObjectiveSpec)
+    (bo : Option Int) (prev : Option (List Value)) (doms : Array DomC)
+    (h0 : convertDomains (presolveProblem o p0).domains = some doms) :
+    convertDomains (presolveProblem (roundConfig o prev) (curP p0 spec bo)).domains =
+      some doms := by
+  rw [presolveProblem_domains, curP_domains]
+  rwa [presolveProblem_domains] at h0
+
 /-- The partial Core oracle, optionally bounded for development/regression checks. -/
 def corePartialSolver (o : SearchConfig := {}) (fuel : Nat := coreFuel) : PartialCertSolver where
   solveWith prev p := coreVerdictWith prev p o fuel
@@ -137,6 +189,30 @@ def optLoopCoreStatsWith (o : SearchConfig) (fuel : Nat)
 termination_by meas p0 spec bo
 decreasing_by
   have hsat := coreSolveStatsWith_sat hs
+  rw [curP_domains] at hsat
+  exact meas_decr hsat.1 hsat.2 hv
+
+/-- Core branch and bound whose converted domains are supplied once and reused
+by every round.  All other round state is rebuilt exactly as in
+`optLoopCoreStatsWith`. -/
+def optLoopCoreStatsWithPrepared (o : SearchConfig) (fuel : Nat)
+    (p0 : CompiledProblem DomConstraint) (spec : ObjectiveSpec)
+    (doms : Array DomC)
+    (h0 : convertDomains (presolveProblem o p0).domains = some doms)
+    (prev : Option (List Value)) (bo : Option Int) : OptRun × EngineStats :=
+  match hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) with
+  | (.unsat, st) => (⟨[], true, bo⟩, st)
+  | (.fail, st) => (⟨[], false, bo⟩, st)
+  | (.sat a, st) =>
+      match hv : a[spec.slot]? with
+      | some (.int v) =>
+          let r := optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 (some a) (some v)
+          (⟨(a, v) :: r.1.sols, r.1.complete, r.1.lastBound⟩, st.add r.2)
+      | _ => (⟨[], false, bo⟩, st)
+termination_by meas p0 spec bo
+decreasing_by
+  have hsat := coreSolveStatsWithPrepared_sat hs
   rw [curP_domains] at hsat
   exact meas_decr hsat.1 hsat.2 hv
 
@@ -176,6 +252,58 @@ private theorem optLoopCoreStatsWith_sat_none_eq {o : SearchConfig} {fuel : Nat}
     (hn : ∀ i : Int, a[spec.slot]? ≠ some (.int i)) :
     optLoopCoreStatsWith o fuel p0 spec prev bo = (⟨[], false, bo⟩, st) := by
   conv => lhs; rw [optLoopCoreStatsWith]
+  rw [hs]
+  simp only []
+
+private theorem optLoopCoreStatsWithPrepared_unsat_eq {o : SearchConfig} {fuel : Nat}
+    {p0 : CompiledProblem DomConstraint} {spec : ObjectiveSpec} {bo : Option Int}
+    {doms : Array DomC}
+    {h0 : convertDomains (presolveProblem o p0).domains = some doms}
+    {prev : Option (List Value)} {st : EngineStats}
+    (hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.unsat, st)) :
+    optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 prev bo = (⟨[], true, bo⟩, st) := by
+  rw [optLoopCoreStatsWithPrepared, hs]
+
+private theorem optLoopCoreStatsWithPrepared_fail_eq {o : SearchConfig} {fuel : Nat}
+    {p0 : CompiledProblem DomConstraint} {spec : ObjectiveSpec} {bo : Option Int}
+    {doms : Array DomC}
+    {h0 : convertDomains (presolveProblem o p0).domains = some doms}
+    {prev : Option (List Value)} {st : EngineStats}
+    (hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.fail, st)) :
+    optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 prev bo = (⟨[], false, bo⟩, st) := by
+  rw [optLoopCoreStatsWithPrepared, hs]
+
+private theorem optLoopCoreStatsWithPrepared_sat_int_eq {o : SearchConfig} {fuel : Nat}
+    {p0 : CompiledProblem DomConstraint} {spec : ObjectiveSpec} {bo : Option Int}
+    {doms : Array DomC}
+    {h0 : convertDomains (presolveProblem o p0).domains = some doms}
+    {prev : Option (List Value)} {a : List Value} {v : Int} {st : EngineStats}
+    (hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st))
+    (hv : a[spec.slot]? = some (.int v)) :
+    optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 prev bo =
+      (⟨(a, v) :: (optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 (some a) (some v)).1.sols,
+          (optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 (some a) (some v)).1.complete,
+          (optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 (some a) (some v)).1.lastBound⟩,
+        st.add (optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 (some a) (some v)).2) := by
+  conv => lhs; rw [optLoopCoreStatsWithPrepared]
+  rw [hs]
+  simp only []
+  rw [hv]
+
+private theorem optLoopCoreStatsWithPrepared_sat_none_eq {o : SearchConfig} {fuel : Nat}
+    {p0 : CompiledProblem DomConstraint} {spec : ObjectiveSpec} {bo : Option Int}
+    {doms : Array DomC}
+    {h0 : convertDomains (presolveProblem o p0).domains = some doms}
+    {prev : Option (List Value)} {a : List Value} {st : EngineStats}
+    (hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st))
+    (hn : ∀ i : Int, a[spec.slot]? ≠ some (.int i)) :
+    optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 prev bo =
+      (⟨[], false, bo⟩, st) := by
+  conv => lhs; rw [optLoopCoreStatsWithPrepared]
   rw [hs]
   simp only []
 
@@ -299,6 +427,93 @@ theorem optLoopCoreStatsWith_fst (o : SearchConfig) (fuel : Nat)
                       rw [optLoopCoreStatsWith_sat_none_eq hc hn',
                         optLoopWith_core_sat_none_eq hcv hn']
 
+/-- Reusing one converted domain array across rounds does not change the
+stats loop: every round's problem has the same domains, and the prepared
+entry is pointwise the ordinary one. -/
+theorem optLoopCoreStatsWithPrepared_eq (o : SearchConfig) (fuel : Nat)
+    (p0 : CompiledProblem DomConstraint) (spec : ObjectiveSpec)
+    (doms : Array DomC)
+    (h0 : convertDomains (presolveProblem o p0).domains = some doms) :
+    ∀ prev bo,
+      optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 prev bo =
+        optLoopCoreStatsWith o fuel p0 spec prev bo := by
+  intro prev bo
+  suffices h : ∀ n prev bo, meas p0 spec bo = n →
+      optLoopCoreStatsWithPrepared o fuel p0 spec doms h0 prev bo =
+        optLoopCoreStatsWith o fuel p0 spec prev bo from h _ prev bo rfl
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+      intro prev bo hn
+      cases hc : coreSolveStatsWith prev (curP p0 spec bo) o fuel with
+      | mk r st =>
+          cases r with
+          | unsat =>
+              have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                  (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.unsat, st) := by
+                rw [coreSolveStatsWithPrepared_eq, hc]
+              rw [optLoopCoreStatsWithPrepared_unsat_eq hcp,
+                optLoopCoreStatsWith_unsat_eq hc]
+          | fail =>
+              have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                  (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.fail, st) := by
+                rw [coreSolveStatsWithPrepared_eq, hc]
+              rw [optLoopCoreStatsWithPrepared_fail_eq hcp,
+                optLoopCoreStatsWith_fail_eq hc]
+          | sat a =>
+              cases hv : a[spec.slot]? with
+              | none =>
+                  have hn' : ∀ i : Int, a[spec.slot]? ≠ some (.int i) := by
+                    intro i hi
+                    rw [hv] at hi
+                    cases hi
+                  have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                    rw [coreSolveStatsWithPrepared_eq, hc]
+                  rw [optLoopCoreStatsWithPrepared_sat_none_eq hcp hn',
+                    optLoopCoreStatsWith_sat_none_eq hc hn']
+              | some w =>
+                  cases w with
+                  | int v =>
+                      have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                          (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                        rw [coreSolveStatsWithPrepared_eq, hc]
+                      have hsat := coreSolveStatsWithPrepared_sat hcp
+                      rw [curP_domains] at hsat
+                      have IH := ih _ (hn ▸ meas_decr hsat.1 hsat.2 hv) (some a) (some v) rfl
+                      rw [optLoopCoreStatsWithPrepared_sat_int_eq hcp hv,
+                        optLoopCoreStatsWith_sat_int_eq hc hv, IH]
+                  | bool b =>
+                      have hn' : ∀ i : Int, a[spec.slot]? ≠ some (.int i) := by
+                        intro i hi
+                        rw [hv] at hi
+                        cases hi
+                      have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                          (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                        rw [coreSolveStatsWithPrepared_eq, hc]
+                      rw [optLoopCoreStatsWithPrepared_sat_none_eq hcp hn',
+                        optLoopCoreStatsWith_sat_none_eq hc hn']
+                  | setOfInt s =>
+                      have hn' : ∀ i : Int, a[spec.slot]? ≠ some (.int i) := by
+                        intro i hi
+                        rw [hv] at hi
+                        cases hi
+                      have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                          (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                        rw [coreSolveStatsWithPrepared_eq, hc]
+                      rw [optLoopCoreStatsWithPrepared_sat_none_eq hcp hn',
+                        optLoopCoreStatsWith_sat_none_eq hc hn']
+                  | array arr =>
+                      have hn' : ∀ i : Int, a[spec.slot]? ≠ some (.int i) := by
+                        intro i hi
+                        rw [hv] at hi
+                        cases hi
+                      have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                          (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                        rw [coreSolveStatsWithPrepared_eq, hc]
+                      rw [optLoopCoreStatsWithPrepared_sat_none_eq hcp hn',
+                        optLoopCoreStatsWith_sat_none_eq hc hn']
+
 
 /-- Core-only linear branch-and-bound. `complete = false` retains valid incumbents. -/
 def optimizeCore (m : Model) (o : SearchConfig := {}) (fuel : Nat := coreFuel) :=
@@ -326,6 +541,34 @@ def optimizeStreamCoreStatsLoop {α : Type} (o : SearchConfig) (fuel : Nat)
 termination_by prev bo => meas p0 spec bo
 decreasing_by
   have hsat := coreSolveStatsWith_sat hs
+  rw [curP_domains] at hsat
+  exact meas_decr hsat.1 hsat.2 hv
+
+/-- Streaming stats loop with one converted domain array reused by every
+round.  The recursion, emissions and counters are those of
+`optimizeStreamCoreStatsLoop`. -/
+def optimizeStreamCoreStatsLoopPrepared {α : Type} (o : SearchConfig) (fuel : Nat)
+    (p0 : CompiledProblem DomConstraint) (spec : ObjectiveSpec)
+    (doms : Array DomC)
+    (h0 : convertDomains (presolveProblem o p0).domains = some doms)
+    (f : List Value → α) (emit : α → IO Unit) :
+    Option (List Value) → Option Int → IO (OptRun × List α × EngineStats)
+  | prev, bo =>
+      match hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+          (convertDomains_presolve_round o p0 spec bo prev doms h0) with
+      | (.unsat, st) => pure (⟨[], true, bo⟩, [], st)
+      | (.fail, st) => pure (⟨[], false, bo⟩, [], st)
+      | (.sat a, st) =>
+          match hv : a[spec.slot]? with
+          | some (.int v) =>
+              emit (f a) >>= fun _ =>
+                optimizeStreamCoreStatsLoopPrepared o fuel p0 spec doms h0 f emit (some a) (some v) >>= fun r =>
+                  pure (⟨(a, v) :: r.1.sols, r.1.complete, r.1.lastBound⟩,
+                    f a :: r.2.1, st.add r.2.2)
+          | _ => pure (⟨[], false, bo⟩, [], st)
+termination_by prev bo => meas p0 spec bo
+decreasing_by
+  have hsat := coreSolveStatsWithPrepared_sat hs
   rw [curP_domains] at hsat
   exact meas_decr hsat.1 hsat.2 hv
 
@@ -372,6 +615,64 @@ private theorem optimizeStreamCoreStatsLoop_sat_none_eq {o : SearchConfig} {fuel
     optimizeStreamCoreStatsLoop o fuel p0 spec f emit prev bo =
       pure (⟨[], false, bo⟩, [], st) := by
   conv => lhs; rw [optimizeStreamCoreStatsLoop]
+  rw [hs]
+  simp only []
+
+private theorem optimizeStreamCoreStatsLoopPrepared_unsat_eq {o : SearchConfig} {fuel : Nat}
+    {p0 : CompiledProblem DomConstraint} {spec : ObjectiveSpec} {bo : Option Int}
+    {doms : Array DomC}
+    {h0 : convertDomains (presolveProblem o p0).domains = some doms}
+    {prev : Option (List Value)} {st : EngineStats}
+    {α : Type} {f : List Value → α} {emit : α → IO Unit}
+    (hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.unsat, st)) :
+    optimizeStreamCoreStatsLoopPrepared o fuel p0 spec doms h0 f emit prev bo =
+      pure (⟨[], true, bo⟩, [], st) := by
+  rw [optimizeStreamCoreStatsLoopPrepared, hs]
+
+private theorem optimizeStreamCoreStatsLoopPrepared_fail_eq {o : SearchConfig} {fuel : Nat}
+    {p0 : CompiledProblem DomConstraint} {spec : ObjectiveSpec} {bo : Option Int}
+    {doms : Array DomC}
+    {h0 : convertDomains (presolveProblem o p0).domains = some doms}
+    {prev : Option (List Value)} {st : EngineStats}
+    {α : Type} {f : List Value → α} {emit : α → IO Unit}
+    (hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.fail, st)) :
+    optimizeStreamCoreStatsLoopPrepared o fuel p0 spec doms h0 f emit prev bo =
+      pure (⟨[], false, bo⟩, [], st) := by
+  rw [optimizeStreamCoreStatsLoopPrepared, hs]
+
+private theorem optimizeStreamCoreStatsLoopPrepared_sat_int_eq {o : SearchConfig} {fuel : Nat}
+    {p0 : CompiledProblem DomConstraint} {spec : ObjectiveSpec} {bo : Option Int}
+    {doms : Array DomC}
+    {h0 : convertDomains (presolveProblem o p0).domains = some doms}
+    {prev : Option (List Value)} {a : List Value} {v : Int} {st : EngineStats}
+    {α : Type} {f : List Value → α} {emit : α → IO Unit}
+    (hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st))
+    (hv : a[spec.slot]? = some (.int v)) :
+    optimizeStreamCoreStatsLoopPrepared o fuel p0 spec doms h0 f emit prev bo =
+      (emit (f a) >>= fun _ =>
+        optimizeStreamCoreStatsLoopPrepared o fuel p0 spec doms h0 f emit (some a) (some v) >>= fun r =>
+          pure (⟨(a, v) :: r.1.sols, r.1.complete, r.1.lastBound⟩,
+            f a :: r.2.1, st.add r.2.2)) := by
+  conv => lhs; rw [optimizeStreamCoreStatsLoopPrepared]
+  rw [hs]
+  simp only []
+  rw [hv]
+
+private theorem optimizeStreamCoreStatsLoopPrepared_sat_none_eq {o : SearchConfig} {fuel : Nat}
+    {p0 : CompiledProblem DomConstraint} {spec : ObjectiveSpec} {bo : Option Int}
+    {doms : Array DomC}
+    {h0 : convertDomains (presolveProblem o p0).domains = some doms}
+    {prev : Option (List Value)} {a : List Value} {st : EngineStats}
+    {α : Type} {f : List Value → α} {emit : α → IO Unit}
+    (hs : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st))
+    (hn : ∀ i : Int, a[spec.slot]? ≠ some (.int i)) :
+    optimizeStreamCoreStatsLoopPrepared o fuel p0 spec doms h0 f emit prev bo =
+      pure (⟨[], false, bo⟩, [], st) := by
+  conv => lhs; rw [optimizeStreamCoreStatsLoopPrepared]
   rw [hs]
   simp only []
 
@@ -525,6 +826,93 @@ theorem optimizeStreamCoreStatsLoop_eq (o : SearchConfig) (fuel : Nat)
                         optLoopCoreStatsWith_sat_none_eq hc hn']
                       simp only [coreStats_io_pure_bind]
 
+/-- The prepared streaming loop is exactly the ordinary stats loop: only the
+per-round domain conversion is shared, and it is the same conversion. -/
+theorem optimizeStreamCoreStatsLoopPrepared_eq (o : SearchConfig) (fuel : Nat)
+    (p0 : CompiledProblem DomConstraint) (spec : ObjectiveSpec)
+    (doms : Array DomC)
+    (h0 : convertDomains (presolveProblem o p0).domains = some doms)
+    {α : Type} (f : List Value → α) (emit : α → IO Unit) :
+    ∀ prev bo,
+      optimizeStreamCoreStatsLoopPrepared o fuel p0 spec doms h0 f emit prev bo =
+        optimizeStreamCoreStatsLoop o fuel p0 spec f emit prev bo := by
+  intro prev bo
+  suffices h : ∀ n prev bo, meas p0 spec bo = n →
+      optimizeStreamCoreStatsLoopPrepared o fuel p0 spec doms h0 f emit prev bo =
+        optimizeStreamCoreStatsLoop o fuel p0 spec f emit prev bo from h _ prev bo rfl
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+      intro prev bo hn
+      cases hc : coreSolveStatsWith prev (curP p0 spec bo) o fuel with
+      | mk r st =>
+          cases r with
+          | unsat =>
+              have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                  (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.unsat, st) := by
+                rw [coreSolveStatsWithPrepared_eq, hc]
+              rw [optimizeStreamCoreStatsLoopPrepared_unsat_eq hcp,
+                optimizeStreamCoreStatsLoop_unsat_eq hc]
+          | fail =>
+              have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                  (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.fail, st) := by
+                rw [coreSolveStatsWithPrepared_eq, hc]
+              rw [optimizeStreamCoreStatsLoopPrepared_fail_eq hcp,
+                optimizeStreamCoreStatsLoop_fail_eq hc]
+          | sat a =>
+              cases hv : a[spec.slot]? with
+              | none =>
+                  have hn' : ∀ i : Int, a[spec.slot]? ≠ some (.int i) := by
+                    intro i hi
+                    rw [hv] at hi
+                    cases hi
+                  have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                      (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                    rw [coreSolveStatsWithPrepared_eq, hc]
+                  rw [optimizeStreamCoreStatsLoopPrepared_sat_none_eq hcp hn',
+                    optimizeStreamCoreStatsLoop_sat_none_eq hc hn']
+              | some w =>
+                  cases w with
+                  | int v =>
+                      have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                          (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                        rw [coreSolveStatsWithPrepared_eq, hc]
+                      have hsat := coreSolveStatsWithPrepared_sat hcp
+                      rw [curP_domains] at hsat
+                      have IH := ih _ (hn ▸ meas_decr hsat.1 hsat.2 hv) (some a) (some v) rfl
+                      rw [optimizeStreamCoreStatsLoopPrepared_sat_int_eq hcp hv,
+                        optimizeStreamCoreStatsLoop_sat_int_eq hc hv, IH]
+                  | bool b =>
+                      have hn' : ∀ i : Int, a[spec.slot]? ≠ some (.int i) := by
+                        intro i hi
+                        rw [hv] at hi
+                        cases hi
+                      have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                          (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                        rw [coreSolveStatsWithPrepared_eq, hc]
+                      rw [optimizeStreamCoreStatsLoopPrepared_sat_none_eq hcp hn',
+                        optimizeStreamCoreStatsLoop_sat_none_eq hc hn']
+                  | setOfInt s =>
+                      have hn' : ∀ i : Int, a[spec.slot]? ≠ some (.int i) := by
+                        intro i hi
+                        rw [hv] at hi
+                        cases hi
+                      have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                          (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                        rw [coreSolveStatsWithPrepared_eq, hc]
+                      rw [optimizeStreamCoreStatsLoopPrepared_sat_none_eq hcp hn',
+                        optimizeStreamCoreStatsLoop_sat_none_eq hc hn']
+                  | array arr =>
+                      have hn' : ∀ i : Int, a[spec.slot]? ≠ some (.int i) := by
+                        intro i hi
+                        rw [hv] at hi
+                        cases hi
+                      have hcp : coreSolveStatsWithPrepared prev (curP p0 spec bo) o fuel doms
+                          (convertDomains_presolve_round o p0 spec bo prev doms h0) = (.sat a, st) := by
+                        rw [coreSolveStatsWithPrepared_eq, hc]
+                      rw [optimizeStreamCoreStatsLoopPrepared_sat_none_eq hcp hn',
+                        optimizeStreamCoreStatsLoop_sat_none_eq hc hn']
+
 /-- Streaming Core optimization entry with stats. -/
 def optimizeStreamCoreStats (o : SearchConfig) (m : Model) (emit : Store → IO Unit) :
     IO (Except String (OptSummary × EngineStats)) := do
@@ -533,7 +921,13 @@ def optimizeStreamCoreStats (o : SearchConfig) (m : Model) (emit : Store → IO 
   | .error e => pure (.error e)
   | .ok (p, spec) =>
       let t1 ← IO.monoMsNow
-      let r ← optimizeStreamCoreStatsLoop o coreFuel p spec (fun a => p.toStore a) emit none none
+      let r ←
+        match hdoms : convertDomains (presolveProblem o p).domains with
+        | some doms =>
+            optimizeStreamCoreStatsLoopPrepared o coreFuel p spec doms hdoms
+              (fun a => p.toStore a) emit none none
+        | none =>
+            optimizeStreamCoreStatsLoop o coreFuel p spec (fun a => p.toStore a) emit none none
       let t2 ← IO.monoMsNow
       if o.stats then
         IO.eprintln s!"leanfzn: timing: compile_ms={t1 - t0} search_ms={t2 - t1}"

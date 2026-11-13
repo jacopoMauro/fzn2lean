@@ -6,6 +6,7 @@ Unknown/incomplete runs use exit 4 and never emit UNSAT or optimum markers.
 -/
 import LeanFzn.Integration.Public.Solve
 import LeanFzn.Integration.Public.Optimize
+import LeanFzn.Integration.Public.PhaseStats
 import LeanFzn.Integration.Public.Seed
 import LeanFzn.Integration.Public.Lns
 import LeanFzn.Integration.Config.Parse
@@ -55,8 +56,9 @@ private def finishOptimization (o : SearchConfig) (run : OptRun) (rounds : Nat)
   IO.println optimumMarker
   return 0
 
-private def runSatisfaction (o : SearchConfig) (model : Model) : IO UInt32 := do
-  let (r, st) := solveModelWithStats model o coreFuel
+private def runSatisfactionWith (o : SearchConfig) (model : Model)
+    (run : IO (Result × EngineStats)) : IO UInt32 := do
+  let (r, st) ← run
   match r with
   | .sat store =>
       emitSolution model store
@@ -74,6 +76,9 @@ private def runSatisfaction (o : SearchConfig) (model : Model) : IO UInt32 := do
       IO.eprintln s!"leanfzn: {reason}"
       emitStats o false 0 0 (some st)
       return 4
+
+private def runSatisfaction (o : SearchConfig) (model : Model) : IO UInt32 :=
+  runSatisfactionWith o model (pure (solveModelWithStats model o coreFuel))
 
 /-! ## Parallel portfolio (`--threads=N`)
 
@@ -440,34 +445,80 @@ private def runOptimization (o : SearchConfig) (model : Model) : IO UInt32 := do
     | .ok (summary, st) =>
         finishOptimization o summary.run (summary.run.sols.length + 1) (some st)
 
-/-- Public programmatic entry also validates Core-only options, so callers
-cannot bypass CLI checks to select a different implementation. -/
-def runModel (o : SearchConfig) (model : Model) : IO UInt32 := do
+/-- Shared option/model validation; `some rc` is the terminal CLI result. -/
+private def validateRun (o : SearchConfig) (model : Model) : IO (Option UInt32) := do
   if o.engine != .core then
     IO.eprintln "leanfzn: the legacy kernel is unavailable in the public Core-only driver"
-    return 2
+    return some 2
   match o.checkCoreImplemented with
   | .error reason =>
       IO.eprintln s!"leanfzn: {reason}"
-      return 2
+      return some 2
   | .ok _ => pure ()
   match o.checkImplemented with
   | .error reason =>
       IO.eprintln s!"leanfzn: {reason}"
-      return 2
+      return some 2
   | .ok _ => pure ()
   if !LeanFzn.Checker.wellFormedFastB model then
     IO.eprintln "leanfzn: model is not well-formed"
-    return 2
-  match model.solve with
-  | .satisfy _ =>
-      if o.primal != .none then
-        IO.eprintln "leanfzn: a primal heuristic requires an optimization model"
-        return 2
-      if o.threads > 1 then
-        runPortfolioSatisfaction o model
-      else
-        runSatisfaction o model
-  | .minimize _ _ | .maximize _ _ => runOptimization o model
+    return some 2
+  return none
+
+/-- Public programmatic entry also validates Core-only options, so callers
+cannot bypass CLI checks to select a different implementation. -/
+def runModel (o : SearchConfig) (model : Model) : IO UInt32 := do
+  match ← validateRun o model with
+  | some rc => return rc
+  | none =>
+      match model.solve with
+      | .satisfy _ =>
+          if o.primal != .none then
+            IO.eprintln "leanfzn: a primal heuristic requires an optimization model"
+            return 2
+          if o.threads > 1 then
+            runPortfolioSatisfaction o model
+          else
+            runSatisfaction o model
+      | .minimize _ _ | .maximize _ _ => runOptimization o model
+
+/-- Phased optimization for the instrumented `--phase-stats` run.  The
+specialized seeded/LNS/portfolio paths are not instrumented internally; they
+run unchanged after a note (their stdout, exit code and counters are
+identical). -/
+private def runOptimizationPhased (ps : PhaseCtx) (o : SearchConfig)
+    (model : Model) : IO UInt32 := do
+  if o.threads > 1 || o.primal == .lns || o.opt == .seeded then
+    IO.eprintln
+      "leanfzn: phase stats: specialized optimization path is not instrumented; running the ordinary driver"
+    runOptimization o model
+  else
+    match ← optimizeStreamCoreStatsPhased ps o model (emitSolution model) with
+    | .error reason =>
+        IO.eprintln s!"leanfzn: unsupported model: {reason}"
+        emitStats o false 0 0 (some {})
+        return 3
+    | .ok (summary, st) =>
+        finishOptimization o summary.run (summary.run.sols.length + 1) (some st)
+
+/-- `runModel` with the dev `--phase-stats` lines.  Every phase line goes to
+stderr; stdout, exit codes and counters are exactly those of `runModel` on
+the same model and options. -/
+def runModelPhased (ps : PhaseCtx) (o : SearchConfig) (model : Model) : IO UInt32 := do
+  match ← validateRun o model with
+  | some rc => return rc
+  | none =>
+      match model.solve with
+      | .satisfy _ =>
+          if o.primal != .none then
+            IO.eprintln "leanfzn: a primal heuristic requires an optimization model"
+            return 2
+          if o.threads > 1 then
+            IO.eprintln
+              "leanfzn: phase stats: the satisfaction portfolio is not instrumented; running the ordinary driver"
+            runPortfolioSatisfaction o model
+          else
+            runSatisfactionWith o model (solveModelWithPhaseStats ps model o coreFuel)
+      | .minimize _ _ | .maximize _ _ => runOptimizationPhased ps o model
 
 end LeanFzn.Core

@@ -9,6 +9,7 @@ import LeanFzn.Engine.Props.Ne
 import LeanFzn.Engine.Props.AllDiff
 import LeanFzn.Engine.Props.Bool
 import LeanFzn.Engine.Props.Linear
+import LeanFzn.Engine.Props.SetIn
 import LeanFzn.Engine.Queue
 import LeanFzn.Engine.Analyze
 import LeanFzn.Engine.Search

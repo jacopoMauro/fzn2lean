@@ -28,6 +28,7 @@ import LeanFzn.Engine.Props.Order
 import LeanFzn.Engine.Props.LinearExt
 import LeanFzn.Engine.Props.BoolExt
 import LeanFzn.Engine.Props.Element
+import LeanFzn.Engine.Props.SetIn
 import LeanFzn.Compiler.SeedClauses
 import LeanFzn.Solver.Propagation.EngineCore
 import LeanFzn.Solver.Propagation.Gates
@@ -337,16 +338,16 @@ def propsOf (p : CompiledProblem DomConstraint) (T : LitTable) (init : Array Dom
         linNeReifPropWith p T cs is b r
           (by simpa [hx] using List.mem_toArray.mp x.2)
     | .boolNotSlot i j =>
-        boolNotPropWith p T i j
+        boolNotPropChoice p T i j
           (by simpa [hx] using List.mem_toArray.mp x.2)
     | .boolAndSlot i j k =>
-        boolAndPropWith p T i j k
+        boolAndPropChoice p T i j k
           (by simpa [hx] using List.mem_toArray.mp x.2)
     | .boolOrSlot i j k =>
-        boolOrPropWith p T i j k
+        boolOrPropChoice p T i j k
           (by simpa [hx] using List.mem_toArray.mp x.2)
     | .boolEqSlot i j =>
-        boolEqPropWith p T i j
+        boolEqPropChoice p T i j
           (by simpa [hx] using List.mem_toArray.mp x.2)
     | .arrayBoolAndSlot is k =>
         arrayBoolAndPropFast p T is k
@@ -359,6 +360,9 @@ def propsOf (p : CompiledProblem DomConstraint) (T : LitTable) (init : Array Dom
           (by simpa [hx] using List.mem_toArray.mp x.2)
     | .arrayVarBoolElementSlot is i k =>
         arrayVarBoolElementPropWith p T is i k
+          (by simpa [hx] using List.mem_toArray.mp x.2)
+    | .setInReifSlot i s r =>
+        setInReifPropWith p T i s r
           (by simpa [hx] using List.mem_toArray.mp x.2)
     | dc =>
         propCheckV2With p T dc init
@@ -448,13 +452,13 @@ theorem propsOf_pruneSound (p : CompiledProblem DomConstraint) (T : LitTable)
   case h_31 cs is b r heq =>
     exact linNeReifPropWith_pruneSound cs is b r (heq ▸ List.mem_toArray.mp x.2)
   case h_32 i j heq =>
-    exact boolNotPropWith_pruneSound i j (heq ▸ List.mem_toArray.mp x.2)
+    exact boolNotPropChoice_pruneSound i j (heq ▸ List.mem_toArray.mp x.2)
   case h_33 i j k heq =>
-    exact boolAndPropWith_pruneSound i j k (heq ▸ List.mem_toArray.mp x.2)
+    exact boolAndPropChoice_pruneSound i j k (heq ▸ List.mem_toArray.mp x.2)
   case h_34 i j k heq =>
-    exact boolOrPropWith_pruneSound i j k (heq ▸ List.mem_toArray.mp x.2)
+    exact boolOrPropChoice_pruneSound i j k (heq ▸ List.mem_toArray.mp x.2)
   case h_35 i j heq =>
-    exact boolEqPropWith_pruneSound i j (heq ▸ List.mem_toArray.mp x.2)
+    exact boolEqPropChoice_pruneSound i j (heq ▸ List.mem_toArray.mp x.2)
   case h_36 is k heq =>
     exact arrayBoolAndPropFast_pruneSound is k (heq ▸ List.mem_toArray.mp x.2)
   case h_37 xs i k heq =>
@@ -463,7 +467,10 @@ theorem propsOf_pruneSound (p : CompiledProblem DomConstraint) (T : LitTable)
     exact arrayVarIntElementPropWith_pruneSound is i k (heq ▸ List.mem_toArray.mp x.2)
   case h_39 is i k heq =>
     exact arrayVarBoolElementPropWith_pruneSound is i k (heq ▸ List.mem_toArray.mp x.2)
-  case h_40 =>
+  case h_40 i s r heq =>
+    exact setInReifPropWith_pruneSound p T i s r
+      (heq ▸ List.mem_toArray.mp x.2)
+  case h_41 =>
     exact propCheckV2With_pruneSound p T x.val init
       (hinit x.val (List.mem_toArray.mp x.2)) (List.mem_toArray.mp x.2)
 
@@ -738,6 +745,29 @@ def initState (p : CompiledProblem DomConstraint) (T : LitTable) :
           let props := propsOf p T doms hinitAll
           some (initStateCore p T doms props)
         else none
+
+/-- Build the initial state from an already converted domain array.  This is
+`initState` with the conversion match supplied by the caller.  The conversion
+equality is a proof argument only; the executable path still runs the entry
+gate and the `initReady` guard. -/
+def initStatePrepared (p : CompiledProblem DomConstraint) (T : LitTable)
+    (doms : Array DomC) (_hconv : convertDomains p.domains = some doms) :
+    Option (EngineState p T) :=
+  if !gateOkFast (propagationProblem p) then none
+  else
+    if hready : initReady p doms = true then
+      let hinitAll := initReady_spec hready
+      let props := propsOf p T doms hinitAll
+      some (initStateCore p T doms props)
+    else none
+
+/-- The prepared entry equals the ordinary entry when the supplied domains are
+the conversion result. -/
+theorem initStatePrepared_eq {p : CompiledProblem DomConstraint} {T : LitTable}
+    {doms : Array DomC} (hconv : convertDomains p.domains = some doms) :
+    initStatePrepared p T doms hconv = initState p T := by
+  unfold initStatePrepared initState
+  rw [hconv]
 
 theorem initStateBase_table (p : CompiledProblem DomConstraint) (T : LitTable)
     (doms : Array DomC) (props : Array (PropV2 p T)) :
@@ -2379,22 +2409,120 @@ def coreSolveFrom (p : CompiledProblem DomConstraint) (T : LitTable)
                       gaveUp := 1,
                       gaveUpCause := "root conflict learned an empty clause above level 0" })
 
+/-- An entry state bundled with the invariants needed by the search loop.
+The proof fields are erased at runtime. -/
+structure EntryState (p : CompiledProblem DomConstraint) (T : LitTable) where
+  st : EngineState p T
+  root : RootInv p T st.doms st
+  props : PropsSound p T st.props
+
+/-- Bundle `initState` with its entry invariants. -/
+def initStateBundled (p : CompiledProblem DomConstraint) :
+    Option (EntryState p {}) :=
+  match h : initState p {} with
+  | none => none
+  | some st => some ⟨st, initState_rootInv h LitTable.inv_empty, initState_propsSound h⟩
+
+/-- Entry plus the CDCL loop over a bundled entry state.  This is the common
+body of the ordinary and prepared entries. -/
+def coreSolveFullWithBundled (p : CompiledProblem DomConstraint)
+    (o : SearchConfig) (prev : Option (List Value)) (fuel : Nat)
+    (init? : Option (EntryState p {})) : CoreResult × EngineStats :=
+  match init? with
+  | none => (.gaveUp, { gaveUp := 1, gaveUpCause := "entry guard or domain conversion failed" })
+  | some es =>
+      let st0 := es.st
+      let stSeed := seedPhases st0 prev
+      let prio := annotPrioArray p
+      let orders := configOrders p o
+      coreSolveFrom p {} o stSeed
+        ((seedPhases_rootInv es.root prev).init_congr (seedPhases_doms st0 prev))
+        (es.props.congr (seedPhases_props st0 prev))
+        prio orders fuel
+
 /-- Entry plus the CDCL loop with the saved phases seeded from a previous
 incumbent, returning the terminal stats as well. -/
 def coreSolveFullWith (p : CompiledProblem DomConstraint) (o : SearchConfig)
     (prev : Option (List Value)) (fuel : Nat) : CoreResult × EngineStats :=
-  let T : LitTable := {}
-  match hinit : initState p T with
-  | none => (.gaveUp, { gaveUp := 1, gaveUpCause := "entry guard or domain conversion failed" })
-  | some st0 =>
-      let stSeed := seedPhases st0 prev
-      let prio := annotPrioArray p
-      let orders := configOrders p o
-      coreSolveFrom p T o stSeed
-        ((seedPhases_rootInv (initState_rootInv hinit LitTable.inv_empty) prev).init_congr
-          (seedPhases_doms st0 prev))
-        ((initState_propsSound hinit).congr (seedPhases_props st0 prev))
-        prio orders fuel
+  coreSolveFullWithBundled p o prev fuel (initStateBundled p)
+
+/-- Bundle the prepared entry with its invariants. -/
+def initStateBundledPrepared (p : CompiledProblem DomConstraint)
+    (doms : Array DomC) (hconv : convertDomains p.domains = some doms) :
+    Option (EntryState p {}) :=
+  match h : initStatePrepared p {} doms hconv with
+  | none => none
+  | some st =>
+      some ⟨st,
+        initState_rootInv (by rw [← initStatePrepared_eq hconv]; exact h) LitTable.inv_empty,
+        initState_propsSound (by rw [← initStatePrepared_eq hconv]; exact h)⟩
+
+/-- The state projection of the ordinary bundle is the ordinary entry. -/
+theorem initStateBundled_st (p : CompiledProblem DomConstraint) :
+    (initStateBundled p).map EntryState.st = initState p {} := by
+  unfold initStateBundled
+  split
+  · rename_i heq
+    rw [heq]
+    rfl
+  · rename_i st heq
+    exact heq.symm
+
+/-- The state projection of the prepared bundle is the prepared entry. -/
+theorem initStateBundledPrepared_st (p : CompiledProblem DomConstraint)
+    (doms : Array DomC) (hconv : convertDomains p.domains = some doms) :
+    (initStateBundledPrepared p doms hconv).map EntryState.st =
+      initStatePrepared p {} doms hconv := by
+  unfold initStateBundledPrepared
+  split
+  · rename_i heq
+    rw [heq]
+    rfl
+  · rename_i st heq
+    exact heq.symm
+
+/-- The bundled entry's result depends only on the entry state, not on the
+proof fields carrying its invariants. -/
+theorem coreSolveFullWithBundled_proof_irrel (p : CompiledProblem DomConstraint)
+    (o : SearchConfig) (prev : Option (List Value)) (fuel : Nat)
+    {init1 init2 : Option (EntryState p {})}
+    (h : init1.map EntryState.st = init2.map EntryState.st) :
+    coreSolveFullWithBundled p o prev fuel init1 =
+      coreSolveFullWithBundled p o prev fuel init2 := by
+  cases init1 with
+  | none =>
+      cases init2 with
+      | none => rfl
+      | some es2 => simp [Option.map] at h
+  | some es1 =>
+      cases init2 with
+      | none => simp [Option.map] at h
+      | some es2 =>
+          cases es1 with
+          | mk st1 root1 props1 =>
+          cases es2 with
+          | mk st2 root2 props2 =>
+          have hs : st1 = st2 := by simpa [EntryState.st, Option.map] using h
+          subst hs
+          rfl
+
+/-- Entry plus the CDCL loop, with an already converted domain array supplied
+by the caller.  All other setup is per round. -/
+def coreSolveFullWithPrepared (p : CompiledProblem DomConstraint) (o : SearchConfig)
+    (prev : Option (List Value)) (fuel : Nat) (doms : Array DomC)
+    (hconv : convertDomains p.domains = some doms) : CoreResult × EngineStats :=
+  coreSolveFullWithBundled p o prev fuel (initStateBundledPrepared p doms hconv)
+
+/-- The prepared entry returns exactly the ordinary entry's result when the
+supplied array is the conversion result. -/
+theorem coreSolveFullWithPrepared_eq (p : CompiledProblem DomConstraint)
+    (o : SearchConfig) (prev : Option (List Value)) (fuel : Nat)
+    (doms : Array DomC) (hconv : convertDomains p.domains = some doms) :
+    coreSolveFullWithPrepared p o prev fuel doms hconv =
+      coreSolveFullWith p o prev fuel := by
+  unfold coreSolveFullWithPrepared coreSolveFullWith
+  apply coreSolveFullWithBundled_proof_irrel
+  rw [initStateBundledPrepared_st, initStateBundled_st, initStatePrepared_eq hconv]
 
 /-- Entry plus the CDCL loop, returning the terminal stats as well. -/
 def coreSolveFull (p : CompiledProblem DomConstraint) (o : SearchConfig)
@@ -2457,7 +2585,7 @@ theorem coreSolveFullWith_sat {p : CompiledProblem DomConstraint}
     {a : List Value}
     (h : (coreSolveFullWith p o prev fuel).1 = .sat a) :
     a ∈ allAssigns p.domains ∧ accepts p a = true := by
-  unfold coreSolveFullWith at h
+  unfold coreSolveFullWith coreSolveFullWithBundled initStateBundled at h
   dsimp only at h
   split at h
   · simp at h
@@ -2506,7 +2634,7 @@ theorem coreSolveFullWith_unsat {p : CompiledProblem DomConstraint}
     {o : SearchConfig} {prev : Option (List Value)} {fuel : Nat}
     (h : (coreSolveFullWith p o prev fuel).1 = .unsat) :
     ∀ b ∈ allAssigns p.domains, accepts p b = false := by
-  unfold coreSolveFullWith at h
+  unfold coreSolveFullWith coreSolveFullWithBundled initStateBundled at h
   dsimp only at h
   split at h
   · simp at h

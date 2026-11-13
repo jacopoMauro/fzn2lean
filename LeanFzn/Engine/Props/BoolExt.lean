@@ -1638,6 +1638,153 @@ theorem mkPrunes_evalLit_none {R : List Bool → Bool} {args : List BArg}
         · exact hq
       exact ofSlots_eval_fixed hargs hqtail
 
+def dedupGo (seen : List Nat) (out : List BArg) : List BArg → List BArg
+  | [] => out.reverse
+  | a :: as =>
+      if a.slot ∈ seen then dedupGo seen out as
+      else dedupGo (a.slot :: seen) (a :: out) as
+
+/-- First occurrence of each operand slot, in order. -/
+def dedupArgs (args : List BArg) : List BArg := dedupGo [] [] args
+
+theorem mem_dedupGo_of_mem_out {seen : List Nat} {out as : List BArg}
+    {b : BArg} (hb : b ∈ out) : b ∈ dedupGo seen out as := by
+  induction as generalizing seen out with
+  | nil => simpa [dedupGo] using hb
+  | cons a as ih =>
+      by_cases h : a.slot ∈ seen
+      · simpa [dedupGo, h] using ih (seen := seen) (out := out) hb
+      · simpa [dedupGo, h] using
+          ih (seen := a.slot :: seen) (out := a :: out)
+            (List.mem_cons_of_mem _ hb)
+
+theorem dedupGo_subset {seen : List Nat} {out as : List BArg} :
+    ∀ {b : BArg}, b ∈ dedupGo seen out as → b ∈ out ∨ b ∈ as := by
+  induction as generalizing seen out with
+  | nil =>
+      intro b hb
+      exact Or.inl (by simpa [dedupGo] using hb)
+  | cons a as ih =>
+      intro b hb
+      by_cases h : a.slot ∈ seen
+      · rw [dedupGo, if_pos h] at hb
+        rcases ih hb with ho | ha
+        · exact Or.inl ho
+        · exact Or.inr (List.mem_cons_of_mem _ ha)
+      · rw [dedupGo, if_neg h] at hb
+        rcases ih hb with ho | ha
+        · rcases List.mem_cons.mp ho with rfl | ho
+          · exact Or.inr (List.mem_cons_self ..)
+          · exact Or.inl ho
+        · exact Or.inr (List.mem_cons_of_mem _ ha)
+
+theorem dedupArgs_subset {args : List BArg} {b : BArg}
+    (hb : b ∈ dedupArgs args) : b ∈ args := by
+  have h := dedupGo_subset (seen := []) (out := []) (as := args) hb
+  rcases h with h | h
+  · simpa using h
+  · exact h
+
+theorem dedupGo_slot_mem {seen : List Nat} {out as : List BArg}
+    (hinv : ∀ s ∈ seen, ∃ b ∈ out, b.slot = s) :
+    ∀ a ∈ as, ∃ b ∈ dedupGo seen out as, b.slot = a.slot := by
+  induction as generalizing seen out with
+  | nil => intro a ha; simp at ha
+  | cons a0 as ih =>
+      intro a ha
+      by_cases h : a0.slot ∈ seen
+      · rw [dedupGo, if_pos h]
+        rcases List.mem_cons.mp ha with rfl | ha
+        · rcases hinv a.slot h with ⟨b, hb, hbs⟩
+          exact ⟨b, mem_dedupGo_of_mem_out hb, hbs⟩
+        · exact ih (seen := seen) (out := out) hinv a ha
+      · rw [dedupGo, if_neg h]
+        have hinv' : ∀ s ∈ a0.slot :: seen,
+            ∃ b ∈ a0 :: out, b.slot = s := by
+          intro s hs
+          rcases List.mem_cons.mp hs with rfl | hs
+          · exact ⟨a0, List.mem_cons_self .., rfl⟩
+          · rcases hinv s hs with ⟨b, hb, hbs⟩
+            exact ⟨b, List.mem_cons_of_mem _ hb, hbs⟩
+        rcases List.mem_cons.mp ha with rfl | ha
+        · exact ⟨a, mem_dedupGo_of_mem_out (List.mem_cons_self ..), rfl⟩
+        · exact ih (seen := a0.slot :: seen) (out := a0 :: out) hinv' a ha
+
+theorem dedupArgs_slot_mem {args : List BArg} {a : BArg} (ha : a ∈ args) :
+    ∃ b ∈ dedupArgs args, b.slot = a.slot :=
+  dedupGo_slot_mem (seen := []) (out := []) (as := args)
+    (by intro s hs; simp at hs) a ha
+
+/-- Position of the first operand with slot `s` in a deduped list. -/
+def idxOfSlot (s : Nat) : List BArg → Nat
+  | [] => 0
+  | a :: as => if a.slot = s then 0 else idxOfSlot s as + 1
+
+theorem idxOfSlot_spec (s : Nat) (args : List BArg)
+    (h : ∃ b ∈ args, b.slot = s) :
+    idxOfSlot s args < args.length ∧
+      (args.getD (idxOfSlot s args) default).slot = s := by
+  induction args with
+  | nil =>
+      rcases h with ⟨b, hb, _⟩
+      simp at hb
+  | cons a as ih =>
+      by_cases ha : a.slot = s
+      · simp [idxOfSlot, ha]
+      · have h' : ∃ b ∈ as, b.slot = s := by
+          rcases h with ⟨b, hb, hbs⟩
+          rcases List.mem_cons.mp hb with rfl | hb
+          · exact absurd hbs ha
+          · exact ⟨b, hb, hbs⟩
+        have hs := ih h'
+        constructor
+        · simp only [idxOfSlot, if_neg ha, List.length_cons]
+          omega
+        · simp only [idxOfSlot, if_neg ha, List.getD_cons_succ]
+          exact hs.2
+
+/-- Expand a value vector over distinct slots to the positional vector. -/
+def expandVals (full dedup : List BArg) (vs : List Bool) : List Bool :=
+  full.map fun a => vs.getD (idxOfSlot a.slot dedup) false
+
+theorem valsOf_expand (b : Assignment) (args : List BArg) :
+    valsOf b args =
+      expandVals args (dedupArgs args) (valsOf b (dedupArgs args)) := by
+  change args.map (fun a => a.valAt b) =
+    args.map (fun a =>
+      (valsOf b (dedupArgs args)).getD (idxOfSlot a.slot (dedupArgs args)) false)
+  apply List.map_congr_left
+  intro a ha
+  have hocc : ∃ c ∈ dedupArgs args, c.slot = a.slot := dedupArgs_slot_mem ha
+  have hspec := idxOfSlot_spec a.slot (dedupArgs args) hocc
+  rw [valsOf_getD (b := b) (args := dedupArgs args)
+    (p := idxOfSlot a.slot (dedupArgs args)) hspec.1]
+  simp only [BArg.valAt]
+  rw [hspec.2]
+
+theorem ofSlots_of_mk? {doms : Array DomC} :
+    ∀ {args : List BArg}, (∀ a ∈ args, BArg.mk? doms a.slot = some a) →
+      ofSlots doms (args.map BArg.slot) = some args
+  | [], _ => by simp [ofSlots]
+  | a :: as, hm => by
+      have ha := hm a (List.mem_cons_self ..)
+      have ht : ofSlots doms (as.map BArg.slot) = some as :=
+        ofSlots_of_mk? (doms := doms) (args := as)
+          (fun b hb => hm b (List.mem_cons_of_mem _ hb))
+      simp only [List.map_cons, ofSlots, ha, ht]
+
+theorem ofSlots_dedup {doms : Array DomC} {slots : List Nat} {args : List BArg}
+    (h : ofSlots doms slots = some args) :
+    ofSlots doms ((dedupArgs args).map BArg.slot) = some (dedupArgs args) := by
+  apply ofSlots_of_mk?
+  intro a ha
+  exact ofSlots_mem_mk h (dedupArgs_subset ha)
+
+/-- Runtime guard: the slot list repeats a slot. -/
+def hasDupSlots : List Nat → Bool
+  | [] => false
+  | s :: ss => ss.contains s || hasDupSlots ss
+
 end BArgs
 
 namespace BPlan
@@ -1942,6 +2089,185 @@ theorem boolSupportPropWith_run_fix_of_no_plan
     rw [hpn] at hplan
     cases hplan
 
+def boolSupportDupPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
+    (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v)) : PropV2 p T :=
+  { vars := slots.toArray
+    events := slots.toArray.map fun s => (s, .fix)
+    run := fun view =>
+      match hfull : BArgs.ofSlots view.doms slots with
+      | none => .fix
+      | some args =>
+          let dargs := BArgs.dedupArgs args
+          let R' : List Bool → Bool :=
+            fun vs => R (BArgs.expandVals args dargs vs)
+          BPlan.out p T (BArgs.mkPlan R' dargs)
+            (fun ls hls =>
+              BArgs.mkPlan_conflict_entailed p R' dargs ls
+                (fun b hb hacc => by
+                  have h := hR view.doms args hfull b hb hacc
+                  rw [BArgs.valsOf_expand b args] at h
+                  exact h)
+                (fun b hb hacc a ha =>
+                  hbool view.doms args hfull b hb hacc a
+                    (BArgs.dedupArgs_subset ha))
+                (fun a ha =>
+                  BArgs.ofSlots_allCur hfull a (BArgs.dedupArgs_subset ha))
+                hls)
+            (fun q hq =>
+              BArgs.mkPlan_prunes_entailed p R' dargs
+                (fun b hb hacc => by
+                  have h := hR view.doms args hfull b hb hacc
+                  rw [BArgs.valsOf_expand b args] at h
+                  exact h)
+                (fun b hb hacc a ha =>
+                  hbool view.doms args hfull b hb hacc a
+                    (BArgs.dedupArgs_subset ha))
+                (fun a ha =>
+                  BArgs.ofSlots_allCur hfull a (BArgs.dedupArgs_subset ha))
+                hq) }
+
+theorem boolSupportDupPropWith_run_conflict
+    (p : CompiledProblem DomConstraint) (T : LitTable)
+    (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ec : EClause p T}
+    (h : (boolSupportDupPropWith p T R slots hR hbool).run view = .conflict ec) :
+    ∃ args dargs,
+      BArgs.ofSlots view.doms slots = some args ∧
+      dargs = BArgs.dedupArgs args ∧
+      (BArgs.mkPlan (fun vs => R (BArgs.expandVals args dargs vs)) dargs).conflict?
+        = some (BArgs.fixedLits dargs) ∧
+      T.decodeClause ec.lits = BArgs.fixedLits dargs ∧
+      Entailed p (BArgs.fixedLits dargs) := by
+  unfold boolSupportDupPropWith at h
+  dsimp only at h
+  split at h
+  · cases h
+  · rename_i args hfull
+    obtain ⟨ls, hls, hdec, hent⟩ :=
+      BPlan.out_run_conflict p T _ _ _ h
+    have hls' : ls = BArgs.fixedLits (BArgs.dedupArgs args) :=
+      BArgs.mkPlan_conflict_eq_fixedLits hls
+    subst hls'
+    exact ⟨args, BArgs.dedupArgs args, hfull, rfl, hls, hdec, hent⟩
+
+theorem boolSupportDupPropWith_run_prune
+    (p : CompiledProblem DomConstraint) (T : LitTable)
+    (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ps : Array (PLit × EClause p T)}
+    (h : (boolSupportDupPropWith p T R slots hR hbool).run view = .prune ps) :
+    ∃ args dargs,
+      BArgs.ofSlots view.doms slots = some args ∧
+      dargs = BArgs.dedupArgs args ∧
+      (BArgs.mkPlan (fun vs => R (BArgs.expandVals args dargs vs)) dargs).conflict? = none ∧
+      (BArgs.mkPlan (fun vs => R (BArgs.expandVals args dargs vs)) dargs).prunes ≠ [] ∧
+      (∀ q ∈ ps.toList, ∃ q' ∈
+        (BArgs.mkPlan (fun vs => R (BArgs.expandVals args dargs vs)) dargs).prunes,
+        q.1.lit = q'.lit ∧ T.decodeClause q.2.lits = q'.reason ∧
+          q'.reason = posBool q'.slot (!q'.val) :: BArgs.fixedLits dargs ∧
+          Entailed p q'.reason) := by
+  unfold boolSupportDupPropWith at h
+  dsimp only at h
+  split at h
+  · cases h
+  · rename_i args hfull
+    obtain ⟨hc, hne, hforall⟩ :=
+      BPlan.out_run_prune p T _ _ _ h
+    refine ⟨args, BArgs.dedupArgs args, hfull, rfl, hc, hne, ?_⟩
+    intro q hq
+    obtain ⟨q', hq', hlit, hdec, hent⟩ := hforall q hq
+    have hpr : (BArgs.mkPlan
+        (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+        (BArgs.dedupArgs args)).prunes =
+        BArgs.mkPrunes
+          (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+          (BArgs.dedupArgs args) := by
+      have hany : BArgs.hasAnySupport
+          (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+          (BArgs.dedupArgs args) = true := by
+        cases hh : BArgs.hasAnySupport
+            (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+            (BArgs.dedupArgs args) with
+        | false => simp [BArgs.mkPlan, hh] at hc
+        | true => rfl
+      simp [BArgs.mkPlan, hany]
+    exact ⟨q', hq', hlit, hdec,
+      (BArgs.mem_mkPrunes_shape (by rwa [hpr] at hq')).1, hent⟩
+
+theorem boolSupportDupPropWith_prune_lit_none
+    (p : CompiledProblem DomConstraint) (T : LitTable)
+    (R : List Bool → Bool) (slots : List Nat)
+    (hR : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        R (BArgs.valsOf b args) = true)
+    (hbool : ∀ (doms : Array DomC) (args : List BArg),
+      BArgs.ofSlots doms slots = some args →
+      ∀ b, b ∈ allAssigns p.domains → accepts p b = true →
+        ∀ a ∈ args, ∃ v, b[a.slot]? = some (.bool v))
+    (view : EngineView) {ps : Array (PLit × EClause p T)}
+    (h : (boolSupportDupPropWith p T R slots hR hbool).run view = .prune ps)
+    {q : PLit × EClause p T} (hq : q ∈ ps.toList) :
+    (view.doms.getD q.1.lit.atom.slot DomC.empty).evalLit q.1.lit = none ∧
+      ∀ q' ∈ T.decodeClause q.2.lits, q' ≠ q.1.lit →
+        (view.doms.getD q'.atom.slot DomC.empty).evalLit q' = some false := by
+  obtain ⟨args, dargs, hfull, hdargs, hc, _hne, hforall⟩ :=
+    boolSupportDupPropWith_run_prune p T R slots hR hbool view h
+  subst hdargs
+  have hany : BArgs.hasAnySupport
+      (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+      (BArgs.dedupArgs args) = true := by
+    cases hh : BArgs.hasAnySupport
+        (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+        (BArgs.dedupArgs args) with
+    | false => simp [BArgs.mkPlan, hh] at hc
+    | true => rfl
+  have hpr : (BArgs.mkPlan
+      (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+      (BArgs.dedupArgs args)).prunes =
+      BArgs.mkPrunes
+        (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+        (BArgs.dedupArgs args) := by
+    simp [BArgs.mkPlan, hany]
+  obtain ⟨q', hq', hlit, hdec, _hent⟩ := hforall q hq
+  have hq'' : q' ∈ BArgs.mkPrunes
+      (fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+      (BArgs.dedupArgs args) := by rwa [hpr] at hq'
+  obtain ⟨hnone, hfalse⟩ := BArgs.mkPrunes_evalLit_none
+    (R := fun vs => R (BArgs.expandVals args (BArgs.dedupArgs args) vs))
+    (args := BArgs.dedupArgs args) (doms := view.doms)
+    (slots := (BArgs.dedupArgs args).map BArg.slot)
+    (BArgs.ofSlots_dedup hfull) hany hq''
+  constructor
+  · rw [hlit]
+    exact hnone
+  · intro r hr hne
+    rw [hdec] at hr
+    exact hfalse r hr (by rwa [hlit] at hne)
+
 /-! ## Dedicated propagators -/
 
 /-- Certified `bool_not` propagator. -/
@@ -1987,6 +2313,52 @@ def boolEqPropWith (p : CompiledProblem DomConstraint) (T : LitTable)
       (BArgs.boolEqR_spec p i j hmem doms args hargs b hb hacc).1)
     (fun doms args hargs b hb hacc =>
       (BArgs.boolEqR_spec p i j hmem doms args hargs b hb hacc).2)
+
+/-- Runtime dispatch for Boolean rows: a row with repeated operand slots
+takes the deduplicated support propagator, a duplicate-free row keeps the
+original one unchanged. -/
+def boolNotPropChoice (p : CompiledProblem DomConstraint) (T : LitTable)
+    (i j : Nat) (hmem : DomConstraint.boolNotSlot i j ∈ p.constraints) : PropV2 p T :=
+  if BArgs.hasDupSlots [i, j] then
+    boolSupportDupPropWith p T boolNotR [i, j]
+      (fun doms args hargs b hb hacc =>
+        (BArgs.boolNotR_spec p i j hmem doms args hargs b hb hacc).1)
+      (fun doms args hargs b hb hacc =>
+        (BArgs.boolNotR_spec p i j hmem doms args hargs b hb hacc).2)
+  else boolNotPropWith p T i j hmem
+
+/-- Runtime dispatch for `bool_and` rows (see `boolNotPropChoice`). -/
+def boolAndPropChoice (p : CompiledProblem DomConstraint) (T : LitTable)
+    (i j k : Nat) (hmem : DomConstraint.boolAndSlot i j k ∈ p.constraints) : PropV2 p T :=
+  if BArgs.hasDupSlots [i, j, k] then
+    boolSupportDupPropWith p T boolAndR [i, j, k]
+      (fun doms args hargs b hb hacc =>
+        (BArgs.boolAndR_spec p i j k hmem doms args hargs b hb hacc).1)
+      (fun doms args hargs b hb hacc =>
+        (BArgs.boolAndR_spec p i j k hmem doms args hargs b hb hacc).2)
+  else boolAndPropWith p T i j k hmem
+
+/-- Runtime dispatch for `bool_or` rows (see `boolNotPropChoice`). -/
+def boolOrPropChoice (p : CompiledProblem DomConstraint) (T : LitTable)
+    (i j k : Nat) (hmem : DomConstraint.boolOrSlot i j k ∈ p.constraints) : PropV2 p T :=
+  if BArgs.hasDupSlots [i, j, k] then
+    boolSupportDupPropWith p T boolOrR [i, j, k]
+      (fun doms args hargs b hb hacc =>
+        (BArgs.boolOrR_spec p i j k hmem doms args hargs b hb hacc).1)
+      (fun doms args hargs b hb hacc =>
+        (BArgs.boolOrR_spec p i j k hmem doms args hargs b hb hacc).2)
+  else boolOrPropWith p T i j k hmem
+
+/-- Runtime dispatch for `bool_eq` rows (see `boolNotPropChoice`). -/
+def boolEqPropChoice (p : CompiledProblem DomConstraint) (T : LitTable)
+    (i j : Nat) (hmem : DomConstraint.boolEqSlot i j ∈ p.constraints) : PropV2 p T :=
+  if BArgs.hasDupSlots [i, j] then
+    boolSupportDupPropWith p T boolEqR [i, j]
+      (fun doms args hargs b hb hacc =>
+        (BArgs.boolEqR_spec p i j hmem doms args hargs b hb hacc).1)
+      (fun doms args hargs b hb hacc =>
+        (BArgs.boolEqR_spec p i j hmem doms args hargs b hb hacc).2)
+  else boolEqPropWith p T i j hmem
 
 /-- Certified `array_bool_and` propagator.  The runtime guard requires the
 initial source domains to be Boolean: the leaf semantics reads a

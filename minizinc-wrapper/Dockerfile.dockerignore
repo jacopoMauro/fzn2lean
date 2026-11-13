@@ -1,0 +1,8 @@
+# Used by `docker build -f minizinc-wrapper/Dockerfile .` (BuildKit reads
+# <Dockerfile>.dockerignore). Keep the context to what `lake build leanfzn`
+# and the image need.
+.git
+.lake
+tmp
+minizinc-challenge
+**/__pycache__
