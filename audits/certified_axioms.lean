@@ -1,3 +1,4 @@
+import LeanFzn.Integration.Emit.RoundTrip
 import LeanFzn.Integration.Public
 import LeanFzn.Solver.Propagation.FrameFilter
 import LeanFzn.Solver.Propagation.Propagate
@@ -4395,3 +4396,36 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 #print axioms LeanFzn.Core.coreSeed_improveBound_satisfiedB_mono
 #print axioms LeanFzn.Core.coreSeedBetterBound
 #print axioms LeanFzn.Core.optimizeCoreSeed_inv
+
+-- Independent solution grammar and value-sensitive parser completeness.
+#print axioms LeanFzn.Checker.Solution.parseSolSetTail_sound
+#print axioms LeanFzn.Checker.Solution.parseSolSetTail_complete
+#print axioms LeanFzn.Checker.Solution.parseSolLiteral_sound
+#print axioms LeanFzn.Checker.Solution.parseSolLiteral_complete
+#print axioms LeanFzn.Checker.Solution.parseSolArrayItems_sound
+#print axioms LeanFzn.Checker.Solution.parseSolArrayItems_complete
+#print axioms LeanFzn.Checker.Solution.parseSolArray_sound
+#print axioms LeanFzn.Checker.Solution.parseSolArray_complete
+#print axioms LeanFzn.Checker.Solution.parseSolEntry_sound
+#print axioms LeanFzn.Checker.Solution.parseSolEntry_complete
+#print axioms LeanFzn.Checker.Solution.parseSolutionTokens_sound
+#print axioms LeanFzn.Checker.Solution.parseSolutionTokens_complete
+#print axioms LeanFzn.Checker.Solution.parseSolutionTokens_eq_ok_iff_grammar
+#print axioms LeanFzn.Checker.Solution.parseSolution_eq_ok_iff_grammar
+#print axioms LeanFzn.Checker.Solution.parseSolution_ok_iff_valid
+
+-- Actual emitted strings: lexical/syntactic round trip and store-value preservation.
+#print axioms LeanFzn.Checker.Globals.checkSolutionFull_correct
+#print axioms LeanFzn.Parser.Lexer.lexToken_renderSolutionToken
+#print axioms LeanFzn.Parser.Lexer.tokenizeAux_renderSolutionToken_step
+#print axioms LeanFzn.Parser.Lexer.tokenize_renderSolutionTokens
+#print axioms LeanFzn.Parser.Lexer.tokenize_renderSolutionTokenLines
+#print axioms LeanFzn.Integration.mem_emittedSet
+#print axioms LeanFzn.Integration.emittedScalarLiteral_denotes
+#print axioms LeanFzn.Integration.emittedDeclEntry_denotes
+#print axioms LeanFzn.Integration.emittedStoreTokens_grammar
+#print axioms LeanFzn.Integration.emittedStoreEntries_denote
+#print axioms LeanFzn.Integration.emitCertifiedSolution_grammar
+#print axioms LeanFzn.Integration.parse_emitCertifiedSolution
+#print axioms LeanFzn.Integration.parse_emitCertifiedSolution_of_satisfies
+#print axioms LeanFzn.Integration.emitCertifiedSolution_roundTrip

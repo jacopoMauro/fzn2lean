@@ -171,7 +171,7 @@ private def cases : List Case :=
   , { name := "solution is garbage"
     , model := goodModel
     , sol := "garbage\n----------"
-    , expected := .malformedSolution "no solution assignment found" }
+    , expected := .malformedSolution "expected solution line 'name = value;'" }
   ]
 
 /-- The exit code the CLI assigns to each outcome. -/

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Public CLI regressions: Core-only routing, incomplete output and checked witnesses."""
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,12 @@ BIN = ROOT / '.lake/build/bin/leanfzn'
 
 
 class CoreOnlyCLI(unittest.TestCase):
+    def assert_assignment(self, result, name, value):
+        # FlatZinc permits whitespace between every token, including before
+        # the semicolon. Check the assignment's value, not incidental spacing.
+        self.assertRegex(result.stdout,
+                         rf'(?m)^{re.escape(name)}\s*=\s*{re.escape(str(value))}\s*;[ \t]*$')
+
     def solve(self, source, *flags):
         with tempfile.TemporaryDirectory() as tmp:
             model = Path(tmp) / 'case.fzn'
@@ -31,7 +38,7 @@ class CoreOnlyCLI(unittest.TestCase):
                 result = self.solve(source, *flags, '--stats')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(result.stdout.rstrip().endswith('----------'), result.stdout)
-                self.assertIn('x = 0;', result.stdout)
+                self.assert_assignment(result, 'x', 0)
                 self.assertIn('complete=1', result.stderr)
                 self.assertIn('gaveUp=0', result.stderr)
 
@@ -42,7 +49,7 @@ class CoreOnlyCLI(unittest.TestCase):
                                     '--opt=' + strategy, '--stats')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(result.stdout.rstrip().endswith('=========='), result.stdout)
-                self.assertIn('x = 0;', result.stdout)
+                self.assert_assignment(result, 'x', 0)
                 self.assertIn('complete=1', result.stderr)
                 self.assertIn('gaveUp=0', result.stderr)
 
@@ -53,7 +60,7 @@ class CoreOnlyCLI(unittest.TestCase):
                                     '--var=' + strategy, '--stats')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(result.stdout.rstrip().endswith('----------'), result.stdout)
-                self.assertIn('x = 0;', result.stdout)
+                self.assert_assignment(result, 'x', 0)
                 self.assertIn('complete=1', result.stderr)
 
     def test_completed_optimization_retains_certified_markers(self):
@@ -64,7 +71,7 @@ class CoreOnlyCLI(unittest.TestCase):
                                         '--opt=' + strategy, '--stats')
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertTrue(result.stdout.rstrip().endswith('=========='), result.stdout)
-                    self.assertIn(f'x = {optimum};', result.stdout)
+                    self.assert_assignment(result, 'x', optimum)
                     self.assertIn('complete=1', result.stderr)
 
     def test_sat_and_unsat(self):
@@ -90,8 +97,8 @@ class CoreOnlyCLI(unittest.TestCase):
             'var 0..2: x :: output_var; var 0..2: y :: output_var; '
             'constraint int_eq_reif(x,y,true); constraint int_eq(x,0); solve satisfy;')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('x = 0;', result.stdout)
-        self.assertIn('y = 0;', result.stdout)
+        self.assert_assignment(result, 'x', 0)
+        self.assert_assignment(result, 'y', 0)
 
     def test_linear_false_literal_result_stays_unsupported(self):
         result = self.solve(
@@ -121,7 +128,7 @@ class CoreOnlyCLI(unittest.TestCase):
                         f'--threads={threads}', '--stats')
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertTrue(result.stdout.rstrip().endswith('=========='), result.stdout)
-                    self.assertIn(f'x = {optimum};', result.stdout)
+                    self.assert_assignment(result, 'x', optimum)
                     self.assertIn('complete=1', result.stderr)
                     self.assertNotIn('does not match', result.stderr)
 

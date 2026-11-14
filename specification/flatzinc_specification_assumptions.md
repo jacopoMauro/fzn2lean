@@ -347,3 +347,42 @@ index set.
 **Implementation.** `GrIndexSet` in `LeanFzn/Parser/Grammar.lean` matches the
 token `intLit 1`; `parseIndexSet` in `LeanFzn/Parser/Parser.lean` checks the
 value.
+
+## Solution assignment syntax and checker interface
+
+The solution language for the supported non-float fragment follows the pinned
+MiniZinc 2.10.1 handbook §4.3.3.1. Its independent, value-sensitive definition is
+`SolutionGrammar` in `LeanFzn/Checker/SolutionGrammar.lean`; `ValidSolution`
+means that some sequence of entries has a derivation in that grammar. Neither
+predicate invokes the solution parser. As with `ValidFlatZinc`, lexical
+conventions are supplied by the shared lexer, including comments, whitespace,
+reserved words and integer spellings.
+
+An assignment body is a sequence of complete `name = value;` assignments.
+Scalar values are Booleans, integers, integer ranges or enumerated integer
+sets. Flat arrays may be written as `[literal, ...]` (the current handbook
+format) or `array1d(1..n, [literal, ...])` (the handbook examples and historical
+solver format). The wrapper's upper bound must equal the element count;
+an empty wrapped array has index set `1..0`. Commas separate set members
+and array elements at their own nesting level. Trailing commas, missing
+separators, nested arrays and unterminated assignment suffixes have no grammar
+production. An empty or comment-only body denotes no assignments; whether it
+satisfies a particular model is a separate semantic question.
+
+The checker consumes one solution at a time. `splitSolutions` handles streams;
+`stripSeparators` removes standard solution/status separator lines before the
+assignment-body parser runs. Syntax correctness is distinct from the
+model-specific gate for declared variable names, parameter reassignment and
+duplicate entries. The main checker correctness theorems use grammatical
+entries and their completed stores, rather than defining syntactic validity
+by parser success.
+
+Emitter round trips require printable, nonreserved FlatZinc names and a store
+whose values fit each declaration. Arbitrary hand-built AST strings need not
+be legal identifiers, so semantic model well-formedness alone cannot supply
+that lexical premise. The value-shape premise follows from `SatisfiesDyn`.
+The round trip preserves scalar values and array positions, and compares sets
+extensionally because output sorts/deduplicates enumerations. Array output
+uses the actual element count, including `1..0` for every empty array.
+Canonical output places whitespace between tokens; this has no effect on the
+handbook syntax or the decoded values.

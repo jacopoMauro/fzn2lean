@@ -42,6 +42,26 @@ still appear in some shared reference/proof modules and need further extraction
 before their corresponding old definitions can be deleted. The public drivers
 never call the old search implementations.
 
+## Solution syntax and emission proofs
+
+`Checker/SolutionGrammar` independently defines `GrSolution` and the
+value-sensitive `SolutionGrammar` relation over the shared lexer. It imports
+no solution parser. `Checker/Runtime/Solution` implements that grammar;
+`Checker/Proofs/SolutionParser` proves soundness and completeness, including
+full token consumption. The main correctness theorems in `Proofs/{Globals,Check}`
+use the grammar; their `_correct_parse` variants support implementation proofs.
+
+`Parser/SolutionRender` provides canonical token rendering for output, and
+`Parser/Proofs/{LexerRender,LexerToken,LexerLayout}` proves that those strings
+tokenize back to the rendered tokens (atomic words/numbers, token steps, then
+complete multiline layouts). `Integration/Emit/{Values,TokenRoundTrip,RoundTrip}` connects
+source-store values, declaration tokens, independent grammar derivations and
+the actual emitted solution text. `Checker/Proofs/SolutionSeparators` supplies
+the multiline/status normalization bridge. Sets are compared extensionally;
+array order and length are preserved. These proof-only modules stay downstream
+of the executable parser/emitter to avoid making proof changes rebuild the
+solver's computational foundations.
+
 ## Reading paths
 
 | Task | Start here |

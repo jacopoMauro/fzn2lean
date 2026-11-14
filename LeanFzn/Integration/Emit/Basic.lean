@@ -7,17 +7,19 @@ Purpose:
 
 Dependencies:
   - LeanFzn.Compiler.Domain: scalar `Value` and the solver's assignment vocabulary.
+  - LeanFzn.Parser.SolutionRender: canonical token spelling with lexical boundaries.
 
 Why:
   Emission is an output concern after direct LeanFzn.Solver correctness is proved; it
   is not part of the solver's semantic correctness argument.
 
 DAG:
-  LeanFzn.Compiler.Domain -> LeanFzn.Integration.Emit.Basic -> LeanFzn.Integration.Emit -> CLI output
+  Compiler.Domain + Parser.SolutionRender -> Emit.Basic -> Emit.Model -> CLI output
 -/
 
 import Lean
 import LeanFzn.Compiler.Domain
+import LeanFzn.Parser.SolutionRender
 open LeanFzn.Compiler.Domains
 open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Compiler
 
@@ -25,6 +27,7 @@ open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Compiler
 namespace LeanFzn.Integration
 open LeanFzn.Semantics
 open LeanFzn
+open LeanFzn.Parser.Lexer
 
 /-- The FlatZinc text of one integer: decimal form, negative numbers
     with a leading `-` (the lexer's `<int-literal>` shape). -/
@@ -48,23 +51,48 @@ def emitScalar : Value → String
   | .setOfInt s => emitSet s
   | .array _ => panic! "internal error: scalar emission of an array value"
 
-/-- One solution line `name = value;`. -/
-def emitEntry (name : String) (v : Value) : String :=
-  s!"{name} = {emitScalar v};"
+/-- Separate already-tokenized literal values with array/set commas. -/
+def commaSeparatedTokens : List (List Token) → List Token
+  | [] => []
+  | ts :: tss => ts ++ tss.foldr (fun xs acc => .comma :: xs ++ acc) []
 
-/-- The FlatZinc text of a declared variable's value: scalars as
-    `emitScalar`; an array as `array1d(1..n, [..])` with the declared
-    index set `1..n` (FlatZinc index sets always start at 1) and
-    scalar elements. -/
-def emitDeclValue (d : VarDeclItem) (v : Value) : String :=
+/-- Canonical scalar tokens. Arrays are excluded by the typed output contract;
+this fallback remains an explicit internal error rather than silently emitting
+an array as a scalar. -/
+def scalarSolutionTokens : Value → List Token
+  | .bool b => [.boolLit b]
+  | .int i => [.intLit i]
+  | .setOfInt s =>
+      .lBrace :: commaSeparatedTokens (s.sortElems.map (fun i => [.intLit i])) ++ [.rBrace]
+  | .array _ => panic! "internal error: scalar emission of an array value"
+
+/-- Tokens of a declared value, with a canonical array upper bound equal to
+the number of emitted elements. This also prints every empty array as 1..0,
+including declarations whose original upper bound is negative. -/
+def declSolutionTokens (d : VarDeclItem) (v : Value) : List Token :=
   match d, v with
-  | .array ty _ _ _, .array vs =>
-      s!"array1d(1..{ty.idx.hi}, [{", ".intercalate (vs.map emitScalar)}])"
-  | _, v => emitScalar v
+  | .array _ _ _ _, .array vs =>
+      [.ident "array1d", .lParen, .intLit 1, .dotDot, .intLit (vs.length : Int),
+       .comma, .lBrack] ++
+      commaSeparatedTokens (vs.map scalarSolutionTokens) ++ [.rBrack, .rParen]
+  | _, v => scalarSolutionTokens v
 
-/-- One solution line for a declaration: `name = value;`. -/
+/-- The exact tokens printed for a declaration assignment. -/
+def declEntryTokens (d : VarDeclItem) (v : Value) : List Token :=
+  [.ident d.name.name, .eq] ++ declSolutionTokens d v ++ [.semi]
+
+/-- One scalar solution assignment. The canonical renderer places whitespace
+between every pair of tokens, so set commas cannot be mistaken for array commas. -/
+def emitEntry (name : String) (v : Value) : String :=
+  renderSolutionTokens ([.ident name, .eq] ++ scalarSolutionTokens v ++ [.semi])
+
+/-- Canonical FlatZinc rendering of a declared scalar or flat array value. -/
+def emitDeclValue (d : VarDeclItem) (v : Value) : String :=
+  renderSolutionTokens (declSolutionTokens d v)
+
+/-- One solution line for a declaration, using the proved token renderer. -/
 def emitDeclEntry (d : VarDeclItem) (v : Value) : String :=
-  s!"{(VarDeclItem.name d).name} = {emitDeclValue d v};"
+  renderSolutionTokens (declEntryTokens d v)
 
 /-- FlatZinc solution separator (ends every solution; O1 prints one per
     intermediate solution). -/

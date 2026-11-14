@@ -5,6 +5,7 @@ DAG: Runtime.Globals -> Proofs.Globals -> public Checker.Globals import.
 -/
 import LeanFzn.Checker.Runtime.Globals
 import LeanFzn.Checker.Proofs.Solution
+import LeanFzn.Checker.Proofs.SolutionParser
 
 open LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation
 
@@ -51,7 +52,7 @@ private theorem constraintHoldsFullB_iff {store : Store} {c : ConstraintItem}
     store it describes satisfies every dynamic condition of
     `Satisfies fullSig fullInterp`: the constraint reading of `Holds`,
     the variable-domain conditions, and the initializer conditions. -/
-theorem checkSolutionFull_correct (m : Model) (sol : String)
+theorem checkSolutionFull_correct_parse (m : Model) (sol : String)
     (hnames : ∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames) :
     checkSolutionFull m sol = true ↔
       ∃ es, LeanFzn.Checker.Solution.parseSolution
@@ -279,6 +280,22 @@ theorem checkSolutionFull_correct (m : Model) (sol : String)
     · -- constraints
       intro c hc
       exact (constraintHoldsFullB_iff (hnames c hc)).mpr (hcons c hc)
+
+/-- Correctness against the independently specified solution grammar.
+    The right-hand side describes the values written in a grammatical
+    solution, rather than defining valid syntax by parser success.
+    `stripSeparators` selects the assignment text of one solution. -/
+theorem checkSolutionFull_correct (m : Model) (sol : String)
+    (hnames : ∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames) :
+    checkSolutionFull m sol = true ↔
+      ∃ es, SolutionGrammar (stripSeparators sol) es ∧
+        SatisfiesDyn fullInterp m (completedStore m es) := by
+  rw [checkSolutionFull_correct_parse m sol hnames]
+  constructor
+  · rintro ⟨es, hp, hs⟩
+    exact ⟨es, parseSolution_eq_ok_iff_grammar.mp hp, hs⟩
+  · rintro ⟨es, hg, hs⟩
+    exact ⟨es, parseSolution_eq_ok_iff_grammar.mpr hg, hs⟩
 
 /-- The fast constraint twin agrees with the slow one on checkable
     predicate names (the map lookup agrees with `fullInterpB` by

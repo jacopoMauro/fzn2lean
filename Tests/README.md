@@ -50,6 +50,27 @@ The compiler array suite compares Core with small exhaustive enumeration, then
 checks rendered witnesses against the original source model. Public seed and
 incumbent tests use `LeanFzn.Core` APIs, with no fallback adapters.
 
+## Solution-format boundary
+
+`Checker/Solution` checks parsed values for bare/wrapped arrays, sets before
+other array elements, comments, empty arrays, malformed separators and
+unterminated suffixes. `Checker/SolutionGrammar` constructs independent grammar
+derivations for the original multi-element-set regression and derives parser
+acceptance from completeness. `Compiler/SetEmitTest` covers normalized output,
+set semantics, empty-array bounds and actual `solve` → file → `check` round trips.
+
+```bash
+lake build +Tests.Checker.SolutionGrammar tests_solution tests_set_emit tests_check tests_fast
+.lake/build/bin/tests_solution
+.lake/build/bin/tests_set_emit
+.lake/build/bin/tests_check
+.lake/build/bin/tests_fast
+```
+
+The independent grammar and the string-level emitter round-trip theorems are
+included in `audits/certified_axioms.lean`. They cover non-float assignment
+bodies; stream separators are handled by their separate normalization lemmas.
+
 ## Historical tests and full validation
 
 ```bash

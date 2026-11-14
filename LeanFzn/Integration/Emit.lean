@@ -2,10 +2,11 @@
 File: LeanFzn/Integration/Emit.lean
 
 Purpose:
-  Output-only rendering of an already-proved LeanFzn.Solver result as FlatZinc text.
+  Rendering of certified solver results, with a verified solution-text round trip.
 
 Dependencies:
-  - LeanFzn.Integration.Emit.Basic: stable executable API and implementation proof.
+  - LeanFzn.Integration.Emit.Basic/Model: stable executable rendering API.
+  - LeanFzn.Integration.Emit.RoundTrip: independent grammar, parsing and value correspondence.
 
 DAG:
   LeanFzn.Compiler.Domain -> LeanFzn.Integration.Emit.Basic -> LeanFzn.Integration.Emit -> CLI output
@@ -13,6 +14,7 @@ DAG:
 
 import LeanFzn.Integration.Emit.Basic
 import LeanFzn.Integration.Emit.Model
+import LeanFzn.Integration.Emit.RoundTrip
 open LeanFzn.Compiler.Domains
 open LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Compiler LeanFzn.Integration
 

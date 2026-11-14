@@ -1,9 +1,10 @@
 /-
 Purpose: Executable solution checker definitions and required local lemmas.
-Dependencies: Parser, semantics and earlier Checker.Runtime modules.
+Dependencies: Shared lexer/parser vocabulary, independent SolutionGrammar, and semantics.
 DAG: Checker.Runtime.Solution -> Checker.Proofs.Solution -> compatibility import Checker.Solution.
 -/
 import LeanFzn.Parser.Parser
+import LeanFzn.Checker.SolutionGrammar
 import LeanFzn.Semantics.Evaluation
 import LeanFzn.Semantics.ValueEquality
 import Lean
@@ -16,7 +17,8 @@ open LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation
 
 An *executable* checker that decides whether a FlatZinc solution string
 (Section 4.3.3.1 of the MiniZinc 2.10.1 handbook: lines of the form
-`x = <literal>;` or `xs = array1d(1..n, [ ... ]);`) solves a given
+`x = <literal>;`, `xs = [ ... ];`, or the historical
+`xs = array1d(1..n, [ ... ]);`) solves a given
 FlatZinc model, together with a machine-checked proof of its correctness
 (`checkSolutionFull_correct`, proved in `FznGlobals.lean` on the full
 predicate scope): the checker returns `true` **if and only if**
@@ -27,9 +29,14 @@ interpretation `stdInterp`.
 
 ## Design
 
-* The solution parser recurses structurally on the token list, so its
-  termination is syntactic (no fuel needed): a solution line contains no
-  nested arrays, only literals.
+* The solution parser is total without fuel. Set enumerations recurse on
+  token tails; array and assignment parsers use the strictly decreasing
+  length of the unconsumed token suffix. Each literal parser consumes its
+  following delimiter, including after multi-element sets.
+* `SolutionGrammar.lean` independently specifies assignment syntax and values.
+  `Proofs/SolutionParser.lean` proves success exactly for those derivations.
+  The solution stream's status/separator lines are handled separately by
+  `stripSeparators` and the CLI's stream splitter.
 * The parameters (whose values are fixed by the model) are loaded into
   the initial store; a solution string never assigns them.
 * Every dynamic condition is mirrored by a Boolean function with an
@@ -65,321 +72,213 @@ The grammar of one solution line, for this fragment:
 
 ```
 line      ::= ident "=" literal ";"
+            | ident "=" "[" literals "]" ";"
             | ident "=" "array1d" "(" int ".." int "," "[" literals "]" ")" ";"
 literal   ::= bool | int | set-literal
 ```
 
 The FlatZinc `array1d(1..n, [...])` wrapper is accepted and checked to
 be 1-based, matching the guarantee of MiniZinc >= 2.7.8 that output
-arrays are one-dimensional and 1-based.  All parsers below are
-structural in the token list: every recursive call is on a `.tail` of
-the matched constructor pattern, so termination is syntactic. -/
-
-/-- A scalar or array solution value. -/
-inductive SolValue where
-  | scalar (l : BasicLiteral)
-  | array (elems : List BasicLiteral)
-  deriving Repr, Inhabited
-
-/-- One solution line: variable name and its scalar-or-array value. -/
-structure Entry where
-  name : String
-  value : SolValue
-  deriving Repr, Inhabited
+arrays are one-dimensional and 1-based. Bare array output follows the current
+handbook production. Arrays are flat; scalar elements may be Booleans,
+integers, integer ranges, or enumerated integer sets. Commas are required
+between elements, and trailing commas and unterminated suffixes are rejected.
+The independent derivation rules live in `SolutionGrammar.lean`; parser
+soundness and completeness are proved in `Proofs/SolutionParser.lean`. -/
 
 /-- The semantic value of a solution value. -/
 def SolValue.toValue : SolValue → Value
   | .scalar l => l.denote
   | .array ls => .array (ls.map (·.denote))
 
-/-- The continuation of a set literal after `{`: more comma-separated
-    atoms until `}`, which is consumed.  The result list is built by
-    append, keeping the recursion structural on the token list. -/
-private def parseSetTail : List Token → Except String (List Int × List Token)
-  | .intLit i :: .comma :: rest =>
-      match parseSetTail rest with
-      | .ok (is, rest') => .ok (i :: is, rest')
-      | .error e => .error e
-  | .intLit i :: .rBrace :: rest => .ok ([i], rest)
+/-- Parse the context delimiter after a literal. -/
+def parseSolTerminator : Token → Except String SolTerminator
+  | .comma => .ok .comma
+  | .rBrack => .ok .rBrack
+  | .semi => .ok .semi
+  | _ => .error "expected literal delimiter"
+
+/-- Parse an integer enumeration, consuming the closing brace. -/
+def parseSolSetTail : List Token → Except String (List Int × List Token)
   | .rBrace :: rest => .ok ([], rest)
+  | .intLit i :: .rBrace :: rest => .ok ([i], rest)
+  | .intLit i :: .comma :: .intLit j :: rest =>
+      match parseSolSetTail (.intLit j :: rest) with
+      | .ok (is, out) => .ok (i :: is, out)
+      | .error e => .error e
   | _ => .error "expected integer or '}' in set literal"
 
-/-- `parseSetTail` returns a suffix of its input: it only consumes
-    tokens from the front. -/
-private theorem parseSetTail_suffix : ∀ (n : Nat) (toks : List Token),
-    toks.length ≤ n → ∀ (out : List Token) (is : List Int),
-    parseSetTail toks = .ok (is, out) → ∃ pre, toks = pre ++ out := by
-  intro n
-  induction n with
-  | zero =>
-      intro toks hle out is h
-      cases toks with
-      | nil => cases h
-      | cons t ts => simp only [List.length_cons] at hle; omega
-  | succ n ih =>
-      intro toks hle out is h
-      cases toks with
-      | nil => cases h
-      | cons t ts =>
-        cases ts with
-        | nil =>
-            cases t with
-            | rBrace =>
-                simp only [parseSetTail, Except.ok.injEq] at h
-                obtain ⟨rfl, rfl⟩ := h
-                exact ⟨[.rBrace], rfl⟩
-            | _ => simp [parseSetTail] at h
-        | cons t2 ts2 =>
-          cases t with
-          | intLit i =>
-              cases t2 with
-              | comma =>
-                  simp only [parseSetTail] at h
-                  cases hp : parseSetTail ts2 with
-                  | error e => rw [hp] at h; simp at h
-                  | ok p2 =>
-                      obtain ⟨is2, out2⟩ := p2
-                      rw [hp] at h
-                      simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                      obtain ⟨rfl, rfl⟩ := h
-                      have hle2 : ts2.length ≤ n := by
-                        simp only [List.length_cons] at hle; omega
-                      obtain ⟨pre, hpre⟩ := ih ts2 hle2 out2 is2 hp
-                      exact ⟨.intLit i :: .comma :: pre, by simp [hpre]⟩
-              | rBrace =>
-                  simp only [parseSetTail, Except.ok.injEq] at h
-                  obtain ⟨rfl, rfl⟩ := h
-                  exact ⟨[.intLit i, .rBrace], rfl⟩
-              | _ => simp [parseSetTail] at h
-          | rBrace =>
-              simp only [parseSetTail, Except.ok.injEq] at h
-              obtain ⟨rfl, rfl⟩ := h
-              exact ⟨[.rBrace], rfl⟩
-          | _ => simp [parseSetTail] at h
-
-/-- A comma-separated list of basic literals up to (but not consuming)
-    the closing `]`.  Every recursive call is on the tail of the matched
-    pattern: set literals are spelt out case by case (empty, one
-    element, several), so no separate set-atom helper is needed. -/
-private def parseLiteralList : List Token →
-    Except String (List BasicLiteral × List Token)
-  | .rBrack :: toks => .ok ([], .rBrack :: toks)
-  | .boolLit b :: .comma :: rest =>
-      match parseLiteralList rest with
-      | .ok (ls, rest') => .ok (.bool b :: ls, rest')
-      | .error e => .error e
-  | .boolLit b :: .rBrack :: rest => .ok ([.bool b], .rBrack :: rest)
-  | .intLit i :: .dotDot :: .intLit hi :: .comma :: rest =>
-      match parseLiteralList rest with
-      | .ok (ls, rest') => .ok (.set (.intRange i hi) :: ls, rest')
-      | .error e => .error e
-  | .intLit i :: .dotDot :: .intLit hi :: .rBrack :: rest =>
-      .ok ([.set (.intRange i hi)], .rBrack :: rest)
-  | .intLit i :: .comma :: rest =>
-      match parseLiteralList rest with
-      | .ok (ls, rest') => .ok (.int i :: ls, rest')
-      | .error e => .error e
-  | .intLit i :: .rBrack :: rest => .ok ([.int i], .rBrack :: rest)
-  | .lBrace :: .rBrace :: .comma :: rest =>
-      match parseLiteralList rest with
-      | .ok (ls, rest') => .ok (.set (.intSet []) :: ls, rest')
-      | .error e => .error e
-  | .lBrace :: .rBrace :: .rBrack :: rest =>
-      .ok ([.set (.intSet [])], .rBrack :: rest)
-  | .lBrace :: .intLit i :: .rBrace :: .comma :: rest =>
-      match parseLiteralList rest with
-      | .ok (ls, rest') => .ok (.set (.intSet [i]) :: ls, rest')
-      | .error e => .error e
-  | .lBrace :: .intLit i :: .rBrace :: .rBrack :: rest =>
-      .ok ([.set (.intSet [i])], .rBrack :: rest)
-  | .lBrace :: .intLit i :: .comma :: rest =>
-      match _hset : parseSetTail (.intLit i :: .comma :: rest) with
-      | .ok (is, out) =>
-          match _hlist : parseLiteralList out with
-          | .ok (ls, rest3) => .ok (.set (.intSet is) :: ls, rest3)
-          | .error e => .error e
-      | .error e => .error e
+/-- Parse one literal together with its following delimiter. Consuming the
+same delimiter for every literal form prevents set/array comma confusion. -/
+def parseSolLiteral : List Token →
+    Except String (BasicLiteral × SolTerminator × List Token)
+  | .boolLit b :: t :: rest => do
+      let term ← parseSolTerminator t
+      .ok (.bool b, term, rest)
+  | .intLit lo :: .dotDot :: .intLit hi :: t :: rest => do
+      let term ← parseSolTerminator t
+      .ok (.set (.intRange lo hi), term, rest)
+  | .intLit i :: t :: rest => do
+      let term ← parseSolTerminator t
+      .ok (.int i, term, rest)
+  | .lBrace :: rest => do
+      let (is, out) ← parseSolSetTail rest
+      match out with
+      | t :: tail => do
+          let term ← parseSolTerminator t
+          .ok (.set (.intSet is), term, tail)
+      | [] => .error "expected delimiter after set literal"
   | _ => .error "expected literal"
-termination_by toks => toks.length
-decreasing_by
+
+theorem parseSolSetTail_suffix {toks is out}
+    (h : parseSolSetTail toks = .ok (is, out)) : ∃ pre, toks = pre ++ out := by
+  fun_induction parseSolSetTail toks generalizing is out with
+  | case1 rest =>
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨[.rBrace], rfl⟩
+  | case2 i rest =>
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨[.intLit i, .rBrace], rfl⟩
+  | case3 i j rest js out hp ih =>
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      obtain ⟨pre, hp⟩ := ih hp
+      exact ⟨.intLit i :: .comma :: pre, by simp [hp]⟩
+  | case4 => cases h
+  | case5 => cases h
+
+theorem parseSolLiteral_lt {toks l term out}
+    (h : parseSolLiteral toks = .ok (l, term, out)) : out.length < toks.length := by
+  unfold parseSolLiteral at h
+  split at h
   all_goals
-    simp only [List.length_cons]
-  all_goals
-    first
-    | omega
-    | (obtain ⟨pre, hpre⟩ := parseSetTail_suffix ((.intLit i :: .comma :: rest).length)
-         (.intLit i :: .comma :: rest) (Nat.le_refl _) out is _hset
-       have hlen : (.intLit i :: .comma :: rest).length = pre.length + out.length := by
-         rw [hpre]; simp [List.length_append]
-       simp only [List.length_cons] at hlen
-       cases pre with
-       | nil =>
-           rw [List.nil_append] at hpre
-           rw [← hpre]
-           simp only [List.length_cons]
-           omega
-       | cons p ps =>
-           simp only [List.length_cons] at hlen
-           omega)
+    try simp only [Bind.bind, Except.bind] at h
+    repeat split at h
+    all_goals try simp_all only [Except.ok.injEq, Prod.mk.injEq, List.length_cons]
+  all_goals first | contradiction | omega | skip
+  rename_i rest pair hp
+  obtain ⟨is, remaining⟩ := pair
+  cases remaining with
+  | nil => simp at h
+  | cons t tail =>
+      simp only at h
+      split at h
+      · contradiction
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl, rfl⟩ := h
+        obtain ⟨pre, hpre⟩ := parseSolSetTail_suffix hp
+        have := congrArg List.length hpre
+        simp only [List.length_append, List.length_cons] at this ⊢
+        omega
 
-/-- Parse `array1d ( <int> ".." <int> , [ <literals> ] )`, checking the
-    index set is 1-based and matches the element count. -/
-private def parseArray1d : List Token →
-    Except String (List BasicLiteral × List Token)
-  | .ident "array1d" :: .lParen :: .intLit lo :: .dotDot :: .intLit hi ::
-    .comma :: .lBrack :: rest =>
-      if lo != 1 then
-        .error "array1d index set must start at 1"
-      else
-        match parseLiteralList rest with
-        | .ok (elems, .rBrack :: .rParen :: rest') =>
-            if hi - lo + 1 == elems.length then
-              .ok (elems, rest')
-            else
-              .error "array1d length mismatch"
-        | .ok _ => .error "expected ']' after array1d elements"
-        | .error e => .error e
-  | _ => .error "expected array1d"
 
-/-- Parse a single literal after `=`: a bool, int, range set, or
-    enumerated set, followed by `;`. -/
-private def parseScalarEntry (x : String) : List Token →
-    Except String (Entry × List Token)
-  | .boolLit b :: .semi :: rest => .ok (⟨x, .scalar (.bool b)⟩, rest)
-  | .intLit i :: .dotDot :: .intLit hi :: .semi :: rest =>
-      .ok (⟨x, .scalar (.set (.intRange i hi))⟩, rest)
-  | .intLit i :: .semi :: rest => .ok (⟨x, .scalar (.int i)⟩, rest)
-  | .lBrace :: rest =>
-      match parseSetTail rest with
-      | .ok (is, .semi :: rest') => .ok (⟨x, .scalar (.set (.intSet is))⟩, rest')
-      | .ok _ => .error s!"expected ';' after assignment to '{x}'"
+/-- Nonempty array contents; a comma always requires another literal. -/
+def parseSolArrayItems (toks : List Token) : Except String (List BasicLiteral × List Token) :=
+  match h : parseSolLiteral toks with
+  | .ok (l, .rBrack, rest) => .ok ([l], rest)
+  | .ok (l, .comma, rest) =>
+      match parseSolArrayItems rest with
+      | .ok (ls, out) => .ok (l :: ls, out)
       | .error e => .error e
-  | _ => .error s!"expected literal or ';' after assignment to '{x}'"
+  | .ok (_, .semi, _) => .error "expected ',' or ']' after array element"
+  | .error e => .error e
+termination_by toks.length
+decreasing_by exact parseSolLiteral_lt h
 
-/-- Parse a single solution line `<ident> "=" <value> ";"`. -/
-private def parseEntry : List Token → Except String (Entry × List Token)
-  | .ident x :: .eq :: .ident "array1d" :: rest =>
-      match parseArray1d (.ident "array1d" :: rest) with
-      | .ok (elems, .semi :: rest') => .ok (⟨x, .array elems⟩, rest')
-      | .ok _ => .error s!"expected ';' after assignment to '{x}'"
-      | .error e => .error e
-  | .ident x :: .eq :: rest => parseScalarEntry x rest
+/-- Possibly empty array contents, consuming `]`. -/
+def parseSolArray : List Token → Except String (List BasicLiteral × List Token)
+  | .rBrack :: rest => .ok ([], rest)
+  | toks => parseSolArrayItems toks
+
+theorem parseSolArrayItems_lt {toks ls out}
+    (h : parseSolArrayItems toks = .ok (ls, out)) : out.length < toks.length := by
+  fun_induction parseSolArrayItems toks generalizing ls out
+  all_goals try contradiction
+  case case1 toks l rest hp =>
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact parseSolLiteral_lt hp
+  case case2 toks l rest hp ls' out' hparse ih =>
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact Nat.lt_trans (ih hparse) (parseSolLiteral_lt hp)
+
+theorem parseSolArray_lt {toks ls out}
+    (h : parseSolArray toks = .ok (ls, out)) : out.length < toks.length := by
+  unfold parseSolArray at h
+  split at h
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    simp
+  · exact parseSolArrayItems_lt h
+
+/-- One complete assignment with the unconsumed suffix returned. -/
+def parseSolEntry : List Token → Except String (Entry × List Token)
+  | .ident x :: .eq :: .lBrack :: rest => do
+      let (ls, out) ← parseSolArray rest
+      match out with
+      | .semi :: tail => .ok (⟨x, .array ls⟩, tail)
+      | _ => .error "expected ';' after array assignment"
+  | .ident x :: .eq :: .ident "array1d" :: .lParen ::
+      .intLit lo :: .dotDot :: .intLit hi :: .comma :: .lBrack :: rest => do
+      if lo != 1 then .error "array1d index set must start at 1" else do
+        let (ls, out) ← parseSolArray rest
+        match out with
+        | .rParen :: .semi :: tail =>
+            if hi == (ls.length : Int) then .ok (⟨x, .array ls⟩, tail)
+            else .error "array1d length mismatch"
+        | _ => .error "expected ')' and ';' after array1d elements"
+  | .ident x :: .eq :: rest => do
+      let (l, term, out) ← parseSolLiteral rest
+      match term with
+      | .semi => .ok (⟨x, .scalar l⟩, out)
+      | _ => .error "expected ';' after scalar assignment"
   | _ => .error "expected solution line 'name = value;'"
 
-/-- The shortest prefix ending in `;` (kept as the last token), and the
-    rest. -/
-private def splitAtSemi : List Token → Option (List Token × List Token)
-  | .semi :: rest => some ([.semi], rest)
-  | t :: rest =>
-      match splitAtSemi rest with
-      | some (line, rest') => some (t :: line, rest')
-      | none => none
-  | [] => none
-
-/-- A successful `splitAtSemi` strictly shortens the input: the
-    returned rest is shorter than the input. -/
-private theorem splitAtSemi_lt (toks : List Token) :
-    ∀ (p : List Token × List Token), splitAtSemi toks = some p →
-      p.2.length < toks.length := by
-  induction toks with
-  | nil => intro p h; cases h
-  | cons t ts ih =>
-    intro p h
-    match hh : splitAtSemi (t :: ts) with
-    | none => rw [hh] at h; cases h
-    | some p2 =>
-        rw [hh] at h
-        simp only [Option.some.injEq] at h
-        obtain ⟨rfl, rfl⟩ := h
-        match t, ts with
-        | .semi, rest =>
-            -- hh : splitAtSemi (semi :: rest) = some p, and by def = some ([semi], rest)
-            rw [show splitAtSemi (.semi :: rest) = some ([.semi], rest) from rfl] at hh
-            simp only [Option.some.injEq] at hh
-            obtain ⟨rfl, rfl⟩ := hh
-            simp [List.length_cons]
-        | t', t2 :: ts2 =>
-            cases t' with
-            | semi =>
-                -- splitAtSemi (semi :: t2 :: ts2) = some ([semi], t2 :: ts2) = some p
-                rw [show splitAtSemi (.semi :: t2 :: ts2) = some ([.semi], t2 :: ts2) from rfl] at hh
-                simp only [Option.some.injEq] at hh
-                obtain ⟨rfl, rfl⟩ := hh
-                simp [List.length_cons]
-            | _ =>
-              simp only [splitAtSemi] at hh
-              cases hp : splitAtSemi (t2 :: ts2) with
-              | none =>
-                  rw [hp] at hh
-                  simp at hh
-              | some q =>
-                  rw [hp] at hh
-                  simp only [Option.some.injEq] at hh
-                  obtain ⟨rfl, rfl⟩ := hh
-                  have := ih q hp
-                  simp only [List.length_cons] at *
-                  omega
-        | t0, [] =>
-            revert hh
-            cases t0 with
-            | semi =>
-                intro hh
-                rw [show splitAtSemi [.semi] = some ([.semi], []) from rfl] at hh
-                simp only [Option.some.injEq] at hh
-                obtain ⟨rfl, rfl⟩ := hh
-                decide
-            | _ =>
-                intro hh
-                simp only [splitAtSemi] at hh
-                cases hh
-
-/-- Split a token list into `;`-terminated chunks (the trailing `;` of each
-    chunk is kept as its last token). -/
-private def splitLines : List Token → List (List Token) → List (List Token)
-  | [], acc => acc.reverse
-  | toks, acc =>
-      match _hh : splitAtSemi toks with
-      | some p => splitLines p.2 (p.1 :: acc)
-      | none => acc.reverse
-termination_by toks => toks.length
-decreasing_by
+theorem parseSolEntry_lt {toks e out}
+    (h : parseSolEntry toks = .ok (e, out)) : out.length < toks.length := by
+  unfold parseSolEntry at h
+  split at h
+  all_goals
+    try simp only [Bind.bind, Except.bind] at h
+    repeat' split at h
+    all_goals try simp_all only [Except.ok.injEq, Prod.mk.injEq, List.length_cons]
+  all_goals first | contradiction | omega | skip
   all_goals
     first
-    | simp +arith
-    | (have := splitAtSemi_lt toks _ _hh
+    | (rename_i hpArray _ _ hrest
+       have hb := parseSolArray_lt hpArray
+       simp_all only [List.length_cons]
+       omega)
+    | (rename_i hpArray _ _ hrest _
+       have hb := parseSolArray_lt hpArray
+       simp_all only [List.length_cons]
+       omega)
+    | (rename_i hpLiteral _ hterm
+       have hb := parseSolLiteral_lt hpLiteral
+       simp_all only [List.length_cons]
        omega)
 
-/-- Parse all solution lines from a token list: split into `;`-chunks
-    and parse each independently; every chunk must parse and consume
-    exactly its tokens (structural recursion on the chunk list). -/
-private def parseEntries : List (List Token) → Except String (List Entry)
+/-- Parse a complete sequence of assignments; no token suffix is discarded. -/
+def parseSolutionTokens : List Token → Except String (List Entry)
   | [] => .ok []
-  | line :: lines =>
-      match parseEntry line with
+  | toks =>
+      match h : parseSolEntry toks with
       | .ok (e, rest) =>
-          if rest == [] then
-            match parseEntries lines with
-            | .ok es => .ok (e :: es)
-            | .error err => .error err
-          else
-            .error "trailing tokens in solution line"
-      | .error e => .error e
+          match parseSolutionTokens rest with
+          | .ok es => .ok (e :: es)
+          | .error err => .error err
+      | .error err => .error err
+termination_by toks => toks.length
+decreasing_by exact parseSolEntry_lt h
 
-/-- Parse a whole solution string: `x = v;` lines, with FlatZinc
-    comments and whitespace allowed anywhere (the model lexer is
-    reused).  Fails if the string is not a sequence of solution lines.
-    A string that tokenizes to nothing but whitespace and comments
-    parses as the empty entry list (all output variables omitted);
-    a string with tokens but no `;`-terminated line is rejected
-    (it cannot be a suffix of a well-formed solution). -/
+/-- Parse whitespace/comment-separated solution assignments, accepting both
+handbook bare arrays and historical one-based `array1d` output. -/
 def parseSolution (src : String) : Except String (List Entry) := do
   let toks ← tokenize src
-  if toks.toList.isEmpty then
-    .ok []
-  else
-    match splitLines toks.toList [] with
-    | [] => .error "no solution assignment found"
-    | lines => parseEntries lines
+  parseSolutionTokens toks.toList
 
 /-! ## Building the store
 
@@ -602,7 +501,7 @@ def allAssignedB (store : Store) (vars : List VarDeclItem) : Bool :=
     `==========` lines) from a solution string.  Statistics lines
     (`%%%mzn-stat`) are FlatZinc comments, which the lexer skips. -/
 def stripSeparators (sol : String) : String :=
-  String.intercalate "\n" ((sol.splitOn "\n").filter (fun l =>
+  String.intercalate "\n" (((sol.split '\n').toList.map String.Slice.copy).filter (fun l =>
     !(l.startsWith "----------" || l.startsWith "==========")))
 
 /-- The top-level solution checker. -/

@@ -680,7 +680,7 @@ theorem firstUnsupportedFast_eq (m : Model) :
     that are well formed (declared variables only, no duplicates)
     and whose completed store satisfies `Satisfies fullSig
     fullInterp`. -/
-theorem checkModelSolution_correct (m : Model) (sol : String) :
+theorem checkModelSolution_correct_parse (m : Model) (sol : String) :
     checkModelSolution m sol = .accepted ↔
       WellFormed fullSig m ∧
       (∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames) ∧
@@ -721,7 +721,7 @@ theorem checkModelSolution_correct (m : Model) (sol : String) :
                 constructor
                 · intro _
                   obtain ⟨es', hparse', hsat⟩ :=
-                    (checkSolutionFull_correct m sol
+                    (checkSolutionFull_correct_parse m sol
                       ((firstUnsupported_none_iff m).mp huns)).mp hcheck
                   have heq : es' = es := Except.ok.inj (hparse'.symm.trans hparse)
                   subst heq
@@ -735,7 +735,7 @@ theorem checkModelSolution_correct (m : Model) (sol : String) :
                 · intro habsurd
                   exact Outcome.noConfusion habsurd
                 · rintro ⟨_, _, es', hparse', hentries', hsat⟩
-                  have hfull := (checkSolutionFull_correct m sol
+                  have hfull := (checkSolutionFull_correct_parse m sol
                     ((firstUnsupported_none_iff m).mp huns)).mpr
                     ⟨es', hparse.trans hparse', hsat.2⟩
                   rw [hfull] at hcheck
@@ -757,6 +757,23 @@ theorem checkModelSolution_correct (m : Model) (sol : String) :
           rw [hfast] at hwf
           exact (hwf rfl).elim
 
+/-- The front door is sound and complete against the independent,
+    value-sensitive solution grammar, within the supported model signature.
+    In particular, valid assignment syntax is not defined using the parser. -/
+theorem checkModelSolution_correct (m : Model) (sol : String) :
+    checkModelSolution m sol = .accepted ↔
+      WellFormed fullSig m ∧
+      (∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames) ∧
+      ∃ es, SolutionGrammar (stripSeparators sol) es ∧
+        entriesOkB m es ∧
+        Satisfies fullSig fullInterp m (completedStore m es) := by
+  rw [checkModelSolution_correct_parse]
+  constructor
+  · rintro ⟨hw, hn, es, hp, he, hs⟩
+    exact ⟨hw, hn, es, parseSolution_eq_ok_iff_grammar.mp hp, he, hs⟩
+  · rintro ⟨hw, hn, es, hg, he, hs⟩
+    exact ⟨hw, hn, es, parseSolution_eq_ok_iff_grammar.mpr hg, he, hs⟩
+
 /-- **What an accepted solution means.**  The store that
     `checkModelSolution_correct` speaks about is tied to the solution
     string and the model: it maps every assigned name to the value
@@ -768,7 +785,7 @@ theorem checkModelSolution_accepted {m : Model} {sol : String}
       (∀ e ∈ es, completedStore m es ⟨e.name⟩ = some e.value.toValue) ∧
       ParamHonest m (completedStore m es) ∧
       Satisfies fullSig fullInterp m (completedStore m es) := by
-  obtain ⟨hwf, _, es, hparse, hok, hsat⟩ := (checkModelSolution_correct m sol).mp h
+  obtain ⟨hwf, _, es, hparse, hok, hsat⟩ := (checkModelSolution_correct_parse m sol).mp h
   obtain ⟨hdecl, hnd⟩ := (entriesOkB_iff m es).mp hok
   have hvu := hwf.valueNamesUnique
   rw [List.nodup_append] at hvu

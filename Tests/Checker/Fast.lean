@@ -55,7 +55,7 @@ private def cases : List (String × Model × String × Outcome) :=
   , ("reject parameter cheat", goodModel, "k = 9;\nx = 2;\ny = 2;\nxs = array1d(1..2, [2, 2]);\n----------",
       .malformedSolution "assigns a parameter, an unknown name, or a name twice")
   , ("malformed solution", goodModel, "garbage\n----------",
-      .malformedSolution "no solution assignment found")
+      .malformedSolution "expected solution line 'name = value;'")
   , ("unsupported predicate", badPredModel, "x = 1;\n----------",
       .unsupportedPredicate "fzn_span")
   , ("malformed model", malformedModel, "x = 1;\n----------",

@@ -37,19 +37,6 @@ The language reference is **MiniZinc 2.10.1**, pinned to commit
 Float syntax and semantics are outside the supported fragment; strings are
 supported in annotations.
 
-## Implementation status
-
-The public solver uses the Core engine; historical implementations are isolated
-under `LeanFzn/Legacy/` for proofs and development comparisons. The compiler
-includes literal folding, checked integer bounds and finite-set expansion.
-The engine supports certified propagation, learned clauses, optimization,
-LNS and parallel portfolios. Unsupported inputs and incomplete searches are
-reported explicitly; see the scope and exit-code tables below.
-
-Use [Tests/README.md](Tests/README.md) and [audits/README.md](audits/README.md)
-for validation commands. Benchmark reports depend on their source snapshot and
-run budget; generated logs under `tmp/` are local artifacts.
-
 ## Using LeanFzn from MiniZinc
 
 [minizinc-wrapper/](minizinc-wrapper/README.md) registers LeanFzn as a MiniZinc
