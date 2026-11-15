@@ -1,3 +1,8 @@
+/-
+Purpose: Set-related and mathematical predicate semantics and Boolean agreement.
+Dependencies: Globals.Common and AllDiffCounting supply finite-set and array helpers.
+DAG: Shared semantic helpers -> this family -> Globals dispatch and checker correctness.
+-/
 import LeanFzn.Semantics.Globals.Common
 import LeanFzn.Semantics.Globals.AllDiffCounting
 open LeanFzn.Semantics
@@ -297,10 +302,9 @@ theorem partitionSetB_iff (xs : List IntSetValue) (univ : IntSetValue) :
 
 /-! ## fzn_at_most1 -/
 
-/-- Shared elements of two sets (each shared element occurs once per
-    occurrence in `a`'s element list). -/
+/-- Distinct shared elements of two mathematical sets. -/
 private def sharedElems (a b : IntSetValue) : List Int :=
-  (setElems a).filter (fun k => setMemB b k)
+  ((setElems a).filter (fun k => setMemB b k)).eraseDups
 
 /-- `fzn_at_most1(xs)`: each pair of sets in `xs` (with distinct
     positions `i < j`) overlaps in at most one element. -/
@@ -368,14 +372,14 @@ def sumPredProp (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) : Prop :=
   match at1 sets idx with
   | none => False
-  | some s => total = (coeffsAt coefficients (setElems s)).sum
+  | some s => total = (coeffsAt coefficients (setElems s).eraseDups).sum
 
 /-- Boolean twin of `sumPredProp`. -/
 def sumPredB (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) : Bool :=
   match at1 sets idx with
   | none => false
-  | some s => decide (total = (coeffsAt coefficients (setElems s)).sum)
+  | some s => decide (total = (coeffsAt coefficients (setElems s).eraseDups).sum)
 
 theorem sumPredB_iff (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) :
@@ -797,50 +801,57 @@ theorem arraySetIntersectB_iff (x : List IntSetValue) (z : IntSetValue) :
 
 /-! ## Sliding window helper -/
 
-/-- Windows of a list: `windowsB l w check` checks `check` on every
-    window of `w.toNat` consecutive elements starting at positions
-    `p` with `p + w ≤ l.length`; a nonpositive width makes it
-    vacuously true (no windows, per the `.mzn` range
-    `lx-1..ux-window_size` being empty). -/
-private def windowsB {α : Type} (l : List α) (w : Int) (check : List α → Bool) : Bool :=
-  if 0 < w then
-    (List.range (l.length + 1 - w.toNat)).all
-      (fun p => check ((l.drop p).take w.toNat))
+/-- Window starts for width `w` on a list of length `n`, mirroring the
+    upstream generator `forall (i in lx-1..ux-window_size)` with
+    `lx = 1` and `ux = n` (FlatZinc arrays are 1-based). The generator
+    range is `0..n-w`, so:
+    - `w > n`: the range `0..(n-w)` is empty, no windows;
+    - `w = 0`: the range is `0..n`, the `n+1` empty windows;
+    - `w < 0`: the first generator value is `0`, and reading `S[0+w]`
+      with `0+w < 0` leaves the declared index set of `S`, so the
+      decomposition is undefined and the constraint is false. -/
+private def windowStarts (n : Nat) (w : Int) : Option (List Nat) :=
+  if 0 ≤ w then
+    some (List.range (n + 1 - w.toNat))
   else
-    true
+    none
+
+/-- `windowsB l w check` checks `check` on every window selected by
+    `windowStarts`, i.e. on each `[x_p, …, x_{p+w-1}]` for a start
+    `p` with `p + w ≤ l.length`. A negative width is undefined
+    upstream and gives `false`; a zero width checks the empty window
+    `l.length + 1` times. -/
+private def windowsB {α : Type} (l : List α) (w : Int) (check : List α → Bool) : Bool :=
+  match windowStarts l.length w with
+  | none => false
+  | some ps => ps.all (fun p => check ((l.drop p).take w.toNat))
 
 private theorem windowsB_iff {α : Type} (l : List α) (w : Int) (check : List α → Bool) :
     windowsB l w check = true ↔
-      ∀ p : Nat, (p : Int) + w ≤ l.length → 0 < w →
-        check ((l.drop p).take w.toNat) = true := by
+      ∃ ps : List Nat, windowStarts l.length w = some ps ∧
+        ∀ p ∈ ps, check ((l.drop p).take w.toNat) = true := by
   unfold windowsB
-  by_cases hw : 0 < w
-  · rw [if_pos (by omega)]
+  cases h : windowStarts l.length w with
+  | none => simp
+  | some ps =>
+    simp only [h, List.all_eq_true]
     constructor
-    · intro h p hp _
-      have hlen : p < l.length + 1 - w.toNat := by omega
-      have hmem : p ∈ List.range (l.length + 1 - w.toNat) :=
-        List.mem_range.mpr hlen
-      exact List.all_eq_true.mp h p hmem
-    · intro h
-      refine List.all_eq_true.mpr ?_
-      intro p hp
-      have hmem : p < l.length + 1 - w.toNat := List.mem_range.mp hp
-      exact h p (by omega) hw
-  · rw [if_neg hw]
-    constructor
-    · intro h p hp hwpos
-      exact absurd hwpos hw
-    · intro h
-      trivial
+    · intro hall
+      exact ⟨ps, rfl, hall⟩
+    · rintro ⟨q, hq, hqcheck⟩
+      simp only [Option.some.injEq] at hq
+      subst hq
+      exact hqcheck
 /-! ## fzn_sliding_sum -/
 
 /-- `fzn_sliding_sum(low, up, window_size, xs)`: the sum of every
-    window of `window_size` consecutive elements belongs to
-    `[low, up]` (vacuously true if `window_size ≤ 0` — no windows). -/
+    window of `window_size` consecutive elements belongs to `[low, up]`,
+    for the windows selected by `windowStarts`. -/
 def slidingSumProp (low up w : Int) (xs : List Int) : Prop :=
-  ∀ p : Nat, (p : Int) + w ≤ xs.length → 0 < w →
-    low ≤ ((xs.drop p).take w.toNat).sum ∧ ((xs.drop p).take w.toNat).sum ≤ up
+  match windowStarts xs.length w with
+  | none => False
+  | some ps => ∀ p ∈ ps, low ≤ ((xs.drop p).take w.toNat).sum ∧
+      ((xs.drop p).take w.toNat).sum ≤ up
 
 /-- Boolean twin of `slidingSumProp`. -/
 def slidingSumB (low up w : Int) (xs : List Int) : Bool :=
@@ -848,22 +859,27 @@ def slidingSumB (low up w : Int) (xs : List Int) : Bool :=
 
 theorem slidingSumB_iff (low up w : Int) (xs : List Int) :
     slidingSumB low up w xs = true ↔ slidingSumProp low up w xs := by
-  rw [slidingSumB, windowsB_iff]
-  constructor
-  · intro h p hp hwpos
-    exact of_decide_eq_true (h p hp hwpos)
-  · intro h p hp hwpos
-    exact decide_eq_true (h p hp hwpos)
+  unfold slidingSumB slidingSumProp
+  cases h : windowStarts xs.length w with
+  | none => simp [h, windowsB]
+  | some ps =>
+    simp only [h, windowsB, List.all_eq_true, true_and]
+    exact ⟨fun hw p hp => of_decide_eq_true (hw p hp),
+      fun h p hp => decide_eq_true (h p hp)⟩
 
 /-! ## fzn_sliding_among_int -/
 
 /-- `fzn_sliding_among_int(low, up, window_size, xs, values)`: every
     window of `window_size` consecutive elements contains between `low`
-    and `up` elements in `values`. -/
+    and `up` elements in `values`, for the windows selected by
+    `windowStarts` (upstream reduces it to `sliding_sum` on the 0/1
+    indicator array of membership in `values`). -/
 def slidingAmongIntProp (low up w : Int) (xs : List Int) (S : IntSetValue) : Prop :=
-  ∀ p : Nat, (p : Int) + w ≤ xs.length → 0 < w →
-    low ≤ (((xs.drop p).take w.toNat).filter (fun x => setMemB S x)).length ∧
-      (((xs.drop p).take w.toNat).filter (fun x => setMemB S x)).length ≤ up
+  match windowStarts xs.length w with
+  | none => False
+  | some ps => ∀ p ∈ ps,
+      low ≤ (((xs.drop p).take w.toNat).filter (fun x => setMemB S x)).length ∧
+        (((xs.drop p).take w.toNat).filter (fun x => setMemB S x)).length ≤ up
 
 /-- Boolean twin of `slidingAmongIntProp`. -/
 def slidingAmongIntB (low up w : Int) (xs : List Int) (S : IntSetValue) : Bool :=
@@ -872,22 +888,26 @@ def slidingAmongIntB (low up w : Int) (xs : List Int) (S : IntSetValue) : Bool :
 
 theorem slidingAmongIntB_iff (low up w : Int) (xs : List Int) (S : IntSetValue) :
     slidingAmongIntB low up w xs S = true ↔ slidingAmongIntProp low up w xs S := by
-  rw [slidingAmongIntB, windowsB_iff]
-  constructor
-  · intro h p hp hwpos
-    exact of_decide_eq_true (h p hp hwpos)
-  · intro h p hp hwpos
-    exact decide_eq_true (h p hp hwpos)
+  unfold slidingAmongIntB slidingAmongIntProp
+  cases h : windowStarts xs.length w with
+  | none => simp [h, windowsB]
+  | some ps =>
+    simp only [h, windowsB, List.all_eq_true, true_and]
+    exact ⟨fun hw p hp => of_decide_eq_true (hw p hp),
+      fun h p hp => decide_eq_true (h p hp)⟩
 
 /-! ## fzn_sliding_among_bool -/
 
 /-- `fzn_sliding_among_bool(low, up, window_size, xs, value)`: every
     window of `window_size` consecutive booleans contains between
-    `low` and `up` occurrences of `value`. -/
+    `low` and `up` occurrences of `value`, for the windows selected by
+    `windowStarts`. -/
 def slidingAmongBoolProp (low up w : Int) (xs : List Bool) (value : Bool) : Prop :=
-  ∀ p : Nat, (p : Int) + w ≤ xs.length → 0 < w →
-    low ≤ ((xs.drop p).take w.toNat).count value ∧
-      ((xs.drop p).take w.toNat).count value ≤ up
+  match windowStarts xs.length w with
+  | none => False
+  | some ps => ∀ p ∈ ps,
+      low ≤ ((xs.drop p).take w.toNat).count value ∧
+        ((xs.drop p).take w.toNat).count value ≤ up
 
 /-- Boolean twin of `slidingAmongBoolProp`. -/
 def slidingAmongBoolB (low up w : Int) (xs : List Bool) (value : Bool) : Bool :=
@@ -896,12 +916,13 @@ def slidingAmongBoolB (low up w : Int) (xs : List Bool) (value : Bool) : Bool :=
 theorem slidingAmongBoolB_iff (low up w : Int) (xs : List Bool) (value : Bool) :
     slidingAmongBoolB low up w xs value = true ↔
       slidingAmongBoolProp low up w xs value := by
-  rw [slidingAmongBoolB, windowsB_iff]
-  constructor
-  · intro h p hp hwpos
-    exact of_decide_eq_true (h p hp hwpos)
-  · intro h p hp hwpos
-    exact decide_eq_true (h p hp hwpos)
+  unfold slidingAmongBoolB slidingAmongBoolProp
+  cases h : windowStarts xs.length w with
+  | none => simp [h, windowsB]
+  | some ps =>
+    simp only [h, windowsB, List.all_eq_true, true_and]
+    exact ⟨fun hw p hp => of_decide_eq_true (hw p hp),
+      fun h p hp => decide_eq_true (h p hp)⟩
 
 /-! ## The interpretations -/
 
