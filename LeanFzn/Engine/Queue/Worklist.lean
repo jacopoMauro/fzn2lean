@@ -88,4 +88,79 @@ def registerProps (st : EngineState p T) : EngineState p T :=
   decreasing_by omega
   go st.props.size 0 st
 
+/-! ### Compiled form of `registerProps`
+
+`registerProps` reads a subscriber list with `getD` and writes back the
+pushed copy, so the list is shared while it is pushed and every push
+copies it: quadratic in the length of one slot's list (a pinned slot
+shared by a million rows).  The twin pushes through `Array.modify`, which
+moves the list out first.  `registerProps_eq_fast` proves the two equal and
+`@[csimp]` runs the twin. -/
+
+/-- One subscription step of `registerProps`, pushing in place. -/
+def registerStepFast (id : Nat) (st : EngineState p T) (e : Slot × EventKind) :
+    EngineState p T :=
+  let idx := e.1 * 3 + e.2.toNat
+  let st := ensureSubs st (idx + 1)
+  { st with subs := st.subs.modify idx (·.push id) }
+
+/-- `registerProps` with the in-place subscription step. -/
+def registerPropsFast (st : EngineState p T) : EngineState p T :=
+  let rec go (n : Nat) (id : Nat) (st : EngineState p T) : EngineState p T :=
+    if h : id < n then
+      match st.props[id]? with
+      | some pr => go n (id + 1) (pr.events.foldl (registerStepFast id) st)
+      | none => st
+    else st
+  termination_by n - id
+  decreasing_by omega
+  go st.props.size 0 st
+
+theorem array_modify_eq_set! {α : Type} [Inhabited α] (a : Array α) (i : Nat)
+    (f : α → α) : a.modify i f = a.set! i (f (a.getD i default)) := by
+  apply Array.ext_getElem?
+  intro j
+  rw [Array.getElem?_modify, Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds]
+  by_cases hij : i = j
+  · subst hij
+    by_cases hi : i < a.size
+    · simp [hi, Array.getD_eq_getD_getElem?]
+    · simp [hi, Array.getElem?_eq_none (Nat.le_of_not_lt hi)]
+  · simp [hij]
+
+theorem registerStepFast_eq (id : Nat) (st : EngineState p T) (e : Slot × EventKind) :
+    registerStepFast id st e =
+      (let idx := e.1 * 3 + e.2.toNat
+       let st := ensureSubs st (idx + 1)
+       let lst := st.subs.getD idx #[]
+       { st with subs := st.subs.set! idx (lst.push id) }) := by
+  simp only [registerStepFast, array_modify_eq_set!]
+  rfl
+
+theorem registerPropsFast_go_eq (n : Nat) :
+    ∀ id (st : EngineState p T), registerPropsFast.go n id st = registerProps.go n id st := by
+  intro id
+  induction h : n - id using Nat.strongRecOn generalizing id with
+  | ind k ih =>
+    intro st
+    rw [registerPropsFast.go.eq_def, registerProps.go.eq_def]
+    by_cases hid : id < n
+    · simp only [dif_pos hid]
+      cases st.props[id]? with
+      | none => rfl
+      | some pr =>
+        dsimp only
+        rw [ih (n - (id + 1)) (by omega) (id + 1) rfl]
+        congr 1
+        congr 1
+        funext st' e
+        rcases e with ⟨s, k'⟩
+        exact registerStepFast_eq id st' (s, k')
+    · simp only [dif_neg hid]
+
+@[csimp] theorem registerProps_eq_fast :
+    @registerProps = @registerPropsFast := by
+  funext p T st
+  exact (registerPropsFast_go_eq st.props.size 0 st).symm
+
 end LeanFzn.Engine

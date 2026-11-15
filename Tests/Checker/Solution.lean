@@ -6,6 +6,7 @@ DAG: solution parser/checker -> this regression executable.
 -/
 import LeanFzn.Checker.Solution
 import LeanFzn.Parser.Parser
+import LeanFzn.Parser.SolutionRender
 import LeanFzn.Semantics.StdLib
 
 open LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation
@@ -108,6 +109,15 @@ def main : IO UInt32 := do
   if checkSolution model1 badSolutions[4]! then
     IO.eprintln "FAIL (expected rejection of garbage)"
     ok := false
+  -- printable-name gate used by the driver before emitting solutions
+  for name in ["x", "_v1", "X_INTRODUCED_3_", "array1d"] do
+    if !LeanFzn.Parser.Lexer.printableSolutionNameB name then
+      IO.eprintln s!"FAIL (printable name rejected): {name}"
+      ok := false
+  for name in ["", "1x", "x-y", "var", "true", "where", "float", "a b"] do
+    if LeanFzn.Parser.Lexer.printableSolutionNameB name then
+      IO.eprintln s!"FAIL (unprintable name accepted): {name}"
+      ok := false
   if ok then
     IO.println "passed all solution checker tests"
     return 0

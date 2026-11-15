@@ -14,10 +14,16 @@ Runs every (model, data) instance of minizinc-challenge/<year>mzn through
 3. End-to-end: the objective MiniZinc prints (`_objective`) equals the
    objective of the last solution in leanfzn's own output stream.
 
+Each row also records peak resident memory: `peak_rss_mb` for the whole run
+(the largest process among minizinc, the wrapper and leanfzn, from wait4)
+and `solver_peak_rss_mb` / `solver_wall_s` for the leanfzn process alone,
+sampled from /proc by a shim that execs the solver binary.
+
 Dev tool, not a solver dependency. Usage:
 
     minizinc-wrapper/challenge_test.py [--years 2025 2026] [--time-limit 20000]
-        [--jobs 3] [--out tmp/minizinc-wrapper/challenge] [--only PROBLEM ...]
+        [--jobs 3] [--parallel 4] [--out tmp/minizinc-wrapper/challenge]
+        [--only PROBLEM ...]
 
 Instances whose pre-compiled FlatZinc is larger than --big-mb run
 afterwards one at a time with a larger memory cap (systemd user scopes).
@@ -32,11 +38,73 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 CHALLENGE = os.path.join(ROOT, "minizinc-challenge")
 LEANFZN = os.environ.get("LEANFZN_BIN", os.path.join(ROOT, ".lake", "build", "bin", "leanfzn"))
+
+# Replaces itself with the real solver (same pid, so the wrapper still waits
+# for and kills the solver directly) after forking a detached monitor that
+# samples the kernel's high-water mark VmHWM from /proc every 0.1 s and keeps
+# the latest value in solver.json.  VmHWM never decreases, so the recorded
+# value can only miss growth in the last interval before the process exits.
+SHIM = '''#!/usr/bin/env python3
+import json, os, sys, time
+d = os.environ.get("FZN_LEANFZN_SAVE_DIR")
+pid = os.getpid()
+if d and os.fork() == 0:
+    os.setsid()
+    if os.fork() != 0:
+        os._exit(0)
+    t0, last = time.monotonic(), None
+    path = os.path.join(d, "solver.json")
+    while True:
+        try:
+            with open(f"/proc/{pid}/status") as f:
+                st = f.read()
+        except OSError:
+            break
+        if "State:\\tZ" in st:
+            break
+        hwm = next((int(l.split()[1]) for l in st.splitlines() if l.startswith("VmHWM:")), None)
+        if hwm is not None and hwm != last:
+            last = hwm
+            with open(path + ".tmp", "w") as f:
+                json.dump({"maxrss_kb": hwm, "wall_s": round(time.monotonic() - t0, 2)}, f)
+            os.replace(path + ".tmp", path)
+        time.sleep(0.1)
+    if last is not None:
+        with open(path + ".tmp", "w") as f:
+            json.dump({"maxrss_kb": last, "wall_s": round(time.monotonic() - t0, 2)}, f)
+        os.replace(path + ".tmp", path)
+    os._exit(0)
+os.execv(%r, [%r] + sys.argv[1:])
+'''
+
+
+def run_measured(cmd, env):
+    """Run cmd, returning (stdout, stderr, rc, peak RSS in KiB of the largest
+    process in its tree). wait4 reports the child's own peak and those of
+    the descendants it waited for, so concurrent runs do not mix."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, errors="replace", env=env)
+    bufs = {}
+    readers = [threading.Thread(target=lambda k, f: bufs.__setitem__(k, f.read()), args=(k, f))
+               for k, f in (("out", p.stdout), ("err", p.stderr))]
+    for t in readers:
+        t.start()
+    while True:
+        try:
+            _, status, ru = os.wait4(p.pid, 0)
+            break
+        except InterruptedError:
+            continue
+    for t in readers:
+        t.join()
+    p.returncode = os.waitstatus_to_exitcode(status)
+    return bufs["out"], bufs["err"], p.returncode, ru.ru_maxrss
 OBJ_RE = re.compile(r"^_objective\s*=\s*(-?\d+);", re.M)
 
 
@@ -97,13 +165,18 @@ def run_one(inst, args, mem):
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work)
     env = dict(os.environ, FZN_LEANFZN_SAVE_DIR=work)
+    if args.shim:
+        env["LEANFZN_BIN"] = args.shim
     cmd = ["systemd-run", "--user", "--scope", "--quiet", "-p", f"MemoryMax={mem}",
            "-p", "MemorySwapMax=0",
            "timeout", "-k", "10", str(args.outer_timeout),
            args.minizinc, "--solver", "leanfzn", inst["model"], inst["data"],
            "-t", str(args.time_limit), "--output-mode", "dzn", "--output-objective"]
+    if args.parallel > 1:
+        cmd += ["-p", str(args.parallel)]
     t0 = time.monotonic()
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    out, err, rc, maxrss = run_measured(cmd, env)
+    p = subprocess.CompletedProcess(cmd, rc, out, err)
     wall = time.monotonic() - t0
     with open(os.path.join(work, "stdout.txt"), "w") as f:
         f.write(p.stdout)
@@ -112,6 +185,15 @@ def run_one(inst, args, mem):
     timed_out = p.returncode == 124
     row = dict(inst, wall_s=round(wall, 1), rc=p.returncode,
                outcome=classify(p.stdout, p.stderr, p.returncode, timed_out))
+    row["peak_rss_mb"] = round(maxrss / 1024, 1)
+    row["solver_peak_rss_mb"] = row["solver_wall_s"] = None
+    try:
+        with open(os.path.join(work, "solver.json")) as f:
+            sj = json.load(f)
+        row["solver_peak_rss_mb"] = round(sj["maxrss_kb"] / 1024, 1)
+        row["solver_wall_s"] = sj["wall_s"]
+    except (OSError, ValueError, KeyError):
+        pass
     objs = [int(x) for x in OBJ_RE.findall(p.stdout)]
     row["n_solutions"] = p.stdout.count("----------")
     row["objective"] = objs[-1] if objs else None
@@ -187,7 +269,8 @@ def safe_result(get, inst):
         return get()
     except Exception as e:
         return dict(inst, wall_s=0, rc=None, outcome="error", n_solutions=0, objective=None,
-                    raw_objective=None, check="-", reason=f"harness error {e!r}"[:160])
+                    raw_objective=None, check="-", reason=f"harness error {e!r}"[:160],
+                    peak_rss_mb=None, solver_peak_rss_mb=None, solver_wall_s=None)
 
 
 def main():
@@ -197,6 +280,9 @@ def main():
     ap.add_argument("--time-limit", type=int, default=20000, help="solver time limit, ms (-t)")
     ap.add_argument("--outer-timeout", type=int, default=900, help="hard cap per run, s")
     ap.add_argument("--jobs", type=int, default=3)
+    ap.add_argument("--parallel", type=int, default=1, help="MiniZinc -p (solver threads)")
+    ap.add_argument("--no-solver-rss", action="store_true",
+                    help="do not put the RSS-measuring shim in front of leanfzn")
     ap.add_argument("--mem", default="5G", help="memory cap per run")
     ap.add_argument("--big-mb", type=float, default=100.0)
     ap.add_argument("--big-mem", default="18G")
@@ -205,6 +291,12 @@ def main():
     args = ap.parse_args()
     args.out = os.path.abspath(args.out)
     os.makedirs(args.out, exist_ok=True)
+    args.shim = None
+    if not args.no_solver_rss:
+        args.shim = os.path.join(args.out, "leanfzn-rss-shim")
+        with open(args.shim, "w") as f:
+            f.write(SHIM % (os.path.abspath(LEANFZN), os.path.abspath(LEANFZN)))
+        os.chmod(args.shim, 0o755)
 
     version = subprocess.run([args.minizinc, "--version"], capture_output=True, text=True).stdout.splitlines()[0]
     print(f"minizinc: {version}\nout: {args.out}", flush=True)
@@ -229,7 +321,9 @@ def main():
         flag = "" if row["oracle"] == "ok" and row["check"] in ("ok", "-") else "  <<<"
         print(f"[{len(rows):3}/{len(insts)}] {row['year']} {row['problem']}/{row['instance']}: "
               f"{row['outcome']} obj={row['objective']} sols={row['n_solutions']} "
-              f"check={row['check']} oracle={row['oracle']} ({row['wall_s']} s){flag}", flush=True)
+              f"check={row['check']} oracle={row['oracle']} ({row['wall_s']} s, "
+              f"peak {row.get('peak_rss_mb')} MB, solver {row.get('solver_peak_rss_mb')} MB){flag}",
+              flush=True)
 
     with cf.ThreadPoolExecutor(max_workers=args.jobs) as ex:
         futs = {ex.submit(run_one, i, args, args.mem): i for i in small}
@@ -251,7 +345,8 @@ def main():
     outcomes = Counter(r["outcome"] for r in rows)
     fails = [r for r in rows if r["oracle"].startswith("FAIL") or r["check"].startswith("FAIL")]
     checked = sum(1 for r in rows if r["check"] == "ok")
-    lines = [f"minizinc: {version}", f"instances: {len(rows)}  time limit: {args.time_limit} ms",
+    lines = [f"minizinc: {version}",
+             f"instances: {len(rows)}  time limit: {args.time_limit} ms  -p {args.parallel}",
              "outcomes: " + ", ".join(f"{k}={v}" for k, v in sorted(outcomes.items())),
              f"witness checks passed: {checked}  failures: {len(fails)}"]
     for r in fails:

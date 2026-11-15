@@ -101,6 +101,10 @@ def solveTest (st : St) : IO St := do
     ((← runModel { threads := 4 } unsupported) == 3)
   st ← st.check "programmatic portfolio rejects seeded optimization"
     ((← runModel { threads := 4, opt := .seeded } minModel) == 2)
+  st ← st.check "programmatic portfolio rejects an explicit variable strategy"
+    ((← runModel { threads := 4, var := .wdeg } minModel) == 2)
+  st ← st.check "programmatic portfolio rejects an explicit value strategy"
+    ((← runModel { threads := 4, val := .incumbent } minModel) == 2)
   pure st
 
 /-- A conflict-capped portfolio cannot claim a proof: a pigeonhole contradiction
@@ -121,6 +125,15 @@ def incompleteTest (st : St) : IO St := do
     ((← runModel { threads := 2, conflictLimit := some 1 } m) == 4)
   st ← st.check "portfolio proves the contradiction with two conflicts"
     ((← runModel { threads := 2, conflictLimit := some 2 } m) == 1)
+  let minModel := model "var 0..2: x :: output_var; solve minimize x;"
+  let sink ← LeanFzn.Integration.Report.ReportSink.new .text
+  sink.markFailed
+  st ← st.check "a failed portfolio report sink is an internal error"
+    ((← runPortfolioOptimization sink { threads := 4 } minModel) == 2)
+  let sink2 ← LeanFzn.Integration.Report.ReportSink.new .text
+  sink2.markFailed
+  st ← st.check "a failed sink on an incomplete optimization is internal"
+    ((← runModelWithSink sink2 { conflictLimit := some 1 } m) == 2)
   pure st
 
 def main : IO UInt32 := do

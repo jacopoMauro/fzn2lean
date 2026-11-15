@@ -19,6 +19,7 @@ import LeanFzn.Compiler.Proofs.SetIn
 import LeanFzn.Compiler.Proofs.CompileAux1
 import LeanFzn.Compiler.Proofs.Fragment
 import LeanFzn.Compiler.Proofs.LiteralFold
+import Std.Data.String.ToNat
 
 namespace LeanFzn.Compiler
 open LeanFzn LeanFzn.Semantics LeanFzn.Semantics.Evaluation LeanFzn.Semantics.Globals
@@ -133,11 +134,53 @@ theorem setUniverse?_mem {ty : BasicVarType} {us : List Int}
 
 /-! ## Fresh Boolean pairs -/
 
+/-- The length of a short shape-aux name. -/
+theorem shapeAuxName_length (bound n : Nat) :
+    (shapeAuxName bound n).length = 5 + (bound + 1) + (Nat.repr n).length := by
+  unfold shapeAuxName
+  rw [String.length_append, String.length_append, dollarRun_length]
+  rfl
+
+/-- A short shape-aux name is longer than every taken name, hence not
+    taken itself. -/
+theorem shapeAuxName_not_mem {taken : List String} {n : Nat} :
+    shapeAuxName (maxStrLength taken) n ∉ taken := by
+  intro hmem
+  have hge := maxStrLength_ge taken _ hmem
+  have hlen := shapeAuxName_length (maxStrLength taken) n
+  have hpos := Nat.length_repr_pos (n := n)
+  rw [hlen] at hge
+  omega
+
+/-- Distinct counters give distinct short shape-aux names. -/
+theorem shapeAuxName_inj {bound n n' : Nat}
+    (h : shapeAuxName bound n = shapeAuxName bound n') : n = n' := by
+  let p := "_aux_" ++ dollarRun (bound + 1)
+  have hp : shapeAuxName bound n = p ++ Nat.repr n := rfl
+  have hp' : shapeAuxName bound n' = p ++ Nat.repr n' := rfl
+  rw [hp, hp'] at h
+  have hlist := congrArg String.toList h
+  simp only [String.toList_append] at hlist
+  have hrep : Nat.repr n = Nat.repr n' :=
+    String.toList_injective (List.append_cancel_left hlist)
+  exact Nat.repr_injective hrep
+
+/-- A set-expansion name is not taken. -/
+theorem setAuxName_not_mem {taken : List String} {n : Nat} :
+    setAuxName taken n ∉ taken :=
+  shapeAuxName_not_mem
+
+/-- Distinct counters give distinct set-expansion names. -/
+theorem setAuxName_inj {taken : List String} {n n' : Nat}
+    (h : setAuxName taken n = setAuxName taken n') : n = n' :=
+  shapeAuxName_inj h
+
+
 /-- The names allocated by `freshPairs`, as a range of auxiliary names. -/
 theorem freshPairs_names (taken : List String) (start : Nat) :
     ∀ us : List Int,
       (freshPairs taken start us).map Prod.fst =
-        (List.range us.length).map (fun j => auxName taken (start + j))
+        (List.range us.length).map (fun j => setAuxName taken (start + j))
   | [] => rfl
   | v :: vs => by
       simp only [freshPairs, List.map_cons, List.length_cons]
@@ -165,7 +208,7 @@ theorem freshPairs_names_nodup (taken : List String) (start : Nat) (us : List In
   refine List.Pairwise.map _ ?_ List.nodup_range
   intro j k hjk heq
   apply hjk
-  have h := auxName_inj (taken := taken) heq
+  have h := setAuxName_inj heq
   omega
 
 /-- The values of a `freshPairs` run are the universe values. -/
@@ -189,7 +232,7 @@ theorem freshPairs_name_not_mem (taken : List String) (start : Nat)
     b ∉ taken := by
   rw [freshPairs_names] at hb
   obtain ⟨j, _, rfl⟩ := List.mem_map.mp hb
-  exact auxName_not_mem
+  exact setAuxName_not_mem
 
 /-! ## Pair lists with distinct keys -/
 
@@ -512,9 +555,23 @@ theorem mapM_congr_set {α β : Type} {f g : α → Option β} :
 /-- **The fast rewrite equals the scanning specification.**  This is what
     lets the executable pass use the hash table while the correctness
     theorems keep talking about `rewriteConstraint`. -/
+theorem infoIndex_foldr (is : List SetInfo) (x : String) :
+    (is.foldr (fun i acc => acc.insert i.name i) ({} : Std.HashMap String SetInfo))[x]? =
+      is.find? (fun i => i.name = x) := by
+  induction is with
+  | nil => simp
+  | cons i is ih =>
+      rw [List.foldr_cons, Std.HashMap.getElem?_insert, ih]
+      by_cases h : i.name = x <;> simp [h, List.find?_cons]
+
+/-- The entry table answers `infoOf`. -/
+theorem infoIndex_get (se : SetExpansion) (x : Ident) :
+    se.infoIndex[x.name]? = se.infoOf x :=
+  infoIndex_foldr se.sets x.name
+
 theorem rewriteConstraintFast_eq (se : SetExpansion) (c : ConstraintItem) :
-    rewriteConstraintFast se.setNameSet se c = rewriteConstraint se c := by
-  simp only [rewriteConstraintFast, rewriteConstraint,
+    rewriteConstraintFast se.setNameSet se.infoIndex se c = rewriteConstraint se c := by
+  simp only [rewriteConstraintFast, rewriteConstraint, infoIndex_get,
     constraintMentionsSetFast_eq, setNameSet_contains_isSetName]
 
 /-- Distinct members of a `flatMap` have disjoint fibres. -/
@@ -623,9 +680,9 @@ def totalValues (infos : List SetInfo) : Nat :=
 
 /-- Mapping a shifted range of auxiliary names splits at an offset. -/
 theorem map_range_add_aux (taken : List String) (n a b : Nat) :
-    (List.range (a + b)).map (fun j => auxName taken (n + j)) =
-      (List.range a).map (fun j => auxName taken (n + j)) ++
-        (List.range b).map (fun j => auxName taken ((n + a) + j)) := by
+    (List.range (a + b)).map (fun j => setAuxName taken (n + j)) =
+      (List.range a).map (fun j => setAuxName taken (n + j)) ++
+        (List.range b).map (fun j => setAuxName taken ((n + a) + j)) := by
   rw [List.range_add, List.map_append, List.map_map]
   congr 1
   apply List.map_congr_left
@@ -663,7 +720,7 @@ structure DeclExpansion (taken : List String) (ds : List VarDeclItem)
   counter : n' = n + totalValues infos
   /-- The fresh names are the consecutive auxiliary names from `n`. -/
   bool_eq : infos.flatMap (fun i => i.bools.map Prod.fst) =
-    (List.range (totalValues infos)).map (fun j => auxName taken (n + j))
+    (List.range (totalValues infos)).map (fun j => setAuxName taken (n + j))
   /-- Set-variable names are unique. -/
   infos_nodup : (infos.map (fun i => i.name)).Nodup
   /-- Each set's universe values are unique. -/
@@ -911,7 +968,7 @@ theorem expandVarDecls_spec (taken : List String) :
                         omega
                       · have hhead : info.bools.map Prod.fst =
                             (List.range us.length).map
-                              (fun j => auxName taken (n + j)) := by
+                              (fun j => setAuxName taken (n + j)) := by
                           rw [show info.bools = freshPairs taken n us from rfl,
                             freshPairs_names]
                         calc
@@ -919,15 +976,15 @@ theorem expandVarDecls_spec (taken : List String) :
                               = info.bools.map Prod.fst ++
                                   infos'.flatMap (fun i => i.bools.map Prod.fst) := rfl
                           _ = (List.range us.length).map
-                                  (fun j => auxName taken (n + j)) ++
+                                  (fun j => setAuxName taken (n + j)) ++
                                 (List.range (totalValues infos')).map
-                                  (fun j => auxName taken ((n + us.length) + j)) := by
+                                  (fun j => setAuxName taken ((n + us.length) + j)) := by
                                 rw [hhead, ihs.bool_eq]
                           _ = (List.range (us.length + totalValues infos')).map
-                                  (fun j => auxName taken (n + j)) := by
+                                  (fun j => setAuxName taken (n + j)) := by
                                 rw [← map_range_add_aux]
                           _ = (List.range (totalValues (info :: infos'))).map
-                                  (fun j => auxName taken (n + j)) := by
+                                  (fun j => setAuxName taken (n + j)) := by
                                 rw [show us.length + totalValues infos' =
                                   totalValues (info :: infos') by
                                     simp [totalValues, hvals]]
@@ -988,7 +1045,7 @@ theorem expandVarDecls_spec (taken : List String) :
                               exact htk_tail e hsrc
                             have ha_not : a ∉ taken := by
                               rw [← hja]
-                              exact auxName_not_mem
+                              exact setAuxName_not_mem
                             exact ha_not (by rw [hab]; exact hb_taken)
                           · have hbmem : p.1 ∈
                                 infos'.flatMap (fun i => i.bools.map Prod.fst) :=
@@ -996,14 +1053,14 @@ theorem expandVarDecls_spec (taken : List String) :
                                 ⟨i, hi, List.mem_map.mpr ⟨p, hp, rfl⟩⟩
                             rw [ihs.bool_eq] at hbmem
                             obtain ⟨k, hk, hkeq⟩ := List.mem_map.mp hbmem
-                            have hb_eq : b = auxName taken ((n + us.length) + k) := by
+                            have hb_eq : b = setAuxName taken ((n + us.length) + k) := by
                               rw [← heb, hde]
                               exact hkeq.symm
-                            have ha_eq : a = auxName taken (n + j) := hja.symm
-                            have heqaux : auxName taken (n + j) =
-                                auxName taken ((n + us.length) + k) := by
+                            have ha_eq : a = setAuxName taken (n + j) := hja.symm
+                            have heqaux : setAuxName taken (n + j) =
+                                setAuxName taken ((n + us.length) + k) := by
                               rw [← ha_eq, hab, hb_eq]
-                            have hidx := auxName_inj heqaux
+                            have hidx := setAuxName_inj heqaux
                             omega
                       · -- removed set names are not kept
                         intro i hi
@@ -1141,10 +1198,11 @@ theorem setExpandModel_spec {taken : List String} {m : Model} {se : SetExpansion
       refine ⟨⟨n', hdecl'⟩, rfl, rfl, rfl, css, ?_, rfl⟩
       let se0 : SetExpansion :=
         { model := { m with variables := vars }, sets := infos }
-      change m.constraints.mapM (rewriteConstraintFast se0.setNameSet se0) = some css at hmap
+      change m.constraints.mapM
+        (rewriteConstraintFast se0.setNameSet se0.infoIndex se0) = some css at hmap
       show m.constraints.mapM (rewriteConstraint se0) = some css
       rw [mapM_congr_set (f := rewriteConstraint se0)
-        (g := rewriteConstraintFast se0.setNameSet se0)
+        (g := rewriteConstraintFast se0.setNameSet se0.infoIndex se0)
         (fun c _ => (rewriteConstraintFast_eq se0 c).symm)]
       exact hmap
 
@@ -1187,7 +1245,7 @@ theorem DeclExpansion.boolNames_nodup {taken : List String} {ds : List VarDeclIt
   refine List.Pairwise.map _ ?_ List.nodup_range
   intro j k hjk heq
   apply hjk
-  have := auxName_inj heq
+  have := setAuxName_inj heq
   omega
 
 /-- The invariants of a successful set-expansion pass. -/

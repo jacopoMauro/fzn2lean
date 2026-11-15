@@ -497,12 +497,98 @@ def varDeclsOkB (store : Store) (vars : List VarDeclItem) : Bool :=
 def allAssignedB (store : Store) (vars : List VarDeclItem) : Bool :=
   vars.all (fun d => (store d.name).isSome)
 
+/-! ## Solution-line classification
+
+A solver output stream mixes assignment blocks with layout lines: blank
+lines, `%` comments, the `----------` solution separator, the `==========`
+optimum marker, and the `=====…=====` status markers.  One pure
+classifier decides which of these a line is, so the stream splitter
+(`splitSolutions`), the content test (`hasSolutionContent`) and the
+separator stripper (`stripSeparators`) cannot disagree.
+
+The classifier is deliberately exact: after dropping one trailing
+carriage return and trimming ASCII spaces/tabs on both ends, a marker
+must equal one of the recognized lines character for character.  A
+malformed prefix such as `----------garbage` or `=====garbage` is
+ordinary content and the assignment parser rejects it; it never
+disappears as a separator or status. -/
+
+/-- Is this character ASCII space or tab?  Only these two are trimmed
+    from marker lines (`trimAscii` also strips other control
+    characters, which would accept `\x0b----------` as a separator). -/
+def isStatusSpace (c : Char) : Bool := c == ' ' || c == '\t'
+
+/-- Trim ASCII spaces and tabs from both ends. -/
+def trimStatusEnds (cs : List Char) : List Char :=
+  (cs.dropWhile isStatusSpace).reverse.dropWhile isStatusSpace |>.reverse
+
+/-- Drop one trailing carriage return, if present. -/
+def dropOneTrailingCR (cs : List Char) : List Char :=
+  match cs.getLast? with
+  | some '\r' => cs.dropLast
+  | _ => cs
+
+/-- Trim one trailing `\r` (CRLF input) and then ASCII spaces and tabs
+    on both ends, the permitted padding around a status marker. -/
+def trimStatusLine (l : String) : String :=
+  String.ofList (trimStatusEnds (dropOneTrailingCR l.toList))
+
+/-- The classification of one solver-output line. -/
+inductive SolutionLine where
+  /-- Empty after `trimStatusLine`. -/
+  | blank
+  /-- `%` comment after `trimStatusLine`. -/
+  | comment
+  /-- Exactly `----------`. -/
+  | solutionSeparator
+  /-- Exactly `==========`. -/
+  | optimumMarker
+  /-- Exactly one of the recognized `=====…=====` status lines; the
+      trimmed text is retained. -/
+  | status (text : String)
+  /-- Anything else, including malformed marker prefixes. -/
+  | content
+  deriving Repr, DecidableEq, Inhabited
+
+/-- Is this trimmed text one of the status markers (not the optimum
+    marker, which is handled separately)? -/
+def isStatusMarkerText (t : String) : Bool :=
+  t == "=====UNSATISFIABLE=====" ||
+  t == "=====UNKNOWN=====" ||
+  t == "=====UNBOUNDED=====" ||
+  t == "=====UNSATorUNBOUNDED=====" ||
+  t == "=====ERROR====="
+
+/-- Classify one solver-output line.  A marker is recognized only if the
+    trimmed line is exactly the marker; there is no prefix matching. -/
+def classifySolutionLine (l : String) : SolutionLine :=
+  let t := trimStatusLine l
+  if t.isEmpty then .blank
+  else if t.startsWith "%" then .comment
+  else if t == "----------" then .solutionSeparator
+  else if t.startsWith "=" then
+    if t == "==========" then .optimumMarker
+    else if isStatusMarkerText t then .status t
+    else .content
+  else .content
+
+/-- Should `stripSeparators` drop this line?  Only the solution
+    separator and the optimum marker are structural; status lines stay
+    so that an UNSAT/UNKNOWN stream cannot become an empty accepted
+    assignment. -/
+def isStrippableSeparator (l : String) : Bool :=
+  match classifySolutionLine l with
+  | .solutionSeparator | .optimumMarker => true
+  | _ => false
+
 /-- Strip the standard FlatZinc solution separators (`----------` and
-    `==========` lines) from a solution string.  Statistics lines
-    (`%%%mzn-stat`) are FlatZinc comments, which the lexer skips. -/
+    `==========` lines) from a solution string.  Status lines and
+    malformed marker prefixes are left in place; the assignment grammar
+    rejects them.  Statistics lines (`%%%mzn-stat`) are FlatZinc
+    comments, which the lexer skips. -/
 def stripSeparators (sol : String) : String :=
-  String.intercalate "\n" (((sol.split '\n').toList.map String.Slice.copy).filter (fun l =>
-    !(l.startsWith "----------" || l.startsWith "==========")))
+  String.intercalate "\n" (((sol.split '\n').toList.map String.Slice.copy).filter
+    (fun l => !isStrippableSeparator l))
 
 /-- The top-level solution checker. -/
 def checkSolution (m : Model) (sol : String) : Bool :=

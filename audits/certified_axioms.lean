@@ -174,6 +174,8 @@ import LeanFzn.Engine.Props.Arith
 import LeanFzn.Engine.Queue
 import LeanFzn.Engine.Analyze
 import LeanFzn.Engine.Reduce
+import LeanFzn.Integration.Report.Proofs
+import LeanFzn.Integration.Report.T8
 open LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Chronological LeanFzn.Solver.UIP LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
 
 
@@ -2677,6 +2679,24 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 #print axioms LeanFzn.Compiler.assembleDom_eq
 #print axioms LeanFzn.Compiler.compileModelFast_eq
 
+-- P-prep (2026-11-15): large set-model preparation fast paths, each a
+-- `@[csimp]` seam whose equality is checked here.  Set-shape answers
+-- declaration lookups from a hash map; set-expand indexes set entries and
+-- names its Booleans with the short decimal family; `expandPlan` computes
+-- the aux-name bound once; `slotsIntB` reads the domain array;
+-- `registerProps` pushes subscribers in place.
+#print axioms LeanFzn.Compiler.ShapeLookup.ofModel_eq_spec
+#print axioms LeanFzn.Compiler.shapeExpandConstraintsL_spec
+#print axioms LeanFzn.Compiler.shapeExpandModelWith_eq_fast
+#print axioms LeanFzn.Compiler.setAuxName_not_mem
+#print axioms LeanFzn.Compiler.setAuxName_inj
+#print axioms LeanFzn.Compiler.infoIndex_get
+#print axioms LeanFzn.Compiler.expandPlanLoop_eq
+#print axioms LeanFzn.Compiler.expandPlan_eq_fast
+#print axioms LeanFzn.Engine.slotsIntB_eq_fast
+#print axioms LeanFzn.Engine.registerPropsFast_go_eq
+#print axioms LeanFzn.Engine.registerProps_eq_fast
+
 -- S7b (2026-10-27): enum-free gate fast paths.
 -- `gateOk` and `domPruningOkB` keep their kernel bodies; the structural twins
 -- read `Dom.intViewableB`, `Dom.allIntBStruct` and `Dom.allBoolBStruct`
@@ -4429,3 +4449,50 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 #print axioms LeanFzn.Integration.parse_emitCertifiedSolution
 #print axioms LeanFzn.Integration.parse_emitCertifiedSolution_of_satisfies
 #print axioms LeanFzn.Integration.emitCertifiedSolution_roundTrip
+
+-- Exact solution-line classifier and rendered-line preservation (D1).
+#print axioms LeanFzn.Checker.Solution.classify_renderSolutionTokens_ident
+#print axioms LeanFzn.Checker.Solution.stripSeparators_terminated
+
+-- Pure certification-boundary report layer (A1/A2).
+#print axioms LeanFzn.Integration.Report.classifyOptimization_eq_incomplete
+#print axioms LeanFzn.Integration.Report.classifyOptimization_eq_optimal
+#print axioms LeanFzn.Integration.Report.classifyOptimization_eq_unsat
+#print axioms LeanFzn.Integration.Report.classifyOptimization_optimal_inv
+#print axioms LeanFzn.Integration.Report.classifyOptimization_unsat_inv
+#print axioms LeanFzn.Integration.Report.classifyOptimization_incomplete
+#print axioms LeanFzn.Integration.Report.classifySatisfaction_unknown_no_proof_claim
+#print axioms LeanFzn.Integration.Report.classifySatisfaction_unsupported_no_proof_claim
+#print axioms LeanFzn.Integration.Report.classifyOptimization_incomplete_no_proof_claim
+#print axioms LeanFzn.Integration.Report.satisfaction_unsat_sound
+#print axioms LeanFzn.Integration.Report.satisfaction_sat_sound
+#print axioms LeanFzn.Integration.Report.optimization_optimal_sound
+#print axioms LeanFzn.Integration.Report.optimization_unsat_sound
+#print axioms LeanFzn.Integration.Report.seed_optimal_sound
+#print axioms LeanFzn.Integration.Report.seed_unsat_sound
+#print axioms LeanFzn.Integration.Report.lns_optimal_sound
+#print axioms LeanFzn.Integration.Report.lns_unsat_sound
+#print axioms LeanFzn.Integration.Report.terminalKind_exitCode_table
+#print axioms LeanFzn.Integration.Report.terminalKind_exit_eq
+#print axioms LeanFzn.Integration.Report.terminalKind_marker_sound
+#print axioms LeanFzn.Integration.Report.terminalKind_marker_sound_optimal
+#print axioms LeanFzn.Integration.Report.terminalKind_no_marker_of_incomplete
+#print axioms LeanFzn.Integration.Report.terminal_toJson_event
+#print axioms LeanFzn.Integration.Report.terminal_toJson_exit
+#print axioms LeanFzn.Integration.Report.error_toJson_exit
+#print axioms LeanFzn.Integration.Report.certifiedEntryPairs_snd
+#print axioms LeanFzn.Integration.Report.certifiedEntryPairs_fst
+#print axioms LeanFzn.Integration.Report.renderSolutionText_eq_emitCertifiedSolution
+#print axioms LeanFzn.Integration.Report.solution_entries_bind
+#print axioms LeanFzn.Integration.Report.outputNamesPrintableB_sound
+#print axioms LeanFzn.Integration.Report.solution_entries_bind_of_gate
+#print axioms LeanFzn.Parser.Lexer.printableSolutionNameB_iff
+#print axioms LeanFzn.Integration.Report.satisfaction_report_truthful
+#print axioms LeanFzn.Integration.Report.optimization_report_truthful
+
+-- A2.5 streaming correspondence (T8).
+#print axioms LeanFzn.Integration.Report.optimizeStreamCoreStats_emitted_eq
+#print axioms LeanFzn.Integration.Report.optimizeStreamCoreLns_emitted_eq
+
+-- A3.5 checked-emission completeness.
+#print axioms LeanFzn.Integration.Report.certifiedEntryPairs_length_eq_of_satisfies

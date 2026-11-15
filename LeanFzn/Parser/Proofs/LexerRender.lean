@@ -324,6 +324,21 @@ theorem int_toString_noNewline (i : Int) : '\n' ∉ (toString i).toList := by
     simp only [String.toList_append, List.mem_append, List.mem_cons, List.mem_singleton]
     simpa using nat_repr_noNewline (n+1)
 
+/-- The executable name check decides `PrintableSolutionName`. -/
+theorem printableSolutionNameB_iff (s : String) :
+    printableSolutionNameB s = true ↔ PrintableSolutionName s := by
+  unfold printableSolutionNameB PrintableSolutionName
+  cases h : s.toList with
+  | nil => simp
+  | cons c cs =>
+      simp only [Bool.and_eq_true, List.all_eq_true, Option.isNone_iff_eq_none,
+        Bool.not_eq_true', List.cons.injEq]
+      constructor
+      · rintro ⟨⟨⟨hc, hcs⟩, hk⟩, hr⟩
+        exact ⟨⟨c, cs, ⟨rfl, rfl⟩, hc, hcs⟩, hk, hr⟩
+      · rintro ⟨⟨c', cs', ⟨rfl, rfl⟩, hc, hcs⟩, hk, hr⟩
+        exact ⟨⟨⟨hc, hcs⟩, hk⟩, hr⟩
+
 /-- A printable name contains no physical newlines. -/
 theorem printableSolutionName_noNewline (s : String) (h : PrintableSolutionName s) :
     '\n' ∉ s.toList := by

@@ -845,37 +845,6 @@ def ShapeAux.KindDeps (taken : List String) : List ShapeAux → Prop
 def ShapeState.TyOk (st : ShapeState) : Prop :=
   ∀ a ∈ st.aux, a.TyOk
 
-/-- The length of a short shape-aux name. -/
-theorem shapeAuxName_length (bound n : Nat) :
-    (shapeAuxName bound n).length = 5 + (bound + 1) + (Nat.repr n).length := by
-  unfold shapeAuxName
-  rw [String.length_append, String.length_append, dollarRun_length]
-  rfl
-
-/-- A short shape-aux name is longer than every taken name, hence not
-    taken itself. -/
-theorem shapeAuxName_not_mem {taken : List String} {n : Nat} :
-    shapeAuxName (maxStrLength taken) n ∉ taken := by
-  intro hmem
-  have hge := maxStrLength_ge taken _ hmem
-  have hlen := shapeAuxName_length (maxStrLength taken) n
-  have hpos := Nat.length_repr_pos (n := n)
-  rw [hlen] at hge
-  omega
-
-/-- Distinct counters give distinct short shape-aux names. -/
-theorem shapeAuxName_inj {bound n n' : Nat}
-    (h : shapeAuxName bound n = shapeAuxName bound n') : n = n' := by
-  let p := "_aux_" ++ dollarRun (bound + 1)
-  have hp : shapeAuxName bound n = p ++ Nat.repr n := rfl
-  have hp' : shapeAuxName bound n' = p ++ Nat.repr n' := rfl
-  rw [hp, hp'] at h
-  have hlist := congrArg String.toList h
-  simp only [String.toList_append] at hlist
-  have hrep : Nat.repr n = Nat.repr n' :=
-    String.toList_injective (List.append_cancel_left hlist)
-  exact Nat.repr_injective hrep
-
 /-- Auxiliary names are an injective `shapeAuxName` family below the
     counter. -/
 def ShapeState.AuxIdx (taken : List String) (st : ShapeState) : Prop :=

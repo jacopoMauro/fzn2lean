@@ -45,8 +45,12 @@ Compared the upstream release trees at commits
   (rewritten or removed before output), and array concatenation/slicing
   return types generalized to `any $T`.
 - The non-float syntax, predicate semantics, assumptions, parser and proof
-  statements therefore require no definition changes. Their source references
-  now identify the 2.10.1 release and immutable commit.
+  statements therefore require no definition changes.
+- On 2026-11-14 the old `specification/minizinc-2.10.0/` snapshot was removed
+  and the remaining Lean, test and documentation references were repointed
+  here, so 2.10.1 is the only vendored reference. The handbook section
+  numbers cited in `Semantics/Globals/` (4.2.2.x) are the same in both
+  versions.
 - HTML handbook copies were downloaded from the 2.10.1 URLs on 2026-11-13.
   `fzn-spec.md` is carried forward from the previous snapshot with versioned
   links updated, since its normative RST source is unchanged; it is a derived

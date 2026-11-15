@@ -57,10 +57,14 @@ tokenize back to the rendered tokens (atomic words/numbers, token steps, then
 complete multiline layouts). `Integration/Emit/{Values,TokenRoundTrip,RoundTrip}` connects
 source-store values, declaration tokens, independent grammar derivations and
 the actual emitted solution text. `Checker/Proofs/SolutionSeparators` supplies
-the multiline/status normalization bridge. Sets are compared extensionally;
-array order and length are preserved. These proof-only modules stay downstream
-of the executable parser/emitter to avoid making proof changes rebuild the
-solver's computational foundations.
+the multiline/status normalization bridge.  The executable classifier
+`SolutionLine` in `Checker/Runtime/Solution` is shared by `stripSeparators`,
+`splitSolutions` and `hasSolutionContent`: only exact marker lines (after one
+trailing CR and ASCII space/tab padding) are structural, status lines are never
+candidates, and malformed prefixes remain assignment content. Sets are
+compared extensionally; array order and length are preserved. These
+proof-only modules stay downstream of the executable parser/emitter to avoid
+making proof changes rebuild the solver's computational foundations.
 
 ## Reading paths
 

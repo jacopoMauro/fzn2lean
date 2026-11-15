@@ -16,6 +16,14 @@ def PrintableSolutionName (s : String) : Prop :=
     ∀ d ∈ cs, isIdentChar d = true) ∧
   keywordToken s = none ∧ reservedNonFzn.contains s = false
 
+/-- Executable check of `PrintableSolutionName`; `printableSolutionNameB_iff`
+in `Parser.Proofs.LexerRender` proves the two agree. -/
+def printableSolutionNameB (s : String) : Bool :=
+  match s.toList with
+  | [] => false
+  | c :: cs => (isAlpha c || c == '_') && cs.all isIdentChar &&
+      (keywordToken s).isNone && !reservedNonFzn.contains s
+
 /-- Tokens used by non-float scalar and one-dimensional array solutions. -/
 def PrintableSolutionToken : Token → Prop
   | .ident s => PrintableSolutionName s

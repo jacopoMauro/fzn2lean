@@ -172,15 +172,23 @@ private def cases : List Case :=
     , model := goodModel
     , sol := "garbage\n----------"
     , expected := .malformedSolution "expected solution line 'name = value;'" }
+  , { name := "padded delimiter and CRLF"
+    , model := goodModel
+    , sol := "  x = 4;  \r\n\ty = 3;\t\r\n  xs = array1d(1..2, [4, 3]);\r\n  ----------  \r\n"
+    , expected := .accepted }
   ]
 
-/-- The exit code the CLI assigns to each outcome. -/
+/- Exit code the CLI assigns to each outcome. -/
+namespace LeanFzn.Checker
+
 def Outcome.exitCode : Outcome → UInt32
   | .accepted => 0
   | .unsatisfied => 1
   | .malformedModel _ => 2
   | .unsupportedPredicate _ => 3
   | .malformedSolution _ => 4
+
+end LeanFzn.Checker
 
 def main : IO UInt32 := do
   let mut ok := true
@@ -217,11 +225,79 @@ def main : IO UInt32 := do
     , ("x = 1;\n----------\nx = 2;\n----------\n==========\n", 2)
     , ("x = 1;\n----------\nx = 2;\n", 2)
     , ("x = 1;\n----------\n% comment\n=====UNKNOWN=====\n", 1)
-    , ("----------\n", 1) ]
+    , ("----------\n", 1)
+    -- D1: padding and CRLF are permitted around exact markers
+    , ("  x = 1;\n\t----------\t\r\n", 1)
+    , ("x = 1;\r\n----------\r\nx = 2;\r\n", 2)
+    , ("x = 1;\n----------\n\t% c\r\n=====UNKNOWN=====\t\r\n", 1)
+    -- D1: blank/comment/status-only streams have no candidate solution
+    , ("\n\n \t\r\n% only a comment\n", 0)
+    , ("=====UNSATISFIABLE=====", 0)
+    , ("\t=====UNKNOWN=====\r\n", 0)
+    -- D1: malformed marker prefixes are content, not separators
+    , ("----------garbage\n", 1)
+    , ("x = 1;\n----------\nx = 2;\n% trailing comment\n", 2)
+    , ("x = 1;\n----------\n\n\n", 1) ]
   for (out, n) in splits do
     let got := (splitSolutions out).length
     if got != n then
       IO.eprintln s!"FAIL splitSolutions {repr out}: {got} solutions, expected {n}"
+      ok := false
+  -- D1: exact line classification, including permitted padding only
+  let classes : List (String × SolutionLine) :=
+    [ ("", .blank)
+    , (" \t \r", .blank)
+    , ("% note", .comment)
+    , ("\t% note\r", .comment)
+    , ("----------", .solutionSeparator)
+    , (" \t----------\r", .solutionSeparator)
+    , ("==========", .optimumMarker)
+    , (" ========== \r", .optimumMarker)
+    , ("=====UNSATISFIABLE=====", .status "=====UNSATISFIABLE=====")
+    , ("\t=====UNKNOWN=====\r", .status "=====UNKNOWN=====")
+    , ("=====UNBOUNDED=====", .status "=====UNBOUNDED=====")
+    , ("=====UNSATorUNBOUNDED=====", .status "=====UNSATorUNBOUNDED=====")
+    , ("=====ERROR=====", .status "=====ERROR=====")
+    , ("x = 1;", .content)
+    , ("-----------", .content)
+    , ("----------garbage", .content)
+    , (" ==========garbage ", .content)
+    , ("=====garbage", .content) ]
+  for (line, expected) in classes do
+    if classifySolutionLine line != expected then
+      IO.eprintln s!"FAIL classifySolutionLine {repr line}: \
+        expected {repr expected}, got {repr (classifySolutionLine line)}"
+      ok := false
+  -- D1: only separators and the optimum marker are stripped
+  let strippings : List (String × String) :=
+    [ ("x = 1;\n----------", "x = 1;")
+    , ("x = 1;\r\n  ----------  \r\n", "x = 1;\r\n")
+    , ("x = 1;\n==========\n", "x = 1;\n")
+    , ("x = 1;\n=====UNKNOWN=====\n", "x = 1;\n=====UNKNOWN=====\n")
+    , ("----------garbage\n", "----------garbage\n")
+    , ("=====garbage\n", "=====garbage\n") ]
+  for (input, expected) in strippings do
+    if stripSeparators input != expected then
+      IO.eprintln s!"FAIL stripSeparators {repr input}: got {repr (stripSeparators input)}"
+      ok := false
+  -- D1: status-only input is a non-answer (CLI exit 4), not acceptance
+  for out in ["=====UNSATISFIABLE=====", "\t=====UNKNOWN=====\r\n",
+              "  =====ERROR===== \r\n"] do
+    if (checkModelSolution m out).exitCode != 4 then
+      IO.eprintln s!"FAIL status-only {repr out}: expected exit 4, got \
+        {(checkModelSolution m out).exitCode}"
+      ok := false
+  -- D1: blank/comment-only streams yield no candidate at the CLI splitter
+  for out in ["% comment only\n", "\n\n \t\r\n"] do
+    if !(splitSolutions out).isEmpty then
+      IO.eprintln s!"FAIL no-candidate {repr out}: \
+        splitSolutions returned {(splitSolutions out).length} blocks"
+      ok := false
+  -- D1: malformed marker prefixes are rejected, not silently dropped
+  for out in ["x = 4;\n----------garbage", "x = 4;\n==========garbage"] do
+    if (checkModelSolution m out).exitCode != 4 then
+      IO.eprintln s!"FAIL malformed marker {repr out}: expected exit 4, got \
+        {(checkModelSolution m out).exitCode}"
       ok := false
   if ok then
     IO.println s!"passed {cases.length} CLI check tests"

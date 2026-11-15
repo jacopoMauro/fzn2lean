@@ -143,14 +143,6 @@ def ShapeAux.definition : ShapeAux → ConstraintItem
         [shapeE (shapeName x), shapeE (shapeName n)]
   | ⟨n, _, .const v⟩ => pinBoolConstraint n v
 
-/-- The fresh-name family of the shape pre-pass.  The `$`-run makes the
-    name strictly longer than every taken name, so it is fresh even
-    against hand-built models; the decimal counter keeps the name short
-    (unlike the older unary `auxName` family, whose name length grew with
-    the allocation counter). -/
-def shapeAuxName (bound n : Nat) : String :=
-  "_aux_" ++ dollarRun (bound + 1) ++ Nat.repr n
-
 /-- Add a declaration and advance the auxiliary counter. -/
 def ShapeState.freshDecl (taken : List String) (st : ShapeState)
     (ty : BasicVarType) : String × ShapeState :=
@@ -599,7 +591,453 @@ def shapeExpandModelWith (taken : List String) (m : Model) : Option ShapeExpansi
            constraints := st.cons.reverse },
          aux := st.aux.reverse }
 
-/-- The shape pre-pass avoiding the model's own names. -/
+/-! ## Indexed twin of the pass
+
+The specification above finds a name's declared type with
+`modelSetUniverse?`/`modelIntValues?`, a linear scan of `m.variables`, once
+per constraint and once per universe value.  On large set models (gt-sort:
+70k declarations, 87k constraints) that scan dominates the whole compile.
+The twin below is the same pass with both lookups abstracted into a
+`ShapeLookup`; `ShapeLookup.ofModel` answers them from a hash map built
+once.  `shapeExpandModelWith_eq_fast` proves the twin equal to the
+specification, and `@[csimp]` installs it as the compiled code, so every
+proof keeps reasoning about the scanning definition. -/
+
+/-- The two declaration lookups the pass performs. -/
+structure ShapeLookup where
+  setU : String → Option (List Int)
+  intV : String → Option (List Int)
+
+/-- The finite integer values of a declared type (the body of
+    `modelIntValues?`). -/
+def tyIntValues? : BasicVarType → Option (List Int)
+  | .intRange lo hi => some (setElems (.interval lo hi))
+  | .intSet xs => some ((IntSetValue.enumeration xs).sortElems)
+  | _ => none
+
+/-- Declared type of every scalar name; the first declaration wins. -/
+def declTypeIndex (ds : List VarDeclItem) : Std.HashMap String BasicVarType :=
+  ds.foldr (fun d acc =>
+    match d with
+    | .basic ty x _ _ => acc.insert x.name ty
+    | .array _ _ _ _ => acc) {}
+
+/-- The scanning lookups of the specification. -/
+def ShapeLookup.spec (m : Model) : ShapeLookup :=
+  ⟨modelSetUniverse? m, modelIntValues? m⟩
+
+/-- The hash-map lookups used by the compiled pass. -/
+def ShapeLookup.ofModel (m : Model) : ShapeLookup :=
+  let idx := declTypeIndex m.variables
+  ⟨fun n => idx[n]?.bind setUniverse?, fun n => idx[n]?.bind tyIntValues?⟩
+
+def memberTermL (L : ShapeLookup) (taken : List String) (st : ShapeState)
+    (s : Expr) (v : Int) : Option (String × ShapeState) :=
+  match s with
+  | .basic (.ident S) =>
+      match L.setU S.name with
+      | none => none
+      | some us =>
+          if v ∈ us then
+            some (st.freshBool taken (.member S.name v))
+          else
+            some (st.freshBool taken (.const false))
+  | .basic (.lit (.set l)) =>
+      let b := decide (l.denote.Contains v)
+      some (st.freshBool taken (.const b))
+  | _ => none
+
+def setArgValuesL (L : ShapeLookup) : Expr → Option (List Int)
+  | .basic (.ident s) => L.setU s.name
+  | .basic (.lit (.set l)) =>
+      match l with
+      | .intSet xs => some ((IntSetValue.enumeration xs).sortElems)
+      | .intRange lo hi => some (setElems (.interval lo hi))
+  | _ => none
+
+def varMemberTermsL (L : ShapeLookup) (taken : List String) (x s : String) :
+    ShapeState → List Int → Option (List String × ShapeState)
+  | st, [] => some ([], st)
+  | st, v :: vs =>
+      match st.freshBool taken (.eq x v) with
+      | (e, st1) =>
+        match memberTermL L taken st1 (.basic (.ident (Ident.mk s))) v with
+        | none => none
+        | some (a, st2) =>
+          match st2.freshBool taken (.and e a) with
+          | (t, st3) =>
+            match varMemberTermsL L taken x s st3 vs with
+            | none => none
+            | some (ts, st4) => some (t :: ts, st4)
+
+def rewriteVarMemberL (L : ShapeLookup) (taken : List String) (st : ShapeState)
+    (x s : String) (vals : List Int) (r : BasicExpr) :
+    Option (ShapeState × List ConstraintItem) :=
+  match varMemberTermsL L taken x s st vals with
+  | none => none
+  | some (terms, st1) =>
+      match resultTarget taken st1 r with
+      | none => none
+      | some (target, st2) => some (linkOr st2 terms target, [])
+
+def cardBitsL (L : ShapeLookup) (taken : List String) (s : String) :
+    ShapeState → List Int → Option (List String × ShapeState)
+  | st, [] => some ([], st)
+  | st, v :: vs =>
+      match memberTermL L taken st (.basic (.ident (Ident.mk s))) v with
+      | none => none
+      | some (a, st1) =>
+        match st1.freshInt01 taken (.bit a) with
+        | (c, st2) =>
+          match cardBitsL L taken s st2 vs with
+          | none => none
+          | some (cs, st3) => some (c :: cs, st3)
+
+def rewriteCardL (L : ShapeLookup) (taken : List String) (st : ShapeState)
+    (s : String) (k : BasicExpr) : Option (ShapeState × List ConstraintItem) :=
+  let us := (L.setU s).getD []
+  if us.isEmpty then
+    match k with
+    | .ident kn =>
+        some (st.emit (shapeConstraint "int_eq" [shapeE (shapeName kn.name), shapeE (shapeInt 0)]), [])
+    | .lit (.int n) =>
+        if n = 0 then some (st, []) else some (st.emit falseConstraint, [])
+    | _ => none
+  else
+    match cardBitsL L taken s st us with
+    | none => none
+    | some (cs, st1) =>
+        match k with
+        | .ident kn =>
+            let coeffs := cs.map (fun _ => 1) ++ [-1]
+            some (st1.emit (shapeLinEq coeffs (cs ++ [kn.name]) 0), [])
+        | .lit (.int n) =>
+            let coeffs := cs.map (fun _ => 1)
+            some (st1.emit (shapeLinEq coeffs cs n), [])
+        | _ => none
+
+def unionRowsL (L : ShapeLookup) (taken : List String) (a b c : Expr) :
+    ShapeState → List Int → Option ShapeState
+  | st, [] => some st
+  | st, v :: vs =>
+      match memberTermL L taken st a v with
+      | none => none
+      | some (av, st1) =>
+        match memberTermL L taken st1 b v with
+        | none => none
+        | some (bv, st2) =>
+          match memberTermL L taken st2 c v with
+          | none => none
+          | some (cv, st3) =>
+            let st4 := st3.emit
+              (shapeConstraint "bool_or"
+                [shapeE (shapeName av), shapeE (shapeName bv), shapeE (shapeName cv)])
+            unionRowsL L taken a b c st4 vs
+
+def intersectRowsL (L : ShapeLookup) (taken : List String) (a b c : Expr) :
+    ShapeState → List Int → Option ShapeState
+  | st, [] => some st
+  | st, v :: vs =>
+      match memberTermL L taken st a v with
+      | none => none
+      | some (av, st1) =>
+        match memberTermL L taken st1 b v with
+        | none => none
+        | some (bv, st2) =>
+          match memberTermL L taken st2 c v with
+          | none => none
+          | some (cv, st3) =>
+            let st4 := st3.emit
+              (shapeConstraint "bool_and"
+                [shapeE (shapeName av), shapeE (shapeName bv), shapeE (shapeName cv)])
+            intersectRowsL L taken a b c st4 vs
+
+def arrayElemUnionL (L : ShapeLookup) : List BasicExpr → Option (List Int)
+  | [] => some []
+  | e :: rest =>
+      match setArgValuesL L (.basic e) with
+      | none => none
+      | some us =>
+          match arrayElemUnionL L rest with
+          | none => none
+          | some union => some (us ++ union)
+
+def arrayElemValuesL (L : ShapeLookup) (es : List BasicExpr) (T : String) :
+    Option (List Int) :=
+  match L.setU T with
+  | none => none
+  | some ut =>
+      match arrayElemUnionL L es with
+      | none => none
+      | some union =>
+          some (IntSetValue.enumeration (ut ++ union)).sortElems
+
+def arrayElemBitsL (L : ShapeLookup) (taken : List String) :
+    List BasicExpr → ShapeState → Int → Option (List String × ShapeState)
+  | [], st, _ => some ([], st)
+  | e :: rest, st, v =>
+      match memberTermL L taken st (.basic e) v with
+      | none => none
+      | some (b, st1) =>
+          match arrayElemBitsL L taken rest st1 v with
+          | none => none
+          | some (bs, st2) => some (b :: bs, st2)
+
+def arrayElemRowsL (L : ShapeLookup) (taken : List String) (i : BasicExpr)
+    (es : List BasicExpr) (T : String) :
+    ShapeState → List Int →
+      Option (List (Int × List String × String) × ShapeState)
+  | st, [] => some ([], st)
+  | st, v :: vs =>
+      match arrayElemBitsL L taken es st v with
+      | none => none
+      | some (bits, st1) =>
+          match memberTermL L taken st1
+              (.basic (.ident (Ident.mk T))) v with
+          | none => none
+          | some (tv, st2) =>
+              match arrayElemRowsL L taken i es T st2 vs with
+              | none => none
+              | some (rows, st3) => some ((v, bits, tv) :: rows, st3)
+
+def rewriteArrayElemL (L : ShapeLookup) (taken : List String) (st : ShapeState)
+    (i : BasicExpr) (es : List BasicExpr) (T : String) :
+    Option (ShapeState × List ConstraintItem) :=
+  match arrayElemValuesL L es T with
+  | none => none
+  | some vals =>
+      match arrayElemRowsL L taken i es T st vals with
+      | none => none
+      | some (rows, st') =>
+          some (st', arrayElemRowList i rows ++ shapeRangeChecks i es.length)
+
+def shapeRewriteConstraintL (L : ShapeLookup) (taken : List String) (st : ShapeState)
+    (c : ConstraintItem) : Option (ShapeState × List ConstraintItem) :=
+  match c.name.name, c.args with
+  | "set_in_reif", [.basic xarg, .basic sarg, .basic rarg] =>
+      match sarg with
+      | .ident S =>
+          match L.setU S.name with
+          | none => some (st, [c])
+          | some _ =>
+              match xarg with
+              | .ident x =>
+                  match L.intV x.name with
+                  | some vals => rewriteVarMemberL L taken st x.name S.name vals rarg
+                  | none => none
+              | .lit (.int _) => some (st, [c])
+              | _ => none
+      | .lit (.set _) => some (st, [c])
+      | _ => none
+  | "set_in", [.basic xarg, .basic sarg] =>
+      match sarg with
+      | .ident S =>
+          match L.setU S.name with
+          | none => some (st, [c])
+          | some _ =>
+              match xarg with
+              | .ident x =>
+                  match L.intV x.name with
+                  | some vals =>
+                      rewriteVarMemberL L taken st x.name S.name vals (shapeBool true)
+                  | none => none
+              | .lit (.int _) => some (st, [c])
+              | _ => none
+      | .lit (.set _) => some (st, [c])
+      | _ => none
+  | "set_card", [.basic sarg, .basic karg] =>
+      match sarg with
+      | .ident S =>
+          match L.setU S.name with
+          | none => some (st, [c])
+          | some _ => rewriteCardL L taken st S.name karg
+      | .lit (.set _) => some (st, [c])
+      | _ => none
+  | "set_union", [sa, sb, sc] =>
+      match setArgValuesL L sa, setArgValuesL L sb, setArgValuesL L sc with
+      | some ua, some ub, some uc =>
+          match unionRowsL L taken sa sb sc st (ua ++ ub ++ uc) with
+          | none => none
+          | some st' => some (st', [])
+      | _, _, _ => some (st, [c])
+  | "array_var_set_element", [.basic iarg, .array es, .basic targ] =>
+      match targ with
+      | .ident T =>
+          match iarg with
+          | .lit (.int _) =>
+              match arrayElemValuesL L es T.name with
+              | none => some (st, [c])
+              | some _ => rewriteArrayElemL L taken st iarg es T.name
+          | .ident x =>
+              match L.intV x.name with
+              | some _ =>
+                  match arrayElemValuesL L es T.name with
+                  | none => some (st, [c])
+                  | some _ => rewriteArrayElemL L taken st iarg es T.name
+              | none => some (st, [c])
+          | _ => some (st, [c])
+      | _ => some (st, [c])
+  | "set_intersect", [sa, sb, sc] =>
+      match setArgValuesL L sa, setArgValuesL L sb, setArgValuesL L sc with
+      | some ua, some ub, some uc =>
+          match intersectRowsL L taken sa sb sc st
+              ((IntSetValue.enumeration (ua ++ ub ++ uc)).sortElems) with
+          | none => none
+          | some st' => some (st', [])
+      | _, _, _ => some (st, [c])
+  | _, _ => some (st, [c])
+
+def shapeExpandConstraintsL (L : ShapeLookup) (taken : List String) :
+    List ConstraintItem → ShapeState → Option ShapeState
+  | [], st => some st
+  | c :: cs, st =>
+      match shapeRewriteConstraintL L taken st c with
+      | none => none
+      | some (st1, cs') => shapeExpandConstraintsL L taken cs (st1.emitList cs')
+
+/-- The compiled form of `shapeExpandModelWith`: the same pass answering
+    declaration lookups from `ShapeLookup.ofModel`. -/
+def shapeExpandModelWithFast (taken : List String) (m : Model) : Option ShapeExpansion := do
+  let st ← shapeExpandConstraintsL (ShapeLookup.ofModel m) taken m.constraints
+    (ShapeState.initial taken)
+  some { model := { m with
+           variables := st.decls.reverse ++ m.variables,
+           constraints := st.cons.reverse },
+         aux := st.aux.reverse }
+
+/-! ### The twin computes the specification -/
+
+theorem declTypeIndex_setU (ds : List VarDeclItem) (n : String) :
+    (declTypeIndex ds)[n]?.bind setUniverse? = modelSetUniverse?.go n ds := by
+  induction ds with
+  | nil => simp [declTypeIndex, modelSetUniverse?.go]
+  | cons d ds ih =>
+      cases d with
+      | basic ty x _ _ =>
+          simp only [declTypeIndex, List.foldr_cons, modelSetUniverse?.go] at ih ⊢
+          rw [Std.HashMap.getElem?_insert]
+          by_cases h : x.name = n
+          · simp [h]
+          · simp [h, ih]
+      | array _ _ _ _ =>
+          simpa [declTypeIndex, modelSetUniverse?.go] using ih
+
+theorem declTypeIndex_intV (ds : List VarDeclItem) (n : String) :
+    (declTypeIndex ds)[n]?.bind tyIntValues? = modelIntValues?.go n ds := by
+  induction ds with
+  | nil => simp [declTypeIndex, modelIntValues?.go]
+  | cons d ds ih =>
+      cases d with
+      | basic ty x _ _ =>
+          simp only [declTypeIndex, List.foldr_cons, modelIntValues?.go] at ih ⊢
+          rw [Std.HashMap.getElem?_insert]
+          by_cases h : x.name = n
+          · cases ty <;> simp [h, tyIntValues?]
+          · simp [h, ih]
+      | array _ _ _ _ =>
+          simpa [declTypeIndex, modelIntValues?.go] using ih
+
+theorem ShapeLookup.ofModel_eq_spec (m : Model) :
+    ShapeLookup.ofModel m = ShapeLookup.spec m := by
+  simp only [ShapeLookup.ofModel, ShapeLookup.spec, ShapeLookup.mk.injEq]
+  constructor
+  · funext n; exact (declTypeIndex_setU m.variables n).trans rfl
+  · funext n; exact (declTypeIndex_intV m.variables n).trans rfl
+
+section SpecEq
+variable (m : Model) (taken : List String)
+
+theorem memberTermL_spec (st : ShapeState) (s : Expr) (v : Int) :
+    memberTermL (ShapeLookup.spec m) taken st s v = memberTerm taken m st s v := rfl
+
+theorem setArgValuesL_spec (e : Expr) :
+    setArgValuesL (ShapeLookup.spec m) e = setArgValues? m e := rfl
+
+theorem varMemberTermsL_spec (x s : String) :
+    ∀ st vals, varMemberTermsL (ShapeLookup.spec m) taken x s st vals =
+      varMemberTerms taken m x s st vals
+  | _, [] => rfl
+  | st, v :: vs => by
+      simp only [varMemberTermsL, varMemberTerms, memberTermL_spec,
+        varMemberTermsL_spec x s _ vs]
+
+theorem cardBitsL_spec (s : String) :
+    ∀ st vals, cardBitsL (ShapeLookup.spec m) taken s st vals = cardBits taken m s st vals
+  | _, [] => rfl
+  | st, v :: vs => by
+      simp only [cardBitsL, cardBits, memberTermL_spec, cardBitsL_spec s _ vs]
+
+theorem unionRowsL_spec (a b c : Expr) :
+    ∀ st vals, unionRowsL (ShapeLookup.spec m) taken a b c st vals =
+      unionRows taken m a b c st vals
+  | _, [] => rfl
+  | st, v :: vs => by
+      simp only [unionRowsL, unionRows, memberTermL_spec, unionRowsL_spec a b c _ vs]
+
+theorem intersectRowsL_spec (a b c : Expr) :
+    ∀ st vals, intersectRowsL (ShapeLookup.spec m) taken a b c st vals =
+      intersectRows taken m a b c st vals
+  | _, [] => rfl
+  | st, v :: vs => by
+      simp only [intersectRowsL, intersectRows, memberTermL_spec,
+        intersectRowsL_spec a b c _ vs]
+
+theorem arrayElemUnionL_spec :
+    ∀ es, arrayElemUnionL (ShapeLookup.spec m) es = arrayElemUnion m es
+  | [] => rfl
+  | e :: es => by
+      simp only [arrayElemUnionL, arrayElemUnion, setArgValuesL_spec, arrayElemUnionL_spec es]
+
+theorem arrayElemValuesL_spec (es : List BasicExpr) (T : String) :
+    arrayElemValuesL (ShapeLookup.spec m) es T = arrayElemValues m es T := by
+  simp only [arrayElemValuesL, arrayElemValues, arrayElemUnionL_spec]; rfl
+
+theorem arrayElemBitsL_spec :
+    ∀ es st v, arrayElemBitsL (ShapeLookup.spec m) taken es st v =
+      arrayElemBits taken m es st v
+  | [], _, _ => rfl
+  | e :: es, st, v => by
+      simp only [arrayElemBitsL, arrayElemBits, memberTermL_spec, arrayElemBitsL_spec es]
+
+theorem arrayElemRowsL_spec (i : BasicExpr) (es : List BasicExpr) (T : String) :
+    ∀ st vals, arrayElemRowsL (ShapeLookup.spec m) taken i es T st vals =
+      arrayElemRows taken m i es T st vals
+  | _, [] => rfl
+  | st, v :: vs => by
+      simp only [arrayElemRowsL, arrayElemRows, arrayElemBitsL_spec, memberTermL_spec,
+        arrayElemRowsL_spec i es T _ vs]
+
+theorem shapeRewriteConstraintL_spec (st : ShapeState) (c : ConstraintItem) :
+    shapeRewriteConstraintL (ShapeLookup.spec m) taken st c =
+      shapeRewriteConstraint taken m st c := by
+  unfold shapeRewriteConstraintL shapeRewriteConstraint
+  simp only [rewriteVarMemberL, rewriteVarMember, varMemberTermsL_spec, rewriteCardL,
+    rewriteCard, cardBitsL_spec, setArgValuesL_spec, unionRowsL_spec, rewriteUnion,
+    intersectRowsL_spec, rewriteIntersect, arrayElemValuesL_spec, rewriteArrayElemL,
+    rewriteArrayElem, arrayElemRowsL_spec]
+  rfl
+
+theorem shapeExpandConstraintsL_spec :
+    ∀ cs st, shapeExpandConstraintsL (ShapeLookup.spec m) taken cs st =
+      shapeExpandConstraints taken m cs st
+  | [], _ => rfl
+  | c :: cs, st => by
+      simp only [shapeExpandConstraintsL, shapeExpandConstraints,
+        shapeRewriteConstraintL_spec]
+      split <;> simp only [shapeExpandConstraintsL_spec cs]
+
+end SpecEq
+
+/-- The indexed pass is the specification; the compiler runs the former. -/
+@[csimp] theorem shapeExpandModelWith_eq_fast :
+    @shapeExpandModelWith = @shapeExpandModelWithFast := by
+  funext taken m
+  simp only [shapeExpandModelWith, shapeExpandModelWithFast, ShapeLookup.ofModel_eq_spec,
+    shapeExpandConstraintsL_spec]
+
+/-- The shape pre-pass avoiding the model's own names.  Defined after
+    `shapeExpandModelWith_eq_fast` so its compiled code already calls the
+    indexed pass (`@[csimp]` only rewrites code compiled after it). -/
 def shapeExpandModel (m : Model) : Option ShapeExpansion :=
   shapeExpandModelWith (setTaken m) m
 

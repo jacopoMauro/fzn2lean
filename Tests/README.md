@@ -41,6 +41,9 @@ rebuild every native executable.
 .lake/build/bin/tests_integration_core_seed
 .lake/build/bin/tests_integration_portfolio
 python3 -B Tests/Cli/test_solve.py
+python3 -B Tests/Cli/test_protocol.py
+python3 -B Tests/Cli/test_check_separators.py
+python3 -B -m unittest Tests.Audits.test_release_gates
 python3 -B -m unittest discover -s Tests/Architecture
 python3 -B -m unittest discover -s Tests/Audits
 python3 audits/check_module_boundaries.py
@@ -69,7 +72,11 @@ lake build +Tests.Checker.SolutionGrammar tests_solution tests_set_emit tests_ch
 
 The independent grammar and the string-level emitter round-trip theorems are
 included in `audits/certified_axioms.lean`. They cover non-float assignment
-bodies; stream separators are handled by their separate normalization lemmas.
+bodies. Stream separators use the exact `SolutionLine` classifier: only exact
+marker lines after permitted padding are structural, status-only input is not a
+candidate solution (exit 4), and malformed marker prefixes are rejected as
+assignment content. `Tests/Cli/test_check_separators.py` exercises those exit
+classes through the compiled CLI.
 
 ## Historical tests and full validation
 

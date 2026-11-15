@@ -414,10 +414,15 @@ def main : IO UInt32 := do
   let (c1, out1) ← runCli ["solve", satPath]
   IO.println s!"CLI solve (SAT) exit {c1}:\n{out1}"
   st ← st.check "CLI solve: array model SAT exit 0" (c1 == 0)
+  -- The emitter uses canonical whitespace between tokens (PLAN section 3);
+  -- compare with all ASCII spaces removed so the test checks shape, not
+  -- incidental spacing.
+  let squash (s : String) : String := String.intercalate "" (s.splitOn " ")
+  let out1s := squash out1
   st ← st.check "CLI solve: output has array1d for xs and bs"
-    ((out1.splitOn "xs = array1d(1..3, [").length == 2 &&
-     (out1.splitOn "bs = array1d(1..2, [").length == 2 &&
-     (out1.splitOn "<unemittable").length == 1)
+    ((out1s.splitOn "xs=array1d(1..3,[").length == 2 &&
+     (out1s.splitOn "bs=array1d(1..2,[").length == 2 &&
+     (out1s.splitOn "<unemittable").length == 1)
   IO.FS.writeFile solPath out1
   let (c2, _) ← runCli ["check", satPath, solPath]
   st ← st.check "CLI check accepts the CLI solve output (arrays)" (c2 == 0)
@@ -438,7 +443,7 @@ def main : IO UInt32 := do
   -- a corrupted witness is rejected by the same checker
   match solveFull msat with
   | some (some sol) =>
-      let bad := sol.replace "xs = array1d(1..3, [" "xs = array1d(1..3, [9,"
+      let bad := sol.replace "xs = array1d ( 1 .. 3 , [" "xs = array1d ( 1 .. 3 , [9 ,"
       st ← st.check "par/var arrays: corrupted array witness rejected"
         (checkModelSolution msat bad != .accepted)
   | _ => st ← st.check "par/var arrays: corrupted witness" false
@@ -462,7 +467,7 @@ def main : IO UInt32 := do
   IO.FS.writeFile scalarPath scalarSrc
   let (c4, out4) ← runCli ["solve", scalarPath]
   st ← st.check "CLI solve: scalar model output shape unchanged"
-    (c4 == 0 && out4 == "x = 2;\ny = 3;\n----------\n")
+    (c4 == 0 && squash out4 == "x=2;\ny=3;\n----------\n")
   -- unrestricted-domain gate: restricted array element type is rejected
   st ← st.check "restricted var-array element domain is rejected"
     (match compileModelFull (parseOrPanic restrictedSrc) with

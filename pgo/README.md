@@ -7,8 +7,32 @@
 moreLeancArgs = ["-fprofile-use=pgo/default.profdata", ...]
 ```
 
-It is build metadata only. It cannot affect solver answers: the deterministic
-search counters must still match the non-PGO binary at a fixed conflict limit.
+It is build metadata only: LLVM profile-guided optimization changes inlining,
+branch layout and code placement. It does not change the Lean source, the
+parsed model, the search configuration, the checker, or the emitted solution
+format.
+
+The enforced release policy is narrower than the old claim that PGO "cannot
+affect solver answers". `audits/run_release_gates.sh` builds this committed
+profile selection and a non-PGO selection from the same frozen source snapshot
+in separate `.lake` trees, runs the committed `audits/release_cohort.tsv` with
+equal flags, seeds and deterministic conflict limits, and requires: identical
+deterministic single-worker action counters; the same terminal result and
+exit class; the same declared objective value and the same known optimum where
+one is known; and every emitted witness accepted by both binaries'
+`leanfzn check` front doors. UNSAT and optimal answers in the cohort are pinned
+to exhaustive or independently established fixtures. `manifest.json` records
+the source file hashes, compiler/linker/LLVM/target versions, the PGO profile
+checksum, the MiniZinc pin and both binary hashes.
+
+This is an empirical behavioural check of that finite cohort, not a proof that
+arbitrary optimized machine code is correct. The remaining trust is the same
+compiler and linker trust every release build relies on, plus the cohort's
+finite coverage. A stale profile is not a soundness finding: clang leaves
+functions it cannot match unprofiled, so profile age is a
+performance/regeneration question rather than a correctness result. Timings
+are evidence, not a correctness threshold; performance claims still require
+the paired measurements described under "Regenerating".
 
 The resulting binary is ordinary x86-64 code for the default target: the
 profile tunes inlining, branch layout and code placement for the training

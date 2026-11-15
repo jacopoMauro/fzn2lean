@@ -6,30 +6,40 @@ calls this script as
 
     fzn-leanfzn [MiniZinc standard flags] [LeanFzn flags] model.fzn
 
-The script translates the flags, runs `leanfzn solve`, and rewrites the
-output into the form MiniZinc's solution processor (solns2out) expects:
+The script translates the flags, runs
 
-* only variables annotated `output_var`/`output_array` are printed (leanfzn
-  prints every variable, which solns2out rejects);
-* leanfzn exit codes become MiniZinc status markers (unsupported model ->
-  `=====UNSUPPORTED=====`, unknown/incomplete without a solution ->
-  `=====UNKNOWN=====`);
-* `-t` is enforced here, because the Core engine has no wall-clock limit;
-  solutions are streamed, so incumbents found before the limit are kept;
-* `-s` turns leanfzn's `--stats` line into `%%%mzn-stat:` lines.
+    leanfzn solve --report=jsonl-v1 [OPTIONS] model.fzn
 
-The wrapper never prints a verdict leanfzn did not print: `==========` and
-`=====UNSATISFIABLE=====` are passed through only as leanfzn emits them.
+and rewrites the structured event stream into the form MiniZinc's solution
+processor (solns2out) expects.  The protocol is frozen in
+`specification/solver_protocol.md`; this wrapper is an explicit state machine
+over it:
+
+    START -> HANDSHAKEN -> MODE -> STREAMING -> TERMINAL
+              |             |         |
+              +-------------+---------+-> ERROR
+              +-------------+---------+-> CANCELLED
+
+Only the entries named in the `model` event's `outputs` list are printed, so no
+FlatZinc text scanning (comments, annotations, arrays or a name such as
+`output_var` in a string cannot affect the filter).  A terminal proof marker is
+buffered until the process exit status has been checked against the event's
+`exit`; malformed, truncated or inconsistent streams never pass as a verdict.
+
+The wrapper never prints a verdict leanfzn did not send: `==========` and
+`=====UNSATISFIABLE=====` come only from a committed, exit-consistent terminal
+event, and a locally cancelled run makes no completion claim.
 
 Environment: LEANFZN_BIN overrides the solver binary (default: the repo
 build at ../.lake/build/bin/leanfzn relative to this script).
 FZN_LEANFZN_SAVE_DIR, if set, receives a copy of the FlatZinc (`model.fzn`)
-and leanfzn's unfiltered stdout (`raw.sol`), so the solutions can be
+and a reconstructed text solution stream (`raw.sol`), so the solutions can be
 re-verified with `leanfzn check model.fzn raw.sol` (used by
 `challenge_test.py`).
 """
 
 import ctypes
+import json
 import os
 import re
 import shutil
@@ -38,9 +48,14 @@ import subprocess
 import sys
 import threading
 import time
+from enum import Enum
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 DEFAULT_BIN = os.path.join(SCRIPT_DIR, "..", ".lake", "build", "bin", "leanfzn")
+
+REPORT_FLAG = "--report=jsonl-v1"
+PROTOCOL_NAME = "leanfzn-report"
+PROTOCOL_VERSION = 1
 
 # LeanFzn options that MiniZinc may pass as `--name value` (from the .msc
 # extraFlags) or that the user may pass as `--name=value` (via --fzn-flags).
@@ -51,27 +66,311 @@ VALUE_OPTIONS = {
 }
 BOOL_OPTIONS = {"--heur-obj-prio", "--heur-obj-bias", "--heur-act", "--phase-stats"}
 
-DECL_RE = re.compile(
-    r"^\s*(?:array\s*\[[^\]]*\]\s*of\s+)?var\b[^:]*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*::([^=;]*)")
-SOLVE_OPT_RE = re.compile(r"^\s*solve\b.*\b(minimize|maximize)\b", re.S)
-ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=")
 STATS_PREFIX = "leanfzn: stats: "
 TIMING_PREFIX = "leanfzn: timing: "
-PARSE_ERROR_PREFIX = "leanfzn: parse error"
 STAT_FIELD_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
 
 # leanfzn counter -> MiniZinc standard statistic name (others keep their name).
 STAT_NAMES = {"decisions": "nodes", "conflicts": "failures"}
 
+# Frozen terminal/exit table (specification/solver_protocol.md section 4).
+TERMINAL_EXITS = {
+    "sat": 0,
+    "optimal": 0,
+    "unsat": 1,
+    "incomplete": 4,
+    "unsupported": 3,
+}
+# Frozen typed-error/exit table (section 3.5).
+ERROR_EXITS = {
+    "usage": 2,
+    "io": 2,
+    "model_parse": 2,
+    "unsupported": 3,
+    "compile": 3,
+    "internal": 2,
+}
+# P0 wrapper policy: MiniZinc is assumed to have produced valid FlatZinc, so a
+# parser failure is reported as a non-answer (UNSUPPORTED), not as a crash.
+UNSUPPORTED_ERROR_KINDS = frozenset({"model_parse", "unsupported", "compile"})
+
+CANONICAL_DECIMAL_RE = re.compile(r"(?:0|-?[1-9][0-9]*)\Z")
+IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_MISSING = object()
+
+
+def silence_stdout():
+    """Prevent an interpreter-shutdown traceback after a broken output pipe."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+    except OSError:
+        pass
+
 
 def die(msg, code=2):
     sys.stderr.write(f"fzn-leanfzn: {msg}\n")
-    print("=====ERROR=====", flush=True)
+    try:
+        print("=====ERROR=====", flush=True)
+    except BrokenPipeError:
+        silence_stdout()
     sys.exit(code)
 
 
 def note(msg):
     sys.stderr.write(f"fzn-leanfzn: {msg}\n")
+
+
+class ProtocolError(Exception):
+    """The selected binary did not emit a consistent jsonl-v1 stream."""
+
+
+class State(Enum):
+    START = "START"
+    HANDSHAKEN = "HANDSHAKEN"
+    MODE = "MODE"
+    STREAMING = "STREAMING"
+    TERMINAL = "TERMINAL"
+    ERROR = "ERROR"
+    CANCELLED = "CANCELLED"
+
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _require(condition, message):
+    if not condition:
+        raise ProtocolError(message)
+
+
+def _member(obj, key, context):
+    if key not in obj:
+        raise ProtocolError(f"{context}: missing '{key}'")
+    return obj[key]
+
+
+def _int_member(obj, key, context):
+    value = _member(obj, key, context)
+    _require(_is_int(value), f"{context}: '{key}' must be a JSON integer")
+    return value
+
+
+def _string_member(obj, key, context):
+    value = _member(obj, key, context)
+    _require(isinstance(value, str), f"{context}: '{key}' must be a string")
+    return value
+
+
+def _canonical_decimal(value, context):
+    _require(isinstance(value, str) and CANONICAL_DECIMAL_RE.match(value) is not None,
+             f"{context}: objective must be a canonical decimal string")
+
+
+def _validate_entry_text(name, text):
+    _require(isinstance(text, str) and text, "solution entry: 'text' must be a nonempty string")
+    _require("\n" not in text and "\r" not in text,
+             f"solution entry {name!r}: text contains a line break")
+    # `isprintable` also excludes DEL, C1 controls and the Unicode line/paragraph
+    # separators (U+2028/U+2029), so no entry can smuggle a second output line.
+    _require(text.isprintable(),
+             f"solution entry {name!r}: text contains a control or separator character")
+    # The canonical line starts with the declaration name.  Checking the prefix
+    # keeps a structured entry from impersonating another variable or a
+    # MiniZinc status marker; it does not parse FlatZinc values.
+    _require(re.match(re.escape(name) + r"\s*=", text) is not None,
+             f"solution entry {name!r}: text does not start with '{name} ='")
+
+
+class ProtocolState:
+    """Explicit, side-effect-free reader for the frozen jsonl-v1 event stream."""
+
+    def __init__(self):
+        self.state = State.START
+        self.mode = None
+        self.objective = None
+        self.outputs = ()
+        self.last_solution_id = 0
+        self.solution_count = 0
+        self.terminal = None
+        self.error = None
+
+    def mark_cancelled(self):
+        """Record that a wrapper-initiated stop won before any completion."""
+        if self.state not in (State.TERMINAL, State.ERROR):
+            self.state = State.CANCELLED
+
+    def finish(self):
+        if self.state in (State.TERMINAL, State.ERROR, State.CANCELLED):
+            return self.state
+        if self.state is State.START:
+            raise ProtocolError("solver did not emit a handshake")
+        raise ProtocolError(
+            f"stream ended in state {self.state.value} without a terminal event")
+
+    def accept(self, event):
+        _require(isinstance(event, dict), "protocol line is not a JSON object")
+        kind = event.get("event", _MISSING)
+        _require(isinstance(kind, str), "event member is missing or not a string")
+        if self.state in (State.TERMINAL, State.ERROR):
+            raise ProtocolError(f"event '{kind}' after terminal outcome")
+        if self.state is State.CANCELLED:
+            raise ProtocolError("event after wrapper cancellation")
+        if kind == "handshake":
+            return self._handshake(event)
+        if self.state is State.START:
+            raise ProtocolError(f"first event is '{kind}', expected handshake")
+        if kind == "model":
+            return self._model(event)
+        if kind == "solution":
+            return self._solution(event)
+        if kind == "terminal":
+            return self._terminal(event)
+        if kind == "error":
+            return self._error(event)
+        raise ProtocolError(f"unknown event '{kind}'")
+
+    def _handshake(self, event):
+        if self.state is not State.START:
+            raise ProtocolError("duplicate handshake")
+        protocol = event.get("protocol", _MISSING)
+        _require(protocol == PROTOCOL_NAME,
+                 f"unsupported report protocol {protocol!r}")
+        version = event.get("version", _MISSING)
+        _require(_is_int(version) and version == PROTOCOL_VERSION,
+                 f"unsupported report protocol version {version!r}")
+        self.state = State.HANDSHAKEN
+        return None
+
+    def _model(self, event):
+        if self.state is not State.HANDSHAKEN:
+            raise ProtocolError(f"model event in state {self.state.value}")
+        mode = _string_member(event, "mode", "model")
+        _require(mode in ("satisfy", "minimize", "maximize"),
+                 f"model: unknown mode {mode!r}")
+        outputs = _member(event, "outputs", "model")
+        _require(isinstance(outputs, list), "model: 'outputs' must be a list")
+        names = []
+        seen = set()
+        for name in outputs:
+            _require(isinstance(name, str) and IDENT_RE.match(name) is not None,
+                     "model: every output name must be a FlatZinc identifier")
+            _require(name not in seen, f"model: duplicate output name {name!r}")
+            seen.add(name)
+            names.append(name)
+        if mode == "satisfy":
+            _require("objective" not in event,
+                     "model: satisfy mode must omit 'objective'")
+            objective = None
+        else:
+            objective = _member(event, "objective", "model")
+            if objective is not None:
+                _require(isinstance(objective, str) and
+                         IDENT_RE.match(objective) is not None,
+                         "model: 'objective' must be an identifier or null")
+        self.mode = mode
+        self.objective = objective
+        self.outputs = tuple(names)
+        self.state = State.MODE
+        return None
+
+    def _solution(self, event):
+        if self.state not in (State.MODE, State.STREAMING):
+            raise ProtocolError(f"solution event in state {self.state.value}")
+        sid = _int_member(event, "id", "solution")
+        _require(sid == self.last_solution_id + 1,
+                 f"solution id {sid} does not follow {self.last_solution_id}")
+        entries = _member(event, "entries", "solution")
+        _require(isinstance(entries, list), "solution: 'entries' must be a list")
+        parsed = []
+        entry_names = set()
+        for entry in entries:
+            _require(isinstance(entry, dict), "solution: every entry must be an object")
+            name = _string_member(entry, "name", "solution entry")
+            _require(IDENT_RE.match(name) is not None,
+                     f"solution entry: invalid name {name!r}")
+            _require(name not in entry_names,
+                     f"solution entry: duplicate name {name!r}")
+            text = _string_member(entry, "text", "solution entry")
+            _validate_entry_text(name, text)
+            entry_names.add(name)
+            parsed.append((name, text))
+        if self.mode == "satisfy":
+            _require(self.solution_count == 0,
+                     "satisfaction run emitted more than one solution")
+            _require("objective" not in event,
+                     "satisfaction solution must omit 'objective'")
+            objective = None
+        else:
+            objective = _member(event, "objective", "solution")
+            _canonical_decimal(objective, f"solution {sid}")
+        missing = [name for name in self.outputs if name not in entry_names]
+        _require(not missing,
+                 f"solution {sid} is missing output entries: {', '.join(missing)}")
+        self.last_solution_id = sid
+        self.solution_count += 1
+        self.state = State.STREAMING
+        return {"id": sid, "entries": parsed, "objective": objective}
+
+    def _terminal(self, event):
+        if self.state not in (State.HANDSHAKEN, State.MODE, State.STREAMING):
+            raise ProtocolError(f"terminal event in state {self.state.value}")
+        kind = _string_member(event, "kind", "terminal")
+        _require(kind in TERMINAL_EXITS, f"terminal: unknown kind {kind!r}")
+        code = _int_member(event, "exit", "terminal")
+        _require(code == TERMINAL_EXITS[kind],
+                 f"terminal {kind!r} requires exit {TERMINAL_EXITS[kind]}, got {code}")
+        _require(self.state is not State.HANDSHAKEN,
+                 f"terminal {kind!r} before model metadata")
+        if kind == "sat":
+            _require(self.mode == "satisfy",
+                     "terminal 'sat' is inconsistent with an optimization model")
+            _require(self.solution_count == 1,
+                     "terminal 'sat' requires exactly one solution event")
+            _require("solution" not in event,
+                     "terminal 'sat' must not reference a solution")
+        elif kind == "optimal":
+            _require(self.mode in ("minimize", "maximize"),
+                     "terminal 'optimal' is inconsistent with a satisfaction model")
+            _require(self.solution_count >= 1,
+                     "terminal 'optimal' without a referenced witness")
+            reference = _int_member(event, "solution", "terminal 'optimal'")
+            _require(reference == self.last_solution_id,
+                     f"terminal 'optimal' references solution {reference}, "
+                     f"last is {self.last_solution_id}")
+        elif kind == "unsat":
+            _require(self.solution_count == 0,
+                     "terminal 'unsat' after a witness")
+        elif kind == "incomplete":
+            _require("solution" not in event,
+                     "terminal 'incomplete' must not reference a solution")
+        elif kind == "unsupported":
+            # A portfolio worker may classify the model as unsupported after
+            # another worker already streamed a checker-accepted incumbent.
+            # The old text wrapper printed those incumbents and then
+            # `=====UNSUPPORTED=====`, so the non-answer is kept and no proof
+            # claim is added.
+            pass
+        if kind in ("incomplete", "unsupported") and "reason" in event:
+            _require(isinstance(event["reason"], str),
+                     f"terminal {kind!r}: 'reason' must be a string")
+        self.terminal = {"kind": kind, "exit": code, "event": event}
+        self.state = State.TERMINAL
+        return self.terminal
+
+    def _error(self, event):
+        if self.state not in (State.HANDSHAKEN, State.MODE, State.STREAMING):
+            raise ProtocolError(f"error event in state {self.state.value}")
+        kind = _string_member(event, "kind", "error")
+        _require(kind in ERROR_EXITS, f"error: unknown kind {kind!r}")
+        code = _int_member(event, "exit", "error")
+        _require(code == ERROR_EXITS[kind],
+                 f"error {kind!r} requires exit {ERROR_EXITS[kind]}, got {code}")
+        message = _string_member(event, "message", "error")
+        self.error = {"kind": kind, "exit": code, "message": message, "event": event}
+        self.state = State.ERROR
+        return self.error
 
 
 def parse_args(argv):
@@ -131,27 +430,6 @@ def parse_args(argv):
     return o
 
 
-def scan_model(path):
-    """Return (output variable names, is_optimization)."""
-    names = set()
-    is_opt = False
-    try:
-        with open(path, encoding="utf-8") as f:
-            # A FlatZinc item can span lines, and several items can share a
-            # line. Mask strings/comments before splitting on semicolons so
-            # annotation text cannot masquerade as syntax or a delimiter.
-            text = re.sub(r'"(?:\\.|[^"\\])*"|%[^\n]*', ' ', f.read())
-            for line in text.split(';'):
-                m = DECL_RE.match(line)
-                if m and re.search(r"\boutput_(var|array)\b", m.group(2)):
-                    names.add(m.group(1))
-                elif line.lstrip().startswith("solve") and SOLVE_OPT_RE.match(line):
-                    is_opt = True
-    except OSError as e:
-        die(f"cannot read '{path}': {e}")
-    return names, is_opt
-
-
 def die_with_parent():
     """Make the solver receive SIGKILL if this wrapper dies (Linux only)."""
     try:
@@ -166,9 +444,8 @@ def main():
     if not os.access(binary, os.X_OK):
         die(f"leanfzn binary not found at '{binary}'; run 'lake build leanfzn' "
             "in the repository or set LEANFZN_BIN")
-    outputs, is_opt = scan_model(o["fzn"])
 
-    cmd = [binary, "solve"] + o["extra"]
+    cmd = [binary, "solve", REPORT_FLAG] + o["extra"]
     if o["threads"] > 1:
         picks_strategy = any(a.split("=", 1)[0] in ("--var", "--val", "--strategy", "--primal")
                              or a == "--opt=seeded" for a in o["extra"])
@@ -177,9 +454,6 @@ def main():
                  "so it cannot be combined with --var/--val/--strategy/--primal/--opt=seeded")
         else:
             cmd.append(f"--threads={min(o['threads'], 8)}")
-    if o["all"] and not is_opt:
-        note("-a: leanfzn reports one solution per satisfaction model; "
-             "it cannot enumerate all solutions")
     if o["stats"]:
         cmd.append("--stats")
     cmd.append(o["fzn"])
@@ -189,118 +463,277 @@ def main():
     save_dir = os.environ.get("FZN_LEANFZN_SAVE_DIR")
     raw = None
     if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        shutil.copyfile(o["fzn"], os.path.join(save_dir, "model.fzn"))
-        raw = open(os.path.join(save_dir, "raw.sol"), "w")
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+            shutil.copyfile(o["fzn"], os.path.join(save_dir, "model.fzn"))
+            raw = open(os.path.join(save_dir, "raw.sol"), "w", encoding="utf-8")
+        except OSError as e:
+            die(f"cannot write save directory '{save_dir}': {e}")
+
+    def write_raw(text):
+        if raw is not None:
+            try:
+                raw.write(text)
+                raw.flush()
+            except OSError as e:
+                die(f"cannot write raw solution stream: {e}")
 
     start = time.monotonic()
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, bufsize=1, preexec_fn=die_with_parent)
-    stopped = {"by": None}
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, preexec_fn=die_with_parent)
+    except OSError as e:
+        if raw is not None:
+            raw.close()
+        die(f"cannot run '{binary}': {e}")
 
-    def stop(reason):
-        if proc.poll() is None:
-            stopped["by"] = reason
-            proc.kill()
+    cancel_lock = threading.RLock()
+    cancel = {"reason": None, "killed": False, "forced": False}
+
+    def request_stop(reason, force=False):
+        """Ask the solver to stop; only a real kill counts as cancellation."""
+        kill_now = False
+        with cancel_lock:
+            if force:
+                cancel["forced"] = True
+            if force or proc.poll() is None:
+                if cancel["reason"] is None:
+                    cancel["reason"] = reason
+                if proc.poll() is None:
+                    cancel["killed"] = True
+                    kill_now = True
+        if kill_now:
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
     def on_signal(signum, _frame):
-        stop("signal")
-        sys.exit(128 + signum)
+        # Do not unwind from the handler: the final status block must still
+        # retain a terminal committed before the signal, and otherwise emit
+        # the documented local-cancellation result (UNKNOWN or incumbents).
+        request_stop("signal")
 
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
+
     timer = None
     if o["time_ms"] is not None and o["time_ms"] > 0:
-        timer = threading.Timer(o["time_ms"] / 1000.0, stop, args=("time limit",))
+        timer = threading.Timer(o["time_ms"] / 1000.0, request_stop,
+                                args=("time limit",))
         timer.daemon = True
         timer.start()
 
     stats_fields = []
-    parse_error = []
 
     def pump_stderr():
-        for line in proc.stderr:
-            if line.startswith(STATS_PREFIX):
-                stats_fields.extend(STAT_FIELD_RE.findall(line[len(STATS_PREFIX):]))
-            elif line.startswith(TIMING_PREFIX) and o["stats"]:
-                stats_fields.extend(STAT_FIELD_RE.findall(line[len(TIMING_PREFIX):]))
-            else:
-                if line.startswith(PARSE_ERROR_PREFIX):
-                    parse_error.append(line)
-                sys.stderr.write(line)
-                sys.stderr.flush()
+        try:
+            for raw_line in proc.stderr:
+                line = raw_line.decode("utf-8", "replace")
+                if line.startswith(STATS_PREFIX):
+                    stats_fields.extend(STAT_FIELD_RE.findall(line[len(STATS_PREFIX):]))
+                elif line.startswith(TIMING_PREFIX) and o["stats"]:
+                    stats_fields.extend(STAT_FIELD_RE.findall(line[len(TIMING_PREFIX):]))
+                else:
+                    sys.stderr.write(line)
+                    sys.stderr.flush()
+        except OSError:
+            pass
 
     err_thread = threading.Thread(target=pump_stderr, daemon=True)
     err_thread.start()
 
-    solutions = 0
-    terminal = False
-    for line in proc.stdout:
-        if raw:
-            raw.write(line)
-            raw.flush()
-        s = line.rstrip("\n")
-        if s == "----------":
-            solutions += 1
-            print(s, flush=True)
-            if o["nsol"] is not None and solutions >= o["nsol"]:
-                stop("solution limit")
-                # leanfzn may already have finished; the solution limit still
-                # ends the run here, so no later verdict is printed.
-                stopped["by"] = "solution limit"
+    machine = ProtocolState()
+    printed_solutions = 0
+    protocol_error = None
+    stdout_broken = False
+
+    def out(text):
+        """Print one wrapper output line; remember a broken stdout pipe."""
+        nonlocal stdout_broken
+        if stdout_broken:
+            return False
+        try:
+            print(text, flush=True)
+            return True
+        except BrokenPipeError:
+            stdout_broken = True
+            return False
+
+    def handle_event(event):
+        nonlocal printed_solutions
+        payload = machine.accept(event)
+        kind = event["event"]
+        if kind == "model":
+            if o["all"] and machine.mode == "satisfy":
+                note("-a: leanfzn reports one solution per satisfaction model; "
+                     "it cannot enumerate all solutions")
+        elif kind == "solution":
+            by_name = dict(payload["entries"])
+            for name in machine.outputs:
+                if not out(by_name[name]):
+                    return True
+            if not out("----------"):
+                return True
+            printed_solutions += 1
+            for _name, text in payload["entries"]:
+                write_raw(text + "\n")
+            write_raw("----------\n")
+            if o["nsol"] is not None and printed_solutions >= o["nsol"]:
+                request_stop("solution limit", force=True)
+                return True
+        elif kind == "terminal":
+            reason = payload.get("event", {}).get("reason")
+            if reason:
+                note(f"leanfzn {payload['kind']}: {reason}")
+        elif kind == "error":
+            note(f"leanfzn {payload['kind']} error: {payload['message']}")
+        return False
+
+    try:
+        for raw_line in proc.stdout:
+            cancel_active = cancel["reason"] is not None
+            if cancel_active and machine.state not in (State.TERMINAL, State.ERROR):
+                # Cancellation wins: never commit a terminal that arrives after
+                # the wrapper asked the solver to stop.
                 break
-        elif s.startswith("=====") and s.endswith("====="):
-            terminal = True
-            print(s, flush=True)
-        else:
-            m = ASSIGN_RE.match(s)
-            if m:
-                if m.group(1) in outputs:
-                    print(s)
-            elif s:
-                sys.stderr.write(line)
+            if not raw_line.endswith(b"\n"):
+                if cancel_active:
+                    # The wrapper killed the solver inside a record; a partial
+                    # record never becomes a partial MiniZinc assignment block.
+                    break
+                protocol_error = "truncated protocol record at EOF"
+                break
+            line_bytes = raw_line[:-1]
+            if line_bytes.endswith(b"\r"):
+                line_bytes = line_bytes[:-1]
+            if not line_bytes:
+                if cancel_active and machine.state in (State.TERMINAL, State.ERROR):
+                    continue
+                protocol_error = "empty protocol line"
+                break
+            try:
+                line = line_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                if cancel_active and machine.state in (State.TERMINAL, State.ERROR):
+                    continue
+                protocol_error = "protocol line is not valid UTF-8"
+                break
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as e:
+                if cancel_active and machine.state in (State.TERMINAL, State.ERROR):
+                    continue
+                protocol_error = f"invalid JSON protocol line: {e.msg}"
+                break
+            if machine.state in (State.TERMINAL, State.ERROR):
+                if cancel_active:
+                    # A committed completion is retained; ignore later bytes
+                    # written before the solver died.
+                    continue
+                protocol_error = "event after terminal outcome"
+                break
+            try:
+                if handle_event(event):
+                    break
+            except ProtocolError as e:
+                if cancel_active and machine.state in (State.TERMINAL, State.ERROR):
+                    continue
+                protocol_error = str(e)
+                break
+    except BrokenPipeError as e:
+        stdout_broken = True
+        protocol_error = f"cannot write wrapper output: {e}"
+    except OSError as e:
+        if cancel["reason"] is None:
+            protocol_error = f"cannot read solver output: {e}"
+
+    if protocol_error is not None and proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    if cancel["reason"] is not None and proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
     rc = proc.wait()
-    if timer:
+    if timer is not None:
         timer.cancel()
     err_thread.join(timeout=5)
+
+    locally_cancelled = bool(cancel["forced"] or
+                             (cancel["reason"] is not None and cancel["killed"]))
+    if locally_cancelled:
+        machine.mark_cancelled()
+
+    if protocol_error is None and not locally_cancelled:
+        try:
+            machine.finish()
+        except ProtocolError as e:
+            protocol_error = str(e)
+
+    if protocol_error is None and machine.state in (State.TERMINAL, State.ERROR):
+        if not locally_cancelled:
+            expected = (machine.terminal["exit"] if machine.state is State.TERMINAL
+                        else machine.error["exit"])
+            if rc != expected:
+                label = (f"terminal {machine.terminal['kind']!r}"
+                         if machine.state is State.TERMINAL
+                         else f"error {machine.error['kind']!r}")
+                protocol_error = (f"{label} declares exit {expected}, "
+                                  f"solver exited {rc}")
+
     elapsed = time.monotonic() - start
 
-    if stopped["by"] is not None:
-        if o["verbose"]:
-            note(f"stopped leanfzn: {stopped['by']}")
-        if solutions == 0 and not terminal:
-            print("=====UNKNOWN=====", flush=True)
-        status = 0
-    elif rc in (0, 1):  # SAT/optimum or certified UNSAT: leanfzn printed the verdict
-        status = 0
-    elif rc == 3:  # outside the certified fragment
-        print("=====UNSUPPORTED=====", flush=True)
-        status = 0
-    elif rc == 4:  # unknown or incomplete: incumbents (if any) were streamed
-        if solutions == 0:
-            print("=====UNKNOWN=====", flush=True)
-        status = 0
-    elif rc == 2 and parse_error:
-        # MiniZinc produced FlatZinc outside leanfzn's parser (e.g. floats):
-        # the model is outside the supported fragment, not malformed.
-        print("=====UNSUPPORTED=====", flush=True)
-        status = 0
-    elif rc == 2:
-        print("=====ERROR=====", flush=True)
+    status = 0
+    if protocol_error is not None:
+        note(f"protocol error: {protocol_error}")
+        out("=====ERROR=====")
         status = 2
-    else:
-        note(f"leanfzn exited with status {rc}")
-        if solutions == 0:
-            print("=====ERROR=====", flush=True)
-        status = 1
+    elif machine.state is State.TERMINAL:
+        kind = machine.terminal["kind"]
+        if kind == "optimal":
+            if out("=========="):
+                write_raw("==========\n")
+        elif kind == "unsat":
+            out("=====UNSATISFIABLE=====")
+        elif kind == "incomplete":
+            if printed_solutions == 0:
+                out("=====UNKNOWN=====")
+        elif kind == "unsupported":
+            out("=====UNSUPPORTED=====")
+        status = 0
+    elif machine.state is State.ERROR:
+        if machine.error["kind"] in UNSUPPORTED_ERROR_KINDS:
+            out("=====UNSUPPORTED=====")
+            status = 0
+        else:
+            out("=====ERROR=====")
+            status = 2
+    elif machine.state is State.CANCELLED:
+        if printed_solutions == 0:
+            out("=====UNKNOWN=====")
+        status = 0
+    else:  # pragma: no cover - finish() rejects every other state
+        note(f"protocol error: internal wrapper state {machine.state.value}")
+        out("=====ERROR=====")
+        status = 2
 
-    if o["stats"]:
-        print(f"%%%mzn-stat: solveTime={elapsed:.3f}")
+    if o["stats"] and not stdout_broken:
+        out(f"%%%mzn-stat: solveTime={elapsed:.3f}")
         for k, v in stats_fields:
             if v == "-" or k == "steps":
                 continue
-            print(f"%%%mzn-stat: {STAT_NAMES.get(k, k)}={v}")
-        print("%%%mzn-stat-end", flush=True)
+            out(f"%%%mzn-stat: {STAT_NAMES.get(k, k)}={v}")
+        out("%%%mzn-stat-end")
+    if stdout_broken:
+        note("cannot write wrapper output: output pipe is closed")
+        status = 2
+        silence_stdout()
+    if raw is not None:
+        raw.close()
     sys.exit(status)
 
 

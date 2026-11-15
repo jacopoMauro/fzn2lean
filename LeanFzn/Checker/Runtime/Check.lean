@@ -354,28 +354,38 @@ the improving solutions of an optimization run), each terminated by a
 `checkModelSolution` checks *one* solution; `splitSolutions` cuts a
 stream into its solutions so that each can be checked separately. -/
 
-/-- Is this LeanFzn.Solver-output line a solution separator? -/
-def isSeparatorLine (l : String) : Bool := l.trimAscii.toString.startsWith "----------"
+/-- Is this LeanFzn.Solver-output line a solution separator?  Exact
+    `----------` after the shared `trimStatusLine` padding rules only;
+    `----------garbage` is content and the assignment parser rejects it. -/
+def isSeparatorLine (l : String) : Bool :=
+  match classifySolutionLine l with
+  | .solutionSeparator => true
+  | _ => false
 
 namespace Internal
 
-/-- Does a block contain anything besides whitespace, comments and
-    `=====…=====` status lines? -/
+/-- Does a block contain anything besides whitespace, comments, the
+    optimum marker and `=====…=====` status lines?  Only `content`
+    counts, so a status-only stream has no candidate solution. -/
 def hasSolutionContent (lines : List String) : Bool :=
   lines.any (fun l =>
-    let t := l.trimAscii.toString
-    !(t.isEmpty || t.startsWith "%" || t.startsWith "====="))
+    match classifySolutionLine l with
+    | .content => true
+    | _ => false)
 
 end Internal
 
 /-- Split LeanFzn.Solver output into its solutions.  Without any `----------`
-    line the whole text is one solution (the plain `x = v;` format).
+    line the whole text is one solution only if it has assignment content
+    (the plain `x = v;` format); a blank/comment/status-only stream has
+    no candidate solution and yields `[]` (the CLI reports exit 4).
     Otherwise every `----------` line ends a solution, and text after
     the last separator counts as a further solution only if it contains
-    more than whitespace, comments and status lines. -/
+    content. -/
 def splitSolutions (out : String) : List String :=
   let lines := out.splitOn "\n"
-  if !lines.any isSeparatorLine then [out]
+  if !lines.any isSeparatorLine then
+    if hasSolutionContent lines then [out] else []
   else
     let (blocks, cur) := lines.foldl (fun (acc : List String × List String) l =>
       if isSeparatorLine l then ("\n".intercalate acc.2.reverse :: acc.1, [])

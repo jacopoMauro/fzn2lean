@@ -38,6 +38,11 @@ The build has three stages:
    solver directory and set as the **default solver**, and the image runs
    `test.sh`. A broken image therefore fails the build.
 
+Stage 1 is a fresh build of the same source and PGO selection that
+`audits/run_release_gates.sh` checks, not a copy of the gated binary. The
+release gate does not build the image (see "Tests and audits" in the main
+README).
+
 The image's entry point is `minizinc`. Mount the directory that holds your
 model and run it like `minizinc`:
 
@@ -249,8 +254,22 @@ the verified engine. Everything else is reported honestly:
 | Unknown / incomplete (exit 4), time limit, or solution limit | The incumbents found so far; `=====UNKNOWN=====` if there were none |
 | Bad option or malformed input (exit 2), or a crash | `=====ERROR=====` and a non-zero exit |
 
+The wrapper invokes `leanfzn solve --report=jsonl-v1` and decodes the frozen
+event stream in `specification/solver_protocol.md`.  It prints a verdict only
+from a committed, exit-consistent terminal event; a missing, duplicated or
+inconsistent terminal (including a stream that stops after a non-terminal
+event) is reported as `=====ERROR=====`, never guessed.  A `model_parse` error
+becomes `=====UNSUPPORTED=====` under the documented assumption that MiniZinc
+supplied a valid FlatZinc file, so a compiler or input fault is not presented
+as a LeanFzn answer.  Cancellation keeps the first committed event: a timeout
+after a committed incumbent or terminal retains it, while a timeout with no
+verdict is `=====UNKNOWN=====`.
+
 If the wrapper is killed (for example by MiniZinc's `--time-limit`), the
-`leanfzn` process is killed with it.
+`leanfzn` process is killed with it.  A closed or broken stdout pipe is an
+output failure: the wrapper stops writing, suppresses the interpreter's
+shutdown traceback, and exits 2; it never turns a partially written run into a
+successful exit.
 
 ### What the guarantees cover
 

@@ -103,6 +103,10 @@ def solutionSeparator : String := "----------"
     satisfaction runs). -/
 def optimumMarker : String := "=========="
 
+/-- FlatZinc unsatisfiability marker, printed once when a completed run proves
+    that the model has no parameter-honest satisfying store. -/
+def unsatMarker : String := "=====UNSATISFIABLE====="
+
 /-- A list of assignment lines followed by the FlatZinc solution separator. -/
 def emitSolution : List (String × Value) → String
   | [] => "----------"

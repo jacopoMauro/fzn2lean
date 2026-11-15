@@ -12,6 +12,7 @@ import LeanFzn.Integration.Public.Driver
 
 namespace LeanFzn.Cli
 open LeanFzn.Solver.Propagation.DomainFiltering LeanFzn.Semantics LeanFzn.Parser LeanFzn.Semantics.Evaluation LeanFzn.Solver.Propagation LeanFzn.Solver.Reference LeanFzn.Compiler LeanFzn.Integration
+open LeanFzn.Integration.Report
 
 
 open LeanFzn
@@ -27,28 +28,64 @@ private def readFileArg (path : String) : IO (Except String String) := do
   catch e =>
     return .error s!"cannot read '{path}': {e}"
 
-private def readSource (args : List String) : IO (Except String String) := do
+/-- Argument-level source failure, split into the protocol's early error
+    classes: a usage error, a file read failure, or a model parse failure. -/
+private inductive SourceError where
+  | usage (message : String)
+  | fileIO (message : String)
+  | modelParse (message : String)
+
+private def SourceError.message : SourceError → String
+  | .usage m | .fileIO m | .modelParse m => m
+
+private def SourceError.kind : SourceError → ErrorKind
+  | .usage _ => .usage
+  | .fileIO _ => .fileIO
+  | .modelParse _ => .modelParse
+
+private def readSource (args : List String) : IO (Except SourceError String) := do
   match args with
   | [] =>
       return .ok (← (← IO.getStdin).readToEnd)
   | ["-"] =>
       return .ok (← (← IO.getStdin).readToEnd)
   | [path] =>
-      readFileArg path
+      match ← readFileArg path with
+      | .ok src => return .ok src
+      | .error e => return .error (.fileIO e)
   | _ =>
-      return .error usageString
+      return .error (.usage usageString)
 
-/-- Read the model source (a file, `-`, or stdin) and parse it; the
-    carried error is the message to print after the `leanfzn: `
-    prefix (callers exit 2, the CLI-level error class, as in
-    `check`). -/
-private def parseModelSource (args : List String) : IO (Except String Model) := do
+/-- Read the model source (a file, `-`, or stdin) and parse it; the carried
+    error keeps its usage/file/parse class and message for the CLI. -/
+private def parseModelSource (args : List String) : IO (Except SourceError Model) := do
   match ← readSource args with
   | .error e => return .error e
   | .ok src =>
       match Parser.parseModel src with
-      | .error e => return .error s!"parse error: {e}"
+      | .error e => return .error (.modelParse s!"parse error: {e}")
       | .ok model => return .ok model
+
+/-- Select the report mode and remove its flags from the solver arguments.
+    Exactly `--report=text` and `--report=jsonl-v1` are accepted, and the last
+    accepted value wins.  A bare or unknown value is a usage error and never
+    selects the JSONL protocol. -/
+def parseReportMode (args : List String) : Except String (ReportMode × List String) :=
+  let rec go (xs : List String) (mode : ReportMode) (kept : List String) :
+      Except String (ReportMode × List String) :=
+    match xs with
+    | [] => .ok (mode, kept.reverse)
+    | arg :: rest =>
+        match arg with
+        | "--report=text" => go rest .text kept
+        | "--report=jsonl-v1" => go rest .jsonlV1 kept
+        | "--report" =>
+            .error "option '--report' requires a value: --report=text or --report=jsonl-v1"
+        | _ =>
+            if arg.startsWith "--report=" then
+              .error s!"invalid value '{(arg.drop "--report=".length).toString}' for --report: expected text or jsonl-v1"
+            else go rest mode (arg :: kept)
+  go args .text []
 
 /-! ## The `check` subcommand
 
@@ -134,15 +171,20 @@ Kernel-only options and `--engine=kernel` are usage errors; no option silently
 selects another engine. The preserved old API lives in LeanFzn/Legacy.
 -/
 
-private def runSolve (args : List String) : IO UInt32 := do
+private def runSolveWithSink (sink : ReportSink) (args : List String) : IO UInt32 := do
   -- Dev diagnostic only (PLAN E1): consumed before the option parser so it
   -- never becomes part of the certified `SearchConfig`.
   let phaseStats := args.elem "--phase-stats"
   let args := args.filter (· != "--phase-stats")
+  if phaseStats && sink.mode == .jsonlV1 then
+    let message :=
+      "--phase-stats is a development diagnostic and cannot be combined with --report=jsonl-v1"
+    IO.eprintln s!"leanfzn: {message}"
+    return (← sink.finishError .usage message)
   match LeanFzn.Core.parseSolveFlags args with
   | .error e =>
       IO.eprintln s!"leanfzn: {e}"
-      return 2
+      return (← sink.finishError .usage e)
   | .ok (o, srcArgs) =>
       let ps? ← if phaseStats then some <$> LeanFzn.Core.PhaseCtx.new else pure none
       let parseStart := match ps? with
@@ -150,14 +192,14 @@ private def runSolve (args : List String) : IO UInt32 := do
         | none => 0
       match ← parseModelSource srcArgs with
       | .error e =>
-          IO.eprintln s!"leanfzn: {e}"
-          return 2
+          IO.eprintln s!"leanfzn: {e.message}"
+          return (← sink.finishError e.kind e.message)
       | .ok model =>
           let rc ← match ps? with
             | some ps =>
                 ps.report "parse" parseStart
-                LeanFzn.Core.runModelPhased ps o model
-            | none => LeanFzn.Core.runModel o model
+                LeanFzn.Core.runModelPhasedWithSink sink ps o model
+            | none => LeanFzn.Core.runModelWithSink sink o model
           if o.threads > 1 then
             -- The portfolio's other workers may still be inside a long pure
             -- search round; exit directly so a completed proof is reported at
@@ -166,6 +208,19 @@ private def runSolve (args : List String) : IO UInt32 := do
             (← IO.getStderr).flush
             IO.Process.exit (UInt8.ofNat rc.toNat)
           return rc
+
+private def runSolve (args : List String) : IO UInt32 := do
+  match parseReportMode args with
+  | .error e =>
+      -- The protocol is not selected: a plain text usage error, no handshake.
+      IO.eprintln s!"leanfzn: {e}"
+      return 2
+  | .ok (mode, args) =>
+      let sink ← ReportSink.new mode
+      -- In JSONL mode the handshake is the first stdout line, even when a
+      -- later argument, source read or model parse fails.
+      sink.start
+      runSolveWithSink sink args
 
 def main (args : List String) : IO UInt32 := do
   match args with
@@ -176,7 +231,7 @@ def main (args : List String) : IO UInt32 := do
   | _ =>
       match ← readSource args with
       | .error e =>
-          IO.eprintln s!"leanfzn: {e}"
+          IO.eprintln s!"leanfzn: {e.message}"
           return 2
       | .ok src =>
           match Parser.parseModel src with

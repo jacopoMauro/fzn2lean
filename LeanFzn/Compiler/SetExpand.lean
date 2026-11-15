@@ -55,21 +55,34 @@ def setUniverse? : BasicVarType → Option (List Int)
   | .setOfIntSet xs => some ((IntSetValue.enumeration xs).sortElems)
   | _ => none
 
+/-- The short fresh-name family of the set passes.  The `$`-run makes the
+    name strictly longer than every taken name, so it is fresh even
+    against hand-built models; the decimal counter keeps the name short
+    (unlike the unary `auxName` family, whose name length grows with the
+    allocation counter: two million set bits would need names millions of
+    characters long). -/
+def shapeAuxName (bound n : Nat) : String :=
+  "_aux_" ++ dollarRun (bound + 1) ++ Nat.repr n
+
+/-- The set-expansion name of slot `n`, fresh against `taken`. -/
+def setAuxName (taken : List String) (n : Nat) : String :=
+  shapeAuxName (maxStrLength taken) n
+
 /-- The fresh Boolean name of each universe value, numbered from `start`
-    in the globally fresh `auxName` family. -/
+    in the globally fresh `setAuxName` family. -/
 def freshPairs (taken : List String) : Nat → List Int → List (String × Int)
   | _, [] => []
-  | start, v :: vs => (auxName taken start, v) :: freshPairs taken (start + 1) vs
+  | start, v :: vs => (setAuxName taken start, v) :: freshPairs taken (start + 1) vs
 
 /-- The counter after a `freshPairs` run. -/
 def freshPairsNext (start : Nat) (us : List Int) : Nat := start + us.length
 
-/-- `auxName` with the length bound already computed.  `auxName` calls
-    `maxStrLength taken` at every slot; on the post-shape models the taken
-    list has over a million names, so allocating twelve thousand slots that
-    way is quadratic. -/
+/-- `setAuxName` with the length bound already computed.  `setAuxName`
+    calls `maxStrLength taken` at every slot; on the post-shape models the
+    taken list has over a million names, so allocating twelve thousand
+    slots that way is quadratic. -/
 def auxNameAt (bound : Nat) (n : Nat) : String :=
-  "_aux_" ++ dollarRun (bound + 1 + n)
+  shapeAuxName bound n
 
 /-- `freshPairs` with the length bound already computed. -/
 def freshPairsAt (bound : Nat) : Nat → List Int → List (String × Int)
@@ -78,7 +91,7 @@ def freshPairsAt (bound : Nat) : Nat → List Int → List (String × Int)
 
 /-- The bounded allocator agrees with `auxName` at its bound. -/
 theorem auxNameAt_eq (taken : List String) (n : Nat) :
-    auxNameAt (maxStrLength taken) n = auxName taken n := rfl
+    auxNameAt (maxStrLength taken) n = setAuxName taken n := rfl
 
 /-- The bounded allocator agrees with `freshPairs` at its bound. -/
 theorem freshPairsAt_eq (taken : List String) (start : Nat) (us : List Int) :
@@ -323,15 +336,21 @@ def rewriteConstraint (se : SetExpansion) (c : ConstraintItem) :
   | _, _ =>
       if constraintMentionsSet se c then none else some [c]
 
-/-- The hash-set twin of `rewriteConstraint`: identical except that set
-    names are looked up in the precomputed table.  The pass below uses this
+/-- Each removed set name's table entry, the first entry winning as in
+    `infoOf`.  Built once per pass; `infoOf` scans every set per call. -/
+def SetExpansion.infoIndex (se : SetExpansion) : Std.HashMap String SetInfo :=
+  se.sets.foldr (fun i acc => acc.insert i.name i) {}
+
+/-- The hash-table twin of `rewriteConstraint`: identical except that set
+    names and set entries are looked up in the precomputed tables.  The pass below uses this
     version; `rewriteConstraintFast_eq` proves it agrees with the scanning
     specification on every constraint. -/
-def rewriteConstraintFast (names : Std.HashSet String) (se : SetExpansion)
+def rewriteConstraintFast (names : Std.HashSet String)
+    (infos : Std.HashMap String SetInfo) (se : SetExpansion)
     (c : ConstraintItem) : Option (List ConstraintItem) :=
   match c.name.name, c.args with
   | "set_in", [.basic (.lit (.int k)), .basic (.ident s)] =>
-      match se.infoOf s with
+      match infos[s.name]? with
       | some i =>
           match i.boolAt k with
           | some b => some [pinBoolConstraint b true]
@@ -339,7 +358,7 @@ def rewriteConstraintFast (names : Std.HashSet String) (se : SetExpansion)
       | none =>
           if constraintMentionsSetFast names c then none else some [c]
   | "set_in_reif", [.basic (.lit (.int k)), .basic (.ident s), r] =>
-      match se.infoOf s with
+      match infos[s.name]? with
       | some i =>
           match i.boolAt k with
           | some b =>
@@ -374,7 +393,7 @@ def setExpandModelWith (taken : List String) (m : Model) : Option SetExpansion :
   | none => none
   | some (infos, _, vars) =>
       let se : SetExpansion := { model := { m with variables := vars }, sets := infos }
-      match m.constraints.mapM (rewriteConstraintFast se.setNameSet se) with
+      match m.constraints.mapM (rewriteConstraintFast se.setNameSet se.infoIndex se) with
       | none => none
       | some css => some { se with model := { se.model with constraints := css.flatten } }
 

@@ -56,6 +56,23 @@ passes on only the verdicts `leanfzn solve` prints.
 
 ## Guarantees and supported scope
 
+The table below is the assurance map for the whole release.  A row is a
+*claim* plus the theorem or executable gate that establishes it; the last
+column states the assumptions and the trust that remains outside the proof.
+
+| Property | Established by | Assumptions and remaining trust |
+| --- | --- | --- |
+| Model lexical interpretation and token grammar | `LeanFzn.Parser.parseModel_ok_iff_valid` over `ValidFlatZinc`, with the independent token/syntax developments in `Parser/Proofs/` | Lexical conventions are those recorded in `specification/flatzinc_specification_assumptions.md`; the reference MiniZinc grammar and the project lexer are not mechanically derived from each other. |
+| Solution assignment grammar and parsing completeness | `parseSolution_ok_iff_valid`, `parseSolution_eq_ok_iff_grammar`, `Checker/SolutionGrammar` (independent of the parser) | Covers the supported assignment fragment (scalars, one-dimensional arrays, sets, bools, ints). Floats and general MiniZinc expressions are outside the grammar and are rejected. |
+| Solution text/value round trip | `emitCertifiedSolution_roundTrip`, `parse_emitCertifiedSolution_of_satisfies`, `parse_emitCertifiedSolution` | Requires `Satisfies` (or the stated store-typing contract) and `PrintableSolutionName` for every emitted declaration; set equality is extensional. No parser-success premise is assumed. The driver checks names with `outputNamesPrintableB` before searching and refuses a failing model as unsupported (exit 3); `solution_entries_bind_of_gate` discharges the name premise from that check. |
+| Separator, optimum and status-marker handling | `Checker/Proofs/SolutionSeparators` (`classify_renderSolutionTokens_ident`, `stripSeparators_terminated`), `tests_check`, `Tests/Cli/test_check_separators.py` | Exact frozen marker list after dropping one trailing CR and ASCII space/tab padding. No general MiniZinc status-stream grammar is claimed; malformed prefixes stay content. |
+| Satisfaction SAT and UNSAT over source semantics | `solveModel_sat_correct`, `solveModel_unsat_correct`, `compileFull_exact`, `compileFull_covers` | Requires `WellFormed fullSig m` and successful compilation of the supported fragment. UNSAT quantifies over parameter-honest stores only; an incomplete run is unknown and is never an UNSAT claim. |
+| Optimization optimality and objective value | `optimizeCore_optimal`, `optimizeCore_unsat`, `compileOpt_exact`, `compileOpt_covers`, `compileOpt_optimal` | Requires a completed run (`run.complete = true`), `WellFormed fullSig m`, and successful compilation. An incomplete run keeps its valid incumbents but makes no optimality claim. |
+| Report terminal class, markers and exit codes | `satisfaction_report_truthful`, `optimization_report_truthful`, `terminalKind_marker_sound`, `terminalKind_no_marker_of_incomplete`, `terminalKind_exit_eq` | Back-translation starts from the actual `solveModel`/`optimizeCore` result. `Truthful` is `True` for unknown, incomplete and unsupported results, so a non-answer cannot become a claim. |
+| JSONL encoding and transport | `Report/Proofs` (`terminal_toJson_event`, `terminal_toJson_exit`, `error_toJson_exit`) and `Tests/Cli/test_protocol.py` | `Lean.Data.Json`'s printer/parser and byte output are trusted; object member order is unspecified and consumers must decode, not byte-compare. |
+| Python MiniZinc wrapper | `Tests/Audits/test_wrapper_protocol.py`, `Tests/Audits/test_wrapper.py`, `minizinc-wrapper/test.sh` against pinned MiniZinc 2.10.1 | The Python process/pipe/cancellation layer is tested, not formally verified; the tests are a finite matrix over committed scenarios. |
+| Lean/C code generation and release artifacts | `audits/run_axiom_audit.sh`, `audits/check_module_boundaries.py`, `audits/run_gates.sh`, `audits/run_release_gates.sh` | Axiom hygiene, module boundaries, full tests and the isolated PGO/non-PGO cohort are checked. The compiler, LLVM/clang, linker and OS runtime remain trusted; the release cohort is finite evidence, not a proof of compiled-code correctness. The Docker image rebuilds from the same source and is not itself gated. |
+
 ### Parser
 
 `LeanFzn.Parser.parseModel_ok_iff_valid` states that parsing succeeds exactly
@@ -65,7 +82,10 @@ parser's fuel bound is proved sufficient.
 
 Recognition is relative to the grammar over tokens produced by the project's
 lexer. Lexical conventions and differences from the reference grammar are
-recorded in the formalization assumptions.
+recorded in the formalization assumptions. General verification that the lexer
+or an arbitrary MiniZinc-produced FlatZinc stream realizes exactly the
+reference language remains deferred; the parser theorem is relative to the
+token stream and `ValidFlatZinc`, not a claim about all possible lexer inputs.
 
 ### Solution checker
 
@@ -87,7 +107,13 @@ produce an explicit unsupported outcome. The predicate definitions and coverage
 lists live in `LeanFzn.Semantics` and `LeanFzn.Checker.Globals`.
 
 The checker accepts solver output containing several solutions separated by
-`----------` and checks each solution. It reports the first failure.
+exact `----------` lines and checks each solution.  ASCII spaces/tabs and one
+trailing carriage return are permitted around a marker; `----------garbage`,
+`==========garbage` and other malformed prefixes are ordinary content and are
+rejected by the assignment grammar.  `==========` and the `=====…=====` status
+markers are not candidate solutions: status/comment/blank-only input is
+reported as `no solution in the input` (exit 4).  The checker reports the first
+failing solution.
 
 ### Certified solver
 
@@ -214,13 +240,43 @@ UNSAT from an entailed empty clause. A failed domain conversion, exhausted
 search fuel or internal analysis give-up returns unknown; it never invokes
 the old solver.
 
+All UNSAT and optimality statements are relative to the supported fragment and
+to *parameter-honest* stores: a store that rebinds a parameter is not a
+candidate solution and cannot witness an UNSAT or beat an optimum. The CLI
+establishes static well-formedness and checkable predicate names before it
+checks a supplied solution, and it rejects assignments to parameters, unknown
+names or duplicate names. Completeness of solution parsing is a statement about
+the assignment grammar; it is separate from solver termination and from
+deciding every syntactically valid FlatZinc model. Models outside the
+compilation fragment are reported unsupported (exit 3), and exhausted or
+resource-limited search is unknown (exit 4), never UNSAT or optimal.
+
 New optimization solutions are always valid and strictly improving. A completed run additionally proves that its final solution is optimal, or that the model is unsatisfiable if no solution was found. Core may stop incomplete, leaving the best solution found without an optimality guarantee.
 Wide enumerated domains are represented directly as sparse domains. For
 example, `var {0,1000000}: x; solve satisfy;` is solved by Core (and
 `minimize x` completes at 0) without falling back to the old solver. A
-conversion failure or an internal give-up still returns unknown (exit 4).
+conversion failure or an ordinary single-worker engine give-up still returns
+unknown (exit 4); an internal report/checker/sink contradiction returns 2.
 Certification supplies correctness guarantees for returned claims, not
 practical running-time or decision-coverage guarantees.
+
+Single-worker and portfolio guarantees are attached to the source result, not
+to the process that produced it.  The ordinary single-worker path prints the
+store of a proved SAT result and accepts UNSAT/optimality only from a completed
+proof; it does not re-run the checker on its own witness.  With `--threads=N`,
+each worker is still an independent certified Core run, and the driver adds a
+runtime consistency gate: every candidate incumbent is rendered and rechecked
+with `checkModelSolutionFast` (proved equal to the verified front door) before
+printing, and a completed optimization proof is reported only when its optimum
+equals the best already-printed checked incumbent.  That recheck is defence in
+depth against wiring/rendering mistakes; it does not replace the per-worker
+theorem.  The rank-circuit 2-cycle seed clauses are proved entailed by the
+offline checker, but they are deliberately not registered by the default
+engine; `tests_rank_circuit` is offline evidence and no active search guarantee
+is claimed for those seeds.  A checker rejection, report-sink failure, internal
+worker exception, or UNSAT/optimum contradiction is a typed internal error
+(exit 2), never an `incomplete` result; exit 4 is reserved for genuine search
+exhaustion such as a conflict cap or give-up.
 
 ## Repository structure
 
@@ -300,6 +356,8 @@ optimization and restarts.
 | Option | What it does |
 | --- | --- |
 | `--engine=core` | Use the array-based Core solver, which is already the default. |
+| `--report=text` | Default output: the FlatZinc text format documented above, byte for byte. |
+| `--report=jsonl-v1` | Opt-in frozen JSONL v1 stream on stdout (see [solver_protocol.md](specification/solver_protocol.md)); it is a reporting/transport mode and selects the same Core solver and search. |
 | `--var=minc` | Choose an unfixed variable with the fewest remaining allowed values. |
 | `--var=annot` | Prioritize variables using the model's search annotation groups; break equal priorities by smallest remaining domain. |
 | `--var=act` | Prioritize variables involved in learned conflicts, using scores that decay over time. Break equal scores by smallest remaining domain. |
@@ -328,7 +386,7 @@ optimization and restarts.
 | `--presolve=none` | Skip a separate presolve phase. Normal Core propagation still runs during search. This is the default. |
 | `--presolve=dedup` | Remove syntactically duplicate compiled constraints while preserving the search box, objective slot and source reconstruction. Rejected with `--opt=seeded`. |
 | `--stats` | Print search counters (including the deepest decision level reached), linear-optimization compile/search timing, and completion/give-up status to stderr. Counters that are unavailable are shown as `-`. |
-| `--phase-stats` | Dev diagnostic: print one stderr line per compiler/search phase with this phase's wall time, cumulative wall time, current `VmRSS` and peak `VmHWM`. It never changes stdout, exit codes or counters; specialized seeded/LNS/portfolio paths print a note and run the ordinary driver. |
+| `--phase-stats` | Dev diagnostic: print one stderr line per compiler/search phase with this phase's wall time, cumulative wall time, current `VmRSS` and peak `VmHWM`. It never changes stdout, exit codes or counters; specialized seeded/LNS/portfolio paths print a note and run the ordinary driver. It is text-mode only: combining it with `--report=jsonl-v1` is a usage error (exit 2) and emits no phase lines. |
 
 Presets are applied first; explicit flags override their settings. Without a
 preset or portfolio, a Core run fills `--var` and `--val` independently:
@@ -340,7 +398,7 @@ its default; set both flags to choose the pair explicitly.
 | --- | --- |
 | Parse | 0: success; 1: parse error; 2: usage/IO error |
 | Check | 0: all supplied solutions accepted; 1: unsatisfied condition; 2: malformed model or usage/IO error; 3: unsupported predicate; 4: malformed solution entries |
-| Solve | 0: SAT or certified completed optimum; 1: certified UNSAT or infeasible completed optimization; 2: malformed model or usage/IO/parse error, including unsupported options; 3: unsupported compilation/domain gate; 4: Core unknown or incomplete optimization, with any streamed incumbents retained |
+| Solve | 0: SAT or certified completed optimum; 1: certified UNSAT or infeasible completed optimization; 2: malformed model or usage/IO/parse error, including unsupported options, plus internal report/checker/sink failures; 3: unsupported compilation/domain gate; 4: Core unknown or genuinely incomplete optimization, with any streamed incumbents retained |
 
 SAT output ends with `----------`; UNSAT is printed as
 `=====UNSATISFIABLE=====`. Optimization prints improving solutions followed by
@@ -377,6 +435,37 @@ performance suite and Core differential checks. It writes logs under `tmp/`.
 Some executables require arguments and have dedicated gate steps. The target
 inventory is [lakefile.toml](lakefile.toml); audit usage and measurement
 provenance are in [audits/README.md](audits/README.md).
+
+Release certification additionally requires the isolated PGO / non-PGO gate:
+
+```sh
+bash audits/run_release_gates.sh
+```
+
+It copies the frozen source and required fixtures into
+`tmp/release/<id>/{pgo,nopgo}`, builds each selection in its own `.lake` tree
+(the non-PGO selection is the PGO lakefile with exactly the package
+`moreLeancArgs` line removed), runs `audits/release_cohort.tsv` with equal flags
+and a frozen conflict limit, checks every emitted witness with both binaries'
+`leanfzn check` front doors, and fails closed on any missing or malformed
+required evidence.  The gate executes the snapshot copies of
+`release_compare.py` and `fixed_k.py` under `--require-snapshot-harness`, and
+checks each fixed-k `model_sha256` against the frozen fixture.
+`manifest.json`, `comparison.json` and `summary.txt` record
+the exact source hashes, toolchain, profile checksum, MiniZinc pin and both
+binary hashes; `--expected-manifest` can pin those values plus the two harness
+hashes for a reproducible rerun. The proposed
+[.github/workflows/certification.yml](.github/workflows/certification.yml)
+makes this gate and the full gate required jobs; it has not been executed in
+this environment, so it is not reported as CI-passing.
+
+The Docker image is not covered by this gate. `minizinc-wrapper/Dockerfile`
+builds `leanfzn` again inside the image, from the same source and the same
+PGO `lakefile.toml` selection, but with the image's own toolchain download and
+system libraries, so its binary is not byte-identical to the gated one. The
+gate does not build the image, because a Docker build cannot be assumed in
+every environment that runs it. Treat the image as a build of the gated
+source, not as the gated binary.
 
 The axiom audit rejects missing profiles, `sorryAx` and axioms outside the
 standard allowlist (`propext`, `Classical.choice`, `Quot.sound`). The boundary

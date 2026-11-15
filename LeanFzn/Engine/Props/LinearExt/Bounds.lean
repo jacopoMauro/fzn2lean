@@ -801,6 +801,15 @@ def domIntB (o : Option Dom) : Bool :=
 def slotsIntB (p : CompiledProblem DomConstraint) (is : List Nat) : Bool :=
   is.all fun s => domIntB p.domains[s]?
 
+/-- `slotsIntB` reading the domain array: `p.domains[s]?` walks the list,
+    so a reified propagator over high slots costs a scan per slot. -/
+def slotsIntBFast (p : CompiledProblem DomConstraint) (is : List Nat) : Bool :=
+  is.all fun s => domIntB p.domainsArray[s]?
+
+@[csimp] theorem slotsIntB_eq_fast : @slotsIntB = @slotsIntBFast := by
+  funext p is
+  simp only [slotsIntB, slotsIntBFast, ← p.domainsArray_toList, Array.getElem?_toList]
+
 def viewIntKindB (view : EngineView) (slots : Array Nat) : Bool :=
   slots.all fun s => (view.doms.getD s DomC.empty).intKindB
 

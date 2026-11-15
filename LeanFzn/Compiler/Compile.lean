@@ -1252,6 +1252,106 @@ def expandPlan (taken : List String) :
                     (auxs ++ auxSlotsK taken auxs.length (v :: vs)) rest
                   (auxs', sh.expand aux ++ cs')
 
+/-! ### Compiled form of `expandPlan`
+
+`expandPlan` recomputes `maxStrLength taken` (a scan of every slot name)
+for each pinning-shape constraint, even the ones that allocate no slot,
+and appends to the slot list and measures its length at every step.  On
+the set-shape output (a million `int_eq_reif` rows over two million
+slots) that is quadratic.  The twin below computes the bound once and
+accumulates in arrays; `expandPlan_eq_fast` proves it equal, and
+`@[csimp]` makes it the compiled code of `expandPlan`. -/
+
+/-- `auxName` with the length bound already computed. -/
+def auxNameB (bound n : Nat) : String :=
+  "_aux_" ++ dollarRun (bound + 1 + n)
+
+/-- `auxSlotsK` with the length bound already computed. -/
+def auxSlotsKB (bound : Nat) : Nat → List Value → List (String × List Value)
+  | _, [] => []
+  | base, v :: ps => (auxNameB bound base, [v]) :: auxSlotsKB bound (base + 1) ps
+
+theorem auxSlotsKB_eq (taken : List String) :
+    ∀ base ps, auxSlotsKB (maxStrLength taken) base ps = auxSlotsK taken base ps
+  | _, [] => rfl
+  | base, v :: ps => by
+      simp only [auxSlotsKB, auxSlotsK, auxSlotsKB_eq taken (base + 1) ps]; rfl
+
+/-- Tail-recursive `expandPlan` over array accumulators. -/
+def expandPlanLoop (bound : Nat) :
+    Array (String × List Value) → Array ConstraintItem → List ConstraintItem →
+    Array (String × List Value) × Array ConstraintItem
+  | auxs, out, [] => (auxs, out)
+  | auxs, out, c :: rest =>
+      match auxShapeOf c with
+      | none => expandPlanLoop bound auxs (out.push c) rest
+      | some sh =>
+          let nm := auxNameB bound auxs.size
+          let aux := Ident.mk nm
+          match sh.pin, sh.pin2 with
+          | some v, some v2 =>
+              expandPlanLoop bound ((auxs.push (nm, [v])).push (nm.push '$', [v2]))
+                (out ++ (sh.expand aux).toArray) rest
+          | some v, none =>
+              expandPlanLoop bound (auxs.push (nm, [v]))
+                (out ++ (sh.expand aux).toArray) rest
+          | _, _ =>
+              match sh.pinsK with
+              | [] => expandPlanLoop bound auxs (out ++ (sh.expand aux).toArray) rest
+              | v :: vs =>
+                  expandPlanLoop bound
+                    (auxs ++ (auxSlotsKB bound auxs.size (v :: vs)).toArray)
+                    (out ++ (sh.expand aux).toArray) rest
+
+/-- The compiled form of `expandPlan`. -/
+def expandPlanFast (taken : List String) (auxs : List (String × List Value))
+    (cs : List ConstraintItem) : List (String × List Value) × List ConstraintItem :=
+  let r := expandPlanLoop (maxStrLength taken) auxs.toArray #[] cs
+  (r.1.toList, r.2.toList)
+
+theorem expandPlanLoop_eq (taken : List String) :
+    ∀ (cs : List ConstraintItem) (auxs : List (String × List Value))
+      (out : Array ConstraintItem),
+      expandPlanLoop (maxStrLength taken) auxs.toArray out cs =
+        ((expandPlan taken auxs cs).1.toArray, out ++ (expandPlan taken auxs cs).2.toArray)
+  | [], auxs, out => by simp [expandPlanLoop, expandPlan]
+  | c :: rest, auxs, out => by
+      have hnm : auxNameB (maxStrLength taken) auxs.toArray.size = auxName taken auxs.length := by
+        simp [auxNameB, auxName]
+      simp only [expandPlanLoop, expandPlan]
+      split
+      · rw [expandPlanLoop_eq taken rest auxs (out.push c)]
+        simp
+      · rename_i sh _
+        rw [hnm]
+        split
+        · rename_i v v2 _ _
+          rw [show (auxs.toArray.push (auxName taken auxs.length, [v])).push
+                ((auxName taken auxs.length).push '$', [v2]) =
+              (auxs ++ [(auxName taken auxs.length, [v]),
+                ((auxName taken auxs.length).push '$', [v2])]).toArray by simp,
+            expandPlanLoop_eq taken rest]
+          simp [Array.append_assoc]
+        · rename_i v _ _
+          rw [show auxs.toArray.push (auxName taken auxs.length, [v]) =
+              (auxs ++ [(auxName taken auxs.length, [v])]).toArray by simp,
+            expandPlanLoop_eq taken rest]
+          simp [Array.append_assoc]
+        · split
+          · rw [expandPlanLoop_eq taken rest]
+            simp [Array.append_assoc]
+          · rename_i v vs _
+            rw [show auxs.toArray.size = auxs.length by simp, auxSlotsKB_eq,
+              show auxs.toArray ++ (auxSlotsK taken auxs.length (v :: vs)).toArray =
+                (auxs ++ auxSlotsK taken auxs.length (v :: vs)).toArray by simp,
+              expandPlanLoop_eq taken rest]
+            simp [Array.append_assoc]
+
+/-- The array loop is `expandPlan`; the compiler runs the former. -/
+@[csimp] theorem expandPlan_eq_fast : @expandPlan = @expandPlanFast := by
+  funext taken auxs cs
+  simp [expandPlanFast, expandPlanLoop_eq]
+
 /-- The model's search slots as a plain list (the empty list when
     slot extraction fails; the certified compile then rejects the
     model before the expansion is consulted). -/
