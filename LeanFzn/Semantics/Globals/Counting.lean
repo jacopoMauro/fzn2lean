@@ -269,20 +269,40 @@ theorem distributeB_iff (count cover xs : List Int) :
     decide_eq_true_iff]
 
 /-- `fzn_global_cardinality(xs, cover, counts)`: for each `i`, the
-    number of occurrences of `cover[i]` in `xs` is `counts[i]`.  Values
-    of `xs` outside `cover` are unconstrained. -/
+    number of occurrences of `cover[i]` in `xs` is `counts[i]`; the
+    implied constraint `length(xs) >= sum(counts)` also holds. Values
+    of `xs` outside `cover` are unconstrained. `counts` must be at
+    least as long as `cover` (upstream `index_sets_agree`); a shorter
+    `counts` makes the constraint false. -/
 def gccProp (xs cover counts : List Int) : Prop :=
-  ∀ i : Nat, i < cover.length →
-    (intCount xs cover[i]! : Int) = (counts[i]! : Int)
+  cover.length ≤ counts.length ∧
+    (∀ i : Nat, i < cover.length →
+      (intCount xs cover[i]! : Int) = (counts[i]! : Int)) ∧
+      (xs.length : Int) ≥ counts.sum
 
 /-- Boolean twin of `gccProp`. -/
 def gccB (xs cover counts : List Int) : Bool :=
-  (List.range cover.length).all (fun i =>
-    decide ((intCount xs cover[i]! : Int) = (counts[i]! : Int)))
+  decide (cover.length ≤ counts.length) &&
+    (List.range cover.length).all (fun i =>
+      decide ((intCount xs cover[i]! : Int) = (counts[i]! : Int))) &&
+    decide ((xs.length : Int) ≥ counts.sum)
+
+/-- `counts` is long enough and every covered value has the stated
+    multiplicity, with the implied length bound. -/
+private theorem gccB_parts (xs cover counts : List Int) :
+    gccB xs cover counts = true ↔
+      cover.length ≤ counts.length ∧
+        (∀ i : Nat, i < cover.length →
+          (intCount xs cover[i]! : Int) = (counts[i]! : Int)) ∧
+          (xs.length : Int) ≥ counts.sum := by
+  unfold gccB
+  simp only [Bool.and_eq_true, List.all_eq_true, List.mem_range,
+    decide_eq_true_iff, and_assoc]
 
 theorem gccB_iff (xs cover counts : List Int) :
     gccB xs cover counts = true ↔ gccProp xs cover counts := by
-  simp only [gccB, gccProp, List.all_eq_true, List.mem_range, decide_eq_true_iff]
+  rw [gccB_parts]
+  rfl
 
 /-- `fzn_global_cardinality_closed(xs, cover, counts)`: the
     global-cardinality condition plus "The elements of xs must take
@@ -297,8 +317,8 @@ def gccClosedB (xs cover counts : List Int) : Bool :=
 
 theorem gccClosedB_iff (xs cover counts : List Int) :
     gccClosedB xs cover counts = true ↔ gccClosedProp xs cover counts := by
-  simp only [gccClosedB, gccClosedProp, gccB, gccProp, Bool.and_eq_true,
-    List.all_eq_true, List.mem_range, decide_eq_true_iff]
+  simp only [gccClosedB, gccClosedProp, Bool.and_eq_true,
+    List.all_eq_true, List.mem_range, decide_eq_true_iff, gccB_iff]
 
 /-- `fzn_global_cardinality_low_up(xs, cover, low, up)`: for each
     `i`, the value `cover[i]` appears at least `low[i]` and at most

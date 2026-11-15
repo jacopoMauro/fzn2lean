@@ -169,3 +169,39 @@ theorem sum_pred_empty_unselected_set_accepted :
       [.int 2,
        .array [.setOfInt (.enumeration [1]), .setOfInt (.enumeration [])],
        .array [.int 3], .int 0] = true := by decide
+
+-- ## SC-10 (T3): global cardinality with duplicate cover values
+-- `fzn_global_cardinality.mzn` conjoins `count(xs, cover[i], count[i])` for
+-- every i with the implied `length(xs) >= sum(count)`, where sum ranges over
+-- all of `count`. `global_cardinality.mzn` asserts that cover and count have
+-- the same index set, so a short `count` is undefined and false.
+
+theorem gcc_duplicate_cover_sum_exceeds_length_rejected :
+    fullInterpB ⟨"fzn_global_cardinality"⟩
+      [.array [.int 1], .array [.int 1, .int 1], .array [.int 1, .int 1]] =
+        false := by decide
+
+theorem gcc_duplicate_cover_count_sum_too_large_rejected :
+    fullInterpB ⟨"fzn_global_cardinality"⟩
+      [.array [.int 1, .int 1], .array [.int 1, .int 1],
+       .array [.int 2, .int 2]] = false := by decide
+
+theorem gcc_cover_value_outside_cover_accepted :
+    fullInterpB ⟨"fzn_global_cardinality"⟩
+      [.array [.int 1, .int 2], .array [.int 1], .array [.int 1]] = true := by
+  decide
+
+theorem gcc_short_count_undefined_rejected :
+    fullInterpB ⟨"fzn_global_cardinality"⟩
+      [.array [.int 1], .array [.int 1, .int 2], .array [.int 1]] = false := by
+  decide
+
+theorem gcc_closed_duplicate_cover_rejected :
+    fullInterpB ⟨"fzn_global_cardinality_closed"⟩
+      [.array [.int 1], .array [.int 1, .int 1], .array [.int 1, .int 1]] =
+        false := by decide
+
+theorem gcc_closed_distinct_cover_accepted :
+    fullInterpB ⟨"fzn_global_cardinality_closed"⟩
+      [.array [.int 1, .int 2], .array [.int 1, .int 2],
+       .array [.int 1, .int 1]] = true := by decide
