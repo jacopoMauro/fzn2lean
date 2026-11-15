@@ -141,3 +141,31 @@ theorem sliding_among_int_zero_width_accepted :
 theorem sliding_among_bool_zero_width_rejected :
     fullInterpB ⟨"fzn_sliding_among_bool"⟩
       [.int 1, .int 1, .int 0, .array [.bool true], .bool true] = false := by decide
+
+-- ## SC-08 (T2): sum_pred with invalid coefficient indices
+-- Upstream `fzn_sum_pred.mzn` builds `sums` for every `j in index_set(sets)`
+-- (a par comprehension, evaluated eagerly), so an out-of-range index in
+-- ANY set is undefined and makes the constraint false, not just one in
+-- the `idx`-th set. The old `coeffsAt` silently filtered such indices.
+
+theorem sum_pred_out_of_range_in_selected_set_rejected :
+    fullInterpB ⟨"fzn_sum_pred"⟩
+      [.int 1, .array [.setOfInt (.enumeration [2])], .array [.int 7], .int 0] =
+        false := by decide
+
+theorem sum_pred_out_of_range_in_other_set_rejected :
+    fullInterpB ⟨"fzn_sum_pred"⟩
+      [.int 1,
+       .array [.setOfInt (.enumeration [1]), .setOfInt (.enumeration [3])],
+       .array [.int 7], .int 7] = false := by decide
+
+theorem sum_pred_all_indices_in_range_accepted :
+    fullInterpB ⟨"fzn_sum_pred"⟩
+      [.int 1, .array [.setOfInt (.enumeration [1, 2])],
+       .array [.int 3, .int 4], .int 7] = true := by decide
+
+theorem sum_pred_empty_unselected_set_accepted :
+    fullInterpB ⟨"fzn_sum_pred"⟩
+      [.int 2,
+       .array [.setOfInt (.enumeration [1]), .setOfInt (.enumeration [])],
+       .array [.int 3], .int 0] = true := by decide

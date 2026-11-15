@@ -357,39 +357,74 @@ theorem sumSetB_iff (values weights : List Int) (selected : IntSetValue) (total 
 
 /-! ## fzn_sum_pred -/
 
-/-- The coefficients at the 1-based indices `ks` (out-of-range
-    indices dropped), duplicates included. -/
-private def coeffsAt (cs : List Int) (ks : List Int) : List Int :=
-  ((ks.filter (fun k => decide (1 ≤ k ∧ k ≤ (cs.length : Int)))).map
-    (fun k => cs[k.toNat - 1]!))
+/-- The sum of `cs` at the 1-based indices `ks` (duplicates included),
+    or `none` if any index is outside `1..cs.length`. Upstream
+    `fzn_sum_pred.mzn` reads `coefficients[k]` for every element of the
+    comprehension, so an out-of-range index is undefined rather than
+    silently skipped. -/
+private def coeffsAt? (cs : List Int) (ks : List Int) : Option Int :=
+  match ks with
+  | [] => some 0
+  | k :: rest =>
+    if 1 ≤ k ∧ k ≤ (cs.length : Int) then
+      (coeffsAt? cs rest).map (fun s => cs[k.toNat - 1]! + s)
+    else
+      none
 
 /-- `fzn_sum_pred(idx, sets, coefficients, total)`: `total` is the sum
     of `coefficients[k]` over the elements `k` of the `idx`-th set of
-    `sets`, the elements being 1-based indices into `coefficients`
-    (out-of-range indices contribute nothing); `idx` out of range
-    makes the constraint false. -/
+    `sets`, the elements being 1-based indices into `coefficients`.
+    `idx` out of range makes the constraint false; so does an
+    out-of-range index in **any** set, because the upstream `sums`
+    comprehension is evaluated for every set. -/
 def sumPredProp (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) : Prop :=
   match at1 sets idx with
   | none => False
-  | some s => total = (coeffsAt coefficients (setElems s).eraseDups).sum
+  | some s =>
+    match coeffsAt? coefficients (setElems s).eraseDups with
+    | none => False
+    | some v => total = v ∧ ∀ j : Nat, j < sets.length →
+        (coeffsAt? coefficients (setElems sets[j]!).eraseDups).isSome = true
 
 /-- Boolean twin of `sumPredProp`. -/
 def sumPredB (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) : Bool :=
   match at1 sets idx with
   | none => false
-  | some s => decide (total = (coeffsAt coefficients (setElems s).eraseDups).sum)
+  | some s =>
+    (match coeffsAt? coefficients (setElems s).eraseDups with
+      | none => false
+      | some v => decide (total = v)) &&
+      sets.all (fun t => (coeffsAt? coefficients (setElems t).eraseDups).isSome)
 
 theorem sumPredB_iff (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) :
     sumPredB idx sets coefficients total = true ↔
       sumPredProp idx sets coefficients total := by
+  unfold sumPredB sumPredProp
   cases h : at1 sets idx with
-  | none => simp [sumPredB, sumPredProp, h]
+  | none => simp only [h, Bool.false_eq_true]
   | some s =>
-    simp only [sumPredB, sumPredProp, h]
-    exact decide_eq_true_iff
+    simp only [h]
+    rw [Bool.and_eq_true, List.all_eq_true]
+    cases hv : coeffsAt? coefficients (setElems s).eraseDups with
+    | none => simp only [Bool.false_eq_true, false_and]
+    | some v =>
+      simp only [decide_eq_true_iff]
+      constructor
+      · rintro ⟨htot, hall⟩
+        refine ⟨htot, fun j hj => ?_⟩
+        simp only [List.getElem!_eq_getElem?_getD, List.getElem?_eq_getElem hj, Option.getD_some]
+        exact hall (sets[j]) (List.getElem_mem hj)
+      · rintro ⟨htot, hall⟩
+        refine ⟨htot, fun t ht => ?_⟩
+        obtain ⟨j, hj, hpos⟩ := List.mem_iff_getElem.mp ht
+        have hval := hall j hj
+        rw [show t = sets[j] from hpos.symm]
+        simp only [List.getElem!_eq_getElem?_getD, List.getElem?_eq_getElem hj,
+          Option.getD_some] at hval
+        exact hval
 
 /-! ## fzn_range -/
 
