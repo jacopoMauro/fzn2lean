@@ -1,3 +1,8 @@
+/-
+Purpose: Packing, scheduling, table and conditional predicate semantics and Boolean agreement.
+Dependencies: Globals.Common and shared semantic helpers supply values and finite-array operations.
+DAG: Shared semantics -> this family -> Globals dispatch and checker correctness.
+-/
 import LeanFzn.Semantics.Globals.Common
 open LeanFzn.Semantics
 
@@ -332,24 +337,20 @@ private theorem binPackingLoadB_iff (load bin weight : List Int) :
     and `total_profit` their weighted sum by `profit`. -/
 def knapsackProp (weight profit xs : List Int) (tw tp : Int) : Prop :=
   weight.length = profit.length ∧ weight.length = xs.length ∧
+    (∀ x ∈ xs, 0 ≤ x) ∧ 0 ≤ tw ∧ 0 ≤ tp ∧
     tw = (((xs.zip weight).map (fun p => p.1 * p.2)) |>.sum) ∧
     tp = (((xs.zip profit).map (fun p => p.1 * p.2)) |>.sum)
 
 /-- Boolean twin of `knapsackProp`. -/
 def knapsackB (weight profit xs : List Int) (tw tp : Int) : Bool :=
   decide (weight.length = profit.length) && decide (weight.length = xs.length) &&
+    xs.all (fun x => decide (0 ≤ x)) && decide (0 ≤ tw) && decide (0 ≤ tp) &&
     decide (tw = (((xs.zip weight).map (fun p => p.1 * p.2)) |>.sum)) &&
     decide (tp = (((xs.zip profit).map (fun p => p.1 * p.2)) |>.sum))
 
 private theorem knapsackB_iff (weight profit xs : List Int) (tw tp : Int) :
     knapsackB weight profit xs tw tp = true ↔ knapsackProp weight profit xs tw tp := by
-  unfold knapsackB knapsackProp
-  simp only [Bool.and_eq_true, decide_eq_true_iff]
-  constructor
-  · rintro ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩
-    exact ⟨h1, h2, h3, h4⟩
-  · rintro ⟨h1, h2, h3, h4⟩
-    exact ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩
+  simp [knapsackB, knapsackProp, List.all_eq_true, and_assoc]
 
 /-! ## Packing: `fzn_diffn` and `fzn_diffn_nonstrict` -/
 
@@ -440,7 +441,7 @@ private theorem geostNonoverlapKB_iff (x1 w1 x2 w2 : List Int) :
 /-- `fzn_disjunctive(start, duration)`: tasks with positive duration do
     not overlap in time. -/
 def disjunctiveProp (start dur : List Int) : Prop :=
-  start.length = dur.length ∧
+  start.length = dur.length ∧ (∀ d ∈ dur, 0 ≤ d) ∧
     ∀ i j : Nat, i < j → j < start.length →
       dur.getD i 0 = 0 ∨ dur.getD j 0 = 0 ∨
         start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
@@ -449,6 +450,7 @@ def disjunctiveProp (start dur : List Int) : Prop :=
 /-- Boolean twin of `disjunctiveProp`. -/
 def disjunctiveB (start dur : List Int) : Bool :=
   decide (start.length = dur.length) &&
+    dur.all (fun d => decide (0 ≤ d)) &&
     (List.range start.length).all (fun j => (List.range j).all (fun i =>
       decide (dur.getD i 0 = 0 ∨ dur.getD j 0 = 0 ∨
         start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
@@ -459,15 +461,15 @@ private theorem disjunctiveB_iff (start dur : List Int) :
   unfold disjunctiveB disjunctiveProp
   simp only [Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true, List.mem_range]
   constructor
-  · rintro ⟨hlen, h4⟩
-    exact ⟨hlen, fun i j hij hjn => h4 j hjn i hij⟩
-  · rintro ⟨hlen, h4⟩
-    exact ⟨hlen, fun j hj i hi => h4 i j hi hj⟩
+  · rintro ⟨⟨hlen, hnonneg⟩, h4⟩
+    exact ⟨hlen, hnonneg, fun i j hij hjn => h4 j hjn i hij⟩
+  · rintro ⟨hlen, hnonneg, h4⟩
+    exact ⟨⟨hlen, hnonneg⟩, fun j hj i hi => h4 i j hi hj⟩
 
 /-- `fzn_disjunctive_strict(start, duration)`: all tasks (including
     zero-duration ones) are pairwise non-overlapping. -/
 def disjunctiveStrictProp (start dur : List Int) : Prop :=
-  start.length = dur.length ∧
+  start.length = dur.length ∧ (∀ d ∈ dur, 0 ≤ d) ∧
     ∀ i j : Nat, i < j → j < start.length →
       start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
       start.getD j 0 + dur.getD j 0 ≤ start.getD i 0
@@ -475,6 +477,7 @@ def disjunctiveStrictProp (start dur : List Int) : Prop :=
 /-- Boolean twin of `disjunctiveStrictProp`. -/
 def disjunctiveStrictB (start dur : List Int) : Bool :=
   decide (start.length = dur.length) &&
+    dur.all (fun d => decide (0 ≤ d)) &&
     (List.range start.length).all (fun j => (List.range j).all (fun i =>
       decide (start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
         start.getD j 0 + dur.getD j 0 ≤ start.getD i 0)))
@@ -484,10 +487,10 @@ private theorem disjunctiveStrictB_iff (start dur : List Int) :
   unfold disjunctiveStrictB disjunctiveStrictProp
   simp only [Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true, List.mem_range]
   constructor
-  · rintro ⟨hlen, h4⟩
-    exact ⟨hlen, fun i j hij hjn => h4 j hjn i hij⟩
-  · rintro ⟨hlen, h4⟩
-    exact ⟨hlen, fun j hj i hi => h4 i j hi hj⟩
+  · rintro ⟨⟨hlen, hnonneg⟩, h4⟩
+    exact ⟨hlen, hnonneg, fun i j hij hjn => h4 j hjn i hij⟩
+  · rintro ⟨hlen, hnonneg, h4⟩
+    exact ⟨⟨hlen, hnonneg⟩, fun j hj i hi => h4 i j hi hj⟩
 
 /-! ## Scheduling: `fzn_cumulative` -/
 
@@ -547,110 +550,193 @@ private theorem cumul_congr (t b : Int) : ∀ (S D R : List Int),
         · have hb : ¬ (s ≤ b ∧ b < s + d) := fun hc => hactive (h0.mpr hc)
           rw [if_neg hactive, if_neg hb, ih D' R' (fun i hi => h (i + 1) (lt_succ_cons hi))]
 
-/-- `fzn_cumulative(start, duration, resource, capacity)`: at every time
-    point the total resource usage of the running tasks is at most
-    `capacity`. -/
+/-- `Tasks` is empty, in value form: no task has positive duration and
+    resource. -/
+private def noSelectedTask (start dur res : List Int) : Bool :=
+  (List.range start.length).all
+    (fun i => !(decide (0 < dur.getD i 0 ∧ 0 < res.getD i 0)))
+
+/-- `fzn_cumulative(start, duration, resource, capacity)` transcribed from
+    `fzn_cumulative.mzn`, with the contract of the `cumulative` wrapper:
+
+    - the three arrays have the same length (wrapper `index_set` assert);
+    - all durations and resources are nonnegative (wrapper `assert`);
+    - with `Tasks = {i | duration[i] > 0 ∧ resource[i] > 0}` (the value
+      form of `ub(...) > 0`), if `Tasks` is empty then
+      `length(start) = 0 ∨ capacity ≥ 0`, and otherwise the usage of the
+      selected tasks is at most `capacity` at every time. -/
 def cumulativeProp (start dur res : List Int) (capacity : Int) : Prop :=
   start.length = dur.length ∧ start.length = res.length ∧
-    ∀ t : Int, cumul start dur res t ≤ capacity
+    (∀ d ∈ dur, 0 ≤ d) ∧ (∀ r ∈ res, 0 ≤ r) ∧
+    (noSelectedTask start dur res = true ∨
+        ∀ t : Int, cumul start dur res t ≤ capacity) ∧
+    (noSelectedTask start dur res = true →
+        start.length = 0 ∨ 0 ≤ capacity)
 
-/-- Boolean twin of `cumulativeProp`.  Besides the start times, the
-    completion times are checked as well: the usage function is constant
-    between event points, so the two finite families of checkpoints
-    together with the `0 ≤ capacity` guard capture the universal
-    quantifier (this matters when some resource amounts are negative). -/
+/-- Boolean twin of `cumulativeProp`, obtained by deciding the Prop with the
+    universal time quantifier replaced by its equivalent finite checkpoint
+    form. -/
 def cumulativeB (start dur res : List Int) (capacity : Int) : Bool :=
   decide (start.length = dur.length) && decide (start.length = res.length) &&
-    decide (0 ≤ capacity) &&
-    start.all (fun s => decide (cumul start dur res s ≤ capacity)) &&
-    (taskEnds start dur).all (fun e => decide (cumul start dur res e ≤ capacity))
+    dur.all (fun d => decide (0 ≤ d)) && res.all (fun r => decide (0 ≤ r)) &&
+    if noSelectedTask start dur res then
+      decide (start.length = 0) || decide (0 ≤ capacity)
+    else
+      (start.all (fun s => decide (cumul start dur res s ≤ capacity)) &&
+        (taskEnds start dur).all (fun e =>
+          decide (cumul start dur res e ≤ capacity)))
 
-set_option maxHeartbeats 1000000 in
+/-- The checkpoint reduction: within capacity at every start and completion
+    time implies within capacity at every time (the usage is constant between
+    event points). Nonnegativity of the values is not needed for this
+    direction. -/
+private theorem cumul_checkpoints (start dur res : List Int) (capacity : Int)
+    (hstarts : start.all (fun s => decide (cumul start dur res s ≤ capacity)) = true)
+    (hends : (taskEnds start dur).all
+      (fun e => decide (cumul start dur res e ≤ capacity)) = true)
+    (hcap : 0 ≤ capacity) :
+    ∀ t : Int, cumul start dur res t ≤ capacity := by
+  intro t
+  by_cases hsome : ∃ e, e ∈ start ++ taskEnds start dur ∧ e ≤ t
+  · obtain ⟨x0, hx0mem, hx0le⟩ := hsome
+    have hne : (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) ≠ [] :=
+      List.ne_nil_of_mem (List.mem_filter.mpr ⟨hx0mem, decide_eq_true hx0le⟩)
+    obtain ⟨b0, bs, hfilt⟩ : ∃ x xs,
+        (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) = x :: xs := by
+      cases hf : (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) with
+      | nil => exact absurd hf hne
+      | cons y ys => exact ⟨y, ys, rfl⟩
+    have hbin : List.foldl max b0 bs ∈ b0 :: bs := by
+      rcases foldl_max_mem_or_eq bs b0 with heq | hm
+      · exact List.mem_cons.mpr (Or.inl heq)
+      · exact List.mem_cons.mpr (Or.inr hm)
+    have hbfilt : List.foldl max b0 bs ∈
+        (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) := by
+      rw [hfilt]; exact hbin
+    have hble : List.foldl max b0 bs ≤ t :=
+      of_decide_eq_true (List.mem_filter.mp hbfilt).2
+    have hbcap : cumul start dur res (List.foldl max b0 bs) ≤ capacity := by
+      rcases List.mem_append.mp (List.mem_filter.mp hbfilt).1 with hm | hm
+      · exact of_decide_eq_true (List.all_eq_true.mp hstarts _ hm)
+      · exact of_decide_eq_true (List.all_eq_true.mp hends _ hm)
+    have hcongr : cumul start dur res t = cumul start dur res (List.foldl max b0 bs) := by
+      refine cumul_congr t (List.foldl max b0 bs) start dur res (fun i hi => ?_)
+      have hb0le : b0 ≤ List.foldl max b0 bs := foldl_max_ge_init bs b0
+      constructor
+      · rintro ⟨hsi, hti⟩
+        refine ⟨?_, by omega⟩
+        have hsimem : start.getD i 0 ∈ start := mem_iff_getD.mpr ⟨i, hi, rfl⟩
+        have hsifilt : start.getD i 0 ∈ b0 :: bs := by
+          rw [← hfilt]
+          exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inl hsimem),
+            decide_eq_true hsi⟩
+        rcases List.mem_cons.mp hsifilt with heq | hm
+        · rw [heq]; exact hb0le
+        · exact foldl_max_ge_mem bs b0 _ hm
+      · rintro ⟨hsi, hbi⟩
+        have hielem : start.getD i 0 + dur.getD i 0 ∈ taskEnds start dur :=
+          List.mem_map.mpr ⟨i, List.mem_range.mpr hi, rfl⟩
+        by_cases hiet : start.getD i 0 + dur.getD i 0 ≤ t
+        · have hiefilt : start.getD i 0 + dur.getD i 0 ∈ b0 :: bs := by
+            rw [← hfilt]
+            exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inr hielem),
+              decide_eq_true hiet⟩
+          have hiele : start.getD i 0 + dur.getD i 0 ≤ List.foldl max b0 bs := by
+            rcases List.mem_cons.mp hiefilt with heq | hm
+            · rw [heq]; exact hb0le
+            · exact foldl_max_ge_mem bs b0 _ hm
+          omega
+        · omega
+    rw [hcongr]
+    exact hbcap
+  · have hzero : cumul start dur res t = 0 :=
+      cumul_eq_zero_of_all_gt t start dur res (fun i hi hsi =>
+        hsome ⟨start.getD i 0,
+          List.mem_append.mpr (Or.inl (mem_iff_getD.mpr ⟨i, hi, rfl⟩)), hsi⟩)
+    rw [hzero]
+    exact hcap
+
+/-- Under nonnegative resources, the cumulative usage is nonnegative. -/
+private theorem cumul_nonneg (t : Int) : ∀ (start dur res : List Int),
+    (∀ r ∈ res, 0 ≤ r) → 0 ≤ cumul start dur res t := by
+  intro start
+  induction start with
+  | nil => intro dur res _; exact by simp [cumul]
+  | cons s0 st ih =>
+    intro dur res hres
+    cases dur with
+    | nil => exact by simp [cumul]
+    | cons d0 dt =>
+      cases res with
+      | nil => exact by simp [cumul]
+      | cons r0 rt =>
+        simp only [cumul]
+        by_cases hact : s0 ≤ t ∧ t < s0 + d0
+        · rw [if_pos hact]
+          have h0 : 0 ≤ r0 := hres r0 (List.mem_cons_self ..)
+          have h1 : 0 ≤ cumul st dt rt t :=
+            ih dt rt (fun r hr => hres r (List.mem_cons_of_mem _ hr))
+          omega
+        · rw [if_neg hact]
+          rw [Int.zero_add]
+          exact ih dt rt (fun r hr => hres r (List.mem_cons_of_mem _ hr))
+
+/-- `noSelectedTask = false` means some task has positive duration and
+    resource. -/
+private theorem not_noSelectedTask {start dur res : List Int}
+    (h : noSelectedTask start dur res = false) :
+    ∃ i, i < start.length ∧ 0 < dur.getD i 0 ∧ 0 < res.getD i 0 := by
+  unfold noSelectedTask at h
+  obtain ⟨i, hi, hnot⟩ := List.all_eq_false.mp h
+  simp only [List.mem_range] at hi
+  simp only [Bool.not_eq_true', decide_eq_false_iff_not] at hnot
+  exact ⟨i, hi, Classical.not_not.mp hnot⟩
+
+/-- If some task is selected, the usage is nonnegative somewhere, so the
+    capacity must be nonnegative. -/
+private theorem capacity_nonneg_of_selected {start dur res : List Int}
+    {capacity : Int} (hnr : ∀ r ∈ res, 0 ≤ r)
+    (hs : ∀ s ∈ start, cumul start dur res s ≤ capacity)
+    (hsel : noSelectedTask start dur res = false) : 0 ≤ capacity := by
+  obtain ⟨i, hi, _⟩ := not_noSelectedTask hsel
+  exact Int.le_trans (cumul_nonneg _ start dur res hnr)
+    (hs _ (mem_iff_getD.mpr ⟨i, hi, rfl⟩))
+
 private theorem cumulativeB_iff (start dur res : List Int) (capacity : Int) :
     cumulativeB start dur res capacity = true ↔ cumulativeProp start dur res capacity := by
   unfold cumulativeB cumulativeProp
-  simp only [Bool.and_eq_true, decide_eq_true_iff]
-  constructor
-  · rintro ⟨⟨⟨⟨hlen1, hlen2⟩, hcapD⟩, hstarts⟩, hends⟩
-    have hcap0 : 0 ≤ capacity := hcapD
-    refine ⟨hlen1, hlen2, fun t => ?_⟩
-    by_cases hsome : ∃ e, e ∈ start ++ taskEnds start dur ∧ e ≤ t
-    · obtain ⟨x0, hx0mem, hx0le⟩ := hsome
-      have hne : (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) ≠ [] :=
-        List.ne_nil_of_mem (List.mem_filter.mpr ⟨hx0mem, decide_eq_true hx0le⟩)
-      obtain ⟨b0, bs, hfilt⟩ : ∃ x xs,
-          (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) = x :: xs := by
-        cases hf : (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) with
-        | nil => exact absurd hf hne
-        | cons y ys => exact ⟨y, ys, rfl⟩
-      have hbin : List.foldl max b0 bs ∈ b0 :: bs := by
-        rcases foldl_max_mem_or_eq bs b0 with heq | hm
-        · exact List.mem_cons.mpr (Or.inl heq)
-        · exact List.mem_cons.mpr (Or.inr hm)
-      have hbfilt : List.foldl max b0 bs ∈
-          (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) := by
-        rw [hfilt]; exact hbin
-      have hble : List.foldl max b0 bs ≤ t := of_decide_eq_true (List.mem_filter.mp hbfilt).2
-      have hbcap : cumul start dur res (List.foldl max b0 bs) ≤ capacity := by
-        rcases List.mem_append.mp (List.mem_filter.mp hbfilt).1 with hm | hm
-        · exact of_decide_eq_true (List.all_eq_true.mp hstarts _ hm)
-        · exact of_decide_eq_true (List.all_eq_true.mp hends _ hm)
-      have hcongr : cumul start dur res t = cumul start dur res (List.foldl max b0 bs) := by
-        refine cumul_congr t (List.foldl max b0 bs) start dur res (fun i hi => ?_)
-        have hb0le : b0 ≤ List.foldl max b0 bs := foldl_max_ge_init bs b0
-        constructor
-        · rintro ⟨hsi, hti⟩
-          have hble2 : List.foldl max b0 bs ≤ t := hble
-          refine ⟨?_, by omega⟩
-          have hsimem : start.getD i 0 ∈ start := mem_iff_getD.mpr ⟨i, hi, rfl⟩
-          have hsi2 : start.getD i 0 ≤ t := hsi
-          have hsifilt : start.getD i 0 ∈ b0 :: bs := by
-            rw [← hfilt]
-            exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inl hsimem), decide_eq_true hsi⟩
-          rcases List.mem_cons.mp hsifilt with heq | hm
-          · rw [heq]; exact hb0le
-          · exact foldl_max_ge_mem bs b0 _ hm
-        · rintro ⟨hsi, hbi⟩
-          have hielem : start.getD i 0 + dur.getD i 0 ∈ taskEnds start dur :=
-            List.mem_map.mpr ⟨i, List.mem_range.mpr hi, rfl⟩
-          by_cases hiet : start.getD i 0 + dur.getD i 0 ≤ t
-          · have hiefilt : start.getD i 0 + dur.getD i 0 ∈ b0 :: bs := by
-              rw [← hfilt]
-              exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inr hielem), decide_eq_true hiet⟩
-            have hiele : start.getD i 0 + dur.getD i 0 ≤ List.foldl max b0 bs := by
-              rcases List.mem_cons.mp hiefilt with heq | hm
-              · rw [heq]; exact hb0le
-              · exact foldl_max_ge_mem bs b0 _ hm
-            omega
-          · omega
-      rw [hcongr]
-      exact hbcap
-    · have hzero : cumul start dur res t = 0 :=
-        cumul_eq_zero_of_all_gt t start dur res (fun i hi hsi =>
-          hsome ⟨start.getD i 0,
-            List.mem_append.mpr (Or.inl (mem_iff_getD.mpr ⟨i, hi, rfl⟩)), hsi⟩)
-      rw [hzero]
-      exact hcap0
-  · rintro ⟨hlen1, hlen2, hall⟩
-    have hzero : cumul start dur res (List.foldl min 0 start - 1) = 0 := by
-      refine cumul_eq_zero_of_all_gt _ _ _ _ (fun i hi hsi => ?_)
-      have hmem : start.getD i 0 ∈ start := mem_iff_getD.mpr ⟨i, hi, rfl⟩
-      have hle := foldl_min_le_mem start 0 (start.getD i 0) hmem
-      omega
-    have hcap : 0 ≤ capacity := by
-      have h1 := hall (List.foldl min 0 start - 1)
-      rw [hzero] at h1
-      exact h1
-    have hs : start.all (fun s => decide (cumul start dur res s ≤ capacity)) = true :=
-      List.all_eq_true.mpr (fun s _ => decide_eq_true (hall s))
-    have he : (taskEnds start dur).all (fun e => decide (cumul start dur res e ≤ capacity)) = true :=
-      List.all_eq_true.mpr (fun e he => by
-        obtain ⟨i, _, heq⟩ := List.mem_map.mp he
-        rw [← heq]
-        exact decide_eq_true (hall _))
-    simp only [hs, he, hlen1,
-      and_true, true_and]
-    exact ⟨hlen1 ▸ hlen2, hcap⟩
+  by_cases hsel : noSelectedTask start dur res = true
+  · rw [hsel]
+    simp only [ite_true, Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true]
+    constructor
+    · rintro ⟨h1, h2⟩
+      refine ⟨h1.1.1.1, h1.1.1.2, h1.1.2, h1.2, Or.inl trivial, fun _ => ?_⟩
+      simp only [Bool.or_eq_true, decide_eq_true_iff] at h2
+      exact h2
+    · rintro ⟨hlen1, hlen2, hnD, hnR, _, hcap⟩
+      exact ⟨⟨⟨⟨hlen1, hlen2⟩, hnD⟩, hnR⟩, by
+        simp only [Bool.or_eq_true, decide_eq_true_iff]
+        exact hcap trivial⟩
+  · have hsel' : noSelectedTask start dur res = false := by
+      cases h : noSelectedTask start dur res with
+      | false => rfl
+      | true => exact absurd h hsel
+    rw [hsel']
+    simp only [Bool.false_eq_true, ite_false, Bool.and_eq_true,
+      decide_eq_true_iff, List.all_eq_true]
+    constructor
+    · rintro ⟨⟨⟨⟨hlen1, hlen2⟩, hnD⟩, hnR⟩, ⟨hs, he⟩⟩
+      refine ⟨hlen1, hlen2, hnD, hnR, Or.inr ?_, False.elim⟩
+      exact cumul_checkpoints start dur res capacity
+        (List.all_eq_true.mpr (fun s hs' => decide_eq_true (hs s hs')))
+        (List.all_eq_true.mpr (fun e he' => decide_eq_true (he e he')))
+        (capacity_nonneg_of_selected hnR (fun s hs' => hs s hs') hsel')
+    · rintro ⟨hlen1, hlen2, hnD, hnR, hcase, _⟩
+      rcases hcase with hbad | hall
+      · exact hbad.elim
+      · refine ⟨⟨⟨⟨hlen1, hlen2⟩, hnD⟩, hnR⟩, ⟨?_, ?_⟩⟩
+        · exact fun s _ => hall s
+        · exact fun e _ => hall e
 
 /-! ## Extensional: `fzn_table_int` -/
 

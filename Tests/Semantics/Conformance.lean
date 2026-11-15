@@ -205,3 +205,35 @@ theorem gcc_closed_distinct_cover_accepted :
     fullInterpB ⟨"fzn_global_cardinality_closed"⟩
       [.array [.int 1, .int 2], .array [.int 1, .int 2],
        .array [.int 1, .int 1]] = true := by decide
+
+-- ## SC-09 (T4): cumulative empty input and nonnegative contract
+-- `cumulative.mzn` asserts equal index sets and `duration[i] >= 0`,
+-- `resource[i] >= 0`; a violating solution is inadmissible and false.
+-- `fzn_cumulative.mzn` selects Tasks by `ub(...) > 0`, which on values is
+-- `duration[i] > 0 ∧ resource[i] > 0`. With no selected task the result is
+-- `length(start) = 0 ∨ capacity ≥ 0`.
+
+theorem cumulative_empty_negative_capacity_accepted :
+    fullInterpB ⟨"fzn_cumulative"⟩
+      [.array ([] : List Value), .array ([] : List Value),
+       .array ([] : List Value), .int (-1)] = true := by decide
+
+theorem cumulative_no_selected_task_nonempty_rejected :
+    fullInterpB ⟨"fzn_cumulative"⟩
+      [.array [.int 0], .array [.int 0], .array [.int 3], .int (-1)] = false := by
+  decide
+
+theorem cumulative_negative_resource_rejected :
+    fullInterpB ⟨"fzn_cumulative"⟩
+      [.array [.int 0], .array [.int 2], .array [.int (-1)], .int 5] = false := by
+  decide
+
+theorem cumulative_overlap_exceeds_capacity_rejected :
+    fullInterpB ⟨"fzn_cumulative"⟩
+      [.array [.int 0, .int 0], .array [.int 2, .int 2],
+       .array [.int 2, .int 2], .int 3] = false := by decide
+
+theorem cumulative_disjoint_tasks_accepted :
+    fullInterpB ⟨"fzn_cumulative"⟩
+      [.array [.int 0, .int 2], .array [.int 2, .int 2],
+       .array [.int 2, .int 2], .int 2] = true := by decide
