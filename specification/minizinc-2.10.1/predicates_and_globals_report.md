@@ -1,12 +1,456 @@
-# FlatZinc predicates and global constraints (MiniZinc 2.10.1)
+# Reviewed FlatZinc semantic-conformance inventory
 
-This report inventories every FlatZinc built-in predicate and every global
-constraint of the MiniZinc 2.10.1 standard library, as published in the
-handbook. It is the input checklist for the Lean formalization of predicate
-semantics (solution checking). The project formalizes the integer/Boolean
-fragment (no floats), per
-`specification/flatzinc_specification_assumptions.md`; float entries are
-listed for completeness but marked out of scope.
+## Executive assessment
+
+Review date: **16 November 2026**. Scope begins at FlatZinc and excludes the
+MiniZinc translator. This is a source-contract review against the pinned
+handbook and immutable libminizinc commit
+`c3448c48e7f05f13805616cfd1b9e94972eef58c`. It is an agent review,
+not an independent human sign-off or a formal proof of correspondence to prose.
+
+Every active `stdSig`/`globalsSig` name has a row: **218 implemented names**,
+plus published builtin/function exclusions and five explicitly unsupported
+globals, for **281 rows**. The evidence records **147 immutable upstream source
+file hashes** and **42 local source/reference hashes**. The machine-readable
+[inventory](semantic_conformance.json) stores each contract, both signatures,
+implementation location, edge cases, source link/hash and finding links.
+
+**The inventory review is complete for this declared scope, with no open
+recorded findings. Upstream semantic equivalence remains unproved, and the
+13 restricted rows retain explicit admissibility obligations.** All **15 findings** are
+repaired and regression-tested. An inventory completion is not permission to call every entry
+conformant. Unlisted globals, reified/float/optional overloads and other native
+ABIs are unsupported unless explicitly inventoried; the 118 high-level global
+names in the historical catalogue below are not 118 implemented native ABIs.
+
+| Disposition | Rows | Meaning |
+| --- | ---: | --- |
+| `reviewed` | 183 | Source comparison found no discrepancy for well-typed, defined inputs within the stated fragment; not a kernel-checked upstream equivalence theorem. |
+| `restricted` | 13 | Agreement requires additional explicit premises not globally guaranteed by the interface. |
+| `extension` | 15 | Project-specific spelling or a signature extension; not strict native ABI conformance. |
+| `nonconformant` | 0 | A concrete signature/semantic discrepancy or an unestablished representation contract remains; linked findings prevent a clean conformance gate. |
+| `unsupported` | 70 | No implementation signature or explicitly excluded input family. |
+
+Counts are predicates/functions, not proof obligations, supported input shapes,
+or independently certified implementations. `reviewed` applies to well-typed,
+defined inputs in the stated fragment; it is not a total native-input theorem.
+`restricted` rows expose additional unestablished admissibility premises.
+
+## Reproduce and maintain the review
+
+```bash
+python3 -B audits/check_semantic_inventory.py
+python3 -B -m unittest Tests.Audits.test_semantic_inventory
+lake build LeanFzn.Semantics +Tests.Semantics.Conformance
+# Optional: verify a fresh immutable libminizinc source download:
+python3 -B audits/check_semantic_inventory.py --upstream-root PATH_TO_TREE
+# Required review-freshness check; does not prove upstream equivalence:
+python3 -B audits/check_semantic_inventory.py --require-clean
+```
+
+The default validator checks coverage and freshness. The clean check is
+expected to pass on this revision. No automatic refresh/approval
+command is provided: changes to a semantic helper, signature, interpretation
+or pinned local reference require renewed review. Axiom hygiene and PGO/native
+comparison gates cannot substitute for this check. Both acceptance and release
+runners now invoke the clean check; the release
+runner validates and preserves the frozen review evidence. A passing check
+alone does not establish a conformance claim. MiniZinc is not needed to run
+the checks above.
+
+
+## Repairs and validation
+
+| Finding | Repair | Regression evidence |
+| --- | --- | --- |
+| SC-01 | Both upstream overloads are registered; decoders use the native argument order and explicit N/E | Arity/order rejection, N/E length and isolated-node witnesses |
+| SC-02 | Set-valued `F`, enforced state/symbol bounds and union-accumulating NFA frontier | Set/indicator `F`, empty word, bad transition and NFA union cases |
+| SC-03 | Flat row-major matrix ABI with recovered dimensions, or explicit rejection where dimensions are not recoverable | Flat/nested shape, length and dimension-recovery witnesses |
+| SC-04 | Per-read shape/partiality gates preserving raw three-valued masking; six residual rows are explicitly restricted | Mismatched-length, out-of-range, first-true and last-write witnesses (T10-W1..W4) |
+| SC-05 | Graph relations transcribed with explicit node/edge validity, endpoint and degree conjuncts | DAG unselected-node, isolated node and path degree witnesses |
+| SC-06 | Literal deterministic `fzn_mdd`; cost MDD gated to the canonical layered fragment; nondeterministic walk remains restricted | Reviewer self-loop counterexample, deterministic accept/reject, cost-total and canonical-gate witnesses |
+| SC-07 | Negative widths rejected; zero-width windows check the window bounds; vacuous overlong windows kept | Zero-width, negative-width and overlong-window witnesses |
+| SC-08 | Out-of-range coefficient references make the predicate false; the defined case is summed directly | Dropped-index and repeated-index witnesses |
+| SC-09 | Empty-task and negative-resource behavior aligned with the raw native decomposition | Empty arrays with negative capacity, negative resources and positive task cases |
+| SC-10 | The implied `sum(count) <= length(xs)` condition is enforced; duplicate cover values reproduced | Duplicate-cover and short-count witnesses |
+| SC-11 | Both disjunctive variants enforce nonnegative durations in Prop and Bool | Negative singleton and zero-duration strict/nonstrict cases |
+| SC-12 | Cumulatives uses the assigned machine bound; native machine ids retain `min_machine` offset | Asymmetric upper/lower bounds, offset and empty tasks |
+| SC-13 | Conditional partiality leaves `b` unrestricted when no condition is true | All-false, selected-false and first-true cases |
+| SC-14 | Knapsack enforces nonnegative counts and both totals | Negative count/totals and a positive solution |
+| SC-15 | Set enumerations are deduplicated for intersection cardinality and sum indices | Duplicate intersection elements and repeated coefficient indices |
+
+`LeanFzn.Semantics` and `Tests.Semantics.Conformance` compiled successfully with
+Lean 4.35.0. This checks the edited Boolean/Prop agreement proofs and **472**
+kernel-evaluated regression theorems. The inventory validator passed with all
+147 downloaded source hashes checked, and its **12** failure-path tests passed.
+The whole-project build passed (`LeanFzn`, `LeanFzn.Legacy`, `Tests`,
+`Tests.Legacy`, `leanfzn` and the four semantic executables; 764 jobs). The
+final Conformance leaf was rechecked after its last test edit. The native
+suites passed **646** checks: globals 52, stdlib 64, coverage 466 and
+Gecode-derived 64. The coverage suite exercised all 218 registered names;
+a separate Lean dispatch-list query matched all 218 inventory rows exactly.
+The eight repaired agreement-theorem axiom profiles used only `propext`,
+`Classical.choice` and `Quot.sound`. These are finite test/build and scoped
+axiom checks, not a passing full acceptance/release gate or upstream
+equivalence proof.
+
+### Concrete observations
+
+Every defect observation from the review is now a kernel-checked
+regression in `Tests/Semantics/Conformance.lean` with the upstream
+expected value. No open observation remains.
+
+## Theorem-by-theorem boundary audit
+
+| Result | Statement complete? | Proof valid? | Dependencies checked? | Edge cases | Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Edited disjunctive/knapsack/cumulatives/partiality Boolean-to-Prop bridges | Relative to local denotations | Kernel accepted | Semantic library rebuilt | 472 new regressions | verified-no-issue-found | Does not quantify over arbitrary upstream programs |
+| Other per-name Boolean/Prop bridges | Relative to local denotations | Semantic library builds; no full line-by-line proof re-review | Local semantic dependency cone built | Listed per family/row | not-fully-checked | Neither shared definitions nor agreement prove upstream fidelity |
+| Upstream-to-local semantic equivalence for every native input | Explicit total ABI/admissibility contracts for the repaired entries | No such complete proof established | Closed findings above | Repairs and regressions recorded | restricted | This inventory does not invent an equivalence theorem |
+
+## Assumption and definition audit
+
+| Rule | Contract | Disposition | Evidence and limitation |
+| --- | --- | --- | --- |
+| MR-01 | One ordered sequence of predicate, parameter, variable, constraint items and one solve item; full consumption. | reviewed | `LeanFzn/Parser/Grammar.lean:GrModel`. Independent grammar/parser correspondence exists; character-level lexer fidelity is a separate obligation, outside this inventory. |
+| MR-02 | Unique predicate names, formal argument names, and a shared unique parameter/variable namespace. | reviewed | `LeanFzn/Semantics/Model.lean:WellFormed`. Names and expression types are statically checked; runtime checker does not trust user-declared predicate meanings. |
+| MR-03 | Parameters are fixed by literal declarations and cannot be reassigned by a solution. | reviewed | `LeanFzn/Semantics/Model.lean:ParamHonest`. Satisfies alone omits this condition. Certification statements about instances must use Satisfies AND ParamHonest, or IsSolution. |
+| MR-04 | Finite ranges are closed; set equality is extensional and duplicates do not change membership/cardinality. | reviewed | `LeanFzn/Semantics/Model.lean:BasicVarType.contains`. Reversed ranges denote empty sets; explicit empty-domain inputs can be unsupported by search without a false verdict. |
+| MR-05 | All variable domain restrictions and initializer equalities hold simultaneously. | policy | `LeanFzn/Semantics/Model.lean:initializerHolds`. Forward references and alias cycles use the documented global-environment policy R5/R6; inconsistent initializers are unsatisfiable, not overwritten. |
+| MR-06 | Arrays are flat, 1-based, have declared lengths and correctly typed elements. | restricted | `LeanFzn/Semantics/Model.lean:WellFormed`. Static lengths do not establish every cross-argument shape condition. Multidimensional native lowering needs SC-03; parallel lengths need SC-04. |
+| MR-07 | Satisfaction requires all constraints, domains and initializers; optimization additionally attains an objective and compares all parameter-honest solutions. | reviewed | `LeanFzn/Semantics/Model.lean:IsSolution`. Integer objective only; supported solver objective shapes are narrower than typed AST objectives. Completion is required for optimality. |
+| MR-08 | Search annotations may affect strategy but cannot alter satisfying assignments. | policy | `LeanFzn/Integration/Config/Annotations.lean`. Annotation grammar extensions R28 and escape rules R11 are documented. Verify strategy soundness separately from semantic interpretation. |
+| MR-09 | Use exact mathematical integers and finite integer sets. | policy | `LeanFzn/Semantics/Model.lean:Value`. A1 explicitly chooses unbounded Lean Int. Machine-specific integer limits must be separate checks; floats/optional values are excluded. |
+| MR-10 | Checker solutions assign declared variables once; omissions may be completed from evaluable declaration initializers. | policy | `LeanFzn/Checker/Runtime/Check.lean:checkModelSolution`. A7/A10 is a checker-interface policy, not a FlatZinc model-semantics ambiguity; projected output without an initializer extension can be rejected. |
+| MR-11 | The documented language admits scalar parameters and selected annotation/index spelling extensions. | policy | `specification/flatzinc_specification_assumptions.md:R27/R28/R29`. These policies must remain distinguishable from exact BNF conformance; they are not evidence that MiniZinc translation is certified. |
+| MR-12 | Registered native predicate names may be resolved from the external signature table without a model declaration. | policy | `LeanFzn/Semantics/Model.lean:Model.sigEnv`. The FlatZinc prose requires nonstandard predicate declarations. Accepting undeclared registered names is a project interface extension, not exact context-sensitive input conformance. Declared signatures take precedence for typing; dynamic meaning still comes from the fixed name table, not a user predicate body. |
+
+The reference for model rules is the [pinned FlatZinc specification]
+(https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/docs/en/fzn-spec.rst)
+and the local [grammar](fzn-grammar.mzn). The [assumptions document]
+(../flatzinc_specification_assumptions.md) records the deliberate policies;
+they must not be confused with implementation discrepancies or checker-interface
+choices. Lexical certification, compiler correctness, search correctness and
+I/O trace refinement remain separate obligations.
+
+## Additional issues
+
+- **MODERATE:** old semantic module headers cite removed G-series assumptions
+  and old filenames. Those references do not establish an upstream contract;
+  the exact sources and findings in this inventory supersede them.
+- **MODERATE:** name support in the solution checker is broader than compilation
+  support in the solver. A row does not promise that all argument shapes compile.
+- **MINOR:** the historical catalogue has duplicate category entries (notably
+  `set_in`) and high-level names. Its totals are not the active signature totals.
+
+## Unresolved proof obligations
+
+- [x] Close SC-01 through SC-10 with an implementation repair or an explicit,
+  verified admissibility/representation contract.
+- [ ] Prove upstream-to-local correspondence on the admitted fragment; do not
+  substitute Boolean/Prop agreement for that statement.
+- [ ] Validate text-level inputs so that no unchecked shape/partiality premise
+  is silently inherited from MiniZinc translation.
+- [ ] Obtain independent human review of the reviewed formal specification.
+- [ ] Run the clean semantic check and existing full/release gates on one
+  complete committed revision before making an artifact-level claim.
+
+## Per-name reviewed inventory
+
+Detailed contracts, edge cases, exact signatures and hashes are in
+[semantic_conformance.json](semantic_conformance.json). Every entry below was
+assigned an explicit disposition. Source comparison does not automatically
+approve a row because the implementation has a theorem named `_iff`.
+
+| Name | Disposition | Implementation | Findings / source |
+| --- | --- | --- | --- |
+| `all_different` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1065) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_all_different_int.mzn) |
+| `all_different_except_0` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1069) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_alldifferent_except_0.mzn) |
+| `array_bool_and` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1176) | —; [reference](lib-flatzinc-bool.html#array-bool-and) |
+| `array_bool_element` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1135) | —; [reference](lib-flatzinc-bool.html#array-bool-element) |
+| `array_bool_or` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1184) | —; [reference](lib-flatzinc-deprecated.html#array-bool-or) |
+| `array_bool_xor` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1180) | —; [reference](lib-flatzinc-bool.html#array-bool-xor) |
+| `array_float_element` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#array-float-element) |
+| `array_float_maximum` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-two.html#array-float-maximum) |
+| `array_float_minimum` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-two.html#array-float-minimum) |
+| `array_int_element` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1123) | —; [reference](lib-flatzinc-int.html#array-int-element) |
+| `array_int_maximum` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1168) | —; [reference](lib-flatzinc-two.html#array-int-maximum) |
+| `array_int_minimum` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1172) | —; [reference](lib-flatzinc-two.html#array-int-minimum) |
+| `array_set_element` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1147) | —; [reference](lib-flatzinc-set.html#array-set-element) |
+| `array_var_bool_element` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1139) | —; [reference](lib-flatzinc-bool.html#array-var-bool-element) |
+| `array_var_bool_element2d_nonshifted` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twofivetwo.html#array-var-bool-element2d-nonshifted) |
+| `array_var_bool_element_nonshifted` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1143) | —; [reference](lib-flatzinc-twootwo.html#array-var-bool-element-nonshifted) |
+| `array_var_float_element` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#array-var-float-element) |
+| `array_var_float_element2d_nonshifted` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twofivetwo.html#array-var-float-element2d-nonshifted) |
+| `array_var_float_element_nonshifted` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twootwo.html#array-var-float-element-nonshifted) |
+| `array_var_int_element` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1127) | —; [reference](lib-flatzinc-int.html#array-var-int-element) |
+| `array_var_int_element2d_nonshifted` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twofivetwo.html#array-var-int-element2d-nonshifted) |
+| `array_var_int_element_nonshifted` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1131) | —; [reference](lib-flatzinc-twootwo.html#array-var-int-element-nonshifted) |
+| `array_var_set_element` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1154) | —; [reference](lib-flatzinc-set.html#array-var-set-element) |
+| `array_var_set_element2d_nonshifted` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twofivetwo.html#array-var-set-element2d-nonshifted) |
+| `array_var_set_element_nonshifted` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1161) | —; [reference](lib-flatzinc-twootwo.html#array-var-set-element-nonshifted) |
+| `bool2int` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L924) | —; [reference](lib-flatzinc-bool.html#bool2int) |
+| `bool_and` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L877) | —; [reference](lib-flatzinc-bool.html#bool-and) |
+| `bool_clause` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L910) | —; [reference](lib-flatzinc-bool.html#bool-clause) |
+| `bool_clause_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L916) | —; [reference](lib-flatzinc-two.html#bool-clause-reif) |
+| `bool_eq` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L869) | —; [reference](lib-flatzinc-bool.html#bool-eq) |
+| `bool_eq_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L897) | —; [reference](lib-flatzinc-bool.html#bool-eq-reif) |
+| `bool_le` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L889) | —; [reference](lib-flatzinc-bool.html#bool-le) |
+| `bool_le_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L901) | —; [reference](lib-flatzinc-bool.html#bool-le-reif) |
+| `bool_lin_eq` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1115) | SC-04; [reference](lib-flatzinc-bool.html#bool-lin-eq) |
+| `bool_lin_le` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1119) | SC-04; [reference](lib-flatzinc-bool.html#bool-lin-le) |
+| `bool_lt` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L893) | —; [reference](lib-flatzinc-bool.html#bool-lt) |
+| `bool_lt_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L905) | —; [reference](lib-flatzinc-bool.html#bool-lt-reif) |
+| `bool_not` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L873) | —; [reference](lib-flatzinc-bool.html#bool-not) |
+| `bool_or` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L881) | —; [reference](lib-flatzinc-bool.html#bool-or) |
+| `bool_xor` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L885) | —; [reference](lib-flatzinc-bool.html#bool-xor) |
+| `dom` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L977) | —; [reference](lib-flatzinc-set.html#set-in) |
+| `float_abs` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-abs) |
+| `float_acos` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-acos) |
+| `float_acosh` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-acosh) |
+| `float_asin` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-asin) |
+| `float_asinh` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-asinh) |
+| `float_atan` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-atan) |
+| `float_atanh` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-atanh) |
+| `float_ceil` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twosevenone.html#float-ceil) |
+| `float_cos` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-cos) |
+| `float_cosh` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-cosh) |
+| `float_div` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-div) |
+| `float_dom` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twoone.html#float-dom) |
+| `float_eq` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-eq) |
+| `float_eq_reif` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-eq-reif) |
+| `float_exp` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-exp) |
+| `float_floor` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twosevenone.html#float-floor) |
+| `float_in` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twoone.html#float-in) |
+| `float_le` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-le) |
+| `float_le_reif` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-le-reif) |
+| `float_lin_eq` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lin-eq) |
+| `float_lin_eq_reif` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lin-eq-reif) |
+| `float_lin_le` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lin-le) |
+| `float_lin_le_reif` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lin-le-reif) |
+| `float_lin_lt` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lin-lt) |
+| `float_lin_lt_reif` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lin-lt-reif) |
+| `float_lin_ne` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lin-ne) |
+| `float_lin_ne_reif` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lin-ne-reif) |
+| `float_ln` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-ln) |
+| `float_log10` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-log10) |
+| `float_log2` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-log2) |
+| `float_lt` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lt) |
+| `float_lt_reif` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-lt-reif) |
+| `float_max` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-max) |
+| `float_min` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-min) |
+| `float_ne` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-ne) |
+| `float_ne_reif` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-ne-reif) |
+| `float_plus` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-plus) |
+| `float_pow` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-pow) |
+| `float_round` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twosevenone.html#float-round) |
+| `float_set_in` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twothreethree.html#float-set-in) |
+| `float_sin` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-sin) |
+| `float_sinh` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-sinh) |
+| `float_sqrt` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-sqrt) |
+| `float_tan` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-tan) |
+| `float_tanh` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-tanh) |
+| `float_times` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#float-times) |
+| `fzn_all_different_int` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L805) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_all_different_int.mzn) |
+| `fzn_all_different_set` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L809) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_all_different_set.mzn) |
+| `fzn_all_disjoint` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L813) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_all_disjoint.mzn) |
+| `fzn_all_equal_int` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L817) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_all_equal_int.mzn) |
+| `fzn_all_equal_set` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L821) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_all_equal_set.mzn) |
+| `fzn_alldifferent_except` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L825) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_alldifferent_except.mzn) |
+| `fzn_alldifferent_except_0` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L829) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_alldifferent_except_0.mzn) |
+| `fzn_alternative` | unsupported | [Globals](../../LeanFzn/Semantics/Globals.lean) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_alternative.mzn) |
+| `fzn_among` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L418) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_among.mzn) |
+| `fzn_arg_sort_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L742) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_sort_int.mzn) |
+| `fzn_arg_val_bool` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L712) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_val_bool.mzn) |
+| `fzn_arg_val_int` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L708) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_val_int.mzn) |
+| `fzn_array_int_union` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1014) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_array_int_union.mzn) |
+| `fzn_array_set_intersect` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1022) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_array_set_intersect.mzn) |
+| `fzn_array_set_union` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1018) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_array_set_union.mzn) |
+| `fzn_at_least_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L422) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_least_int.mzn) |
+| `fzn_at_least_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L530) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_least_set.mzn) |
+| `fzn_at_most1` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L994) | SC-15; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_most1.mzn) |
+| `fzn_at_most_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L426) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_most_int.mzn) |
+| `fzn_at_most_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L534) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_most_set.mzn) |
+| `fzn_bin_packing` | restricted | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1201) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_bin_packing.mzn) |
+| `fzn_bin_packing_capa` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1205) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_bin_packing_capa.mzn) |
+| `fzn_bin_packing_load` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1209) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_bin_packing_load.mzn) |
+| `fzn_bounded_dpath` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1309) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_bounded_dpath_int.mzn) |
+| `fzn_bounded_path` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1302) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_bounded_path_int.mzn) |
+| `fzn_circuit` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1247) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_circuit.mzn) |
+| `fzn_connected` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1264) | SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_connected.mzn) |
+| `fzn_cost_mdd` | restricted | [Regular](../../LeanFzn/Semantics/Globals/Regular.lean#L966) | SC-04, SC-06; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cost_mdd.mzn) |
+| `fzn_cost_regular` | restricted | [Regular](../../LeanFzn/Semantics/Globals/Regular.lean#L953) | SC-02; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cost_regular.mzn) |
+| `fzn_count_eq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L434) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq.mzn) |
+| `fzn_count_eq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L438) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_par.mzn) |
+| `fzn_count_eq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L502) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_set.mzn) |
+| `fzn_count_eq_set_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L506) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_set_par.mzn) |
+| `fzn_count_geq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L442) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq.mzn) |
+| `fzn_count_geq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L446) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq_par.mzn) |
+| `fzn_count_geq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L510) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq_set.mzn) |
+| `fzn_count_gt` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L450) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt.mzn) |
+| `fzn_count_gt_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L454) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt_par.mzn) |
+| `fzn_count_gt_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L514) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt_set.mzn) |
+| `fzn_count_leq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L458) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq.mzn) |
+| `fzn_count_leq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L462) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq_par.mzn) |
+| `fzn_count_leq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L518) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq_set.mzn) |
+| `fzn_count_lt` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L466) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt.mzn) |
+| `fzn_count_lt_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L470) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt_par.mzn) |
+| `fzn_count_lt_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L522) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt_set.mzn) |
+| `fzn_count_neq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L474) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq.mzn) |
+| `fzn_count_neq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L478) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq_par.mzn) |
+| `fzn_count_neq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L526) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq_set.mzn) |
+| `fzn_cumulative` | restricted | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1237) | SC-09; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cumulative.mzn) |
+| `fzn_cumulatives` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L768) | SC-04, SC-12; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cumulatives.mzn) |
+| `fzn_cumulatives_decomp` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L773) | SC-04, SC-12; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cumulatives_decomp.mzn) |
+| `fzn_dag` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1260) | SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dag.mzn) |
+| `fzn_dconnected` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1268) | SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dconnected.mzn) |
+| `fzn_diffn` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1217) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_diffn.mzn) |
+| `fzn_diffn_k` | unsupported | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L796) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_diffn_k.mzn) |
+| `fzn_diffn_nonoverlap_k` | reviewed | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L792) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_diffn_k.mzn) |
+| `fzn_diffn_nonstrict` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1221) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_diffn_nonstrict.mzn) |
+| `fzn_diffn_nonstrict_k` | unsupported | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L800) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_diffn_nonstrict_k.mzn) |
+| `fzn_disjoint` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L982) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_disjoint.mzn) |
+| `fzn_disjunctive` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1229) | SC-04, SC-11; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_disjunctive.mzn) |
+| `fzn_disjunctive_strict` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1233) | SC-04, SC-11; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_disjunctive_strict.mzn) |
+| `fzn_distribute` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L482) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_distribute.mzn) |
+| `fzn_dpath` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1297) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dpath_int.mzn) |
+| `fzn_dreachable` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1277) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dreachable_int.mzn) |
+| `fzn_dsteiner` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1320) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dsteiner.mzn) |
+| `fzn_dtree` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1287) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dtree_int.mzn) |
+| `fzn_dwst` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1328) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dwst.mzn) |
+| `fzn_exactly_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L430) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_exactly_int.mzn) |
+| `fzn_exactly_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L538) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_exactly_set.mzn) |
+| `fzn_geost` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L778) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_geost.mzn) |
+| `fzn_geost_bb` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L782) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_geost_bb.mzn) |
+| `fzn_geost_nonoverlap_k` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1225) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_geost_nonoverlap_k.mzn) |
+| `fzn_geost_smallest_bb` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L787) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_geost_smallest_bb.mzn) |
+| `fzn_global_cardinality` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L486) | SC-04, SC-10; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality.mzn) |
+| `fzn_global_cardinality_closed` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L490) | SC-04, SC-10; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_closed.mzn) |
+| `fzn_global_cardinality_low_up` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L494) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_low_up.mzn) |
+| `fzn_global_cardinality_low_up_closed` | restricted | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L498) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_low_up_closed.mzn) |
+| `fzn_if_then_else_bool` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1249) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_bool.mzn) |
+| `fzn_if_then_else_int` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1245) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_int.mzn) |
+| `fzn_if_then_else_partiality` | reviewed | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L808) | SC-04, SC-13; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_partiality.mzn) |
+| `fzn_if_then_else_set` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1253) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_set.mzn) |
+| `fzn_if_then_else_var_bool` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1249) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_var_bool.mzn) |
+| `fzn_if_then_else_var_int` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1245) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_var_int.mzn) |
+| `fzn_if_then_else_var_set` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1253) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_var_set.mzn) |
+| `fzn_increasing_bool` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L730) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_increasing_bool.mzn) |
+| `fzn_increasing_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L726) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_increasing_int.mzn) |
+| `fzn_int_set_channel` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L688) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_int_set_channel.mzn) |
+| `fzn_inverse` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L680) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_inverse.mzn) |
+| `fzn_inverse_in_range` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L684) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_inverse_in_range.mzn) |
+| `fzn_knapsack` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1213) | SC-04, SC-14; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_knapsack.mzn) |
+| `fzn_lex2` | unsupported | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L288) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex2.mzn) |
+| `fzn_lex_chain_greater_int` | extension | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L300) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_chain_less_int.mzn) |
+| `fzn_lex_chain_greatereq_int` | extension | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L304) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_chain_lesseq_int.mzn) |
+| `fzn_lex_chain_greatereq_orbitope` | extension | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L308) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_chain_lesseq_orbitope.mzn) |
+| `fzn_lex_chain_less_int` | unsupported | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L280) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_chain_less_int.mzn) |
+| `fzn_lex_chain_lesseq_int` | unsupported | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L284) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_chain_lesseq_int.mzn) |
+| `fzn_lex_chain_lesseq_orbitope` | unsupported | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L296) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_chain_lesseq_orbitope.mzn) |
+| `fzn_lex_greater_int` | extension | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L272) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_less_int.mzn) |
+| `fzn_lex_greatereq_int` | extension | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L276) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_lesseq_int.mzn) |
+| `fzn_lex_less_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L718) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_less_int.mzn) |
+| `fzn_lex_lesseq_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L722) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_lex_lesseq_int.mzn) |
+| `fzn_link_set_to_booleans` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L692) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_link_set_to_booleans.mzn) |
+| `fzn_maximum_arg_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L746) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_max_int.mzn) |
+| `fzn_mdd` | reviewed | [Regular](../../LeanFzn/Semantics/Globals/Regular.lean#L958) | SC-04, SC-06; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_mdd.mzn) |
+| `fzn_mdd_nondet` | restricted | [Regular](../../LeanFzn/Semantics/Globals/Regular.lean#L962) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_mdd_nondet.mzn) |
+| `fzn_member_bool` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L700) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_member_bool.mzn) |
+| `fzn_member_int` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L696) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_member_int.mzn) |
+| `fzn_member_set` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L704) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_member_set.mzn) |
+| `fzn_minimum_arg_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L753) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_min_int.mzn) |
+| `fzn_neural_net` | unsupported | [Globals](../../LeanFzn/Semantics/Globals.lean) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_neural_net.mzn) |
+| `fzn_nvalue` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L414) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_nvalue.mzn) |
+| `fzn_partition_set` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L990) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_partition_set.mzn) |
+| `fzn_path` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1292) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_path_int.mzn) |
+| `fzn_piecewise_linear` | unsupported | [Globals](../../LeanFzn/Semantics/Globals.lean) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_piecewise_linear.mzn) |
+| `fzn_piecewise_linear_non_continuous` | unsupported | [Globals](../../LeanFzn/Semantics/Globals.lean) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_piecewise_linear_non_continuous.mzn) |
+| `fzn_range` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1006) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_range.mzn) |
+| `fzn_reachable` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1272) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_reachable_int.mzn) |
+| `fzn_regular` | restricted | [Regular](../../LeanFzn/Semantics/Globals/Regular.lean#L945) | SC-02; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_regular.mzn) |
+| `fzn_regular_nfa` | restricted | [Regular](../../LeanFzn/Semantics/Globals/Regular.lean#L949) | SC-02; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_regular_nfa.mzn) |
+| `fzn_roots` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1010) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_roots.mzn) |
+| `fzn_seq_precede_chain_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L768) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_seq_precede_chain_int.mzn) |
+| `fzn_set_member` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L986) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_set_member.mzn) |
+| `fzn_sliding_among_bool` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1034) | SC-07; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_sliding_among_bool.mzn) |
+| `fzn_sliding_among_int` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1030) | SC-07; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_sliding_among_int.mzn) |
+| `fzn_sliding_sum` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1026) | SC-07; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_sliding_sum.mzn) |
+| `fzn_sort` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L738) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_sort.mzn) |
+| `fzn_span` | unsupported | [Globals](../../LeanFzn/Semantics/Globals.lean) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_span.mzn) |
+| `fzn_steiner` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1316) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_steiner.mzn) |
+| `fzn_strict_lex2` | unsupported | [LexChain](../../LeanFzn/Semantics/Globals/LexChain.lean#L292) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_strict_lex2.mzn) |
+| `fzn_strictly_increasing_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L734) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_strictly_increasing_int.mzn) |
+| `fzn_subcircuit` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1251) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_subcircuit.mzn) |
+| `fzn_subgraph` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1255) | SC-01; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_subgraph_int.mzn) |
+| `fzn_sum_pred` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1002) | SC-04, SC-08, SC-15; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_sum_pred.mzn) |
+| `fzn_sum_set` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L998) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_sum_set.mzn) |
+| `fzn_symmetric_all_different` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L833) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_symmetric_all_different.mzn) |
+| `fzn_table_int` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1241) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_table_int.mzn) |
+| `fzn_tree` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1282) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_tree_int.mzn) |
+| `fzn_value_precede_chain_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L764) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_value_precede_chain_int.mzn) |
+| `fzn_value_precede_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L760) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_value_precede_int.mzn) |
+| `fzn_write` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L716) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_write.mzn) |
+| `fzn_writes` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L720) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_writes.mzn) |
+| `fzn_writes_seq` | reviewed | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L804) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_writes_seq.mzn) |
+| `fzn_wst` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1324) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_wst.mzn) |
+| `int2float` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-float.html#int2float) |
+| `int_abs` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L956) | —; [reference](lib-flatzinc-int.html#int-abs) |
+| `int_div` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L940) | —; [reference](lib-flatzinc-int.html#int-div) |
+| `int_eq` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L821) | —; [reference](lib-flatzinc-int.html#int-eq) |
+| `int_eq_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L845) | —; [reference](lib-flatzinc-int.html#int-eq-reif) |
+| `int_ge` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L837) | —; [reference](lib-flatzinc-int.html#int-le) |
+| `int_ge_reif` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L861) | —; [reference](lib-flatzinc-int.html#int-le-reif) |
+| `int_gt` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L841) | —; [reference](lib-flatzinc-int.html#int-lt) |
+| `int_gt_reif` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L865) | —; [reference](lib-flatzinc-int.html#int-lt-reif) |
+| `int_le` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L829) | —; [reference](lib-flatzinc-int.html#int-le) |
+| `int_le_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L853) | —; [reference](lib-flatzinc-int.html#int-le-reif) |
+| `int_lin_eq` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1073) | SC-04; [reference](lib-flatzinc-int.html#int-lin-eq) |
+| `int_lin_eq_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1085) | SC-04; [reference](lib-flatzinc-int.html#int-lin-eq-reif) |
+| `int_lin_le` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1077) | SC-04; [reference](lib-flatzinc-int.html#int-lin-le) |
+| `int_lin_le_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1097) | SC-04; [reference](lib-flatzinc-int.html#int-lin-le-reif) |
+| `int_lin_ne` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1081) | SC-04; [reference](lib-flatzinc-int.html#int-lin-ne) |
+| `int_lin_ne_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1106) | SC-04; [reference](lib-flatzinc-int.html#int-lin-ne-reif) |
+| `int_lt` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L833) | —; [reference](lib-flatzinc-int.html#int-lt) |
+| `int_lt_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L857) | —; [reference](lib-flatzinc-int.html#int-lt-reif) |
+| `int_max` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L952) | —; [reference](lib-flatzinc-int.html#int-max) |
+| `int_min` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L948) | —; [reference](lib-flatzinc-int.html#int-min) |
+| `int_minus` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L932) | —; [reference](lib-flatzinc-int.html#int-plus) |
+| `int_mod` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L944) | —; [reference](lib-flatzinc-int.html#int-mod) |
+| `int_ne` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L825) | —; [reference](lib-flatzinc-int.html#int-ne) |
+| `int_ne_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L849) | —; [reference](lib-flatzinc-int.html#int-ne-reif) |
+| `int_plus` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L928) | —; [reference](lib-flatzinc-int.html#int-plus) |
+| `int_pow` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L960) | —; [reference](lib-flatzinc-int.html#int-pow) |
+| `int_pow_fixed` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L964) | —; [reference](lib-flatzinc-twotwoone.html#int-pow-fixed) |
+| `int_times` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L936) | —; [reference](lib-flatzinc-int.html#int-times) |
+| `max` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twooneone.html#max) |
+| `min` | unsupported | [StdLib](../../LeanFzn/Semantics/StdLib.lean) | —; [reference](lib-flatzinc-twooneone.html#min) |
+| `set_card` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L981) | —; [reference](lib-flatzinc-set.html#set-card) |
+| `set_diff` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1055) | —; [reference](lib-flatzinc-set.html#set-diff) |
+| `set_eq` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L985) | —; [reference](lib-flatzinc-set.html#set-eq) |
+| `set_eq_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L989) | —; [reference](lib-flatzinc-set.html#set-eq-reif) |
+| `set_in` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L968) | —; [reference](lib-flatzinc-set.html#set-in) |
+| `set_in_reif` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L972) | —; [reference](lib-flatzinc-set.html#set-in-reif) |
+| `set_intersect` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1050) | —; [reference](lib-flatzinc-set.html#set-intersect) |
+| `set_le` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1005) | —; [reference](lib-flatzinc-set.html#set-le) |
+| `set_le_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1009) | —; [reference](lib-flatzinc-set.html#set-le-reif) |
+| `set_lt` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1015) | —; [reference](lib-flatzinc-set.html#set-lt) |
+| `set_lt_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1019) | —; [reference](lib-flatzinc-set.html#set-lt-reif) |
+| `set_ne` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L995) | —; [reference](lib-flatzinc-set.html#set-ne) |
+| `set_ne_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L999) | —; [reference](lib-flatzinc-set.html#set-ne-reif) |
+| `set_subset` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1025) | —; [reference](lib-flatzinc-set.html#set-subset) |
+| `set_subset_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1029) | —; [reference](lib-flatzinc-set.html#set-subset-reif) |
+| `set_superset` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1035) | —; [reference](lib-flatzinc-set.html#set-superset) |
+| `set_superset_reif` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1039) | —; [reference](lib-flatzinc-set.html#set-superset-reif) |
+| `set_symdiff` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1060) | —; [reference](lib-flatzinc-set.html#set-symdiff) |
+| `set_union` | reviewed | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1045) | —; [reference](lib-flatzinc-set.html#set-union) |
+| `true` | extension | [StdLib](../../LeanFzn/Semantics/StdLib.lean#L1188) | —; [reference](fzn-spec.html#constraints) |
+
+## Historical reference catalogue
+
+The following is the original upstream name catalogue, retained for discovery.
+Its use of “in scope” expresses an intended language fragment, not reviewed
+implementation support. Use the reviewed rows above for current claims.
 
 ## Sources (vendored copies)
 
@@ -270,12 +714,14 @@ for checking solutions of models that use them.
 
 ## Notes for the Lean formalization
 
-1. The `fzn-spec.md`/`fzn-spec.html` copy is the normative syntax
-   reference; builtins semantics live in the `lib-flatzinc-*.html` pages.
-2. Global constraints never appear in FlatZinc under their plain names;
-   the compiler decomposes or maps them to `fzn_<name>_<type>` solver
-   predicates. The signature environment (assumption A3) determines
-   which are accepted.
-3. For solution checking, each in-scope builtin needs a Lean definition
-   of its denotation as a predicate on assignments, plus a correctness
-   theorem relating it to the MiniZinc library definition.
+1. The pinned `fzn-grammar.mzn` is the syntax reference. `fzn-spec.html`
+   supplies prose; `fzn-spec.md` is a derived reading copy. Builtin contracts
+   are in the `lib-flatzinc-*.html` pages.
+2. Native global predicate names and signatures must be checked against
+   their pinned declarations, not inferred from a high-level global name.
+   Plain project aliases and reversed-lex names are separately classified
+   as extensions. A3 is not a current specification assumption.
+3. The historical in-scope count is a reference catalogue, not an
+   implementation or conformance claim. The reviewed inventory above is
+   authoritative for current support; Boolean/Prop agreement alone does not
+   relate a definition to the upstream library.

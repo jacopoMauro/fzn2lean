@@ -828,7 +828,8 @@ private def globDynamic : List (String × String × List Value × Bool) :=
         .array [.bool true], .array [.bool true, .bool true]], false)
   , ("fzn_dag t", "fzn_dag",
       [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.bool true, .bool true], .array [.bool true, .bool true]], true)
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true]], true)
   , ("fzn_dag f", "fzn_dag",
       [.array [.int 1, .int 2], .array [.int 2, .int 1],
         .array [.bool true, .bool true], .array [.bool true, .bool true]], false)
@@ -849,124 +850,132 @@ private def globDynamic : List (String × String × List Value × Bool) :=
         .array [.bool true, .bool true, .bool true],
         .array [.bool true, .bool false]], false)
   , ("fzn_reachable t", "fzn_reachable",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1,
         .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1], true)
+        .array [.bool true, .bool true]], true)
   , ("fzn_reachable f", "fzn_reachable",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1,
         .array [.bool true, .bool true, .bool false],
-        .array [.bool true, .bool true], .int 1], false)
+        .array [.bool true, .bool true]], false)
   , ("fzn_dreachable t", "fzn_dreachable",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1,
         .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1], true)
+        .array [.bool true, .bool true]], true)
   , ("fzn_dreachable f", "fzn_dreachable",
-      [.array [.int 1, .int 2], .array [.int 3, .int 2],
+      [.array [.int 1, .int 2], .array [.int 3, .int 2], .int 1,
         .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1], false)
+        .array [.bool true, .bool true]], false)
   , ("fzn_tree t", "fzn_tree",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1,
         .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1], true)
+        .array [.bool true, .bool true]], true)
   , ("fzn_tree f", "fzn_tree",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1,
         .array [.bool true, .bool true, .bool false],
-        .array [.bool true, .bool true], .int 1], false)
+        .array [.bool true, .bool true]], false)
   , ("fzn_dtree t", "fzn_dtree",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1,
         .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1], true)
+        .array [.bool true, .bool true]], true)
   , ("fzn_dtree f", "fzn_dtree",
-      [.array [.int 1, .int 2], .array [.int 2, .int 1],
-        .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1], false)
+      [.array [.int 1, .int 2], .array [.int 2, .int 1], .int 1,
+        .array [.bool true, .bool true],
+        .array [.bool true, .bool true]], false)
   , ("fzn_path t", "fzn_path",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1, .int 3,
         .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 3], true)
+        .array [.bool true, .bool true]], true)
   , ("fzn_path f", "fzn_path",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1, .int 3,
         .array [.bool true, .bool false, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 3], false)
+        .array [.bool true, .bool true]], false)
   , ("fzn_dpath t", "fzn_dpath",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.array [.int 1, .int 2], .array [.int 2, .int 3], .int 1, .int 3,
         .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 3], true)
+        .array [.bool true, .bool true]], true)
   , ("fzn_dpath f", "fzn_dpath",
-      [.array [.int 1, .int 1], .array [.int 3, .int 2],
+      [.array [.int 1, .int 1], .array [.int 3, .int 2], .int 1, .int 3,
         .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 3], false)
+        .array [.bool true, .bool true]], false)
   , ("fzn_bounded_path t", "fzn_bounded_path",
       [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 3, .int 2], true)
+        .array [.int 1, .int 1], .int 1, .int 3,
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 2], true)
   , ("fzn_bounded_path f", "fzn_bounded_path",
       [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 3, .int 1], false)
+        .array [.int 1, .int 1], .int 1, .int 3,
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], false)
   , ("fzn_bounded_dpath t", "fzn_bounded_dpath",
       [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 3, .int 2], true)
+        .array [.int 1, .int 1], .int 1, .int 3,
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 2], true)
   , ("fzn_bounded_dpath f", "fzn_bounded_dpath",
       [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 3, .int 1], false)
+        .array [.int 1, .int 1], .int 1, .int 3,
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], false)
   , ("fzn_steiner t", "fzn_steiner",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.int 3, .int 2, .array [.int 1, .int 2], .array [.int 2, .int 3],
         .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 2], true)
+        .array [.bool true, .bool true], .int 2], true)
   , ("fzn_steiner f", "fzn_steiner",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.int 3, .int 2, .array [.int 1, .int 2], .array [.int 2, .int 3],
         .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 1], false)
+        .array [.bool true, .bool true], .int 1], false)
   , ("fzn_dsteiner t", "fzn_dsteiner",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 2], true)
+      [.int 3, .int 2, .array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .int 1,
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 2], true)
   , ("fzn_dsteiner f", "fzn_dsteiner",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.int 1, .int 1], .array [.bool true, .bool true, .bool true],
-        .array [.bool true, .bool true], .int 1, .int 1], false)
+      [.int 3, .int 2, .array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .int 1,
+        .array [.bool true, .bool true, .bool true],
+        .array [.bool true, .bool true], .int 1], false)
   , ("fzn_wst t", "fzn_wst",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.int 3, .int 2, .array [.int 1, .int 2], .array [.int 2, .int 3],
         .array [.int 1, .int 1], .array [.bool true, .bool true], .int 2], true)
   , ("fzn_wst f", "fzn_wst",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
+      [.int 3, .int 2, .array [.int 1, .int 2], .array [.int 2, .int 3],
         .array [.int 1, .int 1], .array [.bool true, .bool false], .int 2], false)
   , ("fzn_dwst t", "fzn_dwst",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.int 1, .int 1], .array [.bool true, .bool true], .int 1, .int 2], true)
+      [.int 3, .int 2, .array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .int 1, .array [.bool true, .bool true],
+        .int 2], true)
   , ("fzn_dwst f", "fzn_dwst",
-      [.array [.int 1, .int 2], .array [.int 2, .int 3],
-        .array [.int 1, .int 1], .array [.bool true, .bool true], .int 1, .int 1], false)
+      [.int 3, .int 2, .array [.int 1, .int 2], .array [.int 2, .int 3],
+        .array [.int 1, .int 1], .int 1, .array [.bool true, .bool false],
+        .int 2], false)
   -- regular family (G27/G28)
   , ("fzn_regular t", "fzn_regular",
       [.array [.int 1, .int 1], .int 2, .int 2,
         .array [.int 2, .int 2, .int 2, .int 0], .int 1,
-        .array [.int 0, .int 1]], true)
+        .setOfInt (.enumeration [2])], true)
   , ("fzn_regular f", "fzn_regular",
       [.array [.int 1, .int 1], .int 2, .int 2,
         .array [.int 2, .int 2, .int 2, .int 0], .int 1,
-        .array [.int 1, .int 0]], false)
+        .setOfInt (.enumeration [1])], false)
   , ("fzn_regular_nfa t", "fzn_regular_nfa",
       [.array [.int 1, .int 1], .int 2, .int 2,
         .array [.setOfInt (.enumeration [1]), .setOfInt (.enumeration []),
           .setOfInt (.enumeration []), .setOfInt (.enumeration [])], .int 1,
-        .array [.int 1, .int 0]], true)
+        .setOfInt (.enumeration [1])], true)
   , ("fzn_regular_nfa f", "fzn_regular_nfa",
       [.array [.int 2, .int 2], .int 2, .int 2,
         .array [.setOfInt (.enumeration [1]), .setOfInt (.enumeration []),
           .setOfInt (.enumeration []), .setOfInt (.enumeration [])], .int 1,
-        .array [.int 1, .int 0]], false)
+        .setOfInt (.enumeration [1])], false)
   , ("fzn_cost_regular t", "fzn_cost_regular",
       [.array [.int 1, .int 1], .int 2, .int 2,
         .array [.int 2, .int 2, .int 2, .int 0], .int 1,
-        .array [.int 0, .int 1], .array [.int 3, .int 5, .int 0, .int 0], .int 3], true)
+        .setOfInt (.enumeration [2]), .array [.int 3, .int 5, .int 0, .int 0], .int 3], true)
   , ("fzn_cost_regular f", "fzn_cost_regular",
       [.array [.int 1, .int 1], .int 2, .int 2,
         .array [.int 2, .int 2, .int 2, .int 0], .int 1,
-        .array [.int 0, .int 1], .array [.int 3, .int 5, .int 0, .int 0], .int 4], false)
+        .setOfInt (.enumeration [2]), .array [.int 3, .int 5, .int 0, .int 0], .int 4], false)
   , ("fzn_mdd t", "fzn_mdd",
       [.array [.int 1, .int 2], .int 3, .array [.int 1, .int 2, .int 3],
         .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
@@ -977,6 +986,14 @@ private def globDynamic : List (String × String × List Value × Bool) :=
         .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
         .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])],
         .array [.int 2, .int 0, .int 0]], false)
+  -- Reviewer SC-06 counterexample: both level-2 nodes are forced active,
+  -- contradicting P4.  The old walk search accepted it; upstream rejects.
+  , ("fzn_mdd reviewer cex", "fzn_mdd",
+      [.array [.int 1, .int 1], .int 3, .array [.int 1, .int 2, .int 2],
+        .int 4, .array [.int 1, .int 1, .int 2, .int 3],
+        .array [.setOfInt (.enumeration [1]), .setOfInt (.enumeration [1]),
+          .setOfInt (.enumeration [1]), .setOfInt (.enumeration [1])],
+        .array [.int 2, .int 3, .int 0, .int 0]], false)
   , ("fzn_mdd_nondet t", "fzn_mdd_nondet",
       [.array [.int 1, .int 2], .int 3, .array [.int 1, .int 2, .int 3],
         .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
@@ -987,16 +1004,17 @@ private def globDynamic : List (String × String × List Value × Bool) :=
         .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
         .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])],
         .array [.int 2, .int 0, .int 0]], false)
+  -- Canonical layered cost MDD for xs=[1,2]: costs 4 and 7, ln[1]=11.
   , ("fzn_cost_mdd t", "fzn_cost_mdd",
-      [.array [.int 1, .int 2], .int 3, .array [.int 1, .int 2, .int 3],
-        .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
-        .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])], .array [.int 4, .int 6, .int 7],
-        .array [.int 2, .int 0, .int 0], .int 11], true)
+      [.array [.int 1, .int 2], .int 2, .array [.int 1, .int 2],
+        .int 2, .array [.int 1, .int 2], .array [.setOfInt (.enumeration [1]),
+        .setOfInt (.enumeration [2])], .array [.int 4, .int 7],
+        .array [.int 2, .int 0], .int 11], true)
   , ("fzn_cost_mdd f", "fzn_cost_mdd",
-      [.array [.int 1, .int 2], .int 3, .array [.int 1, .int 2, .int 3],
-        .int 3, .array [.int 1, .int 1, .int 2], .array [.setOfInt (.enumeration [1]),
-        .setOfInt (.enumeration [2]), .setOfInt (.enumeration [2])], .array [.int 4, .int 6, .int 7],
-        .array [.int 2, .int 0, .int 0], .int 10], false)
+      [.array [.int 1, .int 2], .int 2, .array [.int 1, .int 2],
+        .int 2, .array [.int 1, .int 2], .array [.setOfInt (.enumeration [1]),
+        .setOfInt (.enumeration [2])], .array [.int 4, .int 7],
+        .array [.int 2, .int 0], .int 10], false)
   -- sched2 family (G26/G30/G31/G32)
   , ("fzn_cumulatives t", "fzn_cumulatives",
       [.array [.int 0, .int 2], .array [.int 2, .int 2],
@@ -1018,35 +1036,35 @@ private def globDynamic : List (String × String × List Value × Bool) :=
       [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
         .array [.int 0, .int 0, .int 0, .int 0],
         .array [.setOfInt (.enumeration [1])],
-        .array [.int 0, .int 5], .array [.int 1, .int 1]], true)
+        .array [.int 0, .int 5, .int 0, .int 0], .array [.int 1, .int 1]], true)
   , ("fzn_geost f", "fzn_geost",
       [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
         .array [.int 0, .int 0, .int 0, .int 0],
         .array [.setOfInt (.enumeration [1])],
-        .array [.int 0, .int 0], .array [.int 1, .int 1]], false)
+        .array [.int 0, .int 0, .int 0, .int 0], .array [.int 1, .int 1]], false)
   , ("fzn_geost_bb t", "fzn_geost_bb",
       [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
         .array [.int 0, .int 0, .int 0, .int 0],
         .array [.setOfInt (.enumeration [1])],
-        .array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 5, .int 0, .int 0], .array [.int 1, .int 1],
         .array [.int 0, .int 0], .array [.int 1, .int 6]], true)
   , ("fzn_geost_bb f", "fzn_geost_bb",
       [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
         .array [.int 0, .int 0, .int 0, .int 0],
         .array [.setOfInt (.enumeration [1])],
-        .array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 5, .int 0, .int 0], .array [.int 1, .int 1],
         .array [.int 0, .int 0], .array [.int 1, .int 5]], false)
   , ("fzn_geost_smallest_bb t", "fzn_geost_smallest_bb",
       [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
         .array [.int 0, .int 0, .int 0, .int 0],
         .array [.setOfInt (.enumeration [1])],
-        .array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 5, .int 0, .int 0], .array [.int 1, .int 1],
         .array [.int 0, .int 0], .array [.int 1, .int 6]], true)
   , ("fzn_geost_smallest_bb f", "fzn_geost_smallest_bb",
       [.int 2, .array [.int 1, .int 1, .int 1, .int 1],
         .array [.int 0, .int 0, .int 0, .int 0],
         .array [.setOfInt (.enumeration [1])],
-        .array [.int 0, .int 5], .array [.int 1, .int 1],
+        .array [.int 0, .int 5, .int 0, .int 0], .array [.int 1, .int 1],
         .array [.int 0, .int 0], .array [.int 1, .int 9]], false)
   , ("fzn_diffn_nonoverlap_k t", "fzn_diffn_nonoverlap_k",
       [.array [.int 0, .int 5], .array [.int 1, .int 1],
@@ -1137,12 +1155,12 @@ private def endToEnd : List (String × String × String × Bool) :=
   , ("link_set reject",
       "var bool: c1;\nvar bool: c2;\nvar bool: c3;\nvar set of 1..3: s;\narray [1..3] of var bool: bs = [c1, c2, c3];\nconstraint fzn_link_set_to_booleans(s, bs);\nsolve satisfy;",
       "c1 = true;\nc2 = true;\nc3 = true;\ns = {1, 3};\nbs = array1d(1..3, [true, true, true]);\n----------", false)
-  , ("lex-chain greater vacuous accept",
+  , ("lex-chain greater empty flat reject",
       "constraint fzn_lex_chain_greater_int([]);\nsolve satisfy;",
-      "----------", true)
-  , ("lex-chain greatereq orbitope accept",
+      "----------", false)
+  , ("lex-chain greatereq orbitope empty flat reject",
       "constraint fzn_lex_chain_greatereq_orbitope([], 1);\nsolve satisfy;",
-      "----------", true)
+      "----------", false)
   ]
 
 /-! ## Static coverage: every global used in a well-formed model -/
@@ -1259,10 +1277,10 @@ private def staticModels : List (String × String) :=
        constraint fzn_table_int(o, t);\n\
        constraint fzn_if_then_else_int(cs, [1, 2], y);\n\
        constraint fzn_if_then_else_bool(cs, [false, false], false);\n\
-       constraint fzn_if_then_else_set(cs, [{1}], w);\n\
+       constraint fzn_if_then_else_set(cs, [{1}, {2}], w);\n\
        constraint fzn_if_then_else_var_int(cs, [1, 2], y);\n\
        constraint fzn_if_then_else_var_bool(cs, [false, false], false);\n\
-       constraint fzn_if_then_else_var_set(cs, [{1}], w);\n\
+       constraint fzn_if_then_else_var_set(cs, [{1}, {2}], w);\n\
        solve satisfy;")
   , ("channeling family", "array [1..2] of var 1..2: xs = [2, 1];\n\
        array [1..2] of var 1..2: ys = [2, 1];\n\
@@ -1306,6 +1324,12 @@ private def staticModels : List (String × String) :=
        constraint fzn_sliding_among_int(1, 2, 2, xs, {1});\n\
        constraint fzn_sliding_among_bool(1, 2, 2, bs, true);\n\
        solve satisfy;")
+  -- The chain/2D lex names require a nested matrix argument and cannot
+  -- appear in a well-formed flat model: most are SC-03 `unsupported`, and
+  -- `fzn_lex_chain_greater_int`, `fzn_lex_chain_greatereq_int` and
+  -- `fzn_lex_chain_greatereq_orbitope` are ledger `extension` rows.  Only
+  -- the two reverse-direction 1-D names are kept here; the chain names
+  -- remain covered by `globDynamic`.
   , ("lex-chain family", "var 1..9: a;
 var 1..9: b;
 \
@@ -1316,22 +1340,6 @@ var 1..9: b;
        constraint fzn_lex_greater_int(xs, ys);
 \
        constraint fzn_lex_greatereq_int(xs, ys);
-\
-       constraint fzn_lex_chain_less_int([a, b, b, a]);
-\
-       constraint fzn_lex_chain_lesseq_int([a, b, b, a]);
-\
-       constraint fzn_lex2([a, b, b, a]);
-\
-       constraint fzn_strict_lex2([a, b, b, a]);
-\
-       constraint fzn_lex_chain_lesseq_orbitope([a, b, b, a], 1);
-\
-       constraint fzn_lex_chain_greater_int([a, b, b, a]);
-\
-       constraint fzn_lex_chain_greatereq_int([a, b, b, a]);
-\
-       constraint fzn_lex_chain_greatereq_orbitope([a, b, b, a], 1);
 \
        solve satisfy;")
   , ("graph family", "array [1..2] of int: from = [1, 2];\n\
@@ -1346,38 +1354,45 @@ var 1..9: b;
        constraint fzn_dag(from, to, ns, es);\n\
        constraint fzn_connected(from, to, ns, es);\n\
        constraint fzn_dconnected(from, to, ns, es);\n\
-       constraint fzn_reachable(from, to, ns, es, 1);\n\
-       constraint fzn_dreachable(from, to, ns, es, 1);\n\
-       constraint fzn_tree(from, to, ns, es, 1);\n\
-       constraint fzn_dtree(from, to, ns, es, 1);\n\
-       constraint fzn_path(from, to, ns, es, 1, 3);\n\
-       constraint fzn_dpath(from, to, ns, es, 1, 3);\n\
-       constraint fzn_bounded_path(from, to, w, ns, es, 1, 3, 2);\n\
-       constraint fzn_bounded_dpath(from, to, w, ns, es, 1, 3, 2);\n\
-       constraint fzn_steiner(from, to, w, ns, es, 1, 2);\n\
-       constraint fzn_dsteiner(from, to, w, ns, es, 1, 2);\n\
-       constraint fzn_wst(from, to, w, es, 2);\n\
-       constraint fzn_dwst(from, to, w, es, 1, 2);\n\
+       constraint fzn_reachable(from, to, 1, ns, es);\n\
+       constraint fzn_dreachable(from, to, 1, ns, es);\n\
+       constraint fzn_tree(from, to, 1, ns, es);\n\
+       constraint fzn_dtree(from, to, 1, ns, es);\n\
+       constraint fzn_path(from, to, 1, 3, ns, es);\n\
+       constraint fzn_dpath(from, to, 1, 3, ns, es);\n\
+       constraint fzn_bounded_path(from, to, w, 1, 3, ns, es, 2);\n\
+       constraint fzn_bounded_dpath(from, to, w, 1, 3, ns, es, 2);\n\
+       constraint fzn_steiner(3, 2, from, to, w, ns, es, 2);\n\
+       constraint fzn_dsteiner(3, 2, from, to, w, 1, ns, es, 2);\n\
+       constraint fzn_wst(3, 2, from, to, w, es, 2);\n\
+       constraint fzn_dwst(3, 2, from, to, w, 1, es, 2);\n\
        constraint fzn_circuit([n1, n2, n3]);\n\
        constraint fzn_subcircuit([n1, n2, n3]);\n\
        solve satisfy;")
+  -- `fzn_cost_mdd` is restricted to the canonical layered fragment
+  -- (`N = length(xs)`, `level[k] = k`, `to` advances one level), so the
+  -- shared MDD arguments use the canonical diamond N = L = 2.
   , ("regular family", "array [1..4] of int: d = [0, 2, 0, 0];\n\
        array [1..4] of int: c = [3, 5, 0, 0];\n\
        array [1..4] of set of int: nd = [{1}, {2}, {2}, {2}];\n\
-       array [1..3] of int: level = [1, 2, 3];\n\
-       array [1..2] of int: efrom = [1, 1];\n\
+       array [1..2] of int: level = [1, 2];\n\
+       array [1..2] of int: efrom = [1, 2];\n\
        array [1..2] of set of int: elabel = [{1}, {2}];\n\
        array [1..2] of int: ecost = [4, 6];\n\
        array [1..2] of int: eto = [2, 0];\n\
-       array [1..2] of var 1..2: xs = [1, 1];\n\
+       array [1..2] of var 1..2: xs = [1, 2];\n\
        var int: total;\n\
-       constraint fzn_regular(xs, 2, 2, d, 1, [1]);\n\
-       constraint fzn_regular_nfa(xs, 2, 2, nd, 1, [1]);\n\
-       constraint fzn_cost_regular(xs, 2, 2, d, 1, [1], c, total);\n\
-       constraint fzn_mdd(xs, 3, level, 2, efrom, elabel, eto);\n\
-       constraint fzn_mdd_nondet(xs, 3, level, 2, efrom, elabel, eto);\n\
-       constraint fzn_cost_mdd(xs, 3, level, 2, efrom, elabel, ecost, eto, total);\n\
+       constraint fzn_regular(xs, 2, 2, d, 1, {1});\n\
+       constraint fzn_regular_nfa(xs, 2, 2, nd, 1, {1});\n\
+       constraint fzn_cost_regular(xs, 2, 2, d, 1, {1}, c, total);\n\
+       constraint fzn_mdd(xs, 2, level, 2, efrom, elabel, eto);\n\
+       constraint fzn_mdd_nondet(xs, 2, level, 2, efrom, elabel, eto);\n\
+       constraint fzn_cost_mdd(xs, 2, level, 2, efrom, elabel, ecost, eto, total);\n\
        solve satisfy;")
+  -- `fzn_diffn_k` / `fzn_diffn_nonstrict_k` are omitted: they need a
+  -- nested matrix argument and are SC-03 `unsupported` at the FlatZinc
+  -- ABI, so no flat static model can be well-formed.  They remain
+  -- covered by the negative `globDynamic` rows.
   , ("sched2 family", "array [1..4] of int: rs = [1, 1, 1, 1];\n\
        array [1..4] of int: ro = [0, 0, 0, 0];\n\
        array [1..1] of set of int: sh = [{1}];\n\
@@ -1386,7 +1401,7 @@ var 1..9: b;
        array [1..2] of var int: res = [1, 1];\n\
        array [1..2] of var int: mach = [1, 1];\n\
        array [1..2] of var int: bnd = [1, 1];\n\
-       array [1..2] of var int: ox = [0, 5];\n\
+       array [1..4] of var int: ox = [0, 5, 0, 0];\n\
        array [1..2] of var int: kd = [1, 1];\n\
        array [1..2] of var int: lo = [0, 0];\n\
        array [1..2] of var int: up = [6, 6];\n\
@@ -1407,8 +1422,6 @@ var 1..9: b;
        constraint fzn_geost_bb(2, rs, ro, sh, ox, kd, lo, up);\n\
        constraint fzn_geost_smallest_bb(2, rs, ro, sh, ox, kd, lo, up);\n\
        constraint fzn_diffn_nonoverlap_k(bp1, bs1, bp2, bs2);\n\
-       constraint fzn_diffn_k([0, 5, 0, 0], [1, 1, 1, 1]);\n\
-       constraint fzn_diffn_nonstrict_k([0, 5, 0, 0], [1, 1, 1, 1]);\n\
        constraint fzn_writes_seq(wi, wp, wv, wo);\n\
        constraint fzn_if_then_else_partiality(itc, itd, itb);\n\
        solve satisfy;")

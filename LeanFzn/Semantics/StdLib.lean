@@ -594,206 +594,217 @@ theorem lexLtB_iff (xs ys : List Int) :
     var parameters also accept fixed ones. -/
 def stdSig : SigEnv := fun x =>
   match x.name with
-  | "int_eq" => some [.basic (.var (.par .int)), .basic (.var (.par .int))]
-  | "int_ne" => some [.basic (.var (.par .int)), .basic (.var (.par .int))]
-  | "int_le" => some [.basic (.var (.par .int)), .basic (.var (.par .int))]
-  | "int_lt" => some [.basic (.var (.par .int)), .basic (.var (.par .int))]
-  | "int_ge" => some [.basic (.var (.par .int)), .basic (.var (.par .int))]
-  | "int_gt" => some [.basic (.var (.par .int)), .basic (.var (.par .int))]
+  | "int_eq" =>
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]]
+  | "int_ne" =>
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]]
+  | "int_le" =>
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]]
+  | "int_lt" =>
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]]
+  | "int_ge" =>
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]]
+  | "int_gt" =>
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]]
   | "int_eq_reif" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .bool))]]
   | "int_ne_reif" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .bool))]]
   | "int_le_reif" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .bool))]]
   | "int_lt_reif" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .bool))]]
   | "int_ge_reif" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .bool))]]
   | "int_gt_reif" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .bool))]
-  | "bool_eq" => some [.basic (.var (.par .bool)), .basic (.var (.par .bool))]
-  | "bool_not" => some [.basic (.var (.par .bool)), .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .bool))]]
+  | "bool_eq" =>
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool))]]
+  | "bool_not" =>
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool))]]
   | "bool_and" =>
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
   | "bool_or" =>
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
   | "bool_xor" =>
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .bool))]
-  | "bool_le" => some [.basic (.var (.par .bool)), .basic (.var (.par .bool))]
-  | "bool_lt" => some [.basic (.var (.par .bool)), .basic (.var (.par .bool))]
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
+  | "bool_le" =>
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool))]]
+  | "bool_lt" =>
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool))]]
   | "bool_eq_reif" =>
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
   | "bool_le_reif" =>
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
   | "bool_lt_reif" =>
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
   | "bool_clause" =>
-      some [.array .int (.var (.par .bool)), .array .int (.var (.par .bool))]
+      [[.array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "bool_clause_reif" =>
-      some [.array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+      [[.array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
   | "bool2int" =>
-      some [.basic (.var (.par .bool)), .basic (.var (.par .int))]
+      [[.basic (.var (.par .bool)), .basic (.var (.par .int))]]
   | "int_plus" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_minus" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_times" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_div" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_mod" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_min" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_max" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_abs" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]]
   | "int_pow" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_pow_fixed" =>
-      some [.basic (.var (.par .int)), .basic (.par .int),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .basic (.par .int),
+        .basic (.var (.par .int))]]
   | "set_in" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .setOfInt))]]
   | "set_in_reif" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .bool))]]
   | "set_eq" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]]
   | "set_eq_reif" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .bool))]]
   | "set_ne" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]]
   | "set_ne_reif" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .bool))]]
   | "set_le" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]]
   | "set_le_reif" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .bool))]]
   | "set_lt" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]]
   | "set_lt_reif" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .bool))]]
   | "set_subset" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]]
   | "set_subset_reif" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .bool))]]
   | "set_superset" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt))]]
   | "set_superset_reif" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .bool))]]
   | "set_card" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "set_union" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "set_intersect" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "set_diff" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "set_symdiff" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
-  | "all_different" => some [.array .int (.var (.par .int))]
-  | "all_different_except_0" => some [.array .int (.var (.par .int))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
+  | "all_different" =>
+      [[.array .int (.var (.par .int))]]
+  | "all_different_except_0" =>
+      [[.array .int (.var (.par .int))]]
   | "int_lin_eq" =>
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_lin_le" =>
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_lin_ne" =>
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "int_lin_eq_reif" =>
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.par .int), .basic (.var (.par .bool))]
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.par .int), .basic (.var (.par .bool))]]
   | "int_lin_le_reif" =>
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.par .int), .basic (.var (.par .bool))]
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.par .int), .basic (.var (.par .bool))]]
   | "int_lin_ne_reif" =>
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.par .int), .basic (.var (.par .bool))]
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.par .int), .basic (.var (.par .bool))]]
   | "bool_lin_eq" =>
-      some [.array .int (.par .int), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int))]
+      [[.array .int (.par .int), .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))]]
   | "bool_lin_le" =>
-      some [.array .int (.par .int), .array .int (.var (.par .bool)),
-        .basic (.par .int)]
+      [[.array .int (.par .int), .array .int (.var (.par .bool)),
+        .basic (.par .int)]]
   | "array_int_element" =>
-      some [.basic (.var (.par .int)), .array .int (.par .int),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .array .int (.par .int),
+        .basic (.var (.par .int))]]
   | "array_var_int_element" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "array_bool_element" =>
-      some [.basic (.var (.par .int)), .array .int (.par .bool),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .array .int (.par .bool),
+        .basic (.var (.par .bool))]]
   | "array_var_bool_element" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
   | "array_set_element" =>
-      some [.basic (.var (.par .int)), .array .int (.par .setOfInt),
-        .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .int)), .array .int (.par .setOfInt),
+        .basic (.var (.par .setOfInt))]]
   | "array_var_set_element" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "array_var_int_element_nonshifted" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "array_var_bool_element_nonshifted" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
   | "array_var_set_element_nonshifted" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "array_int_maximum" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .int))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .int))]]
   | "array_int_minimum" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .int))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .int))]]
   | "array_bool_and" =>
-      some [.array .int (.var (.par .bool)), .basic (.var (.par .bool))]
-  | "array_bool_xor" => some [.array .int (.var (.par .bool))]
+      [[.array .int (.var (.par .bool)), .basic (.var (.par .bool))]]
+  | "array_bool_xor" =>
+      [[.array .int (.var (.par .bool))]]
   | "array_bool_or" =>
-      some [.array .int (.var (.par .bool)), .basic (.var (.par .bool))]
-  | "true" => some []
+      [[.array .int (.var (.par .bool)), .basic (.var (.par .bool))]]
+  | "true" =>
+      [[]]
   | "dom" =>
-      some [.basic (.var (.par .int)), .basic (.var (.par .setOfInt))]
-  | _ => none
-
-/-- Convenience: static well-formedness under the standard signatures. -/
-def stdWellFormed (m : Model) : Bool := wellFormedB stdSig m
+      [[.basic (.var (.par .int)), .basic (.var (.par .setOfInt))]]
+  | _ => []
 
 /-! ## Standard interpretations -/
 
@@ -1074,18 +1085,32 @@ def stdInterp : PredicateInterpretation := fun x =>
   | "int_lin_eq_reif" => fun args =>
     match args with
     | [.array as_, .array xs, .int b, .bool r] =>
-        (r = true ∧ dotProduct as_ xs = some b) ∨
-          (r = false ∧ dotProduct as_ xs ≠ some b)
+        -- `int_lin_eq_reif(as, xs, y, b)` is `b ↔ y = Σ_i as[i]*xs[i]`
+        -- (`lib-flatzinc-int.html#int-lin-eq-reif`).  The sum needs a
+        -- common index set for `as` and `xs`; `dotProduct` is `none` on
+        -- a length or element-type mismatch, and then the whole
+        -- relation -- including the `r = false` branch -- is false.
+        match dotProduct as_ xs with
+        | some d => (r = true ∧ d = b) ∨ (r = false ∧ d ≠ b)
+        | none => False
     | _ => False
   | "int_lin_le_reif" => fun args =>
     match args with
     | [.array as_, .array xs, .int b, .bool r] =>
-        (r = true ∧ dotLe as_ xs b = true) ∨ (r = false ∧ dotLe as_ xs b = false)
+        -- `b ↔ Σ_i as[i]*xs[i] ≤ y`; malformed dot products are false
+        -- (see `int_lin_eq_reif`).
+        match dotProduct as_ xs with
+        | some d => (r = true ∧ d ≤ b) ∨ (r = false ∧ ¬ d ≤ b)
+        | none => False
     | _ => False
   | "int_lin_ne_reif" => fun args =>
     match args with
     | [.array as_, .array xs, .int b, .bool r] =>
-        (r = true ∧ dotNe as_ xs b = true) ∨ (r = false ∧ dotNe as_ xs b = false)
+        -- `b ↔ y ≠ Σ_i as[i]*xs[i]`; malformed dot products are false
+        -- (see `int_lin_eq_reif`).
+        match dotProduct as_ xs with
+        | some d => (r = true ∧ d ≠ b) ∨ (r = false ∧ d = b)
+        | none => False
     | _ => False
   | "bool_lin_eq" => fun args =>
     match args with
@@ -1383,20 +1408,25 @@ def stdInterpB : Ident → List Value → Bool := fun x =>
   | "int_lin_eq_reif" => fun args =>
     match args with
     | [.array as_, .array xs, .int b, .bool r] =>
-        decide ((r = true ∧ dotProduct as_ xs = some b) ∨
-          (r = false ∧ dotProduct as_ xs ≠ some b))
+        -- mirror of `stdInterp`: a malformed dot product is false in
+        -- both reification branches.
+        match dotProduct as_ xs with
+        | some d => decide ((r = true ∧ d = b) ∨ (r = false ∧ d ≠ b))
+        | none => false
     | _ => false
   | "int_lin_le_reif" => fun args =>
     match args with
     | [.array as_, .array xs, .int b, .bool r] =>
-        decide ((r = true ∧ dotLe as_ xs b = true) ∨
-          (r = false ∧ dotLe as_ xs b = false))
+        match dotProduct as_ xs with
+        | some d => decide ((r = true ∧ d ≤ b) ∨ (r = false ∧ ¬ d ≤ b))
+        | none => false
     | _ => false
   | "int_lin_ne_reif" => fun args =>
     match args with
     | [.array as_, .array xs, .int b, .bool r] =>
-        decide ((r = true ∧ dotNe as_ xs b = true) ∨
-          (r = false ∧ dotNe as_ xs b = false))
+        match dotProduct as_ xs with
+        | some d => decide ((r = true ∧ d ≠ b) ∨ (r = false ∧ d = b))
+        | none => false
     | _ => false
   | "bool_lin_eq" => fun args =>
     match args with
@@ -2365,6 +2395,46 @@ theorem builtin_all_different_except_0_iff (args : List Value) :
       stdInterp (Ident.mk "all_different_except_0") args :=
   agreeA (fun _ => Iff.rfl) args
 
+/-- Shape agreement for `int_lin_eq_reif`: the Boolean twin and the
+    Prop interpretation are both `match dotProduct ... with some d =>
+    ... | none => false`; a malformed dot product makes both false. -/
+private theorem int_lin_eq_reif_shape (as_ xs : List Value) (b : Int) (r : Bool) :
+    (match dotProduct as_ xs with
+      | some d => decide ((r = true ∧ d = b) ∨ (r = false ∧ d ≠ b))
+      | none => false) = true ↔
+    (match dotProduct as_ xs with
+      | some d => (r = true ∧ d = b) ∨ (r = false ∧ d ≠ b)
+      | none => False) := by
+  cases dotProduct as_ xs with
+  | none => simp
+  | some d => simp only [decide_eq_true_iff]
+
+/-- Shape agreement for `int_lin_le_reif` (see
+    `int_lin_eq_reif_shape`). -/
+private theorem int_lin_le_reif_shape (as_ xs : List Value) (b : Int) (r : Bool) :
+    (match dotProduct as_ xs with
+      | some d => decide ((r = true ∧ d ≤ b) ∨ (r = false ∧ ¬ d ≤ b))
+      | none => false) = true ↔
+    (match dotProduct as_ xs with
+      | some d => (r = true ∧ d ≤ b) ∨ (r = false ∧ ¬ d ≤ b)
+      | none => False) := by
+  cases dotProduct as_ xs with
+  | none => simp
+  | some d => simp only [decide_eq_true_iff]
+
+/-- Shape agreement for `int_lin_ne_reif` (see
+    `int_lin_eq_reif_shape`). -/
+private theorem int_lin_ne_reif_shape (as_ xs : List Value) (b : Int) (r : Bool) :
+    (match dotProduct as_ xs with
+      | some d => decide ((r = true ∧ d ≠ b) ∨ (r = false ∧ d = b))
+      | none => false) = true ↔
+    (match dotProduct as_ xs with
+      | some d => (r = true ∧ d ≠ b) ∨ (r = false ∧ d = b)
+      | none => False) := by
+  cases dotProduct as_ xs with
+  | none => simp
+  | some d => simp only [decide_eq_true_iff]
+
 /-- `int_lin_eq` agreement. -/
 theorem builtin_int_lin_eq_iff (args : List Value) :
     stdInterpB (Ident.mk "int_lin_eq") args = true ↔
@@ -2387,19 +2457,19 @@ theorem builtin_int_lin_ne_iff (args : List Value) :
 theorem builtin_int_lin_eq_reif_iff (args : List Value) :
     stdInterpB (Ident.mk "int_lin_eq_reif") args = true ↔
       stdInterp (Ident.mk "int_lin_eq_reif") args :=
-  agreeAAIB (fun _ _ _ _ => decide_eq_true_iff) args
+  agreeAAIB int_lin_eq_reif_shape args
 
 /-- `int_lin_le_reif` agreement. -/
 theorem builtin_int_lin_le_reif_iff (args : List Value) :
     stdInterpB (Ident.mk "int_lin_le_reif") args = true ↔
       stdInterp (Ident.mk "int_lin_le_reif") args :=
-  agreeAAIB (fun _ _ _ _ => decide_eq_true_iff) args
+  agreeAAIB int_lin_le_reif_shape args
 
 /-- `int_lin_ne_reif` agreement. -/
 theorem builtin_int_lin_ne_reif_iff (args : List Value) :
     stdInterpB (Ident.mk "int_lin_ne_reif") args = true ↔
       stdInterp (Ident.mk "int_lin_ne_reif") args :=
-  agreeAAIB (fun _ _ _ _ => decide_eq_true_iff) args
+  agreeAAIB int_lin_ne_reif_shape args
 
 /-- `bool_lin_eq` agreement. -/
 theorem builtin_bool_lin_eq_iff (args : List Value) :

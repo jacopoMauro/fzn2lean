@@ -159,6 +159,62 @@ def staticEnvFast (m : Model) : Std.HashMap String (FznType × Bool) :=
 def staticEnvFastAsEnv (m : Model) : StaticEnv :=
   fun x => (staticEnvFast m).get? x.name
 
+/-! ### The fast shape store
+
+`m.shapeStore` resolves each lookup by scanning the parameter and
+variable declaration lists, so the static checker's decodability gate
+(which evaluates every constraint's arguments) would be Θ(n²) in the
+model size.  As with the static environment, a hash-map-backed twin
+is built once per call and exposed through a constructor allocation
+across a function boundary (see the compilation-safeguard note
+below); `shapeStoreFast` agrees with `m.shapeStore` on every model
+name when declarations are unique. -/
+
+namespace Internal
+
+/-- Insert variable declarations' shape values into a hash map. -/
+def insertVarShapeVals : List VarDeclItem →
+    Std.HashMap String Value → Std.HashMap String Value
+  | [], acc => acc
+  | d :: rest, acc => insertVarShapeVals rest (acc.insert d.name.name d.shapeValue)
+
+end Internal
+
+namespace Internal
+
+/-- Insert parameter declarations' values (after variables, so
+    parameters win on a name collision, matching `shapeStore`). -/
+def insertParVals : List ParDeclItem →
+    Std.HashMap String Value → Std.HashMap String Value
+  | [], acc => acc
+  | d :: rest, acc => insertParVals rest (acc.insert d.name.name d.value)
+
+end Internal
+
+/-- The shape store as a hash map: variables first, then parameters
+    (overwriting on collision, matching `shapeStore`'s
+    parameters-first order). -/
+def shapeStoreFast (m : Model) : Std.HashMap String Value :=
+  insertParVals m.parameters (insertVarShapeVals m.variables {})
+
+/-- The hash-map shape store, wrapped as a `Store`. -/
+def shapeStoreFastAsStore (m : Model) : Store :=
+  fun x => (shapeStoreFast m).get? x.name
+
+/-- A shape store wrapped in a constructor allocation (the same
+    compilation safeguard as `StaticEnvBox`: a `let`-bound
+    function-typed store would otherwise be fused into the consumer
+    loop and its hash map rebuilt per constraint). -/
+structure ShapeStoreBox where
+  f : Store
+  deriving Nonempty, Inhabited
+
+/-- The boxed shape store: the hash map is built once per call and
+    captured by the closure. -/
+def shapeStoreBox (m : Model) : ShapeStoreBox :=
+  let mp := shapeStoreFast m
+  ⟨fun x => mp.get? x.name⟩
+
 /-! ## Entry well-formedness
 
 A FlatZinc solution string assigns decision variables only, each at
@@ -264,15 +320,20 @@ def staticEnvBox (m : Model) : StaticEnvBox :=
 
 /-- **The fast executable static checker.**  Same conditions as
     `wellFormedB fullSig`, with hash-based duplicate detection and
-    environment lookups.  The boxed environment is built once per call
-    and its projection shared by the three environment-consuming
-    sub-checks (the helper takes the environment as a parameter, so no
-    consumer closure can re-run the construction). -/
-def wellFormedEnvFastB (env : StaticEnv) (m : Model) : Bool :=
+    environment lookups.  The boxed environment and shape store are
+    built once per call and their projections shared by the
+    environment- and decodability-consuming sub-checks (the helper
+    takes both as parameters, so no consumer closure can re-run the
+    constructions). -/
+def wellFormedEnvFastB (env : StaticEnv) (shp : Store) (m : Model) : Bool :=
   m.variables.all (fun d => varDeclInitB env d) &&
   solveObjB env m.solve &&
   m.constraints.all (fun c =>
-    checkConstraintB env c.args (m.sigEnv fullSig c.name))
+    (m.sigEnv fullSig c.name).any (fun params =>
+      checkArgsB env c.args params &&
+      (match c.args.mapM (Expr.eval shp) with
+       | some vs => fullDecodes c.name.name params vs
+       | none => false)))
 
 def wellFormedFastB (m : Model) : Bool :=
   nodupIdentsFast (m.predicates.map (·.name)) &&
@@ -280,7 +341,7 @@ def wellFormedFastB (m : Model) : Bool :=
   m.predicates.all (fun p => nodupIdentsFast (p.params.map (·.name))) &&
   m.parameters.all (fun d => parDeclCheckB d) &&
   m.variables.all (fun d => varDeclArrayLenB d) &&
-  wellFormedEnvFastB (staticEnvBox m).f m
+  wellFormedEnvFastB (staticEnvBox m).f (shapeStoreBox m).f m
 
 /-! ## The front-door checker -/
 

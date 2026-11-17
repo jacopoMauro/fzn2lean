@@ -44,14 +44,16 @@ tree's decompositions (`share/minizinc/std/fzn_*.mzn`):
   false when the value is absent.)
 * `write` — "Creates a new array O from an input array I with a change
   at position i to take value v"; the decomposition is
-  `forall j in index_set(I) (O[j] = if j = i then v else I[j] endif)`
-  with "O ... same index set as I".  (Out-of-range `i` therefore leaves
-  `O` equal to `I` positionally.)
+  `forall (j in index_set(I)) (O[j] = if j = i then v else I[j] endif)`.
+  It reads `O[j]` only over `index_set(I)`, so `I.length ≤ O.length` is
+  required and extra positions of a longer `O` are unconstrained.
+  (Out-of-range `i` therefore leaves `O` equal to `I` positionally.)
 * `writes` — "Creates a new array O from an input array I with a
   simultaneous change at positions P to values V"; the decomposition
-  is `forall j in index_set(P) (O[P[j]] = V[j])` plus "unwritten
-  positions keep their value", with P and V sharing an index set and
-  O the index set of I.
+  is `forall (j in index_set(P)) (O[P[j]] = V[j])` plus "unwritten
+  positions keep their value".  It requires `P.length ≤ V.length`,
+  every `P[j]` in `index_set(O)`, and `I.length ≤ O.length`; longer `V`
+  or `O` arrays are unused and accepted.
 
 All FlatZinc arrays are 1-based; the twins realize this with 0-based
 `List` indices plus a `+1` shift, guarding bounds explicitly.
@@ -596,18 +598,24 @@ theorem argValBoolB_iff (bs : List Bool) (e : Bool) (i : Int) :
 
 /-- `fzn_write(x, i, e, y)` (handbook 4.2.2.6): "Creates a new array
     O from an input array I with a change at position i to take value
-    v", with O of the same index set as I.  The decomposition is
-    `forall j in index_set(I) (O[j] = if j = i then v else I[j])`
-    (1-based): every position keeps its value except (1-based) `i`,
-    which becomes `e`.  An out-of-range `i` therefore leaves `y` equal
-    to `x` positionally (the decomposition is total). -/
+    v".  The decomposition `fzn_write.mzn` is
+    `forall (j in index_set(I)) (O[j] = if j = i then v else I[j] endif)`:
+    it reads `O[j]` only for `j ∈ index_set(I)`, so `I.length ≤ O.length`
+    is required (a shorter `O` is undefined, hence false) while extra
+    positions of a longer `O` are never read and are accepted.  An
+    out-of-range `i` never equals any `j ∈ index_set(I)` and therefore
+    leaves `y` equal to `x` positionally (the decomposition is total in
+    `i`). -/
 def writeProp (xs : List Int) (i v : Int) (ys : List Int) : Prop :=
-  xs.length = ys.length ∧
+  xs.length ≤ ys.length ∧
+  -- `j < xs.length ≤ ys.length` proves both `[j]!` accesses in bounds.
   ∀ j, j < xs.length → ys[j]! = (if ((j : Int) + 1) = i then v else xs[j]!)
 
 /-- Boolean twin of `writeProp`. -/
 def writeB (xs : List Int) (i v : Int) (ys : List Int) : Bool :=
-  decide (xs.length = ys.length) &&
+  decide (xs.length ≤ ys.length) &&
+  -- Same bound as in `writeProp`: `List.range xs.length` and
+  -- `xs.length ≤ ys.length`.
   (List.range xs.length).all (fun j =>
     decide (ys[j]! = (if ((j : Int) + 1) = i then v else xs[j]!)))
 
@@ -618,25 +626,35 @@ theorem writeB_iff (xs : List Int) (i v : Int) (ys : List Int) :
 
 /-- `fzn_writes(x, idx, elem, y)` (handbook 4.2.2.6): "Creates a new
     array O from an input array I with a simultaneous change at
-    positions P to values V".  The decomposition is
-    `forall j in index_set(P) (O[P[j]] = V[j])` together with
-    "positions of I that no P[j] points to keep their value"; P and V
-    share an index set and O the index set of I.  A `P[j]` outside the
-    index range of O makes the (partial) array access undefined, so
-    the predicate is false. -/
+    positions P to values V".  The decomposition `fzn_writes.mzn` is
+    `forall (j in index_set(P)) (O[P[j]] = V[j]) /\
+     forall (i in index_set(I))
+       (if forall (j in index_set(P)) (P[j] != i) then O[i] = I[i] else true endif)`.
+
+    Hence: `P.length ≤ V.length` (the first loop reads `V[j]` for every
+    `j ∈ index_set(P)`; a shorter `V` is undefined and false, a longer `V`
+    is unused and accepted); every `P[j]` must be a valid index of `O`
+    (`1 ≤ P[j] ≤ O.length`, otherwise `O[P[j]]` is undefined and false);
+    and `I.length ≤ O.length` (the second loop reads `O[i]` for every
+    `i ∈ index_set(I)`; positions of a longer `O` are unused and
+    accepted). -/
 def writesProp (xs ps vs ys : List Int) : Prop :=
-  xs.length = ys.length ∧ ps.length = vs.length ∧
-  (∀ j, j < ps.length → 1 ≤ ps[j]! ∧ ps[j]! ≤ ys.length ∧
+  xs.length ≤ ys.length ∧
+  ps.length ≤ vs.length ∧
+  -- `j < ps.length ≤ vs.length` proves `vs[j]!`; the `1 ≤ ps[j]! ≤ ys.length`
+  -- conjunct proves the `ys[ps[j]! - 1]!` access.
+  (∀ j, j < ps.length → 1 ≤ ps[j]! ∧ ps[j]! ≤ (ys.length : Int) ∧
       ys[(ps[j]! - 1).toNat]! = vs[j]!) ∧
+  -- `i < xs.length ≤ ys.length` proves the `ys[i]!` access.
   (∀ i, i < xs.length →
       (∀ j, j < ps.length → ps[j]! ≠ (i : Int) + 1) → ys[i]! = xs[i]!)
 
 /-- Boolean twin of `writesProp`. -/
 def writesB (xs ps vs ys : List Int) : Bool :=
-  decide (xs.length = ys.length) &&
-  decide (ps.length = vs.length) &&
+  decide (xs.length ≤ ys.length) &&
+  decide (ps.length ≤ vs.length) &&
   (List.range ps.length).all (fun j =>
-    decide (1 ≤ ps[j]! ∧ ps[j]! ≤ ys.length ∧
+    decide (1 ≤ ps[j]! ∧ ps[j]! ≤ (ys.length : Int) ∧
       ys[(ps[j]! - 1).toNat]! = vs[j]!)) &&
   (List.range xs.length).all (fun i =>
     decide ((List.range ps.length).all (fun j =>
@@ -988,5 +1006,395 @@ theorem fzn_writes_iff (args : List Value) :
     obtain ⟨a, p', v, b⟩ := p
     simp only
     exact writesB_iff a p' v b
+
+/-! ## Decodability gates
+
+`channelingDecodes` is the neutral decodability gate of the family: it
+replays the acceptance condition of exactly the argument decoder that
+each branch of `channelingInterp` uses, and is neutral (`true`) outside
+the family.  Every decoder above reads its arguments only through
+constructor tags and the success of `valueInts` / `valueBools` /
+`valueSets` on the array components; no decoded integer, boolean, set
+or parameter value is inspected.  Hence `ArgsAgree` (equality at `par`
+positions, constructor shape at `var` positions) already forces the same
+decode result, and no extra `par`-position hypothesis is needed. -/
+
+/-- `twoIntArrays` accepts exactly two integer arrays. -/
+private theorem twoIntArrays_isSome_eq (a b : List Value) :
+    (twoIntArrays [.array a, .array b]).isSome =
+      ((valueInts a).isSome && (valueInts b).isSome) := by
+  simp only [twoIntArrays]
+  cases valueInts a <;> cases valueInts b <;> rfl
+
+/-- `intAndSetArrays` accepts exactly an integer array and a set array. -/
+private theorem intAndSetArrays_isSome_eq (a b : List Value) :
+    (intAndSetArrays [.array a, .array b]).isSome =
+      ((valueInts a).isSome && (valueSets b).isSome) := by
+  simp only [intAndSetArrays]
+  cases valueInts a <;> cases valueSets b <;> rfl
+
+/-- `setAndBoolArray` accepts exactly a set and a boolean array. -/
+private theorem setAndBoolArray_isSome_eq (s : IntSetValue) (b : List Value) :
+    (setAndBoolArray [.setOfInt s, .array b]).isSome =
+      (valueBools b).isSome := by
+  simp only [setAndBoolArray]
+  cases valueBools b <;> rfl
+
+/-- `arrayAndInt` accepts exactly an integer array and an integer. -/
+private theorem arrayAndInt_isSome_eq (a : List Value) (y : Int) :
+    (arrayAndInt [.array a, .int y]).isSome = (valueInts a).isSome := by
+  simp only [arrayAndInt]
+  cases valueInts a <;> rfl
+
+/-- `arrayAndBool` accepts exactly a boolean array and a boolean. -/
+private theorem arrayAndBool_isSome_eq (a : List Value) (y : Bool) :
+    (arrayAndBool [.array a, .bool y]).isSome = (valueBools a).isSome := by
+  simp only [arrayAndBool]
+  cases valueBools a <;> rfl
+
+/-- `arrayAndSet` accepts exactly a set array and a set. -/
+private theorem arrayAndSet_isSome_eq (a : List Value) (y : IntSetValue) :
+    (arrayAndSet [.array a, .setOfInt y]).isSome = (valueSets a).isSome := by
+  simp only [arrayAndSet]
+  cases valueSets a <;> rfl
+
+/-- `arrayIntInt` accepts exactly an integer array and two integers. -/
+private theorem arrayIntInt_isSome_eq (a : List Value) (y i : Int) :
+    (arrayIntInt [.array a, .int y, .int i]).isSome = (valueInts a).isSome := by
+  simp only [arrayIntInt]
+  cases valueInts a <;> rfl
+
+/-- `arrayBoolInt` accepts exactly a boolean array, a boolean and an
+    integer. -/
+private theorem arrayBoolInt_isSome_eq (a : List Value) (y : Bool) (i : Int) :
+    (arrayBoolInt [.array a, .bool y, .int i]).isSome = (valueBools a).isSome := by
+  simp only [arrayBoolInt]
+  cases valueBools a <;> rfl
+
+/-- `writeArgs` accepts exactly an integer array, two integers and an
+    integer array. -/
+private theorem writeArgs_isSome_eq (a b : List Value) (i v : Int) :
+    (writeArgs [.array a, .int i, .int v, .array b]).isSome =
+      ((valueInts a).isSome && (valueInts b).isSome) := by
+  simp only [writeArgs]
+  cases valueInts a <;> cases valueInts b <;> rfl
+
+/-- `writesArgs` accepts exactly four integer arrays. -/
+private theorem writesArgs_isSome_eq (a b c d : List Value) :
+    (writesArgs [.array a, .array b, .array c, .array d]).isSome =
+      ((valueInts a).isSome && (valueInts b).isSome &&
+        (valueInts c).isSome && (valueInts d).isSome) := by
+  simp only [writesArgs]
+  cases valueInts a <;> cases valueInts b <;> cases valueInts c <;>
+    cases valueInts d <;> rfl
+
+theorem twoIntArrays_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (twoIntArrays vs).isSome = (twoIntArrays ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array b b' hb =>
+        rw [twoIntArrays_isSome_eq, twoIntArrays_isSome_eq,
+          valueInts_isSome_sameShape ha, valueInts_isSome_sameShape hb]
+  · cases hx <;> cases hy <;> rfl
+
+theorem intAndSetArrays_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (intAndSetArrays vs).isSome = (intAndSetArrays ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array b b' hb =>
+        rw [intAndSetArrays_isSome_eq, intAndSetArrays_isSome_eq,
+          valueInts_isSome_sameShape ha, valueSets_isSome_sameShape hb]
+  · cases hx <;> cases hy <;> rfl
+
+theorem setAndBoolArray_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (setAndBoolArray vs).isSome = (setAndBoolArray ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | @array _ _ _ => rfl
+    | setOfInt _ _ =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array b b' hb =>
+        rw [setAndBoolArray_isSome_eq, setAndBoolArray_isSome_eq,
+          valueBools_isSome_sameShape hb]
+  · cases hx <;> cases hy <;> rfl
+
+theorem arrayAndInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (arrayAndInt vs).isSome = (arrayAndInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ =>
+        rw [arrayAndInt_isSome_eq, arrayAndInt_isSome_eq,
+          valueInts_isSome_sameShape ha]
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem arrayAndBool_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (arrayAndBool vs).isSome = (arrayAndBool ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ =>
+        rw [arrayAndBool_isSome_eq, arrayAndBool_isSome_eq,
+          valueBools_isSome_sameShape ha]
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem arrayAndSet_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (arrayAndSet vs).isSome = (arrayAndSet ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ =>
+        rw [arrayAndSet_isSome_eq, arrayAndSet_isSome_eq,
+          valueSets_isSome_sameShape ha]
+      | array _ => rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem arrayIntInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (arrayIntInt vs).isSome = (arrayIntInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ =>
+          rw [arrayIntInt_isSome_eq, arrayIntInt_isSome_eq,
+            valueInts_isSome_sameShape ha]
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+theorem arrayBoolInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (arrayBoolInt vs).isSome = (arrayBoolInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ =>
+          rw [arrayBoolInt_isSome_eq, arrayBoolInt_isSome_eq,
+            valueBools_isSome_sameShape ha]
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+theorem writeArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (writeArgs vs).isSome = (writeArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+  rcases hws with _ | ⟨hu, hus⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ =>
+          cases hw with
+          | bool _ _ => rfl
+          | int _ _ => rfl
+          | setOfInt _ _ => rfl
+          | @array b b' hb =>
+            rw [writeArgs_isSome_eq, writeArgs_isSome_eq,
+              valueInts_isSome_sameShape ha, valueInts_isSome_sameShape hb]
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> rfl
+
+theorem writesArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (writesArgs vs).isSome = (writesArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+  rcases hws with _ | ⟨hu, hus⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array b b' hb =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt _ _ => rfl
+        | @array c c' hc =>
+          cases hw with
+          | bool _ _ => rfl
+          | int _ _ => rfl
+          | setOfInt _ _ => rfl
+          | @array d d' hd =>
+            rw [writesArgs_isSome_eq, writesArgs_isSome_eq,
+              valueInts_isSome_sameShape ha, valueInts_isSome_sameShape hb,
+              valueInts_isSome_sameShape hc, valueInts_isSome_sameShape hd]
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> rfl
+
+/-- Boolean decodability gate of the channeling family.  Neutral
+    (`true`) outside the family. -/
+def channelingDecodes (n : String) (args : List Value) : Bool :=
+  match n with
+  | "fzn_inverse" => (twoIntArrays args).isSome
+  | "fzn_inverse_in_range" => (twoIntArrays args).isSome
+  | "fzn_int_set_channel" => (intAndSetArrays args).isSome
+  | "fzn_link_set_to_booleans" => (setAndBoolArray args).isSome
+  | "fzn_member_int" => (arrayAndInt args).isSome
+  | "fzn_member_bool" => (arrayAndBool args).isSome
+  | "fzn_member_set" => (arrayAndSet args).isSome
+  | "fzn_arg_val_int" => (arrayIntInt args).isSome
+  | "fzn_arg_val_bool" => (arrayBoolInt args).isSome
+  | "fzn_write" => (writeArgs args).isSome
+  | "fzn_writes" => (writesArgs args).isSome
+  | _ => true
+
+/-- The decodability gate is invariant under `ArgsAgree`. -/
+theorem channelingDecodes_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) (n : String) :
+    channelingDecodes n vs = channelingDecodes n ws := by
+  unfold channelingDecodes
+  split
+  · exact twoIntArrays_isSome_agree h
+  · exact twoIntArrays_isSome_agree h
+  · exact intAndSetArrays_isSome_agree h
+  · exact setAndBoolArray_isSome_agree h
+  · exact arrayAndInt_isSome_agree h
+  · exact arrayAndBool_isSome_agree h
+  · exact arrayAndSet_isSome_agree h
+  · exact arrayIntInt_isSome_agree h
+  · exact arrayBoolInt_isSome_agree h
+  · exact writeArgs_isSome_agree h
+  · exact writesArgs_isSome_agree h
+  · rfl
 
 end LeanFzn.Semantics.Globals.Channeling

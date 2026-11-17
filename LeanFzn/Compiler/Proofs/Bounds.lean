@@ -1350,6 +1350,21 @@ theorem tightenDecl_type (env : List BoundEntry) (d : VarDeclItem) :
       | setOfIntSet xs => simp [tightenDecl]
   | array ty n anns es => rfl
 
+theorem tightenDecl_shapeValue (env : List BoundEntry) (d : VarDeclItem) :
+    (tightenDecl env d).shapeValue = d.shapeValue := by
+  cases d with
+  | basic ty n anns v =>
+      cases ty with
+      | par t =>
+          cases t <;>
+            simp [tightenDecl, BasicVarType.dummy, BaseType.dummy] <;>
+            (try split <;> rfl) <;> rfl
+      | intRange lo hi => simp [tightenDecl]
+      | intSet xs => simp [tightenDecl]
+      | setOfIntRange lo hi => simp [tightenDecl]
+      | setOfIntSet xs => simp [tightenDecl]
+  | array ty n anns es => rfl
+
 theorem tightenDecl_base {env : List BoundEntry} {ty : BasicVarType} {n : Ident}
     {anns : List Annotation} {v : Option BasicExpr} :
     ∃ ty', tightenDecl env (.basic ty n anns v) = .basic ty' n anns v ∧
@@ -1417,6 +1432,16 @@ theorem tightenDecl_initializer (env : List BoundEntry) (d : VarDeclItem)
   | array ty n anns es => simp [tightenDecl]
 
 /-- The rewrite preserves the global static environment. -/
+theorem shapeStore_bounds (m : Model) (env : List BoundEntry) :
+    (tightenModel m env).shapeStore = m.shapeStore := by
+  apply Model.shapeStore_eq_of (m := m) (m' := tightenModel m env)
+  · rfl
+  · rw [show (tightenModel m env).variables =
+        m.variables.map (tightenDecl env) from rfl, List.map_map]
+    apply List.map_congr_left
+    intro d _
+    simp [Function.comp_def, tightenDecl_name, tightenDecl_shapeValue]
+
 theorem staticEnv_bounds (m : Model) (env : List BoundEntry) :
     (tightenModel m env).staticEnv = m.staticEnv := by
   funext x
@@ -1464,7 +1489,8 @@ theorem wf_bounds {m : Model} {env : List BoundEntry}
       variableArrayLengths := ?_
       variableInitializers := ?_
       objectiveType := ?_
-      constraintsChecked := ?_ }
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · rw [hp, hv]
     exact hwf.valueNamesUnique
   · intro d hd
@@ -1508,6 +1534,10 @@ theorem wf_bounds {m : Model} {env : List BoundEntry}
   · intro c hc
     obtain ⟨params, hsig, hca⟩ := hwf.constraintsChecked c hc
     exact ⟨params, hsig, by simpa [staticEnv_bounds] using hca⟩
+  · intro c hc
+    obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc
+    exact ⟨params, hsig, vs, by simpa [staticEnv_bounds] using hF, by
+      rw [shapeStore_bounds]; exact hev, hdec⟩
 
 /-! ## The bounds pass preserves and reflects satisfaction -/
 

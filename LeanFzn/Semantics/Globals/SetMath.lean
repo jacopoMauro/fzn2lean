@@ -1,3 +1,8 @@
+/-
+Purpose: Set-related and mathematical predicate semantics and Boolean agreement.
+Dependencies: Globals.Common and AllDiffCounting supply finite-set and array helpers.
+DAG: Shared semantic helpers -> this family -> Globals dispatch and checker correctness.
+-/
 import LeanFzn.Semantics.Globals.Common
 import LeanFzn.Semantics.Globals.AllDiffCounting
 open LeanFzn.Semantics
@@ -80,9 +85,10 @@ appear in the semantics.  Decoding a wrong argument shape yields
 The interpretive decisions specific to this family (`at_most1` as
 overlap ≤ 1 rather than disjointness, the empty-array corner cases of
 `array_set_union`/`array_set_intersect`, the index-based reading of
-`sum_pred`, the exactness of `range`/`roots`, and vacuous
-non-positive window sizes for the sliding predicates) are recorded
-in `specification/flatzinc_specification_assumptions.md`, G21–G22.
+`sum_pred`, and the exactness of `range`/`roots`) are recorded in
+`specification/flatzinc_specification_assumptions.md`, G21–G22.  The
+sliding predicates follow `fzn_sliding_sum.mzn` exactly, including its
+undefined cases (empty array, negative width); see `windowStarts`.
 -/
 
 open LeanFzn.Semantics
@@ -297,10 +303,9 @@ theorem partitionSetB_iff (xs : List IntSetValue) (univ : IntSetValue) :
 
 /-! ## fzn_at_most1 -/
 
-/-- Shared elements of two sets (each shared element occurs once per
-    occurrence in `a`'s element list). -/
+/-- Distinct shared elements of two mathematical sets. -/
 private def sharedElems (a b : IntSetValue) : List Int :=
-  (setElems a).filter (fun k => setMemB b k)
+  ((setElems a).filter (fun k => setMemB b k)).eraseDups
 
 /-- `fzn_at_most1(xs)`: each pair of sets in `xs` (with distinct
     positions `i < j`) overlaps in at most one element. -/
@@ -334,157 +339,200 @@ theorem atMost1B_iff (xs : List IntSetValue) :
 
 /-! ## fzn_sum_set -/
 
-/-- `fzn_sum_set(values, weights, selected, total)`: `total` is the sum
-    of `weights[j]` over all 1-based positions `j` with
-    `values[j] ∈ selected`. -/
+/-- `fzn_sum_set(values, weights, selected, total)`: `total` is the sum of
+    `weights[j]` over all 1-based positions `j` with
+    `values[j] ∈ selected`.
+
+    Upstream `fzn_sum_set.mzn` is
+    `total == sum (j in index_set(values)) ((values[j] in selected) * weights[j])`,
+    so `weights` is read at every position of `values`: `values.length ≤
+    weights.length` is required (a shorter `weights` is undefined, hence
+    false), while extra positions of a longer `weights` are never read and
+    are accepted. Upstream accesses `weights[j]` only for
+    `j ∈ index_set(values)`, never `values[j]` for `j` outside its own index
+    set, so no element of `selected` is used as an index. -/
 def sumSetProp (values weights : List Int) (selected : IntSetValue) (total : Int) : Prop :=
-  total = (((values.zip weights).filter
-    (fun q => setMemB selected q.1)).map (fun q => q.2)).sum
+  values.length ≤ weights.length ∧
+  -- `j ∈ List.range values.length` proves `values[j]!` in bounds; the first
+  -- conjunct `values.length ≤ weights.length` proves `weights[j]!` in bounds.
+  total = (((List.range values.length).filter
+    (fun j => setMemB selected values[j]!)).map (fun j => weights[j]!)).sum
 
 /-- Boolean twin of `sumSetProp`. -/
 def sumSetB (values weights : List Int) (selected : IntSetValue) (total : Int) : Bool :=
-  decide (total = (((values.zip weights).filter
-    (fun q => setMemB selected q.1)).map (fun q => q.2)).sum)
+  decide (values.length ≤ weights.length) &&
+  -- Same two bounds as in `sumSetProp`: `List.range values.length` and the
+  -- first conjunct `values.length ≤ weights.length`.
+  (total == (((List.range values.length).filter
+    (fun j => setMemB selected values[j]!)).map (fun j => weights[j]!)).sum)
 
+/-- `sumSetB_iff`: the explicit length conjunct in both bodies is the same
+    `values.length ≤ weights.length`; the two remaining sides are the same
+    integer equality (`==` versus `=`). -/
 theorem sumSetB_iff (values weights : List Int) (selected : IntSetValue) (total : Int) :
     sumSetB values weights selected total = true ↔
-      sumSetProp values weights selected total :=
-  decide_eq_true_iff
+      sumSetProp values weights selected total := by
+  unfold sumSetB sumSetProp
+  rw [Bool.and_eq_true, decide_eq_true_iff, beq_iff_eq]
 
 /-! ## fzn_sum_pred -/
 
-/-- The coefficients at the 1-based indices `ks` (out-of-range
-    indices dropped), duplicates included. -/
-private def coeffsAt (cs : List Int) (ks : List Int) : List Int :=
-  ((ks.filter (fun k => decide (1 ≤ k ∧ k ≤ (cs.length : Int)))).map
-    (fun k => cs[k.toNat - 1]!))
+/-- The sum of `cs` at the 1-based indices `ks` (duplicates included),
+    or `none` if any index is outside `1..cs.length`. Upstream
+    `fzn_sum_pred.mzn` reads `coefficients[k]` for every element of the
+    comprehension, so an out-of-range index is undefined rather than
+    silently skipped. -/
+private def coeffsAt? (cs : List Int) (ks : List Int) : Option Int :=
+  match ks with
+  | [] => some 0
+  | k :: rest =>
+    if 1 ≤ k ∧ k ≤ (cs.length : Int) then
+      -- The test `1 ≤ k ∧ k ≤ cs.length` is exactly the index-set premise
+      -- of the upstream `coefficients[k]` access, so this `[k.toNat - 1]!`
+      -- is in bounds.
+      (coeffsAt? cs rest).map (fun s => cs[k.toNat - 1]! + s)
+    else
+      none
 
 /-- `fzn_sum_pred(idx, sets, coefficients, total)`: `total` is the sum
     of `coefficients[k]` over the elements `k` of the `idx`-th set of
-    `sets`, the elements being 1-based indices into `coefficients`
-    (out-of-range indices contribute nothing); `idx` out of range
-    makes the constraint false. -/
+    `sets`, the elements being 1-based indices into `coefficients`.
+    `idx` out of range makes the constraint false; so does an
+    out-of-range index in **any** set, because the upstream `sums`
+    comprehension is evaluated for every set. -/
 def sumPredProp (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) : Prop :=
   match at1 sets idx with
   | none => False
-  | some s => total = (coeffsAt coefficients (setElems s)).sum
+  | some s =>
+    match coeffsAt? coefficients (setElems s).eraseDups with
+    | none => False
+    | some v => total = v ∧ ∀ j : Nat, j < sets.length →
+        -- `j < sets.length` proves this `sets[j]!` in bounds.
+        (coeffsAt? coefficients (setElems sets[j]!).eraseDups).isSome = true
 
 /-- Boolean twin of `sumPredProp`. -/
 def sumPredB (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) : Bool :=
   match at1 sets idx with
   | none => false
-  | some s => decide (total = (coeffsAt coefficients (setElems s)).sum)
+  | some s =>
+    (match coeffsAt? coefficients (setElems s).eraseDups with
+      | none => false
+      | some v => decide (total = v)) &&
+      sets.all (fun t => (coeffsAt? coefficients (setElems t).eraseDups).isSome)
 
 theorem sumPredB_iff (idx : Int) (sets : List IntSetValue) (coefficients : List Int)
     (total : Int) :
     sumPredB idx sets coefficients total = true ↔
       sumPredProp idx sets coefficients total := by
+  unfold sumPredB sumPredProp
   cases h : at1 sets idx with
-  | none => simp [sumPredB, sumPredProp, h]
+  | none => simp only [h, Bool.false_eq_true]
   | some s =>
-    simp only [sumPredB, sumPredProp, h]
-    exact decide_eq_true_iff
+    simp only [h]
+    rw [Bool.and_eq_true, List.all_eq_true]
+    cases hv : coeffsAt? coefficients (setElems s).eraseDups with
+    | none => simp only [Bool.false_eq_true, false_and]
+    | some v =>
+      simp only [decide_eq_true_iff]
+      constructor
+      · rintro ⟨htot, hall⟩
+        refine ⟨htot, fun j hj => ?_⟩
+        simp only [List.getElem!_eq_getElem?_getD, List.getElem?_eq_getElem hj, Option.getD_some]
+        exact hall (sets[j]) (List.getElem_mem hj)
+      · rintro ⟨htot, hall⟩
+        refine ⟨htot, fun t ht => ?_⟩
+        obtain ⟨j, hj, hpos⟩ := List.mem_iff_getElem.mp ht
+        have hval := hall j hj
+        rw [show t = sets[j] from hpos.symm]
+        simp only [List.getElem!_eq_getElem?_getD, List.getElem?_eq_getElem hj,
+          Option.getD_some] at hval
+        exact hval
 
 /-! ## fzn_range -/
 
 /-- `fzn_range(xs, domain, image)`: `image` is the image of `xs` on
-    `domain` (1-based positions): for every `k`,
-    `image.Contains k ↔ ∃ i : Nat, i < xs.length ∧
-    domain.Contains (i + 1) ∧ xs[i]! = k`. -/
-def rangeProp (xs : List Int) (domain image : IntSetValue) : Prop :=
-  ∀ k, image.Contains k ↔
-    ∃ i : Nat, i < xs.length ∧ domain.Contains ((i : Int) + 1) ∧ xs[i]! = k
+    `domain` (1-based positions), and `domain` only refers to positions of
+    `xs`.
 
-/-- Boolean twin of `rangeProp`: every element of `image` is hit by
-    some position in `domain`, and every position in `domain` maps
-    into `image`. -/
+    Upstream `fzn_range.mzn` is
+    `forall (i in ub(domain)) (i in domain -> xs[i] in image) /\
+     forall (i in ub(image))
+       (i in image -> exists (j in ub(domain)) (j in domain /\ xs[j] == i))`.
+    Both directions read `xs[j]` only for `j ∈ domain`, so every element of
+    `domain` must be a valid index of `xs` (`1 ≤ i ≤ xs.length`); an element
+    of `domain` outside that range makes the decomposition undefined, hence
+    false, and is not silently ignored. The `ub(image)` loop only enumerates
+    the bounds of the set `image`, never indices of `xs`, so `image` elements
+    are not index premises. -/
+def rangeProp (xs : List Int) (domain image : IntSetValue) : Prop :=
+  (∀ i, domain.Contains i → 1 ≤ i ∧ i ≤ (xs.length : Int)) ∧
+  (∀ k, image.Contains k ↔
+    ∃ i : Nat, i < xs.length ∧ domain.Contains ((i : Int) + 1) ∧ xs[i]! = k)
+
+/-- Boolean twin of `rangeProp`: the domain-range gate, the forward
+    condition (every `domain` position maps into `image`) and the backward
+    condition (every `image` element is hit by a `domain` position). -/
 def rangeB (xs : List Int) (domain image : IntSetValue) : Bool :=
+  (setElems domain).all (fun i => decide (1 ≤ i ∧ i ≤ (xs.length : Int)))
+  &&
+  -- `i ∈ List.range xs.length` proves the `xs[i]!` access in bounds.
+  (List.range xs.length).all (fun i =>
+    (!(decide (domain.Contains ((i : Int) + 1)))) ||
+      decide (image.Contains xs[i]!))
+  &&
   (setElems image).all (fun k =>
     (List.range xs.length).any (fun i =>
       decide (domain.Contains ((i : Int) + 1) ∧ xs[i]! = k)))
-  &&
-  (setElems domain).all (fun i =>
-    (!(decide (1 ≤ i ∧ i ≤ xs.length))) ||
-      (setElems image).any (fun k => decide (xs[i.toNat - 1]! = k)))
 
 theorem rangeB_iff (xs : List Int) (domain image : IntSetValue) :
     rangeB xs domain image = true ↔ rangeProp xs domain image := by
   constructor
   · intro h
     unfold rangeB at h
-    rw [Bool.and_eq_true] at h
-    obtain ⟨h1, h2⟩ := h
-    intro k
-    constructor
-    · intro hk
-      obtain ⟨i, himem, hdec⟩ :=
-        List.any_eq_true.mp ((List.all_eq_true.mp h1) k (setElems_mem_iff.mp hk))
-      simp only [List.mem_range] at himem
-      obtain ⟨hdom, rfl⟩ := of_decide_eq_true hdec
-      exact ⟨i, himem, hdom, rfl⟩
-    · rintro ⟨i, hi, hdom, rfl⟩
-      have hposnat : (((i : Int) + 1).toNat - 1) = i := by omega
-      have hall := (List.all_eq_true.mp h2) ((i : Int) + 1) (setElems_mem_iff.mp hdom)
-      rw [hposnat] at hall
-      have hbounds : (1 ≤ (i : Int) + 1 ∧ (i : Int) + 1 ≤ xs.length) := by omega
-      cases hor : ((setElems image).any (fun k => xs[i]! = k)) with
-      | true =>
-          have hall' : ((setElems image).any (fun k => xs[i]! = k)) = true := hor
-          obtain ⟨k, hk, hkeq⟩ := List.any_eq_true.mp hall'
-          have hkeq' : xs[i]! = k := of_decide_eq_true hkeq
-          rw [hkeq']
-          exact setElems_mem_iff.mpr hk
-      | false =>
-          rw [hor, Bool.or_false] at hall
-          have hneg : (!(decide (1 ≤ (i : Int) + 1 ∧ (i : Int) + 1 ≤ xs.length))) = true :=
-            hall
-          rw [Bool.not_eq_true'] at hneg
-          have hcon : ¬ (1 ≤ (i : Int) + 1 ∧ (i : Int) + 1 ≤ xs.length) := by
-            simpa using hneg
-          omega
+    rw [Bool.and_eq_true, Bool.and_eq_true] at h
+    obtain ⟨⟨hgate, hfwd⟩, hbwd⟩ := h
+    refine ⟨?_, ?_⟩
+    · intro i hi
+      exact of_decide_eq_true
+        ((List.all_eq_true.mp hgate) i (setElems_mem_iff.mp hi))
+    · intro k
+      constructor
+      · intro hk
+        obtain ⟨i, himem, hdec⟩ :=
+          List.any_eq_true.mp ((List.all_eq_true.mp hbwd) k (setElems_mem_iff.mp hk))
+        simp only [List.mem_range] at himem
+        obtain ⟨hdom, rfl⟩ := of_decide_eq_true hdec
+        exact ⟨i, himem, hdom, rfl⟩
+      · rintro ⟨i, hi, hdom, rfl⟩
+        have hall := (List.all_eq_true.mp hfwd) i (List.mem_range.mpr hi)
+        rw [Bool.or_eq_true] at hall
+        rcases hall with hnot | himg
+        · rw [Bool.not_eq_true'] at hnot
+          exact absurd hdom (of_decide_eq_false hnot)
+        · exact of_decide_eq_true himg
   · intro h
     unfold rangeB
-    rw [Bool.and_eq_true]
-    refine ⟨List.all_eq_true.mpr ?_, List.all_eq_true.mpr ?_⟩
+    obtain ⟨hgate, himg⟩ := h
+    rw [Bool.and_eq_true, Bool.and_eq_true]
+    refine ⟨⟨List.all_eq_true.mpr ?_, List.all_eq_true.mpr ?_⟩,
+      List.all_eq_true.mpr ?_⟩
+    · intro i hi
+      exact decide_eq_true (hgate i (setElems_mem_iff.mpr hi))
+    · intro i hi
+      simp only [List.mem_range] at hi
+      show ((!decide (domain.Contains ((i : Int) + 1)) ||
+        decide (image.Contains xs[i]!)) = true)
+      rw [Bool.or_eq_true]
+      by_cases hdom : domain.Contains ((i : Int) + 1)
+      · exact Or.inr (decide_eq_true ((himg xs[i]!).mpr ⟨i, hi, hdom, rfl⟩))
+      · exact Or.inl (by rw [Bool.not_eq_true']; exact decide_eq_false_iff_not.mpr hdom)
     · intro k hk
-      obtain ⟨i, hi, hdom, hkeq⟩ := (h k).mp (setElems_mem_iff.mpr hk)
+      obtain ⟨i, hi, hdom, hkeq⟩ := (himg k).mp (setElems_mem_iff.mpr hk)
       rw [← hkeq]
       exact List.any_eq_true.mpr
         ⟨i, List.mem_range.mpr hi, decide_eq_true ⟨hdom, rfl⟩⟩
-    · intro i hi
-      by_cases hbounds : 1 ≤ i ∧ i ≤ xs.length
-      · obtain ⟨hlo, hhi⟩ := hbounds
-        have hdom : domain.Contains i := setElems_mem_iff.mpr hi
-        have hcn : (((i : Int) - 1).toNat : Int) + 1 = i := by omega
-        have hidx : ((i : Int) - 1).toNat < xs.length := by omega
-        have hdom' : domain.Contains ((((i : Int) - 1).toNat : Int) + 1) := by
-          rw [hcn]; exact hdom
-        have hmem : image.Contains xs[((i : Int) - 1).toNat]! :=
-          (h xs[((i : Int) - 1).toNat]!).mpr
-            ⟨((i : Int) - 1).toNat, hidx, hdom', rfl⟩
-        have heq : ((i : Int) - 1).toNat = i.toNat - 1 := by omega
-        rw [Bool.or_eq_true]
-        refine Or.inr ?_
-        rw [← heq]
-        exact List.any_eq_true.mpr
-          ⟨xs[((i : Int) - 1).toNat]!, setElems_mem_iff.mp hmem,
-            decide_eq_true rfl⟩
-      · have hout : ¬ (1 ≤ i ∧ i ≤ xs.length) := hbounds
-        show ((!decide (1 ≤ i ∧ i ≤ xs.length) ||
-            (setElems image).any (fun k => decide (xs[i.toNat - 1]! = k))) = true)
-        rw [Bool.or_eq_true]
-        by_cases hin : (decide (1 ≤ i ∧ i ≤ xs.length)) = false
-        · rw [Bool.not_eq_true'] at *
-          exact Or.inl hin
-        · exfalso
-          have hcon : (decide (1 ≤ i ∧ i ≤ xs.length)) = true := by
-            cases hdec : (decide (1 ≤ i ∧ i ≤ xs.length)) with
-            | true => rfl
-            | false => exact absurd hdec hin
-          rw [decide_eq_true_iff] at hcon
-          exact hout hcon
 
 /-! ## fzn_roots -/
 
@@ -797,50 +845,61 @@ theorem arraySetIntersectB_iff (x : List IntSetValue) (z : IntSetValue) :
 
 /-! ## Sliding window helper -/
 
-/-- Windows of a list: `windowsB l w check` checks `check` on every
-    window of `w.toNat` consecutive elements starting at positions
-    `p` with `p + w ≤ l.length`; a nonpositive width makes it
-    vacuously true (no windows, per the `.mzn` range
-    `lx-1..ux-window_size` being empty). -/
-private def windowsB {α : Type} (l : List α) (w : Int) (check : List α → Bool) : Bool :=
-  if 0 < w then
-    (List.range (l.length + 1 - w.toNat)).all
-      (fun p => check ((l.drop p).take w.toNat))
+/-- Window starts for width `w` on a list of length `n`, mirroring the
+    upstream generator `forall (i in lx-1..ux-window_size)` with
+    `lx = min(index_set(xs)) = 1` and `ux = max(index_set(xs)) = n`
+    (FlatZinc arrays are 1-based). `none` means the decomposition is
+    undefined, so the constraint is false:
+    - `n = 0`: `min` of the empty index set is undefined, whatever `w`
+      (MiniZinc 2.10.1: "minimum of empty set is undefined"; the model is
+      unsatisfiable);
+    - `w < 0`: the first generator value is `0`, and reading `S[0+w]`
+      with `0+w < 0` leaves the declared index set of `S`.
+    Otherwise the generator range is `0..n-w`, so:
+    - `w > n`: the range `0..(n-w)` is empty, no windows;
+    - `w = 0`: the range is `0..n`, the `n+1` empty windows. -/
+private def windowStarts (n : Nat) (w : Int) : Option (List Nat) :=
+  if 0 < n ∧ 0 ≤ w then
+    some (List.range (n + 1 - w.toNat))
   else
-    true
+    none
+
+/-- `windowsB l w check` checks `check` on every window selected by
+    `windowStarts`, i.e. on each `[x_p, …, x_{p+w-1}]` for a start
+    `p` with `p + w ≤ l.length`. An empty list or a negative width is
+    undefined upstream and gives `false`; a zero width checks the empty
+    window `l.length + 1` times. -/
+private def windowsB {α : Type} (l : List α) (w : Int) (check : List α → Bool) : Bool :=
+  match windowStarts l.length w with
+  | none => false
+  | some ps => ps.all (fun p => check ((l.drop p).take w.toNat))
 
 private theorem windowsB_iff {α : Type} (l : List α) (w : Int) (check : List α → Bool) :
     windowsB l w check = true ↔
-      ∀ p : Nat, (p : Int) + w ≤ l.length → 0 < w →
-        check ((l.drop p).take w.toNat) = true := by
+      ∃ ps : List Nat, windowStarts l.length w = some ps ∧
+        ∀ p ∈ ps, check ((l.drop p).take w.toNat) = true := by
   unfold windowsB
-  by_cases hw : 0 < w
-  · rw [if_pos (by omega)]
+  cases h : windowStarts l.length w with
+  | none => simp
+  | some ps =>
+    simp only [h, List.all_eq_true]
     constructor
-    · intro h p hp _
-      have hlen : p < l.length + 1 - w.toNat := by omega
-      have hmem : p ∈ List.range (l.length + 1 - w.toNat) :=
-        List.mem_range.mpr hlen
-      exact List.all_eq_true.mp h p hmem
-    · intro h
-      refine List.all_eq_true.mpr ?_
-      intro p hp
-      have hmem : p < l.length + 1 - w.toNat := List.mem_range.mp hp
-      exact h p (by omega) hw
-  · rw [if_neg hw]
-    constructor
-    · intro h p hp hwpos
-      exact absurd hwpos hw
-    · intro h
-      trivial
+    · intro hall
+      exact ⟨ps, rfl, hall⟩
+    · rintro ⟨q, hq, hqcheck⟩
+      simp only [Option.some.injEq] at hq
+      subst hq
+      exact hqcheck
 /-! ## fzn_sliding_sum -/
 
 /-- `fzn_sliding_sum(low, up, window_size, xs)`: the sum of every
-    window of `window_size` consecutive elements belongs to
-    `[low, up]` (vacuously true if `window_size ≤ 0` — no windows). -/
+    window of `window_size` consecutive elements belongs to `[low, up]`,
+    for the windows selected by `windowStarts`. -/
 def slidingSumProp (low up w : Int) (xs : List Int) : Prop :=
-  ∀ p : Nat, (p : Int) + w ≤ xs.length → 0 < w →
-    low ≤ ((xs.drop p).take w.toNat).sum ∧ ((xs.drop p).take w.toNat).sum ≤ up
+  match windowStarts xs.length w with
+  | none => False
+  | some ps => ∀ p ∈ ps, low ≤ ((xs.drop p).take w.toNat).sum ∧
+      ((xs.drop p).take w.toNat).sum ≤ up
 
 /-- Boolean twin of `slidingSumProp`. -/
 def slidingSumB (low up w : Int) (xs : List Int) : Bool :=
@@ -848,22 +907,27 @@ def slidingSumB (low up w : Int) (xs : List Int) : Bool :=
 
 theorem slidingSumB_iff (low up w : Int) (xs : List Int) :
     slidingSumB low up w xs = true ↔ slidingSumProp low up w xs := by
-  rw [slidingSumB, windowsB_iff]
-  constructor
-  · intro h p hp hwpos
-    exact of_decide_eq_true (h p hp hwpos)
-  · intro h p hp hwpos
-    exact decide_eq_true (h p hp hwpos)
+  unfold slidingSumB slidingSumProp
+  cases h : windowStarts xs.length w with
+  | none => simp [h, windowsB]
+  | some ps =>
+    simp only [h, windowsB, List.all_eq_true, true_and]
+    exact ⟨fun hw p hp => of_decide_eq_true (hw p hp),
+      fun h p hp => decide_eq_true (h p hp)⟩
 
 /-! ## fzn_sliding_among_int -/
 
 /-- `fzn_sliding_among_int(low, up, window_size, xs, values)`: every
     window of `window_size` consecutive elements contains between `low`
-    and `up` elements in `values`. -/
+    and `up` elements in `values`, for the windows selected by
+    `windowStarts` (upstream reduces it to `sliding_sum` on the 0/1
+    indicator array of membership in `values`). -/
 def slidingAmongIntProp (low up w : Int) (xs : List Int) (S : IntSetValue) : Prop :=
-  ∀ p : Nat, (p : Int) + w ≤ xs.length → 0 < w →
-    low ≤ (((xs.drop p).take w.toNat).filter (fun x => setMemB S x)).length ∧
-      (((xs.drop p).take w.toNat).filter (fun x => setMemB S x)).length ≤ up
+  match windowStarts xs.length w with
+  | none => False
+  | some ps => ∀ p ∈ ps,
+      low ≤ (((xs.drop p).take w.toNat).filter (fun x => setMemB S x)).length ∧
+        (((xs.drop p).take w.toNat).filter (fun x => setMemB S x)).length ≤ up
 
 /-- Boolean twin of `slidingAmongIntProp`. -/
 def slidingAmongIntB (low up w : Int) (xs : List Int) (S : IntSetValue) : Bool :=
@@ -872,22 +936,26 @@ def slidingAmongIntB (low up w : Int) (xs : List Int) (S : IntSetValue) : Bool :
 
 theorem slidingAmongIntB_iff (low up w : Int) (xs : List Int) (S : IntSetValue) :
     slidingAmongIntB low up w xs S = true ↔ slidingAmongIntProp low up w xs S := by
-  rw [slidingAmongIntB, windowsB_iff]
-  constructor
-  · intro h p hp hwpos
-    exact of_decide_eq_true (h p hp hwpos)
-  · intro h p hp hwpos
-    exact decide_eq_true (h p hp hwpos)
+  unfold slidingAmongIntB slidingAmongIntProp
+  cases h : windowStarts xs.length w with
+  | none => simp [h, windowsB]
+  | some ps =>
+    simp only [h, windowsB, List.all_eq_true, true_and]
+    exact ⟨fun hw p hp => of_decide_eq_true (hw p hp),
+      fun h p hp => decide_eq_true (h p hp)⟩
 
 /-! ## fzn_sliding_among_bool -/
 
 /-- `fzn_sliding_among_bool(low, up, window_size, xs, value)`: every
     window of `window_size` consecutive booleans contains between
-    `low` and `up` occurrences of `value`. -/
+    `low` and `up` occurrences of `value`, for the windows selected by
+    `windowStarts`. -/
 def slidingAmongBoolProp (low up w : Int) (xs : List Bool) (value : Bool) : Prop :=
-  ∀ p : Nat, (p : Int) + w ≤ xs.length → 0 < w →
-    low ≤ ((xs.drop p).take w.toNat).count value ∧
-      ((xs.drop p).take w.toNat).count value ≤ up
+  match windowStarts xs.length w with
+  | none => False
+  | some ps => ∀ p ∈ ps,
+      low ≤ ((xs.drop p).take w.toNat).count value ∧
+        ((xs.drop p).take w.toNat).count value ≤ up
 
 /-- Boolean twin of `slidingAmongBoolProp`. -/
 def slidingAmongBoolB (low up w : Int) (xs : List Bool) (value : Bool) : Bool :=
@@ -896,12 +964,13 @@ def slidingAmongBoolB (low up w : Int) (xs : List Bool) (value : Bool) : Bool :=
 theorem slidingAmongBoolB_iff (low up w : Int) (xs : List Bool) (value : Bool) :
     slidingAmongBoolB low up w xs value = true ↔
       slidingAmongBoolProp low up w xs value := by
-  rw [slidingAmongBoolB, windowsB_iff]
-  constructor
-  · intro h p hp hwpos
-    exact of_decide_eq_true (h p hp hwpos)
-  · intro h p hp hwpos
-    exact decide_eq_true (h p hp hwpos)
+  unfold slidingAmongBoolB slidingAmongBoolProp
+  cases h : windowStarts xs.length w with
+  | none => simp [h, windowsB]
+  | some ps =>
+    simp only [h, windowsB, List.all_eq_true, true_and]
+    exact ⟨fun hw p hp => of_decide_eq_true (hw p hp),
+      fun h p hp => decide_eq_true (h p hp)⟩
 
 /-! ## The interpretations -/
 
@@ -1325,5 +1394,470 @@ theorem fzn_sliding_among_bool_iff (args : List Value) :
     obtain ⟨l, u, w, xs, b⟩ := p
     simp only
     exact slidingAmongBoolB_iff l u w xs b
+
+/-! ## Decodability gates
+
+`setMathDecodes` is the neutral decodability gate of the family: it
+replays the acceptance condition of exactly the argument decoder that
+each branch of `setMathInterp` uses, and is neutral (`true`) outside the
+family.  Every decoder above reads its arguments only through
+constructor tags and the success of `valueInts` / `valueSets` /
+`valueBools` on the array components; no decoded integer, set value or
+parameter value is inspected.  Hence `ArgsAgree` already forces the
+same decode result, and no extra `par`-position hypothesis is needed. -/
+
+/-- `setArrAndSet` accepts exactly an array of sets and a set. -/
+private theorem setArrAndSet_isSome_eq (a : List Value) (u : IntSetValue) :
+    (setArrAndSet [.array a, .setOfInt u]).isSome = (valueSets a).isSome := by
+  simp only [setArrAndSet]
+  cases valueSets a <;> rfl
+
+/-- `intArrAndSet` accepts exactly an integer array and a set. -/
+private theorem intArrAndSet_isSome_eq (a : List Value) (s : IntSetValue) :
+    (intArrAndSet [.array a, .setOfInt s]).isSome = (valueInts a).isSome := by
+  simp only [intArrAndSet]
+  cases valueInts a <;> rfl
+
+/-- `setArrAndOneSet` accepts exactly an array of sets and a set. -/
+private theorem setArrAndOneSet_isSome_eq (a : List Value) (s : IntSetValue) :
+    (setArrAndOneSet [.array a, .setOfInt s]).isSome = (valueSets a).isSome := by
+  simp only [setArrAndOneSet]
+  cases valueSets a <;> rfl
+
+/-- `sumSetArgs` accepts exactly two integer arrays, a set and an
+    integer. -/
+private theorem sumSetArgs_isSome_eq (a b : List Value) (s : IntSetValue)
+    (t : Int) :
+    (sumSetArgs [.array a, .array b, .setOfInt s, .int t]).isSome =
+      ((valueInts a).isSome && (valueInts b).isSome) := by
+  simp only [sumSetArgs]
+  cases valueInts a <;> cases valueInts b <;> rfl
+
+/-- `sumPredArgs` accepts exactly an integer, a set array, an integer
+    array and an integer. -/
+private theorem sumPredArgs_isSome_eq (idx : Int) (a b : List Value) (t : Int) :
+    (sumPredArgs [.int idx, .array a, .array b, .int t]).isSome =
+      ((valueSets a).isSome && (valueInts b).isSome) := by
+  simp only [sumPredArgs]
+  cases valueSets a <;> cases valueInts b <;> rfl
+
+/-- `intArrSetSet` accepts exactly an integer array and two sets. -/
+private theorem intArrSetSet_isSome_eq (a : List Value) (s1 s2 : IntSetValue) :
+    (intArrSetSet [.array a, .setOfInt s1, .setOfInt s2]).isSome =
+      (valueInts a).isSome := by
+  simp only [intArrSetSet]
+  cases valueInts a <;> rfl
+
+/-- `slidingSumArgs` accepts exactly three integers and an integer
+    array. -/
+private theorem slidingSumArgs_isSome_eq (l u w : Int) (a : List Value) :
+    (slidingSumArgs [.int l, .int u, .int w, .array a]).isSome =
+      (valueInts a).isSome := by
+  simp only [slidingSumArgs]
+  cases valueInts a <;> rfl
+
+/-- `slidingAmongIntArgs` accepts exactly three integers, an integer
+    array and a set. -/
+private theorem slidingAmongIntArgs_isSome_eq (l u w : Int) (a : List Value)
+    (S : IntSetValue) :
+    (slidingAmongIntArgs [.int l, .int u, .int w, .array a, .setOfInt S]).isSome =
+      (valueInts a).isSome := by
+  simp only [slidingAmongIntArgs]
+  cases valueInts a <;> rfl
+
+/-- `slidingAmongBoolArgs` accepts exactly three integers, a boolean
+    array and a boolean. -/
+private theorem slidingAmongBoolArgs_isSome_eq (l u w : Int) (a : List Value)
+    (b : Bool) :
+    (slidingAmongBoolArgs [.int l, .int u, .int w, .array a, .bool b]).isSome =
+      (valueBools a).isSome := by
+  simp only [slidingAmongBoolArgs]
+  cases valueBools a <;> rfl
+
+/-- Local agreement for the imported `AllDiffCounting.oneSetArr`, kept
+    private so that it is independent of the lemma of the same name in
+    `AllDiffCounting.lean` (owned by another worker). -/
+private theorem oneSetArr_isSome_agree_local {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (AllDiffCounting.oneSetArr vs).isSome =
+      (AllDiffCounting.oneSetArr ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      simp only [AllDiffCounting.oneSetArr]
+      exact valueSets_isSome_sameShape ha
+  · cases hx <;> rfl
+
+theorem twoSets_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (twoSets vs).isSome = (twoSets ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem setAndInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (setAndInt vs).isSome = (setAndInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem setArrAndSet_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (setArrAndSet vs).isSome = (setArrAndSet ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ =>
+        rw [setArrAndSet_isSome_eq, setArrAndSet_isSome_eq,
+          valueSets_isSome_sameShape ha]
+      | array _ => rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem intArrAndSet_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (intArrAndSet vs).isSome = (intArrAndSet ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ =>
+        rw [intArrAndSet_isSome_eq, intArrAndSet_isSome_eq,
+          valueInts_isSome_sameShape ha]
+      | array _ => rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem setArrAndOneSet_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (setArrAndOneSet vs).isSome = (setArrAndOneSet ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ =>
+        rw [setArrAndOneSet_isSome_eq, setArrAndOneSet_isSome_eq,
+          valueSets_isSome_sameShape ha]
+      | array _ => rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem sumSetArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (sumSetArgs vs).isSome = (sumSetArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+  rcases hws with _ | ⟨hu, hus⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array b b' hb =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt _ _ =>
+          cases hw with
+          | bool _ _ => rfl
+          | int _ _ =>
+            rw [sumSetArgs_isSome_eq, sumSetArgs_isSome_eq,
+              valueInts_isSome_sameShape ha, valueInts_isSome_sameShape hb]
+          | setOfInt _ _ => rfl
+          | array _ => rfl
+        | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> rfl
+
+theorem sumPredArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (sumPredArgs vs).isSome = (sumPredArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+  rcases hws with _ | ⟨hu, hus⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | setOfInt _ _ => rfl
+    | array _ => rfl
+    | int _ _ =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array a a' ha =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt _ _ => rfl
+        | @array b b' hb =>
+          cases hw with
+          | bool _ _ => rfl
+          | int _ _ =>
+            rw [sumPredArgs_isSome_eq, sumPredArgs_isSome_eq,
+              valueSets_isSome_sameShape ha, valueInts_isSome_sameShape hb]
+          | setOfInt _ _ => rfl
+          | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> rfl
+
+theorem intArrSetSet_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (intArrSetSet vs).isSome = (intArrSetSet ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt _ _ =>
+          rw [intArrSetSet_isSome_eq, intArrSetSet_isSome_eq,
+            valueInts_isSome_sameShape ha]
+        | array _ => rfl
+      | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+theorem slidingSumArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (slidingSumArgs vs).isSome = (slidingSumArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+  rcases hws with _ | ⟨hu, hus⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | setOfInt _ _ => rfl
+    | array _ => rfl
+    | int _ _ =>
+      cases hy with
+      | bool _ _ => rfl
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+      | int _ _ =>
+        cases hz with
+        | bool _ _ => rfl
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+        | int _ _ =>
+          cases hw with
+          | bool _ _ => rfl
+          | int _ _ => rfl
+          | setOfInt _ _ => rfl
+          | @array a a' ha =>
+            rw [slidingSumArgs_isSome_eq, slidingSumArgs_isSome_eq,
+              valueInts_isSome_sameShape ha]
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> rfl
+
+theorem slidingAmongIntArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (slidingAmongIntArgs vs).isSome = (slidingAmongIntArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+  rcases hws with _ | ⟨hu, hus⟩
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> rfl
+  rcases hus with _ | ⟨hv, hvs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | setOfInt _ _ => rfl
+    | array _ => rfl
+    | int _ _ =>
+      cases hy with
+      | bool _ _ => rfl
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+      | int _ _ =>
+        cases hz with
+        | bool _ _ => rfl
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+        | int _ _ =>
+          cases hw with
+          | bool _ _ => rfl
+          | int _ _ => rfl
+          | setOfInt _ _ => rfl
+          | @array a a' ha =>
+            cases hu with
+            | bool _ _ => rfl
+            | int _ _ => rfl
+            | setOfInt _ _ =>
+              rw [slidingAmongIntArgs_isSome_eq,
+                slidingAmongIntArgs_isSome_eq,
+                valueInts_isSome_sameShape ha]
+            | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> cases hu <;> rfl
+
+theorem slidingAmongBoolArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (slidingAmongBoolArgs vs).isSome = (slidingAmongBoolArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+  rcases hws with _ | ⟨hu, hus⟩
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> rfl
+  rcases hus with _ | ⟨hv, hvs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | setOfInt _ _ => rfl
+    | array _ => rfl
+    | int _ _ =>
+      cases hy with
+      | bool _ _ => rfl
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+      | int _ _ =>
+        cases hz with
+        | bool _ _ => rfl
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+        | int _ _ =>
+          cases hw with
+          | bool _ _ => rfl
+          | int _ _ => rfl
+          | setOfInt _ _ => rfl
+          | @array a a' ha =>
+            cases hu with
+            | int _ _ => rfl
+            | setOfInt _ _ => rfl
+            | array _ => rfl
+            | bool _ _ =>
+              rw [slidingAmongBoolArgs_isSome_eq,
+                slidingAmongBoolArgs_isSome_eq,
+                valueBools_isSome_sameShape ha]
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> cases hu <;> rfl
+
+/-- Boolean decodability gate of the set/math family.  Neutral (`true`)
+    outside the family. -/
+def setMathDecodes (n : String) (args : List Value) : Bool :=
+  match n with
+  | "fzn_disjoint" => (twoSets args).isSome
+  | "fzn_set_member" => (setAndInt args).isSome
+  | "fzn_partition_set" => (setArrAndSet args).isSome
+  | "fzn_at_most1" => (AllDiffCounting.oneSetArr args).isSome
+  | "fzn_sum_set" => (sumSetArgs args).isSome
+  | "fzn_sum_pred" => (sumPredArgs args).isSome
+  | "fzn_range" => (intArrSetSet args).isSome
+  | "fzn_roots" => (intArrSetSet args).isSome
+  | "fzn_array_int_union" => (intArrAndSet args).isSome
+  | "fzn_array_set_union" => (setArrAndOneSet args).isSome
+  | "fzn_array_set_intersect" => (setArrAndOneSet args).isSome
+  | "fzn_sliding_sum" => (slidingSumArgs args).isSome
+  | "fzn_sliding_among_int" => (slidingAmongIntArgs args).isSome
+  | "fzn_sliding_among_bool" => (slidingAmongBoolArgs args).isSome
+  | _ => true
+
+/-- The decodability gate is invariant under `ArgsAgree`. -/
+theorem setMathDecodes_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) (n : String) :
+    setMathDecodes n vs = setMathDecodes n ws := by
+  unfold setMathDecodes
+  split
+  · exact twoSets_isSome_agree h
+  · exact setAndInt_isSome_agree h
+  · exact setArrAndSet_isSome_agree h
+  · exact oneSetArr_isSome_agree_local h
+  · exact sumSetArgs_isSome_agree h
+  · exact sumPredArgs_isSome_agree h
+  · exact intArrSetSet_isSome_agree h
+  · exact intArrSetSet_isSome_agree h
+  · exact intArrAndSet_isSome_agree h
+  · exact setArrAndOneSet_isSome_agree h
+  · exact setArrAndOneSet_isSome_agree h
+  · exact slidingSumArgs_isSome_agree h
+  · exact slidingAmongIntArgs_isSome_agree h
+  · exact slidingAmongBoolArgs_isSome_agree h
+  · rfl
 
 end LeanFzn.Semantics.Globals.SetMath

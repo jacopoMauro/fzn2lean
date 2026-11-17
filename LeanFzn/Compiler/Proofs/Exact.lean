@@ -483,8 +483,8 @@ theorem two_of_bang {c : ConstraintItem}
 /-- The declared-signature lookup is none for any name in a model
     without predicate items. -/
 theorem declaredSigs_none {m : Model} (hpred : m.predicates = [])
-    (x : Ident) : m.declaredSigs x = none := by
-  show lookupIdent x (m.predicates.map (fun p => (p.name, p.params.map (·.type)))) = none
+    (x : Ident) : m.declaredSigs x = [] := by
+  unfold LeanFzn.Model.declaredSigs
   rw [hpred]
   rfl
 
@@ -496,12 +496,10 @@ theorem sigEnv_int_binary {m : Model} (hpred : m.predicates = [])
     (hn : n = "int_eq" ∨ n = "int_ne" ∨ n = "int_le" ∨ n = "int_lt" ∨
       n = "int_ge" ∨ n = "int_gt") :
     m.sigEnv fullSig (Ident.mk n) =
-    some [.basic (.var (.par .int)), .basic (.var (.par .int))] := by
+    [[.basic (.var (.par .int)), .basic (.var (.par .int))]] := by
   rcases hn with h | h | h | h | h | h
   all_goals
-    show (match m.declaredSigs (Ident.mk n) with
-      | some params => some params
-      | none => fullSig (Ident.mk n)) = _
+    unfold LeanFzn.Model.sigEnv
     rw [declaredSigs_none hpred (Ident.mk n), h]
     rfl
 
@@ -509,11 +507,9 @@ theorem sigEnv_int_binary {m : Model} (hpred : m.predicates = [])
     int/int/bool parameter types (model without predicate items). -/
 theorem sigEnv_int_eq_reif {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "int_eq_reif") =
-    some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-      .basic (.var (.par .bool))] := by
-  show (match m.declaredSigs (Ident.mk "int_eq_reif") with
-    | some params => some params
-    | none => fullSig (Ident.mk "int_eq_reif")) = _
+    [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+      .basic (.var (.par .bool))]] := by
+  unfold LeanFzn.Model.sigEnv
   rw [declaredSigs_none hpred (Ident.mk "int_eq_reif")]
   rfl
 
@@ -521,11 +517,9 @@ theorem sigEnv_int_eq_reif {m : Model} (hpred : m.predicates = []) :
     int-var parameter types. -/
 theorem sigEnv_int_plus' {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "int_plus") =
-    some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-      .basic (.var (.par .int))] := by
-  show (match m.declaredSigs (Ident.mk "int_plus") with
-    | some params => some params
-    | none => fullSig (Ident.mk "int_plus")) = _
+    [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+      .basic (.var (.par .int))]] := by
+  unfold LeanFzn.Model.sigEnv
   rw [declaredSigs_none hpred (Ident.mk "int_plus")]
   rfl
 
@@ -536,12 +530,10 @@ theorem sigEnv_array_int_extreme {m : Model} (hpred : m.predicates = [])
     (n : String)
     (hn : n = "array_int_minimum" ∨ n = "array_int_maximum") :
     m.sigEnv fullSig (Ident.mk n) =
-    some [.basic (.var (.par .int)), .array .int (.var (.par .int))] := by
+    [[.basic (.var (.par .int)), .array .int (.var (.par .int))]] := by
   rcases hn with h | h
   all_goals
-    show (match m.declaredSigs (Ident.mk n) with
-      | some params => some params
-      | none => fullSig (Ident.mk n)) = _
+    unfold LeanFzn.Model.sigEnv
     rw [declaredSigs_none hpred (Ident.mk n), h]
     rfl
 
@@ -569,21 +561,21 @@ theorem int_reads_of_mem_int_binary {m : Model}
   intro x i hxarg hxi
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      some [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.int))] :=
+        BasicParType.int))]] :=
     sigEnv_int_binary hpred c.name.name hname
   have hparameq : params =
       [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int))] := by
-    have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+    have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
     rw [show m.sigEnv Globals.fullSig c.name
         = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
     rw [hres] at h1
-    exact (Option.some.inj h1).symm
+    exact List.mem_singleton.mp h1
   rw [hparameq] at hfor
   obtain ⟨pt, hptmem, hchk0⟩ :=
     forall2_mem (Expr.checkArg m.staticEnv) c.args
@@ -620,12 +612,12 @@ theorem int_reads_of_mem_int_plus {m : Model}
   intro x i hxarg hxi
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      some [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.int))] := by
+        BasicParType.int))]] := by
     rw [hname]
     exact sigEnv_int_plus' hpred
   have hparameq : params =
@@ -635,11 +627,11 @@ theorem int_reads_of_mem_int_plus {m : Model}
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int))] := by
-    have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+    have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
     rw [show m.sigEnv Globals.fullSig c.name
         = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
     rw [hres] at h1
-    exact (Option.some.inj h1).symm
+    exact List.mem_singleton.mp h1
   rw [hparameq] at hfor
   obtain ⟨pt, hptmem, hchk0⟩ :=
     forall2_mem (Expr.checkArg m.staticEnv) c.args
@@ -696,7 +688,42 @@ theorem compile_sat_link_extracted {m : Model}
       ∃ p, a[i]! = Value.int p := by
     intro x i hxarg hxi hname
     exact int_reads_of_mem_eq_ne hwf hslot hc hpred hname hmem x i hxarg hxi
-  exact extractConstraint_holds_converse hnu halt hex hreads hsat
+  -- the array-element reads for the three linear reified shapes
+  have harr : ∀ (ks elems : ArrayLiteral) (b : Int) (r x : Ident) (i : Nat),
+      c.args = [Expr.array ks, Expr.array elems,
+        Expr.basic (.lit (.int b)), Expr.basic (.ident r)] →
+      BasicExpr.ident x ∈ elems →
+      nameIndex (slots.map Prod.fst) x.name = some i →
+      (c.name.name = "int_lin_eq_reif" ∨
+        c.name.name = "int_lin_le_reif" ∨
+        c.name.name = "int_lin_ne_reif") →
+      ∃ p, a[i]! = Value.int p := by
+    intro ks elems b r x i hargs hxmem hxi hname
+    obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
+    have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
+        [[.array .int (.par .int), .array .int (.var (.par .int)),
+          .basic (.par .int), .basic (.var (.par .bool))]] := by
+      rcases hname with h1 | h1 | h1
+      · rw [h1]
+        simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
+          globalsSig, stdSig]
+      · rw [h1]
+        simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
+          globalsSig, stdSig]
+      · rw [h1]
+        simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
+          globalsSig, stdSig]
+    have hparameq : params =
+        [.array .int (.par .int), .array .int (.var (.par .int)),
+          .basic (.par .int), .basic (.var (.par .bool))] := by
+      have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
+      rw [show m.sigEnv Globals.fullSig c.name
+          = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
+      rw [hres] at h1
+      exact List.mem_singleton.mp h1
+    have hchk := checkArg_lin_reif_elem hfor hparameq hargs hxmem
+    exact int_read_of_checkArg_slot hwf hslot hfor hchk hxi hmem
+  exact extractConstraint_holds_converse hnu halt hex hreads harr hsat
 
 
 
@@ -3736,6 +3763,142 @@ theorem auxPin_of_mem {slots0 auxs : List (String × List Value)}
 /-! ### The ext-SAT linker (passthrough constraints) -/
 /-! ### The ext-reads masters -/
 
+/-- A name found in the extended slot list at a position is a model
+    name whenever it has a static environment entry (the extended list is
+    the model slots followed by fresh aux names). -/
+theorem nameIndex_model_of_ext {m : Model}
+    {slots0 auxs : List (String × List Value)} {x : Ident} {i : Nat}
+    (hvars : ∀ d ∈ m.variables, ∃ (ty : BasicVarType) (n : Ident)
+      (anns : List Annotation), d = .basic ty n anns none)
+    (hslot : slotsChecked m = .ok slots0)
+    (hauxfresh : ∀ (n2 : Nat) (p : String × List Value),
+      auxs[n2]? = some p → p.1 ∉ auxTaken m slots0)
+    (hstatic : m.staticEnv x ≠ none)
+    (hxi : nameIndex ((slots0 ++ auxs).map Prod.fst) x.name = some i) :
+    ∃ j, nameIndex (slots0.map Prod.fst) x.name = some j := by
+    by_cases hx : ∃ j, nameIndex (slots0.map Prod.fst) x.name = some j
+    · exact hx
+    · exfalso
+      -- x is not a model slot name; the extended lookup found x —
+      -- at an aux name. But x is declared (well-formedness): a
+      -- variable (with a slot: contradiction) or a parameter (whose
+      -- name is never an aux name: contradiction with hauxfresh).
+      have hxdecl : (∃ d ∈ m.variables, VarDeclItem.name d = x) ∨
+          (∃ d ∈ m.parameters, ParDeclItem.name d = x) := by
+        -- the staticEnv resolution: parameters first, then vars
+        unfold Model.staticEnv at hstatic
+        cases hparam : lookupIdent x
+            (m.parameters.map (fun d => (d.name, (d.type, false)))) with
+        | some p =>
+            obtain ⟨y, hmem, hyname⟩ := lookupIdent_inv_mem x _ p hparam
+            obtain ⟨d, hd, hdget⟩ := List.mem_map.mp hmem
+            refine Or.inr ⟨d, hd, ?_⟩
+            have hyd : y = ParDeclItem.name d := (congrArg Prod.fst hdget).symm
+            have hyn : (ParDeclItem.name d).name = x.name := hyd ▸ hyname
+            exact ident_eq_of_name hyn
+        | none =>
+            cases hvar : lookupIdent x
+                (m.variables.map (fun d => (d.name, (d.type, true)))) with
+            | some p =>
+                obtain ⟨y, hmem, hyname⟩ := lookupIdent_inv_mem x _ p hvar
+                obtain ⟨d, hd, hdget⟩ := List.mem_map.mp hmem
+                refine Or.inl ⟨d, hd, ?_⟩
+                have hyd : y = VarDeclItem.name d := (congrArg Prod.fst hdget).symm
+                have hyn : (VarDeclItem.name d).name = x.name := hyd ▸ hyname
+                exact ident_eq_of_name hyn
+            | none =>
+                exfalso
+                apply hstatic
+                rw [hparam, hvar]
+      -- x's name is in the taken list — but the aux name at the
+      -- extended position is never a taken name
+      have hxi' : nameIndex (slots0.map Prod.fst ++ auxs.map Prod.fst) x.name
+          = some i := by
+        rw [show slots0.map Prod.fst ++ auxs.map Prod.fst
+          = (slots0 ++ auxs).map Prod.fst from (List.map_append).symm]
+        exact hxi
+      rcases nameIndex_append_inv (l1 := slots0.map Prod.fst)
+          (l2 := auxs.map Prod.fst) hxi' with
+        hmodel | ⟨j, hj, hjeq⟩
+      · exact hx ⟨i, hmodel⟩
+      · -- x.name is an aux name (the aux-half hit at j)
+        have hname : (auxs.map Prod.fst)[j]! = x.name := by
+          have hp := nameIndex_some (auxs.map Prod.fst) x.name j hj
+          exact getElem_of_getElem? hp.1 hp.2
+        -- x's name is in the taken list (variable or parameter)
+        have htaken : x.name ∈ auxTaken m slots0 := by
+          rcases hxdecl with ⟨d, hd, hdx⟩ | ⟨d, hd, hdx⟩
+          · -- the variable's slot name is a model slot name
+            have hslotmem : (VarDeclItem.name d).name ∈ slots0.map Prod.fst := by
+              obtain ⟨ty, n, anns, hshape⟩ := hvars d hd
+              rw [hshape] at hd
+              match hs : declSlot (.basic ty n anns none : VarDeclItem) with
+              | .error e => exact absurd hs (declSlots_no_error m.variables slots0
+                  (declSlots_of_slotsChecked hslot) _ hd e)
+              | .ok none => exact (declSlot_basic_none hs).elim
+              | .ok (some p0) =>
+                  have hp0mem : p0 ∈ slots0 :=
+                    declSlots_produce m.variables slots0
+                      (declSlots_of_slotsChecked hslot) _ hd p0 hs
+                  rw [List.mem_map]
+                  refine ⟨p0, hp0mem, ?_⟩
+                  have hp1 : p0.1 = n.name := slot_name_eq_var _ p0 hs
+                  have hdxn : n = x := by
+                    rw [hshape] at hdx
+                    exact hdx
+                  rw [hp1, hdxn]
+                  have hdd : d.name = x := by
+                    rw [hshape]
+                    exact hdxn
+                  exact (congrArg (fun i => i.name) hdd).symm
+            rw [hdx] at hslotmem
+            exact List.mem_append.mpr (Or.inl hslotmem)
+          · -- the parameter's name is a parameter name
+            refine List.mem_append.mpr (Or.inr ?_)
+            refine List.mem_map.mpr ⟨d, hd, ?_⟩
+            exact congrArg (fun i => i.name) hdx
+        -- the aux name at position j is fresh from the taken list
+        have hlen : (auxs.map Prod.fst).length = auxs.length := by
+          rw [List.length_map]
+        have hjlt : j < auxs.length := by
+          have := (nameIndex_some (auxs.map Prod.fst) x.name j hj).1
+          rw [hlen] at this
+          omega
+        have hnamej : (auxs.map Prod.fst)[j]! = (auxs[j]).1 := by
+          rw [getElem!_map_fst (slots := auxs) j, getElem!_eq_getElem hjlt]
+        rw [hnamej] at hname
+        have hfresh := hauxfresh j auxs[j] (List.getElem?_eq_getElem hjlt)
+        rw [hname] at hfresh
+        exact hfresh htaken
+
+/-- The int-reads lemma for an array-element identifier over the
+    extended candidate space: an element checked against the int element
+    type reads an integer at its model slot. -/
+theorem int_read_of_checkArg_elem_ext {m : Model}
+    {slots0 auxs : List (String × List Value)} {a : List Value}
+    {c : ConstraintItem} {params : List PredParamType} {x : Ident} {i : Nat}
+    (hvars : ∀ d ∈ m.variables, ∃ (ty : BasicVarType) (n : Ident)
+      (anns : List Annotation), d = .basic ty n anns none)
+    (hwf : WellFormed fullSig m)
+    (hslot : slotsChecked m = .ok slots0)
+    (hauxfresh : ∀ (n2 : Nat) (p : String × List Value),
+      auxs[n2]? = some p → p.1 ∉ auxTaken m slots0)
+    (hchecked : Forall2 (Expr.checkArg m.staticEnv) c.args params)
+    (hcheck :
+      (Expr.basic (.ident x)).checkArg m.staticEnv (.basic (.var (.par .int))))
+    (hxi : nameIndex ((slots0 ++ auxs).map Prod.fst) x.name = some i)
+    (hmem : a ∈ allAssigns ((slots0 ++ auxs).map Prod.snd)) :
+    ∃ p, a[i]! = Value.int p := by
+  obtain ⟨isVar, hstaticx⟩ := staticEnv_int_of_checkArg hcheck
+  have hstatic : m.staticEnv x ≠ none := by rw [hstaticx]; simp
+  obtain ⟨j, hxj⟩ :=
+    nameIndex_model_of_ext hvars hslot hauxfresh hstatic hxi
+  have hextj : nameIndex ((slots0 ++ auxs).map Prod.fst) x.name = some j :=
+    nameIndex_ext_eq_model hxj
+  have hij : i = j := Option.some.inj (hxi.symm.trans hextj)
+  subst hij
+  exact int_read_of_checkArg_slot_ext hwf hslot hchecked hcheck hxj hmem
+
 /-- The master int-reads lemma over the extended names: any int-signed
     argument of a well-formed constraint reads an integer. -/
 theorem int_read_of_checkArg_master_ext {m : Model}
@@ -4163,16 +4326,14 @@ theorem int_arg_model_slot {m : Model}
   -- the signature chain
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.int))] := by
-    show (match m.declaredSigs (Ident.mk c.name.name) with
-      | some params => some params
-      | none => fullSig (Ident.mk c.name.name)) = _
-    rw [declaredSigs_none hpred, hname]
+        BasicParType.int))]] := by
+    unfold LeanFzn.Model.sigEnv
+    rw [declaredSigs_none hpred (Ident.mk c.name.name), hname]
     rfl
   have hparameq : params =
       [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
@@ -4181,11 +4342,11 @@ theorem int_arg_model_slot {m : Model}
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int))] := by
-    have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+    have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
     rw [show m.sigEnv Globals.fullSig c.name
         = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
     rw [hres] at h1
-    exact (Option.some.inj h1).symm
+    exact List.mem_singleton.mp h1
   rw [hparameq] at hfor
   obtain ⟨pt, hptmem, hchk0⟩ :=
     forall2_mem (Expr.checkArg m.staticEnv) c.args
@@ -4283,12 +4444,12 @@ theorem bool_arg_model_slot {m : Model}
     ∃ i3, nameIndex (slots0.map Prod.fst) x.name = some i3 := by
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.bool)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.bool)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.bool))] := by
+        BasicParType.bool))]] := by
     rcases hname with hn | hn
     · rw [show Ident.mk c.name.name = Ident.mk "bool_and" from by rw [hn]]
       exact sigEnv_bool_and hpred
@@ -4301,11 +4462,11 @@ theorem bool_arg_model_slot {m : Model}
         BasicParType.bool)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.bool))] := by
-    have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+    have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
     rw [show m.sigEnv Globals.fullSig c.name
         = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
     rw [hres] at h1
-    exact (Option.some.inj h1).symm
+    exact List.mem_singleton.mp h1
   rw [hparameq] at hfor
   obtain ⟨pt, hptmem, hchk0⟩ :=
     forall2_mem (Expr.checkArg m.staticEnv) c.args
@@ -4566,10 +4727,10 @@ theorem compile_sat_link_ext {m : Model}
     -- master-ext read derivation)
     obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
     have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-        [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+        [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
           BasicParType.int)),
          PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-          BasicParType.int))] := by
+          BasicParType.int))]] := by
       rcases hname with h1 | h1
       · rw [h1]; exact sigEnv_int_eq hpred
       · rw [h1]; exact sigEnv_int_ne hpred
@@ -4578,11 +4739,11 @@ theorem compile_sat_link_ext {m : Model}
           BasicParType.int)),
          PredParamType.basic (BasicPredParamType.var (BasicVarType.par
           BasicParType.int))] := by
-      have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+      have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
       rw [show m.sigEnv Globals.fullSig c.name
           = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
       rw [hres] at h1
-      exact (Option.some.inj h1).symm
+      exact List.mem_singleton.mp h1
     rw [hparameq] at hfor
     obtain ⟨pt, hptmem, hchk0⟩ :=
       forall2_mem (Expr.checkArg m.staticEnv) c.args
@@ -4608,6 +4769,41 @@ theorem compile_sat_link_ext {m : Model}
             · rfl
             · exact absurd hnil (by simp))
       hxarg hxi hmem
+  -- the array-element reads for the three linear reified shapes
+  have harr : ∀ (ks elems : ArrayLiteral) (b : Int) (r x : Ident) (i : Nat),
+      c.args = [Expr.array ks, Expr.array elems,
+        Expr.basic (.lit (.int b)), Expr.basic (.ident r)] →
+      BasicExpr.ident x ∈ elems →
+      nameIndex ((slots0 ++ auxs).map Prod.fst) x.name = some i →
+      (c.name.name = "int_lin_eq_reif" ∨
+        c.name.name = "int_lin_le_reif" ∨
+        c.name.name = "int_lin_ne_reif") →
+      ∃ p, a[i]! = Value.int p := by
+    intro ks elems b r x i hargs hxmem hxi hname
+    obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
+    have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
+        [[.array .int (.par .int), .array .int (.var (.par .int)),
+          .basic (.par .int), .basic (.var (.par .bool))]] := by
+      rcases hname with h1 | h1 | h1
+      · rw [h1]
+        simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
+          globalsSig, stdSig]
+      · rw [h1]
+        simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
+          globalsSig, stdSig]
+      · rw [h1]
+        simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
+          globalsSig, stdSig]
+    have hparameq : params =
+        [.array .int (.par .int), .array .int (.var (.par .int)),
+          .basic (.par .int), .basic (.var (.par .bool))] := by
+      have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
+      rw [show m.sigEnv Globals.fullSig c.name
+          = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
+      rw [hres] at h1
+      exact List.mem_singleton.mp h1
+    have hchk := checkArg_lin_reif_elem hfor hparameq hargs hxmem
+    exact int_read_of_checkArg_elem_ext hvars hwf hslot hauxfresh hfor hchk hxi hmem
   cases hnone : extractConstraint ((slots0 ++ auxs).map Prod.fst) c with
   | some dc' =>
       have hcdc : dc = dc' := by
@@ -4615,7 +4811,7 @@ theorem compile_sat_link_ext {m : Model}
         simp only [hnone] at hcc
         exact (Except.ok.inj hcc).symm
       subst hcdc
-      exact extractConstraint_holds_converse hnu halt hnone hreads hsat
+      exact extractConstraint_holds_converse hnu halt hnone hreads harr hsat
   | none =>
       -- the fallback arm: the family linkers are generic over the
       -- slot list except the bool-reads chain (the ext derivation)
@@ -4628,17 +4824,17 @@ theorem compile_sat_link_ext {m : Model}
         -- the bool-family signature chain + the bool ext derivation
         obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
         have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-            [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+            [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
               BasicParType.bool)),
              PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-              BasicParType.bool))] ∨
+              BasicParType.bool))]] ∨
             m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-            [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+            [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
               BasicParType.bool)),
              PredParamType.basic (BasicPredParamType.var (BasicVarType.par
               BasicParType.bool)),
              PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-              BasicParType.bool))] := by
+              BasicParType.bool))]] := by
           rcases hname with hn | hn | hn
           · rw [hn]; exact Or.inl (sigEnv_bool_not hpred)
           · rw [hn]; exact Or.inr (sigEnv_bool_and hpred)
@@ -4655,14 +4851,14 @@ theorem compile_sat_link_ext {m : Model}
               BasicParType.bool)),
              PredParamType.basic (BasicPredParamType.var (BasicVarType.par
               BasicParType.bool))] := by
-          have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+          have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
           rw [show m.sigEnv Globals.fullSig c.name
               = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
           rcases hres with hres | hres
           · rw [hres] at h1
-            exact Or.inl (Option.some.inj h1).symm
+            exact Or.inl (List.mem_singleton.mp h1)
           · rw [hres] at h1
-            exact Or.inr (Option.some.inj h1).symm
+            exact Or.inr (List.mem_singleton.mp h1)
         have hpsall : ∀ pt ∈ params, pt = .basic (.var (.par .bool)) := by
           intro pt hpt
           rcases hparameq with h | h
@@ -5434,12 +5630,12 @@ theorem int_reads_of_mem_int_eq_reif_RK {m : Model}
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hfor0 := hfor
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.bool))] := by
+        BasicParType.bool))]] := by
     rw [hname]
     exact sigEnv_int_eq_reif hpred
   have hparameq : params =
@@ -5449,11 +5645,11 @@ theorem int_reads_of_mem_int_eq_reif_RK {m : Model}
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.bool))] := by
-    have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+    have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
     rw [show m.sigEnv Globals.fullSig c.name
         = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
     rw [hres] at h1
-    exact (Option.some.inj h1).symm
+    exact List.mem_singleton.mp h1
   have hchk0 : (Expr.basic (.ident x)).checkArg m.staticEnv
       (.basic (.var (.par .int))) := by
     rw [hargs, hparameq] at hfor
@@ -5479,12 +5675,12 @@ theorem int_reads_of_mem_int_eq_reif_KR {m : Model}
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hfor0 := hfor
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.bool))] := by
+        BasicParType.bool))]] := by
     rw [hname]
     exact sigEnv_int_eq_reif hpred
   have hparameq : params =
@@ -5494,11 +5690,11 @@ theorem int_reads_of_mem_int_eq_reif_KR {m : Model}
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.bool))] := by
-    have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+    have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
     rw [show m.sigEnv Globals.fullSig c.name
         = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
     rw [hres] at h1
-    exact (Option.some.inj h1).symm
+    exact List.mem_singleton.mp h1
   have hchk0 : (Expr.basic (.ident x)).checkArg m.staticEnv
       (.basic (.var (.par .int))) := by
     rw [hargs, hparameq] at hfor
@@ -7393,10 +7589,10 @@ theorem compile_exact {m : Model}
               have hread : ∃ p, a[i]! = Value.int p := by
                 obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc'
                 have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-                    [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+                    [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                       BasicParType.int)),
                      PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-                      BasicParType.int))] := by
+                      BasicParType.int))]] := by
                   rw [show Ident.mk c.name.name = Ident.mk "int_ne" from by
                     rw [hnamec]]
                   exact sigEnv_int_ne hpred
@@ -7405,11 +7601,11 @@ theorem compile_exact {m : Model}
                       BasicParType.int)),
                      PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                       BasicParType.int))] := by
-                  have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+                  have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
                   rw [show m.sigEnv Globals.fullSig c.name
                       = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
                   rw [hres] at h1
-                  exact (Option.some.inj h1).symm
+                  exact List.mem_singleton.mp h1
                 rw [hparameq] at hfor
                 exact int_read_of_checkArg_master_ext
                   (compileModel_vars_basic hc) hwf hslots0 hnu
@@ -7494,10 +7690,10 @@ theorem compile_exact {m : Model}
               have hread : ∃ p, a[i]! = Value.int p := by
                 obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc'
                 have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-                    [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+                    [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                       BasicParType.int)),
                      PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-                      BasicParType.int))] := by
+                      BasicParType.int))]] := by
                   rw [show Ident.mk c.name.name = Ident.mk "int_ne" from by
                     rw [hnamec]]
                   exact sigEnv_int_ne hpred
@@ -7506,11 +7702,11 @@ theorem compile_exact {m : Model}
                       BasicParType.int)),
                      PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                       BasicParType.int))] := by
-                  have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+                  have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
                   rw [show m.sigEnv Globals.fullSig c.name
                       = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
                   rw [hres] at h1
-                  exact (Option.some.inj h1).symm
+                  exact List.mem_singleton.mp h1
                 rw [hparameq] at hfor
                 exact int_read_of_checkArg_master_ext
                   (compileModel_vars_basic hc) hwf hslots0 hnu
@@ -8259,12 +8455,12 @@ theorem compile_exact {m : Model}
             -- the well-formed constraint's bool signature
             obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc'
             have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-                some [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+                [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                   BasicParType.bool)),
                  PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                   BasicParType.bool)),
                  PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-                  BasicParType.bool))] := by
+                  BasicParType.bool))]] := by
               rw [show Ident.mk c.name.name = Ident.mk "bool_xor" from by
                 rw [hnamec]]
               exact sigEnv_bool_xor hpred
@@ -8275,11 +8471,11 @@ theorem compile_exact {m : Model}
                   BasicParType.bool)),
                  PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                   BasicParType.bool))] := by
-              have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+              have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
               rw [show m.sigEnv Globals.fullSig c.name
                   = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
               rw [hres] at h1
-              exact (Option.some.inj h1).symm
+              exact List.mem_singleton.mp h1
             rw [hparameq] at hfor
             -- the bool-reads master (the three arguments)
             have hboolread : ∀ (w : Ident) (iw : Nat),
@@ -8997,12 +9193,12 @@ theorem compile_exact {m : Model}
               -- bool-reads master's premise)
               obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc'
               have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-                  [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+                  [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                     BasicParType.bool)),
                    PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                     BasicParType.bool)),
                    PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-                    BasicParType.bool))] := by
+                    BasicParType.bool))]] := by
                 rw [show Ident.mk c.name.name = Ident.mk "bool_and" from by
                   rw [hnamec]]
                 exact sigEnv_bool_and hpred
@@ -9013,11 +9209,11 @@ theorem compile_exact {m : Model}
                     BasicParType.bool)),
                    PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                     BasicParType.bool))] := by
-                have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+                have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
                 rw [show m.sigEnv Globals.fullSig c.name
                     = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
                 rw [hres] at h1
-                exact (Option.some.inj h1).symm
+                exact List.mem_singleton.mp h1
               rw [hparameq] at hfor
               -- the bool-reads master (for the resolved-variable cases)
               have hboolread : ∀ (z : Ident) (iz : Nat),
@@ -9263,12 +9459,12 @@ theorem compile_exact {m : Model}
               -- bool-reads master's premise)
               obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc'
               have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-                  [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+                  [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                     BasicParType.bool)),
                    PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                     BasicParType.bool)),
                    PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-                    BasicParType.bool))] := by
+                    BasicParType.bool))]] := by
                 rw [show Ident.mk c.name.name = Ident.mk "bool_or" from by
                   rw [hnamec]]
                 exact sigEnv_bool_or hpred
@@ -9279,11 +9475,11 @@ theorem compile_exact {m : Model}
                     BasicParType.bool)),
                    PredParamType.basic (BasicPredParamType.var (BasicVarType.par
                     BasicParType.bool))] := by
-                have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
+                have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
                 rw [show m.sigEnv Globals.fullSig c.name
                     = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
                 rw [hres] at h1
-                exact (Option.some.inj h1).symm
+                exact List.mem_singleton.mp h1
               rw [hparameq] at hfor
               -- the bool-reads master (for the resolved-variable cases)
               have hboolread : ∀ (z : Ident) (iz : Nat),
@@ -11551,14 +11747,14 @@ theorem checkBase_int_of_array_elem {m : Model} {c : ConstraintItem}
     BasicExpr.checkBase m.staticEnv (.ident e2) (.var (.par .int)) := by
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hres : m.sigEnv fullSig c.name =
-      some [.basic (.var (.par .int)), .array .int (.var (.par .int))] := by
+      [[.basic (.var (.par .int)), .array .int (.var (.par .int))]] := by
     have h1 : m.sigEnv fullSig c.name = m.sigEnv fullSig (Ident.mk c.name.name) := rfl
     rw [h1]
     exact sigEnv_array_int_extreme hpred c.name.name hname
   have hparameq : params =
       [.basic (.var (.par .int)), .array .int (.var (.par .int))] := by
     rw [hres] at hsig
-    exact (Option.some.inj hsig).symm
+    exact List.mem_singleton.mp hsig
   rw [hargs, hparameq] at hfor
   obtain ⟨-, hfor2⟩ := hfor
   obtain ⟨harr, -⟩ := hfor2

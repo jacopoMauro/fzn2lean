@@ -7,10 +7,15 @@ __pycache__/
 *.py[cod]
 /.claude/
 /.codex/
+/.mcp.json
 /.devcontainer
 
 # Benchmark reports belong under tmp/; keep input cohorts in audits/cohorts/.
 /audits/*.tsv
+!/audits/release_cohort.tsv
+
+# Obsolete challenge comparison outputs; maintained runners write under tmp/.
+/minizinc-challenge/comparison/
 
 # local container-only VS Code MCP config
 .vscode/

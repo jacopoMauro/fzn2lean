@@ -1,3 +1,8 @@
+/-
+Purpose: Packing, scheduling, table and conditional predicate semantics and Boolean agreement.
+Dependencies: Globals.Common and shared semantic helpers supply values and finite-array operations.
+DAG: Shared semantics -> this family -> Globals dispatch and checker correctness.
+-/
 import LeanFzn.Semantics.Globals.Common
 open LeanFzn.Semantics
 
@@ -30,21 +35,31 @@ entries); the individual decisions are:
   allowed; `diffn_nonstrict` additionally allows single-point
   (zero-area) overlaps.
 * `geost_nonoverlap_k` follows the `k`-dimensional decomposition
-  restricted to pairwise axis-aligned non-overlap of two objects
-  (the `fzn_geost` family itself is unsupported and reported).
+  restricted to pairwise axis-aligned non-overlap of two objects.
+  The `fzn_geost` family itself lives in `Sched2.lean` and reads the
+  `xs`/`rect_*` arguments as flat row-major `k`-column matrices
+  (SC-03).
 * `cumulative` checks the resource usage at the finite set of task
   start and end times only (the usage function is constant between
   event points), plus a `0 ≤ capacity` guard that captures negative
   resource amounts.
 * `table_int` reads the flat tuple array as rows of `|xs|` columns;
-  `xs = []` is vacuously satisfied.
+  `xs` must be nonempty (the upstream `min`/`max` over an empty index
+  set is undefined → false) and `|tuples|` must be a multiple of
+  `|xs|` (SC-03).
 * `if_then_else[_var]_{int,bool,set}` follow the decomposition's
   `firstTrue` selection: the first true of the condition array
-  selects the branch; when no condition is true the shared length
-  check is the whole constraint (vacuous satisfaction), matching the
-  total (non-partial) `fzn_if_then_else` decomposition rather than
-  the partial `fzn_if_then_else_partiality` variant (unsupported,
-  reported).
+  selects the branch and only that `x` entry is read; when no
+  condition is true the constraint is vacuous and no `x` entry is
+  read.  This matches the total (non-partial) `fzn_if_then_else`
+  decomposition rather than the partial
+  `fzn_if_then_else_partiality` variant (unsupported, reported).
+* `diffn`, `diffn_nonstrict`, `geost_nonoverlap_k`, `disjunctive`
+  and `disjunctive_strict` follow MiniZinc's three-valued array-access
+  semantics: a loop over an empty index set is vacuous, and a true
+  disjunct or existential witness masks a missing entry in a later
+  branch.  They therefore carry per-iteration access premises rather
+  than unconditional parallel-array length gates.
 
 All FlatZinc arrays are 1-based; the twins realize this with 0-based
 `List` indices plus a `+1` shift where positions appear in the
@@ -236,42 +251,89 @@ private theorem foldl_min_le_mem :
 
 /-! ## Packing: `fzn_bin_packing` -/
 
-/-- `fzn_bin_packing(capacity, bin, weight)`: for every bin value `b`
-    occurring in `bin`, the total weight of the items assigned to `b` is
-    at most `capacity` (weights and capacity are assumed nonnegative). -/
+/-- `fzn_bin_packing(capacity, bin, weight)`: transcribed from
+    `fzn_bin_packing.mzn` lines 1-8.
+
+    - `length(bin) = 0` is true regardless of `weight` and `capacity`
+      (line 2: the body is not evaluated).
+    - Otherwise the raw decomposition sums `weight` over
+      `index_set(bin)`, so `bin.length = weight.length` is the restricted
+      domain on which the occupied-bin load identity is exact; every
+      unoccupied declared domain value then has load `0`, and line 6
+      reduces to `0 ≤ capacity`.  The declared bounds `lb_array(bin)` /
+      `ub_array(bin)` are not recoverable from a decoded `Value`, so the
+      row stays `restricted`.
+    - This restricted domain also assumes `0 ≤ capacity` and nonnegative
+      weights; both are enforced here so that the unoccupied-bin case is
+      exactly the `0 ≤ capacity` side condition.
+
+    For every bin value `b` occurring in `bin`, the total weight of the
+    items assigned to `b` is at most `capacity`. -/
 def binPackingProp (capacity : Int) (bin weight : List Int) : Prop :=
-  bin.length = weight.length ∧
-    ∀ b ∈ bin,
-      ((((bin.zip weight).filter (fun q => decide (q.1 = b))).map (·.2)) |>.sum) ≤ capacity
+  bin = [] ∨
+    (bin.length = weight.length ∧ 0 ≤ capacity ∧ (∀ w ∈ weight, 0 ≤ w) ∧
+      -- `zip` is guarded by the `bin.length = weight.length` conjunct;
+      -- `filter` only reads the paired entries.
+      ∀ b ∈ bin,
+        ((((bin.zip weight).filter (fun q => decide (q.1 = b))).map (·.2)) |>.sum) ≤ capacity)
 
 /-- Boolean twin of `binPackingProp`. -/
 def binPackingB (capacity : Int) (bin weight : List Int) : Bool :=
-  decide (bin.length = weight.length) &&
-    bin.all (fun b => decide
-      (((((bin.zip weight).filter (fun q => decide (q.1 = b))).map (·.2)) |>.sum) ≤ capacity))
+  if bin = [] then true
+  else
+    decide (bin.length = weight.length) && decide (0 ≤ capacity) &&
+      weight.all (fun w => decide (0 ≤ w)) &&
+      -- `bin.all` is only reached with the `bin.length = weight.length`
+      -- conjunct true; `zip`/`filter` then pair every item with its weight.
+      bin.all (fun b => decide
+        (((((bin.zip weight).filter (fun q => decide (q.1 = b))).map (·.2)) |>.sum) ≤ capacity))
 
 private theorem binPackingB_iff (capacity : Int) (bin weight : List Int) :
     binPackingB capacity bin weight = true ↔ binPackingProp capacity bin weight := by
   unfold binPackingB binPackingProp
-  simp only [Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true]
+  by_cases hb : bin = []
+  · subst hb
+    simp
+  · rw [if_neg hb]
+    simp only [hb, false_or, Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true]
+    constructor
+    · rintro ⟨⟨⟨hlen, hcap⟩, hw⟩, hball⟩
+      exact ⟨hlen, hcap, hw, hball⟩
+    · rintro ⟨hlen, hcap, hw, hball⟩
+      exact ⟨⟨⟨hlen, hcap⟩, hw⟩, hball⟩
 
 /-! ## Packing: `fzn_bin_packing_capa` -/
 
-/-- `fzn_bin_packing_capa(capacity, bin, weight)`: every bin index is in
-    `1..|capacity|` and, for every bin `b` of `1..|capacity|`, the total
-    weight of the items assigned to `b` is at most `capacity[b-1]`. -/
+/-- `fzn_bin_packing_capa(capacity, bin, weight)`: transcribed from
+    `fzn_bin_packing_capa.mzn` lines 1-11.
+
+    - Line 6 reads `weight[i]` for `i ∈ index_set(bin)`, so
+      `bin.length ≤ weight.length`; a longer `weight` is unused.
+    - Line 7 compares every `bin[i]` with `index_set(capacity)`
+      (`1..capacity.length` in the 1-based ABI).
+    - Lines 9-10 run over all of `index_set(capacity)` and only read
+      `weight[i]` over `index_set(bin)`.
+
+    Every bin index is in `1..|capacity|` and, for every bin `b` of
+    `1..|capacity|`, the total weight of the items assigned to `b` is at
+    most `capacity[b-1]`. -/
 def binPackingCapaProp (capacity bin weight : List Int) : Prop :=
-  bin.length = weight.length ∧
+  -- `zip` is safe because `bin.length ≤ weight.length`; it keeps every bin item.
+  bin.length ≤ weight.length ∧
+    -- `bin.getD i 0` is guarded by the binder `i < bin.length`.
     (∀ i, i < bin.length → 1 ≤ bin.getD i 0 ∧ bin.getD i 0 ≤ capacity.length) ∧
+    -- `capacity.getD b 0` is guarded by the binder `b < capacity.length`.
     (∀ b, b < capacity.length →
       ((((bin.zip weight).filter (fun q => decide (q.1 = ((b + 1 : Nat) : Int)))).map (·.2)) |>.sum)
         ≤ capacity.getD b 0)
 
 /-- Boolean twin of `binPackingCapaProp`. -/
 def binPackingCapaB (capacity bin weight : List Int) : Bool :=
-  decide (bin.length = weight.length) &&
+  decide (bin.length ≤ weight.length) &&
     bin.all (fun v => decide (1 ≤ v ∧ v ≤ capacity.length)) &&
     (List.range capacity.length).all (fun b =>
+      -- `b < capacity.length` from `List.mem_range` guards `capacity.getD b 0`.
+      -- `zip` is guarded by the leading `bin.length ≤ weight.length` conjunct.
       decide (((((bin.zip weight).filter (fun q => decide (q.1 = ((b + 1 : Nat) : Int)))).map (·.2))
         |>.sum) ≤ capacity.getD b 0))
 
@@ -292,21 +354,38 @@ private theorem binPackingCapaB_iff (capacity bin weight : List Int) :
 
 /-! ## Packing: `fzn_bin_packing_load` -/
 
-/-- `fzn_bin_packing_load(load, bin, weight)`: every bin index is in
-    `1..|load|` and, for every bin `b` of `1..|load|`, the load variable
-    `load[b-1]` equals the total weight of the items assigned to `b`. -/
+/-- `fzn_bin_packing_load(load, bin, weight)`: transcribed from
+    `fzn_bin_packing_load.mzn` lines 1-10.
+
+    - Line 6 sums all of `load` and all of `weight`:
+      `sum(load) = sum(weight)` is an explicit conjunct.
+    - Line 8 requires `bin[i] ∈ 1..load.length` for `i ∈ index_set(bin)`.
+    - Line 10 forces every `load[b]` to the bin-prefix sum, reading
+      `weight[i]` only over `index_set(bin)`, hence
+      `bin.length ≤ weight.length` (a longer `weight` only matters
+      through the total sum).
+
+    Every bin index is in `1..|load|` and, for every bin `b` of
+    `1..|load|`, the load variable `load[b-1]` equals the total weight of
+    the items assigned to `b`. -/
 def binPackingLoadProp (load bin weight : List Int) : Prop :=
-  bin.length = weight.length ∧
+  -- `zip` is safe because `bin.length ≤ weight.length`; it keeps every bin item.
+  bin.length ≤ weight.length ∧
+    load.sum = weight.sum ∧
+    -- `bin.getD i 0` is guarded by the binder `i < bin.length`.
     (∀ i, i < bin.length → 1 ≤ bin.getD i 0 ∧ bin.getD i 0 ≤ load.length) ∧
+    -- `load.getD b 0` is guarded by the binder `b < load.length`.
     (∀ b, b < load.length →
       load.getD b 0 =
         ((((bin.zip weight).filter (fun q => decide (q.1 = ((b + 1 : Nat) : Int)))).map (·.2)) |>.sum))
 
 /-- Boolean twin of `binPackingLoadProp`. -/
 def binPackingLoadB (load bin weight : List Int) : Bool :=
-  decide (bin.length = weight.length) &&
+  decide (bin.length ≤ weight.length) && decide (load.sum = weight.sum) &&
     bin.all (fun v => decide (1 ≤ v ∧ v ≤ load.length)) &&
     (List.range load.length).all (fun b =>
+      -- `b < load.length` from `List.mem_range` guards `load.getD b 0`.
+      -- `zip` is guarded by the leading `bin.length ≤ weight.length` conjunct.
       decide (load.getD b 0 =
         ((((bin.zip weight).filter (fun q => decide (q.1 = ((b + 1 : Nat) : Int)))).map (·.2)) |>.sum)))
 
@@ -315,11 +394,11 @@ private theorem binPackingLoadB_iff (load bin weight : List Int) :
   unfold binPackingLoadB binPackingLoadProp
   simp only [Bool.and_eq_true, decide_eq_true_iff, List.mem_range, List.all_eq_true]
   constructor
-  · rintro ⟨⟨hlen, hbin⟩, hrange⟩
-    refine ⟨hlen, fun i hi => ?_, fun b hb => hrange b hb⟩
+  · rintro ⟨⟨⟨hlen, hsum⟩, hbin⟩, hrange⟩
+    refine ⟨hlen, hsum, fun i hi => ?_, fun b hb => hrange b hb⟩
     exact hbin _ (mem_iff_getD.mpr ⟨i, hi, rfl⟩)
-  · rintro ⟨hlen, hmid, hrange⟩
-    refine ⟨⟨hlen, fun v hv => ?_⟩, fun b hb => ?_⟩
+  · rintro ⟨hlen, hsum, hmid, hrange⟩
+    refine ⟨⟨⟨hlen, hsum⟩, fun v hv => ?_⟩, fun b hb => ?_⟩
     · obtain ⟨i, hi, hv⟩ := mem_iff_getD.mp hv
       rw [← hv]
       exact hmid i hi
@@ -328,166 +407,327 @@ private theorem binPackingLoadB_iff (load bin weight : List Int) :
 /-! ## Packing: `fzn_knapsack` -/
 
 /-- `fzn_knapsack(weight, profit, xs, total_weight, total_profit)`:
+    transcribed from `fzn_knapsack.mzn` lines 1-12.
+
+    - Line 8 requires `xs[i] ≥ 0` over **all** of `index_set(xs)`.
+    - Lines 11-12 sum over all of `index_set(profit)` / `index_set(weight)`
+      and read `xs[i]` there, hence only `weight.length ≤ xs.length` and
+      `profit.length ≤ xs.length` are needed; the two parameter arrays
+      need not have equal length, and trailing `xs` entries are unused
+      except for nonnegativity.
+    - `total_weight ≥ 0` and `total_profit ≥ 0` (lines 9-10).
+
     `total_weight` is the weighted sum of the selected items by `weight`
     and `total_profit` their weighted sum by `profit`. -/
 def knapsackProp (weight profit xs : List Int) (tw tp : Int) : Prop :=
-  weight.length = profit.length ∧ weight.length = xs.length ∧
-    tw = (((xs.zip weight).map (fun p => p.1 * p.2)) |>.sum) ∧
-    tp = (((xs.zip profit).map (fun p => p.1 * p.2)) |>.sum)
+  weight.length ≤ xs.length ∧ profit.length ≤ xs.length ∧
+    (∀ x ∈ xs, 0 ≤ x) ∧ 0 ≤ tw ∧ 0 ≤ tp ∧
+    -- `xs.getD i 0` is guarded by `i < weight.length ≤ xs.length`;
+    -- `weight.getD i 0` by `i < weight.length` from `List.mem_range`.
+    tw = ((List.range weight.length).map
+      (fun i => xs.getD i 0 * weight.getD i 0)).sum ∧
+    -- `xs.getD i 0` is guarded by `i < profit.length ≤ xs.length`;
+    -- `profit.getD i 0` by `i < profit.length` from `List.mem_range`.
+    tp = ((List.range profit.length).map
+      (fun i => xs.getD i 0 * profit.getD i 0)).sum
 
 /-- Boolean twin of `knapsackProp`. -/
 def knapsackB (weight profit xs : List Int) (tw tp : Int) : Bool :=
-  decide (weight.length = profit.length) && decide (weight.length = xs.length) &&
-    decide (tw = (((xs.zip weight).map (fun p => p.1 * p.2)) |>.sum)) &&
-    decide (tp = (((xs.zip profit).map (fun p => p.1 * p.2)) |>.sum))
+  decide (weight.length ≤ xs.length) && decide (profit.length ≤ xs.length) &&
+    xs.all (fun x => decide (0 ≤ x)) && decide (0 ≤ tw) && decide (0 ≤ tp) &&
+    -- `i < weight.length` from `List.mem_range` guards `weight.getD i 0`;
+    -- `weight.length ≤ xs.length` guards `xs.getD i 0`.
+    decide (tw = ((List.range weight.length).map
+      (fun i => xs.getD i 0 * weight.getD i 0)).sum) &&
+    -- `i < profit.length` from `List.mem_range` guards `profit.getD i 0`;
+    -- `profit.length ≤ xs.length` guards `xs.getD i 0`.
+    decide (tp = ((List.range profit.length).map
+      (fun i => xs.getD i 0 * profit.getD i 0)).sum)
 
 private theorem knapsackB_iff (weight profit xs : List Int) (tw tp : Int) :
     knapsackB weight profit xs tw tp = true ↔ knapsackProp weight profit xs tw tp := by
-  unfold knapsackB knapsackProp
-  simp only [Bool.and_eq_true, decide_eq_true_iff]
-  constructor
-  · rintro ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩
-    exact ⟨h1, h2, h3, h4⟩
-  · rintro ⟨h1, h2, h3, h4⟩
-    exact ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩
+  simp [knapsackB, knapsackProp, List.all_eq_true, and_assoc]
 
 /-! ## Packing: `fzn_diffn` and `fzn_diffn_nonstrict` -/
 
-/-- `fzn_diffn(x, y, dx, dy)`: the rectangles `[x[i], x[i]+dx[i]) ×
-    `[y[i], y[i]+dy[i])` are pairwise non-overlapping. -/
+/-- The raw `fzn_diffn.mzn` disjunction at one pair `i < j`, with
+    MiniZinc's three-valued array-access semantics: a disjunct is usable
+    only when every entry it reads exists, and an existing true disjunct
+    makes the whole disjunction true even if an earlier disjunct was
+    undefined (written `true ∨ undefined = true` in MiniZinc).  The four
+    raw disjuncts read, in order,
+    `x[i],dx[i],x[j]`, `y[i],dy[i],y[j]`, `x[j],dx[j],x[i]`,
+    `y[j],dy[j],y[i]`.  The `x` entries exist because `i < j <
+    x.length`. -/
+private def diffnPairProp (x y dx dy : List Int) (i j : Nat) : Prop :=
+  (i < dx.length ∧ x.getD i 0 + dx.getD i 0 ≤ x.getD j 0) ∨
+  (i < y.length ∧ j < y.length ∧ i < dy.length ∧
+    y.getD i 0 + dy.getD i 0 ≤ y.getD j 0) ∨
+  (j < dx.length ∧ x.getD j 0 + dx.getD j 0 ≤ x.getD i 0) ∨
+  (i < y.length ∧ j < y.length ∧ j < dy.length ∧
+    y.getD j 0 + dy.getD j 0 ≤ y.getD i 0)
+
+/-- Boolean twin of `diffnPairProp`. -/
+private def diffnPairB (x y dx dy : List Int) (i j : Nat) : Bool :=
+  (decide (i < dx.length) && decide (x.getD i 0 + dx.getD i 0 ≤ x.getD j 0)) ||
+  (decide (i < y.length) && decide (j < y.length) && decide (i < dy.length) &&
+    decide (y.getD i 0 + dy.getD i 0 ≤ y.getD j 0)) ||
+  (decide (j < dx.length) && decide (x.getD j 0 + dx.getD j 0 ≤ x.getD i 0)) ||
+  (decide (i < y.length) && decide (j < y.length) && decide (j < dy.length) &&
+    decide (y.getD j 0 + dy.getD j 0 ≤ y.getD i 0))
+
+private theorem diffnPairB_iff (x y dx dy : List Int) (i j : Nat) :
+    diffnPairB x y dx dy i j = true ↔ diffnPairProp x y dx dy i j := by
+  simp only [diffnPairB, diffnPairProp, Bool.or_eq_true, Bool.and_eq_true,
+    decide_eq_true_iff, and_assoc, or_assoc]
+
+/-- `fzn_diffn(x, y, dx, dy)`: transcribed from `fzn_diffn.mzn` lines 1-9.
+    The pair loop runs over `index_set(x)`, so it is vacuous when
+    `x.length ≤ 1` and no parallel-array entry is read.  For a nonempty
+    pair `i < j < x.length`, each disjunct reads only its own entries;
+    a true disjunct masks a missing entry in a later disjunct (and an
+    undefined earlier disjunct does not mask a true later one), exactly
+    as MiniZinc's three-valued disjunction.  There is therefore no
+    unconditional length gate on `y`, `dx` or `dy`; longer trailing
+    arrays are unused.
+
+    The rectangles `[x[i], x[i]+dx[i]) × [y[i], y[i]+dy[i])` are pairwise
+    non-overlapping. -/
 def diffnProp (x y dx dy : List Int) : Prop :=
-  x.length = y.length ∧ x.length = dx.length ∧ x.length = dy.length ∧
-    ∀ i j : Nat, i < j → j < x.length →
-      x.getD i 0 + dx.getD i 0 ≤ x.getD j 0 ∨ y.getD i 0 + dy.getD i 0 ≤ y.getD j 0 ∨
-        x.getD j 0 + dx.getD j 0 ≤ x.getD i 0 ∨ y.getD j 0 + dy.getD j 0 ≤ y.getD i 0
+  ∀ i j : Nat, i < j → j < x.length → diffnPairProp x y dx dy i j
 
 /-- Boolean twin of `diffnProp`. -/
 def diffnB (x y dx dy : List Int) : Bool :=
-  decide (x.length = y.length) && decide (x.length = dx.length) &&
-    decide (x.length = dy.length) &&
-    (List.range x.length).all (fun j => (List.range j).all (fun i =>
-      decide (x.getD i 0 + dx.getD i 0 ≤ x.getD j 0 ∨ y.getD i 0 + dy.getD i 0 ≤ y.getD j 0 ∨
-        x.getD j 0 + dx.getD j 0 ≤ x.getD i 0 ∨ y.getD j 0 + dy.getD j 0 ≤ y.getD i 0)))
+  (List.range x.length).all (fun j => (List.range j).all (fun i =>
+    diffnPairB x y dx dy i j))
 
 private theorem diffnB_iff (x y dx dy : List Int) :
     diffnB x y dx dy = true ↔ diffnProp x y dx dy := by
   unfold diffnB diffnProp
-  simp only [Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true, List.mem_range]
+  simp only [List.all_eq_true, List.mem_range]
   constructor
-  · rintro ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩
-    exact ⟨h1, h2, h3, fun i j hij hjn => h4 j hjn i hij⟩
-  · rintro ⟨h1, h2, h3, h4⟩
-    exact ⟨⟨⟨h1, h2⟩, h3⟩, fun j hj i hi => h4 i j hi hj⟩
+  · intro h i j hij hjn
+    exact (diffnPairB_iff x y dx dy i j).mp (h j hjn i hij)
+  · intro h j hj i hi
+    exact (diffnPairB_iff x y dx dy i j).mpr (h i j hi hj)
 
-/-- `fzn_diffn_nonstrict(x, y, dx, dy)`: as `fzn_diffn`, but rectangles
-    with a zero side in either rectangle may touch or coincide. -/
+/-- The raw `fzn_diffn_nonstrict.mzn` disjunction at one pair `i < j`,
+    with the same three-valued access rule as `diffnPairProp`.  The
+    zero-side tests read only `dx[i]`, `dx[j]`, `dy[i]`, `dy[j]`
+    respectively. -/
+private def diffnNonstrictPairProp (x y dx dy : List Int) (i j : Nat) : Prop :=
+  (i < dx.length ∧ dx.getD i 0 = 0) ∨
+  (j < dx.length ∧ dx.getD j 0 = 0) ∨
+  (i < dy.length ∧ dy.getD i 0 = 0) ∨
+  (j < dy.length ∧ dy.getD j 0 = 0) ∨
+  (i < dx.length ∧ x.getD i 0 + dx.getD i 0 ≤ x.getD j 0) ∨
+  (i < y.length ∧ j < y.length ∧ i < dy.length ∧
+    y.getD i 0 + dy.getD i 0 ≤ y.getD j 0) ∨
+  (j < dx.length ∧ x.getD j 0 + dx.getD j 0 ≤ x.getD i 0) ∨
+  (i < y.length ∧ j < y.length ∧ j < dy.length ∧
+    y.getD j 0 + dy.getD j 0 ≤ y.getD i 0)
+
+/-- Boolean twin of `diffnNonstrictPairProp`. -/
+private def diffnNonstrictPairB (x y dx dy : List Int) (i j : Nat) : Bool :=
+  (decide (i < dx.length) && decide (dx.getD i 0 = 0)) ||
+  (decide (j < dx.length) && decide (dx.getD j 0 = 0)) ||
+  (decide (i < dy.length) && decide (dy.getD i 0 = 0)) ||
+  (decide (j < dy.length) && decide (dy.getD j 0 = 0)) ||
+  (decide (i < dx.length) && decide (x.getD i 0 + dx.getD i 0 ≤ x.getD j 0)) ||
+  (decide (i < y.length) && decide (j < y.length) && decide (i < dy.length) &&
+    decide (y.getD i 0 + dy.getD i 0 ≤ y.getD j 0)) ||
+  (decide (j < dx.length) && decide (x.getD j 0 + dx.getD j 0 ≤ x.getD i 0)) ||
+  (decide (i < y.length) && decide (j < y.length) && decide (j < dy.length) &&
+    decide (y.getD j 0 + dy.getD j 0 ≤ y.getD i 0))
+
+private theorem diffnNonstrictPairB_iff (x y dx dy : List Int) (i j : Nat) :
+    diffnNonstrictPairB x y dx dy i j = true ↔
+      diffnNonstrictPairProp x y dx dy i j := by
+  simp only [diffnNonstrictPairB, diffnNonstrictPairProp, Bool.or_eq_true,
+    Bool.and_eq_true, decide_eq_true_iff, and_assoc, or_assoc]
+
+/-- `fzn_diffn_nonstrict(x, y, dx, dy)`: transcribed from
+    `fzn_diffn_nonstrict.mzn` lines 1-16.  The pair loop is vacuous for
+    `x.length ≤ 1`; for a nonempty pair each of the eight disjuncts reads
+    only its own entries, so a true disjunct masks a missing later entry
+    and there is no unconditional length gate.
+
+    As `fzn_diffn`, but rectangles with a zero side in either rectangle
+    may touch or coincide. -/
 def diffnNonstrictProp (x y dx dy : List Int) : Prop :=
-  x.length = y.length ∧ x.length = dx.length ∧ x.length = dy.length ∧
-    ∀ i j : Nat, i < j → j < x.length →
-      dx.getD i 0 = 0 ∨ dx.getD j 0 = 0 ∨ dy.getD i 0 = 0 ∨ dy.getD j 0 = 0 ∨
-        x.getD i 0 + dx.getD i 0 ≤ x.getD j 0 ∨ y.getD i 0 + dy.getD i 0 ≤ y.getD j 0 ∨
-          x.getD j 0 + dx.getD j 0 ≤ x.getD i 0 ∨ y.getD j 0 + dy.getD j 0 ≤ y.getD i 0
+  ∀ i j : Nat, i < j → j < x.length → diffnNonstrictPairProp x y dx dy i j
 
 /-- Boolean twin of `diffnNonstrictProp`. -/
 def diffnNonstrictB (x y dx dy : List Int) : Bool :=
-  decide (x.length = y.length) && decide (x.length = dx.length) &&
-    decide (x.length = dy.length) &&
-    (List.range x.length).all (fun j => (List.range j).all (fun i =>
-      decide (dx.getD i 0 = 0 ∨ dx.getD j 0 = 0 ∨ dy.getD i 0 = 0 ∨ dy.getD j 0 = 0 ∨
-        x.getD i 0 + dx.getD i 0 ≤ x.getD j 0 ∨ y.getD i 0 + dy.getD i 0 ≤ y.getD j 0 ∨
-          x.getD j 0 + dx.getD j 0 ≤ x.getD i 0 ∨ y.getD j 0 + dy.getD j 0 ≤ y.getD i 0)))
+  (List.range x.length).all (fun j => (List.range j).all (fun i =>
+    diffnNonstrictPairB x y dx dy i j))
 
 private theorem diffnNonstrictB_iff (x y dx dy : List Int) :
     diffnNonstrictB x y dx dy = true ↔ diffnNonstrictProp x y dx dy := by
   unfold diffnNonstrictB diffnNonstrictProp
-  simp only [Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true, List.mem_range]
+  simp only [List.all_eq_true, List.mem_range]
   constructor
-  · rintro ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩
-    exact ⟨h1, h2, h3, fun i j hij hjn => h4 j hjn i hij⟩
-  · rintro ⟨h1, h2, h3, h4⟩
-    exact ⟨⟨⟨h1, h2⟩, h3⟩, fun j hj i hi => h4 i j hi hj⟩
+  · intro h i j hij hjn
+    exact (diffnNonstrictPairB_iff x y dx dy i j).mp (h j hjn i hij)
+  · intro h j hj i hi
+    exact (diffnNonstrictPairB_iff x y dx dy i j).mpr (h i j hi hj)
 
 /-! ## Packing: `fzn_geost_nonoverlap_k` -/
 
-/-- `fzn_geost_nonoverlap_k(x1, w1, x2, w2)`: the two `k`-dimensional
-    boxes with origins `x1`, `x2` and sizes `w1`, `w2` are separated in
-    some dimension. -/
+/-- The raw `fzn_geost_nonoverlap_k.mzn` body at one dimension `j`, with
+    the same three-valued access rule as `diffnPairProp`.  `x1[j]` exists
+    because `j < x1.length`; the first disjunct also reads `w1[j]` and
+    `x2[j]`, the second `x2[j]` and `w2[j]`. -/
+private def geostNonoverlapKBodyProp (x1 w1 x2 w2 : List Int) (j : Nat) : Prop :=
+  (j < w1.length ∧ j < x2.length ∧
+    x1.getD j 0 + w1.getD j 0 ≤ x2.getD j 0) ∨
+  (j < x2.length ∧ j < w2.length ∧
+    x2.getD j 0 + w2.getD j 0 ≤ x1.getD j 0)
+
+/-- Boolean twin of `geostNonoverlapKBodyProp`. -/
+private def geostNonoverlapKBodyB (x1 w1 x2 w2 : List Int) (j : Nat) : Bool :=
+  (decide (j < w1.length) && decide (j < x2.length) &&
+    decide (x1.getD j 0 + w1.getD j 0 ≤ x2.getD j 0)) ||
+  (decide (j < x2.length) && decide (j < w2.length) &&
+    decide (x2.getD j 0 + w2.getD j 0 ≤ x1.getD j 0))
+
+private theorem geostNonoverlapKBodyB_iff (x1 w1 x2 w2 : List Int) (j : Nat) :
+    geostNonoverlapKBodyB x1 w1 x2 w2 j = true ↔
+      geostNonoverlapKBodyProp x1 w1 x2 w2 j := by
+  simp only [geostNonoverlapKBodyB, geostNonoverlapKBodyProp, Bool.or_eq_true,
+    Bool.and_eq_true, decide_eq_true_iff, and_assoc]
+
+/-- `fzn_geost_nonoverlap_k(x1, w1, x2, w2)`: transcribed from
+    `fzn_geost_nonoverlap_k.mzn` lines 1-8.  The `exists` runs over
+    `index_set(x1)`; an early `j` whose disjunction is true makes the
+    existential true without reading the later `w1`/`x2`/`w2` entries.
+    There is therefore no unconditional length gate, and longer trailing
+    arrays are unused.
+
+    The two `k`-dimensional boxes with origins `x1`, `x2` and sizes `w1`,
+    `w2` are separated in some dimension. -/
 def geostNonoverlapKProp (x1 w1 x2 w2 : List Int) : Prop :=
-  x1.length = w1.length ∧ x1.length = x2.length ∧ x1.length = w2.length ∧
-    ∃ j : Nat, j < x1.length ∧
-      (x1.getD j 0 + w1.getD j 0 ≤ x2.getD j 0 ∨ x2.getD j 0 + w2.getD j 0 ≤ x1.getD j 0)
+  ∃ j : Nat, j < x1.length ∧ geostNonoverlapKBodyProp x1 w1 x2 w2 j
 
 /-- Boolean twin of `geostNonoverlapKProp`. -/
 def geostNonoverlapKB (x1 w1 x2 w2 : List Int) : Bool :=
-  decide (x1.length = w1.length) && decide (x1.length = x2.length) &&
-    decide (x1.length = w2.length) &&
-    (List.range x1.length).any (fun j =>
-      decide (x1.getD j 0 + w1.getD j 0 ≤ x2.getD j 0 ∨ x2.getD j 0 + w2.getD j 0 ≤ x1.getD j 0))
+  (List.range x1.length).any (fun j => geostNonoverlapKBodyB x1 w1 x2 w2 j)
 
 private theorem geostNonoverlapKB_iff (x1 w1 x2 w2 : List Int) :
     geostNonoverlapKB x1 w1 x2 w2 = true ↔ geostNonoverlapKProp x1 w1 x2 w2 := by
   unfold geostNonoverlapKB geostNonoverlapKProp
-  simp only [Bool.and_eq_true, decide_eq_true_iff, List.any_eq_true, List.mem_range,
-    decide_eq_true_iff]
+  simp only [List.any_eq_true, List.mem_range]
   constructor
-  · rintro ⟨⟨⟨h1, h2⟩, h3⟩, j, hj, hd⟩
-    exact ⟨h1, h2, h3, j, hj, hd⟩
-  · rintro ⟨h1, h2, h3, j, hj, hd⟩
-    exact ⟨⟨⟨h1, h2⟩, h3⟩, j, hj, hd⟩
+  · rintro ⟨j, hj, hd⟩
+    exact ⟨j, hj, (geostNonoverlapKBodyB_iff x1 w1 x2 w2 j).mp hd⟩
+  · rintro ⟨j, hj, hd⟩
+    exact ⟨j, hj, (geostNonoverlapKBodyB_iff x1 w1 x2 w2 j).mpr hd⟩
 
 /-! ## Scheduling: `fzn_disjunctive` and `fzn_disjunctive_strict` -/
 
-/-- `fzn_disjunctive(start, duration)`: tasks with positive duration do
-    not overlap in time. -/
+/-- The raw `fzn_disjunctive.mzn` pair disjunction at `i < j`, with the
+    same three-valued access rule as `diffnPairProp`.  The first two
+    disjuncts read only `duration`; the two separation disjuncts both
+    need `start[i]` and `start[j]`. -/
+private def disjunctivePairProp (start dur : List Int) (i j : Nat) : Prop :=
+  dur.getD i 0 = 0 ∨ dur.getD j 0 = 0 ∨
+    (i < start.length ∧ j < start.length ∧
+      (start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
+       start.getD j 0 + dur.getD j 0 ≤ start.getD i 0))
+
+/-- Boolean twin of `disjunctivePairProp`. -/
+private def disjunctivePairB (start dur : List Int) (i j : Nat) : Bool :=
+  decide (dur.getD i 0 = 0) || decide (dur.getD j 0 = 0) ||
+    (decide (i < start.length) && decide (j < start.length) &&
+      (decide (start.getD i 0 + dur.getD i 0 ≤ start.getD j 0) ||
+       decide (start.getD j 0 + dur.getD j 0 ≤ start.getD i 0)))
+
+private theorem disjunctivePairB_iff (start dur : List Int) (i j : Nat) :
+    disjunctivePairB start dur i j = true ↔
+      disjunctivePairProp start dur i j := by
+  simp only [disjunctivePairB, disjunctivePairProp, Bool.or_eq_true,
+    Bool.and_eq_true, decide_eq_true_iff, and_assoc, or_assoc]
+
+/-- `fzn_disjunctive(start, duration)`: transcribed from
+    `fzn_disjunctive.mzn` lines 1-5.  Both loops use
+    `index_set(duration)`.  The pair loop is vacuous for
+    `dur.length ≤ 1`, and for a nonempty pair a zero duration on either
+    task makes the disjunction true without reading `start`; hence there
+    is no unconditional length gate and trailing `start` entries are
+    unused.
+
+    Tasks with positive duration do not overlap in time. -/
 def disjunctiveProp (start dur : List Int) : Prop :=
-  start.length = dur.length ∧
-    ∀ i j : Nat, i < j → j < start.length →
-      dur.getD i 0 = 0 ∨ dur.getD j 0 = 0 ∨
-        start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
-        start.getD j 0 + dur.getD j 0 ≤ start.getD i 0
+  (∀ d ∈ dur, 0 ≤ d) ∧
+    ∀ i j : Nat, i < j → j < dur.length → disjunctivePairProp start dur i j
 
 /-- Boolean twin of `disjunctiveProp`. -/
 def disjunctiveB (start dur : List Int) : Bool :=
-  decide (start.length = dur.length) &&
-    (List.range start.length).all (fun j => (List.range j).all (fun i =>
-      decide (dur.getD i 0 = 0 ∨ dur.getD j 0 = 0 ∨
-        start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
-        start.getD j 0 + dur.getD j 0 ≤ start.getD i 0)))
+  dur.all (fun d => decide (0 ≤ d)) &&
+    (List.range dur.length).all (fun j => (List.range j).all (fun i =>
+      disjunctivePairB start dur i j))
 
 private theorem disjunctiveB_iff (start dur : List Int) :
     disjunctiveB start dur = true ↔ disjunctiveProp start dur := by
   unfold disjunctiveB disjunctiveProp
   simp only [Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true, List.mem_range]
   constructor
-  · rintro ⟨hlen, h4⟩
-    exact ⟨hlen, fun i j hij hjn => h4 j hjn i hij⟩
-  · rintro ⟨hlen, h4⟩
-    exact ⟨hlen, fun j hj i hi => h4 i j hi hj⟩
+  · rintro ⟨hnonneg, h4⟩
+    exact ⟨hnonneg, fun i j hij hjn =>
+      (disjunctivePairB_iff start dur i j).mp (h4 j hjn i hij)⟩
+  · rintro ⟨hnonneg, h4⟩
+    exact ⟨hnonneg, fun j hj i hi =>
+      (disjunctivePairB_iff start dur i j).mpr (h4 i j hi hj)⟩
 
-/-- `fzn_disjunctive_strict(start, duration)`: all tasks (including
-    zero-duration ones) are pairwise non-overlapping. -/
+/-- The raw `fzn_disjunctive_strict.mzn` pair disjunction at `i < j`;
+    both disjuncts need `start[i]` and `start[j]`. -/
+private def disjunctiveStrictPairProp (start dur : List Int) (i j : Nat) : Prop :=
+  i < start.length ∧ j < start.length ∧
+    (start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
+     start.getD j 0 + dur.getD j 0 ≤ start.getD i 0)
+
+/-- Boolean twin of `disjunctiveStrictPairProp`. -/
+private def disjunctiveStrictPairB (start dur : List Int) (i j : Nat) : Bool :=
+  decide (i < start.length) && decide (j < start.length) &&
+    (decide (start.getD i 0 + dur.getD i 0 ≤ start.getD j 0) ||
+     decide (start.getD j 0 + dur.getD j 0 ≤ start.getD i 0))
+
+private theorem disjunctiveStrictPairB_iff (start dur : List Int) (i j : Nat) :
+    disjunctiveStrictPairB start dur i j = true ↔
+      disjunctiveStrictPairProp start dur i j := by
+  simp only [disjunctiveStrictPairB, disjunctiveStrictPairProp, Bool.or_eq_true,
+    Bool.and_eq_true, decide_eq_true_iff, and_assoc]
+
+/-- `fzn_disjunctive_strict(start, duration)`: transcribed from
+    `fzn_disjunctive_strict.mzn` lines 1-9.  The nonnegativity and pair
+    loops run over `index_set(duration)`; the pair loop is vacuous for
+    `dur.length ≤ 1`, so no `start` entry is needed then.  For a
+    nonempty pair both separation disjuncts read `start[i]` and
+    `start[j]`, so there is no unconditional length gate.
+
+    All tasks (including zero-duration ones) are pairwise
+    non-overlapping. -/
 def disjunctiveStrictProp (start dur : List Int) : Prop :=
-  start.length = dur.length ∧
-    ∀ i j : Nat, i < j → j < start.length →
-      start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
-      start.getD j 0 + dur.getD j 0 ≤ start.getD i 0
+  (∀ d ∈ dur, 0 ≤ d) ∧
+    ∀ i j : Nat, i < j → j < dur.length → disjunctiveStrictPairProp start dur i j
 
 /-- Boolean twin of `disjunctiveStrictProp`. -/
 def disjunctiveStrictB (start dur : List Int) : Bool :=
-  decide (start.length = dur.length) &&
-    (List.range start.length).all (fun j => (List.range j).all (fun i =>
-      decide (start.getD i 0 + dur.getD i 0 ≤ start.getD j 0 ∨
-        start.getD j 0 + dur.getD j 0 ≤ start.getD i 0)))
+  dur.all (fun d => decide (0 ≤ d)) &&
+    (List.range dur.length).all (fun j => (List.range j).all (fun i =>
+      disjunctiveStrictPairB start dur i j))
 
 private theorem disjunctiveStrictB_iff (start dur : List Int) :
     disjunctiveStrictB start dur = true ↔ disjunctiveStrictProp start dur := by
   unfold disjunctiveStrictB disjunctiveStrictProp
   simp only [Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true, List.mem_range]
   constructor
-  · rintro ⟨hlen, h4⟩
-    exact ⟨hlen, fun i j hij hjn => h4 j hjn i hij⟩
-  · rintro ⟨hlen, h4⟩
-    exact ⟨hlen, fun j hj i hi => h4 i j hi hj⟩
+  · rintro ⟨hnonneg, h4⟩
+    exact ⟨hnonneg, fun i j hij hjn =>
+      (disjunctiveStrictPairB_iff start dur i j).mp (h4 j hjn i hij)⟩
+  · rintro ⟨hnonneg, h4⟩
+    exact ⟨hnonneg, fun j hj i hi =>
+      (disjunctiveStrictPairB_iff start dur i j).mpr (h4 i j hi hj)⟩
 
 /-! ## Scheduling: `fzn_cumulative` -/
 
@@ -547,159 +787,231 @@ private theorem cumul_congr (t b : Int) : ∀ (S D R : List Int),
         · have hb : ¬ (s ≤ b ∧ b < s + d) := fun hc => hactive (h0.mpr hc)
           rw [if_neg hactive, if_neg hb, ih D' R' (fun i hi => h (i + 1) (lt_succ_cons hi))]
 
-/-- `fzn_cumulative(start, duration, resource, capacity)`: at every time
-    point the total resource usage of the running tasks is at most
-    `capacity`. -/
+/-- `Tasks` is empty, in value form: no task has positive duration and
+    resource. -/
+private def noSelectedTask (start dur res : List Int) : Bool :=
+  (List.range start.length).all
+    (fun i => !(decide (0 < dur.getD i 0 ∧ 0 < res.getD i 0)))
+
+/-- `fzn_cumulative(start, duration, resource, capacity)` transcribed from
+    `fzn_cumulative.mzn`, with the contract of the `cumulative` wrapper:
+
+    - the three arrays have the same length (wrapper `index_set` assert);
+    - all durations and resources are nonnegative (wrapper `assert`);
+    - with `Tasks = {i | duration[i] > 0 ∧ resource[i] > 0}` (the value
+      form of `ub(...) > 0`), if `Tasks` is empty then
+      `length(start) = 0 ∨ capacity ≥ 0`, and otherwise the usage of the
+      selected tasks is at most `capacity` at every time. -/
 def cumulativeProp (start dur res : List Int) (capacity : Int) : Prop :=
   start.length = dur.length ∧ start.length = res.length ∧
-    ∀ t : Int, cumul start dur res t ≤ capacity
+    (∀ d ∈ dur, 0 ≤ d) ∧ (∀ r ∈ res, 0 ≤ r) ∧
+    (noSelectedTask start dur res = true ∨
+        ∀ t : Int, cumul start dur res t ≤ capacity) ∧
+    (noSelectedTask start dur res = true →
+        start.length = 0 ∨ 0 ≤ capacity)
 
-/-- Boolean twin of `cumulativeProp`.  Besides the start times, the
-    completion times are checked as well: the usage function is constant
-    between event points, so the two finite families of checkpoints
-    together with the `0 ≤ capacity` guard capture the universal
-    quantifier (this matters when some resource amounts are negative). -/
+/-- Boolean twin of `cumulativeProp`, obtained by deciding the Prop with the
+    universal time quantifier replaced by its equivalent finite checkpoint
+    form. -/
 def cumulativeB (start dur res : List Int) (capacity : Int) : Bool :=
   decide (start.length = dur.length) && decide (start.length = res.length) &&
-    decide (0 ≤ capacity) &&
-    start.all (fun s => decide (cumul start dur res s ≤ capacity)) &&
-    (taskEnds start dur).all (fun e => decide (cumul start dur res e ≤ capacity))
+    dur.all (fun d => decide (0 ≤ d)) && res.all (fun r => decide (0 ≤ r)) &&
+    if noSelectedTask start dur res then
+      decide (start.length = 0) || decide (0 ≤ capacity)
+    else
+      (start.all (fun s => decide (cumul start dur res s ≤ capacity)) &&
+        (taskEnds start dur).all (fun e =>
+          decide (cumul start dur res e ≤ capacity)))
 
-set_option maxHeartbeats 1000000 in
+/-- The checkpoint reduction: within capacity at every start and completion
+    time implies within capacity at every time (the usage is constant between
+    event points). Nonnegativity of the values is not needed for this
+    direction. -/
+private theorem cumul_checkpoints (start dur res : List Int) (capacity : Int)
+    (hstarts : start.all (fun s => decide (cumul start dur res s ≤ capacity)) = true)
+    (hends : (taskEnds start dur).all
+      (fun e => decide (cumul start dur res e ≤ capacity)) = true)
+    (hcap : 0 ≤ capacity) :
+    ∀ t : Int, cumul start dur res t ≤ capacity := by
+  intro t
+  by_cases hsome : ∃ e, e ∈ start ++ taskEnds start dur ∧ e ≤ t
+  · obtain ⟨x0, hx0mem, hx0le⟩ := hsome
+    have hne : (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) ≠ [] :=
+      List.ne_nil_of_mem (List.mem_filter.mpr ⟨hx0mem, decide_eq_true hx0le⟩)
+    obtain ⟨b0, bs, hfilt⟩ : ∃ x xs,
+        (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) = x :: xs := by
+      cases hf : (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) with
+      | nil => exact absurd hf hne
+      | cons y ys => exact ⟨y, ys, rfl⟩
+    have hbin : List.foldl max b0 bs ∈ b0 :: bs := by
+      rcases foldl_max_mem_or_eq bs b0 with heq | hm
+      · exact List.mem_cons.mpr (Or.inl heq)
+      · exact List.mem_cons.mpr (Or.inr hm)
+    have hbfilt : List.foldl max b0 bs ∈
+        (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) := by
+      rw [hfilt]; exact hbin
+    have hble : List.foldl max b0 bs ≤ t :=
+      of_decide_eq_true (List.mem_filter.mp hbfilt).2
+    have hbcap : cumul start dur res (List.foldl max b0 bs) ≤ capacity := by
+      rcases List.mem_append.mp (List.mem_filter.mp hbfilt).1 with hm | hm
+      · exact of_decide_eq_true (List.all_eq_true.mp hstarts _ hm)
+      · exact of_decide_eq_true (List.all_eq_true.mp hends _ hm)
+    have hcongr : cumul start dur res t = cumul start dur res (List.foldl max b0 bs) := by
+      refine cumul_congr t (List.foldl max b0 bs) start dur res (fun i hi => ?_)
+      have hb0le : b0 ≤ List.foldl max b0 bs := foldl_max_ge_init bs b0
+      constructor
+      · rintro ⟨hsi, hti⟩
+        refine ⟨?_, by omega⟩
+        have hsimem : start.getD i 0 ∈ start := mem_iff_getD.mpr ⟨i, hi, rfl⟩
+        have hsifilt : start.getD i 0 ∈ b0 :: bs := by
+          rw [← hfilt]
+          exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inl hsimem),
+            decide_eq_true hsi⟩
+        rcases List.mem_cons.mp hsifilt with heq | hm
+        · rw [heq]; exact hb0le
+        · exact foldl_max_ge_mem bs b0 _ hm
+      · rintro ⟨hsi, hbi⟩
+        have hielem : start.getD i 0 + dur.getD i 0 ∈ taskEnds start dur :=
+          List.mem_map.mpr ⟨i, List.mem_range.mpr hi, rfl⟩
+        by_cases hiet : start.getD i 0 + dur.getD i 0 ≤ t
+        · have hiefilt : start.getD i 0 + dur.getD i 0 ∈ b0 :: bs := by
+            rw [← hfilt]
+            exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inr hielem),
+              decide_eq_true hiet⟩
+          have hiele : start.getD i 0 + dur.getD i 0 ≤ List.foldl max b0 bs := by
+            rcases List.mem_cons.mp hiefilt with heq | hm
+            · rw [heq]; exact hb0le
+            · exact foldl_max_ge_mem bs b0 _ hm
+          omega
+        · omega
+    rw [hcongr]
+    exact hbcap
+  · have hzero : cumul start dur res t = 0 :=
+      cumul_eq_zero_of_all_gt t start dur res (fun i hi hsi =>
+        hsome ⟨start.getD i 0,
+          List.mem_append.mpr (Or.inl (mem_iff_getD.mpr ⟨i, hi, rfl⟩)), hsi⟩)
+    rw [hzero]
+    exact hcap
+
+/-- Under nonnegative resources, the cumulative usage is nonnegative. -/
+private theorem cumul_nonneg (t : Int) : ∀ (start dur res : List Int),
+    (∀ r ∈ res, 0 ≤ r) → 0 ≤ cumul start dur res t := by
+  intro start
+  induction start with
+  | nil => intro dur res _; exact by simp [cumul]
+  | cons s0 st ih =>
+    intro dur res hres
+    cases dur with
+    | nil => exact by simp [cumul]
+    | cons d0 dt =>
+      cases res with
+      | nil => exact by simp [cumul]
+      | cons r0 rt =>
+        simp only [cumul]
+        by_cases hact : s0 ≤ t ∧ t < s0 + d0
+        · rw [if_pos hact]
+          have h0 : 0 ≤ r0 := hres r0 (List.mem_cons_self ..)
+          have h1 : 0 ≤ cumul st dt rt t :=
+            ih dt rt (fun r hr => hres r (List.mem_cons_of_mem _ hr))
+          omega
+        · rw [if_neg hact]
+          rw [Int.zero_add]
+          exact ih dt rt (fun r hr => hres r (List.mem_cons_of_mem _ hr))
+
+/-- `noSelectedTask = false` means some task has positive duration and
+    resource. -/
+private theorem not_noSelectedTask {start dur res : List Int}
+    (h : noSelectedTask start dur res = false) :
+    ∃ i, i < start.length ∧ 0 < dur.getD i 0 ∧ 0 < res.getD i 0 := by
+  unfold noSelectedTask at h
+  obtain ⟨i, hi, hnot⟩ := List.all_eq_false.mp h
+  simp only [List.mem_range] at hi
+  simp only [Bool.not_eq_true', decide_eq_false_iff_not] at hnot
+  exact ⟨i, hi, Classical.not_not.mp hnot⟩
+
+/-- If some task is selected, the usage is nonnegative somewhere, so the
+    capacity must be nonnegative. -/
+private theorem capacity_nonneg_of_selected {start dur res : List Int}
+    {capacity : Int} (hnr : ∀ r ∈ res, 0 ≤ r)
+    (hs : ∀ s ∈ start, cumul start dur res s ≤ capacity)
+    (hsel : noSelectedTask start dur res = false) : 0 ≤ capacity := by
+  obtain ⟨i, hi, _⟩ := not_noSelectedTask hsel
+  exact Int.le_trans (cumul_nonneg _ start dur res hnr)
+    (hs _ (mem_iff_getD.mpr ⟨i, hi, rfl⟩))
+
 private theorem cumulativeB_iff (start dur res : List Int) (capacity : Int) :
     cumulativeB start dur res capacity = true ↔ cumulativeProp start dur res capacity := by
   unfold cumulativeB cumulativeProp
-  simp only [Bool.and_eq_true, decide_eq_true_iff]
-  constructor
-  · rintro ⟨⟨⟨⟨hlen1, hlen2⟩, hcapD⟩, hstarts⟩, hends⟩
-    have hcap0 : 0 ≤ capacity := hcapD
-    refine ⟨hlen1, hlen2, fun t => ?_⟩
-    by_cases hsome : ∃ e, e ∈ start ++ taskEnds start dur ∧ e ≤ t
-    · obtain ⟨x0, hx0mem, hx0le⟩ := hsome
-      have hne : (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) ≠ [] :=
-        List.ne_nil_of_mem (List.mem_filter.mpr ⟨hx0mem, decide_eq_true hx0le⟩)
-      obtain ⟨b0, bs, hfilt⟩ : ∃ x xs,
-          (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) = x :: xs := by
-        cases hf : (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) with
-        | nil => exact absurd hf hne
-        | cons y ys => exact ⟨y, ys, rfl⟩
-      have hbin : List.foldl max b0 bs ∈ b0 :: bs := by
-        rcases foldl_max_mem_or_eq bs b0 with heq | hm
-        · exact List.mem_cons.mpr (Or.inl heq)
-        · exact List.mem_cons.mpr (Or.inr hm)
-      have hbfilt : List.foldl max b0 bs ∈
-          (start ++ taskEnds start dur).filter (fun e => decide (e ≤ t)) := by
-        rw [hfilt]; exact hbin
-      have hble : List.foldl max b0 bs ≤ t := of_decide_eq_true (List.mem_filter.mp hbfilt).2
-      have hbcap : cumul start dur res (List.foldl max b0 bs) ≤ capacity := by
-        rcases List.mem_append.mp (List.mem_filter.mp hbfilt).1 with hm | hm
-        · exact of_decide_eq_true (List.all_eq_true.mp hstarts _ hm)
-        · exact of_decide_eq_true (List.all_eq_true.mp hends _ hm)
-      have hcongr : cumul start dur res t = cumul start dur res (List.foldl max b0 bs) := by
-        refine cumul_congr t (List.foldl max b0 bs) start dur res (fun i hi => ?_)
-        have hb0le : b0 ≤ List.foldl max b0 bs := foldl_max_ge_init bs b0
-        constructor
-        · rintro ⟨hsi, hti⟩
-          have hble2 : List.foldl max b0 bs ≤ t := hble
-          refine ⟨?_, by omega⟩
-          have hsimem : start.getD i 0 ∈ start := mem_iff_getD.mpr ⟨i, hi, rfl⟩
-          have hsi2 : start.getD i 0 ≤ t := hsi
-          have hsifilt : start.getD i 0 ∈ b0 :: bs := by
-            rw [← hfilt]
-            exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inl hsimem), decide_eq_true hsi⟩
-          rcases List.mem_cons.mp hsifilt with heq | hm
-          · rw [heq]; exact hb0le
-          · exact foldl_max_ge_mem bs b0 _ hm
-        · rintro ⟨hsi, hbi⟩
-          have hielem : start.getD i 0 + dur.getD i 0 ∈ taskEnds start dur :=
-            List.mem_map.mpr ⟨i, List.mem_range.mpr hi, rfl⟩
-          by_cases hiet : start.getD i 0 + dur.getD i 0 ≤ t
-          · have hiefilt : start.getD i 0 + dur.getD i 0 ∈ b0 :: bs := by
-              rw [← hfilt]
-              exact List.mem_filter.mpr ⟨List.mem_append.mpr (Or.inr hielem), decide_eq_true hiet⟩
-            have hiele : start.getD i 0 + dur.getD i 0 ≤ List.foldl max b0 bs := by
-              rcases List.mem_cons.mp hiefilt with heq | hm
-              · rw [heq]; exact hb0le
-              · exact foldl_max_ge_mem bs b0 _ hm
-            omega
-          · omega
-      rw [hcongr]
-      exact hbcap
-    · have hzero : cumul start dur res t = 0 :=
-        cumul_eq_zero_of_all_gt t start dur res (fun i hi hsi =>
-          hsome ⟨start.getD i 0,
-            List.mem_append.mpr (Or.inl (mem_iff_getD.mpr ⟨i, hi, rfl⟩)), hsi⟩)
-      rw [hzero]
-      exact hcap0
-  · rintro ⟨hlen1, hlen2, hall⟩
-    have hzero : cumul start dur res (List.foldl min 0 start - 1) = 0 := by
-      refine cumul_eq_zero_of_all_gt _ _ _ _ (fun i hi hsi => ?_)
-      have hmem : start.getD i 0 ∈ start := mem_iff_getD.mpr ⟨i, hi, rfl⟩
-      have hle := foldl_min_le_mem start 0 (start.getD i 0) hmem
-      omega
-    have hcap : 0 ≤ capacity := by
-      have h1 := hall (List.foldl min 0 start - 1)
-      rw [hzero] at h1
-      exact h1
-    have hs : start.all (fun s => decide (cumul start dur res s ≤ capacity)) = true :=
-      List.all_eq_true.mpr (fun s _ => decide_eq_true (hall s))
-    have he : (taskEnds start dur).all (fun e => decide (cumul start dur res e ≤ capacity)) = true :=
-      List.all_eq_true.mpr (fun e he => by
-        obtain ⟨i, _, heq⟩ := List.mem_map.mp he
-        rw [← heq]
-        exact decide_eq_true (hall _))
-    simp only [hs, he, hlen1,
-      and_true, true_and]
-    exact ⟨hlen1 ▸ hlen2, hcap⟩
+  by_cases hsel : noSelectedTask start dur res = true
+  · rw [hsel]
+    simp only [ite_true, Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true]
+    constructor
+    · rintro ⟨h1, h2⟩
+      refine ⟨h1.1.1.1, h1.1.1.2, h1.1.2, h1.2, Or.inl trivial, fun _ => ?_⟩
+      simp only [Bool.or_eq_true, decide_eq_true_iff] at h2
+      exact h2
+    · rintro ⟨hlen1, hlen2, hnD, hnR, _, hcap⟩
+      exact ⟨⟨⟨⟨hlen1, hlen2⟩, hnD⟩, hnR⟩, by
+        simp only [Bool.or_eq_true, decide_eq_true_iff]
+        exact hcap trivial⟩
+  · have hsel' : noSelectedTask start dur res = false := by
+      cases h : noSelectedTask start dur res with
+      | false => rfl
+      | true => exact absurd h hsel
+    rw [hsel']
+    simp only [Bool.false_eq_true, ite_false, Bool.and_eq_true,
+      decide_eq_true_iff, List.all_eq_true]
+    constructor
+    · rintro ⟨⟨⟨⟨hlen1, hlen2⟩, hnD⟩, hnR⟩, ⟨hs, he⟩⟩
+      refine ⟨hlen1, hlen2, hnD, hnR, Or.inr ?_, False.elim⟩
+      exact cumul_checkpoints start dur res capacity
+        (List.all_eq_true.mpr (fun s hs' => decide_eq_true (hs s hs')))
+        (List.all_eq_true.mpr (fun e he' => decide_eq_true (he e he')))
+        (capacity_nonneg_of_selected hnR (fun s hs' => hs s hs') hsel')
+    · rintro ⟨hlen1, hlen2, hnD, hnR, hcase, _⟩
+      rcases hcase with hbad | hall
+      · exact hbad.elim
+      · refine ⟨⟨⟨⟨hlen1, hlen2⟩, hnD⟩, hnR⟩, ⟨?_, ?_⟩⟩
+        · exact fun s _ => hall s
+        · exact fun e _ => hall e
 
 /-! ## Extensional: `fzn_table_int` -/
 
-/-- `fzn_table_int(xs, tuples)`: `tuples` is the row-major flattening of
-    a matrix with row width `|xs|`, and `xs` equals one complete row
-    (an empty `xs` matches trivially). -/
+/-- `fzn_table_int(xs, tuples)` under the flat FlatZinc ABI (SC-03):
+    `tuples` is the row-major flattening of a matrix with `|xs|` columns
+    (`columns = |xs|`, `rows = |tuples| / |xs|`) and `xs` equals one
+    complete row.
+
+    The upstream decomposition (`fzn_table_int.mzn` lines 8–15) takes
+    `min`/`max` of `index_set(xs)` and `index_set_1of2(tuples)`, so an
+    empty `xs` (or an empty tuple matrix) makes the constraint
+    undefined, i.e. **false**; an empty `xs` no longer matches
+    vacuously. The divisibility conjunct rejects a flat tuple array
+    that is not the flattening of any matrix with `|xs|` columns. -/
 def tableIntProp (xs tuples : List Int) : Prop :=
-  ∃ r : Nat, r * xs.length + xs.length ≤ tuples.length ∧
-    ∀ j : Nat, j < xs.length → tuples[r * xs.length + j]? = xs[j]?
+  0 < xs.length ∧
+    tuples.length % xs.length = 0 ∧
+    ∃ r : Nat, r < tuples.length / xs.length ∧
+      ∀ j : Nat, j < xs.length →
+        tuples.getD (r * xs.length + j) 0 = xs.getD j 0
 
 /-- Boolean twin of `tableIntProp`. -/
 def tableIntB (xs tuples : List Int) : Bool :=
-  match xs.length with
-  | 0 => true
-  | w + 1 =>
-    (List.range (tuples.length / (w + 1))).any (fun r =>
-      (List.range (w + 1)).all (fun j => decide (tuples[r * (w + 1) + j]? = xs[j]?)))
+  decide (0 < xs.length) && decide (tuples.length % xs.length = 0) &&
+    (List.range (tuples.length / xs.length)).any (fun r =>
+      (List.range xs.length).all (fun j =>
+        decide (tuples.getD (r * xs.length + j) 0 = xs.getD j 0)))
 
 private theorem tableIntB_iff (xs tuples : List Int) :
     tableIntB xs tuples = true ↔ tableIntProp xs tuples := by
   unfold tableIntB tableIntProp
-  cases hn : xs.length with
-  | zero =>
-    constructor
-    · intro _
-      exact ⟨0, by omega, fun j hj => absurd hj (Nat.not_lt_zero j)⟩
-    · intro _
-      trivial
-  | succ w =>
-    constructor
-    · intro h
-      rw [List.any_eq_true] at h
-      obtain ⟨r, hr, hall⟩ := h
-      have hr' : r < tuples.length / (w + 1) := List.mem_range.mp hr
-      refine ⟨r, ?_, fun j hj => of_decide_eq_true
-        (List.all_eq_true.mp hall j (List.mem_range.mpr hj))⟩
-      have h1 : r + 1 ≤ tuples.length / (w + 1) := by omega
-      have h2 := (Nat.le_div_iff_mul_le (k := w + 1) (by omega)).mp h1
-      have h3 : (r + 1) * (w + 1) = r * (w + 1) + (w + 1) := Nat.succ_mul r (w + 1)
-      omega
-    · rintro ⟨r, hrle, hrow⟩
-      have h2 : (r + 1) * (w + 1) ≤ tuples.length := by
-        have h3 : (r + 1) * (w + 1) = r * (w + 1) + (w + 1) := Nat.succ_mul r (w + 1)
-        omega
-      have h1 : r < tuples.length / (w + 1) :=
-        (Nat.le_div_iff_mul_le (k := w + 1) (by omega)).mpr h2
-      refine List.any_eq_true.mpr ⟨r, List.mem_range.mpr h1, ?_⟩
-      refine List.all_eq_true.mpr (fun j hj => ?_)
-      exact decide_eq_true (hrow j (List.mem_range.mp hj))
+  simp only [Bool.and_eq_true, List.any_eq_true, List.all_eq_true,
+    List.mem_range, decide_eq_true_iff]
+  constructor
+  · rintro ⟨⟨hpos, hdiv⟩, r, hr, hall⟩
+    exact ⟨hpos, hdiv, r, hr, hall⟩
+  · rintro ⟨hpos, hdiv, r, hr, hall⟩
+    exact ⟨⟨hpos, hdiv⟩, r, hr, hall⟩
 
 /-! ## If-then-else family -/
 
@@ -793,55 +1105,42 @@ private theorem firstTrue_none : ∀ (c : List Bool), firstTrue c = none →
           exact h2
       | some k => rw [hm] at h; simp at h
 
-/-- Mathematical meaning shared by all six `fzn_if_then_else_*`
-    predicates: `y` equals the `x`-entry selected by the first true
-    condition (0-based index `i`), and there is no constraint when all
-    conditions are false. -/
+/-- Mathematical meaning shared by the `int` and `set`
+    `fzn_if_then_else_*` predicates: if the first true condition is at
+    0-based index `i`, then `x[i]` is read and `y` equals it; when all
+    conditions are false no `x` entry is read and there is no constraint.
+    For these element types an out-of-bounds `x[i]` makes the equality
+    undefined, hence false, so the selected index must exist.  The `bool`
+    rows use `iteBoolProp` below: MiniZinc 2.10.1 turns an out-of-bounds
+    bool into `false` at the subexpression level, so a missing selected
+    entry is the defined equality `y = false`.
+
+    The `d` guard in `fzn_if_then_else_{int,bool,set}.mzn` line 7 makes
+    the implication body read `x[i]` only at the first true `c` index.
+    There is therefore no unconditional `c.length ≤ x.length` gate, and
+    trailing `x` entries are unused. -/
 private def iteGenProp {α : Type} (fallback : α) (eqv : α → α → Prop)
     (c : List Bool) (x : List α) (y : α) : Prop :=
-  c.length = x.length ∧
-    ∀ i : Nat, i < c.length →
-      ((∀ j : Nat, j < i → c.getD j false = false) ∧ c.getD i false = true) →
-      eqv y (x.getD i fallback)
+  match firstTrue c with
+  | none => True
+  | some i => i < x.length ∧ eqv y (x.getD i fallback)
 
 /-- Boolean twin of `iteGenProp`. -/
 private def iteGenB {α : Type} (fallback : α) (eqB : α → α → Bool)
     (c : List Bool) (x : List α) (y : α) : Bool :=
-  decide (c.length = x.length) &&
-    ((firstTrue c).map (fun i => eqB y (x.getD i fallback))).getD true
+  match firstTrue c with
+  | none => true
+  | some i => decide (i < x.length) && eqB y (x.getD i fallback)
 
-set_option maxHeartbeats 1000000 in
 private theorem iteGenB_iff {α : Type} (fallback : α) (eqv : α → α → Prop)
     (eqB : α → α → Bool) (hEq : ∀ a b, eqB a b = true ↔ eqv a b)
     (c : List Bool) (x : List α) (y : α) :
     iteGenB fallback eqB c x y = true ↔ iteGenProp fallback eqv c x y := by
   unfold iteGenB iteGenProp
   cases hf : firstTrue c with
-  | none =>
-    simp only [decide_eq_true_iff, Option.map_none,
-      Option.getD_none, Bool.and_true]
-    constructor
-    · intro hl
-      refine ⟨hl, fun i hi hcon => ?_⟩
-      have h9 := firstTrue_none c hf i hi
-      rw [h9] at hcon
-      exact Bool.noConfusion hcon.2
-    · intro h
-      exact h.1
+  | none => simp
   | some i =>
-    obtain ⟨hilt, hitrue, hbefore⟩ := firstTrue_sound c hf
-    simp only [Bool.and_eq_true, decide_eq_true_iff, Option.map_some,
-      Option.getD_some]
-    constructor
-    · rintro ⟨hlen, hb⟩
-      refine ⟨hlen, fun i' hi' hcon => ?_⟩
-      have hfe : firstTrue c = some i' := firstTrue_complete c i' hi' hcon.2 hcon.1
-      rw [hf] at hfe
-      have hii : i' = i := (Option.some.inj hfe).symm
-      subst hii
-      exact (hEq _ _).mp hb
-    · rintro ⟨hlen, hall⟩
-      exact ⟨hlen, (hEq _ _).mpr (hall i hilt ⟨hbefore, hitrue⟩)⟩
+    simp only [Bool.and_eq_true, decide_eq_true_iff, hEq]
 
 /-- `fzn_if_then_else_int(c, x, y)` (and its `_var_int` twin). -/
 def iteIntProp (c : List Bool) (x : List Int) (y : Int) : Prop :=
@@ -855,17 +1154,29 @@ private theorem iteIntB_iff (c : List Bool) (x : List Int) (y : Int) :
   iteGenB_iff 0 (fun a b => a = b) (fun a b => decide (a = b))
     (fun _ _ => decide_eq_true_iff) c x y
 
-/-- `fzn_if_then_else_bool(c, x, y)` (and its `_var_bool` twin). -/
+/-- `fzn_if_then_else_bool(c, x, y)` (and its `_var_bool` twin).
+    Unlike `int`/`set`, MiniZinc 2.10.1 turns an out-of-bounds bool into
+    `false` at the subexpression level ("undefined result becomes false in
+    Boolean context"), so a missing selected `x[i]` is the defined
+    constraint `y = false` rather than an undefined equality.  All other
+    entries of `x` are still unread, and an all-false `c` leaves `y`
+    unrestricted. -/
 def iteBoolProp (c : List Bool) (x : List Bool) (y : Bool) : Prop :=
-  iteGenProp false (fun a b => a = b) c x y
+  match firstTrue c with
+  | none => True
+  | some i => y = x.getD i false
 
 def iteBoolB (c : List Bool) (x : List Bool) (y : Bool) : Bool :=
-  iteGenB false (fun a b => decide (a = b)) c x y
+  match firstTrue c with
+  | none => true
+  | some i => y == x.getD i false
 
 private theorem iteBoolB_iff (c : List Bool) (x : List Bool) (y : Bool) :
-    iteBoolB c x y = true ↔ iteBoolProp c x y :=
-  iteGenB_iff false (fun a b => a = b) (fun a b => decide (a = b))
-    (fun _ _ => decide_eq_true_iff) c x y
+    iteBoolB c x y = true ↔ iteBoolProp c x y := by
+  unfold iteBoolB iteBoolProp
+  cases firstTrue c with
+  | none => simp
+  | some i => simp
 
 /-- `fzn_if_then_else_set(c, x, y)` (and its `_var_set` twin); set
     equality is extensional. -/
@@ -1382,5 +1693,698 @@ theorem if_then_else_var_set_iff (args : List Value) :
     obtain ⟨c, x, y⟩ := p
     simp only
     exact iteSetB_iff c x y
+
+/-- `fzn_bin_packing` decodes the same shapes. -/
+theorem intInts2_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (intInts2 vs).isSome = (intInts2 ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a1 b1 ha1 =>
+            cases ht2 with
+            | nil => rfl
+            | cons hv3 ht3 =>
+              cases hv3 with
+              | bool => rfl
+              | int => rfl
+              | setOfInt => rfl
+              | @array a2 b2 ha2 =>
+                cases ht3 with
+                | cons _ _ => rfl
+                | nil =>
+                  simp only [intInts2]
+                  have hx1 := valueInts_isSome_sameShape ha1
+                  have hx2 := valueInts_isSome_sameShape ha2
+                  cases h1 : valueInts a1 with
+                  | none =>
+                    cases h2 : valueInts b1 with
+                    | none => rfl
+                    | some _ => simp [h1, h2] at hx1
+                  | some _ =>
+                    cases h2 : valueInts b1 with
+                    | none => simp [h1, h2] at hx1
+                    | some _ =>
+                      cases h3 : valueInts a2 with
+                      | none =>
+                        cases h4 : valueInts b2 with
+                        | none => rfl
+                        | some _ => simp [h3, h4] at hx2
+                      | some _ =>
+                        cases h4 : valueInts b2 with
+                        | none => simp [h3, h4] at hx2
+                        | some _ => rfl
+      | setOfInt => rfl
+      | array => rfl
+
+
+/-- `fzn_bin_packing_capa`/`fzn_bin_packing_load` decode the same shapes. -/
+theorem ints3_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (ints3 vs).isSome = (ints3 ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int => rfl
+      | setOfInt => rfl
+      | @array a1 b1 ha1 =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a2 b2 ha2 =>
+            cases ht2 with
+            | nil => rfl
+            | cons hv3 ht3 =>
+              cases hv3 with
+              | bool => rfl
+              | int => rfl
+              | setOfInt => rfl
+              | @array a3 b3 ha3 =>
+                cases ht3 with
+                | cons _ _ => rfl
+                | nil =>
+                  simp only [ints3]
+                  have hx1 := valueInts_isSome_sameShape ha1
+                  have hx2 := valueInts_isSome_sameShape ha2
+                  have hx3 := valueInts_isSome_sameShape ha3
+                  cases h1 : valueInts a1 with
+                  | none =>
+                    cases h2 : valueInts b1 with
+                    | none => rfl
+                    | some _ => simp [h1, h2] at hx1
+                  | some _ =>
+                    cases h2 : valueInts b1 with
+                    | none => simp [h1, h2] at hx1
+                    | some _ =>
+                      cases h3 : valueInts a2 with
+                      | none =>
+                        cases h4 : valueInts b2 with
+                        | none => rfl
+                        | some _ => simp [h3, h4] at hx2
+                      | some _ =>
+                        cases h4 : valueInts b2 with
+                        | none => simp [h3, h4] at hx2
+                        | some _ =>
+                          cases h5 : valueInts a3 with
+                          | none =>
+                            cases h6 : valueInts b3 with
+                            | none => rfl
+                            | some _ => simp [h5, h6] at hx3
+                          | some _ =>
+                            cases h6 : valueInts b3 with
+                            | none => simp [h5, h6] at hx3
+                            | some _ => rfl
+
+
+/-- `fzn_diffn`/`fzn_diffn_nonstrict`/`fzn_geost_nonoverlap_k` decode the same shapes. -/
+theorem ints4_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (ints4 vs).isSome = (ints4 ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int => rfl
+      | setOfInt => rfl
+      | @array a1 b1 ha1 =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a2 b2 ha2 =>
+            cases ht2 with
+            | nil => rfl
+            | cons hv3 ht3 =>
+              cases hv3 with
+              | bool => rfl
+              | int => rfl
+              | setOfInt => rfl
+              | @array a3 b3 ha3 =>
+                cases ht3 with
+                | nil => rfl
+                | cons hv4 ht4 =>
+                  cases hv4 with
+                  | bool => rfl
+                  | int => rfl
+                  | setOfInt => rfl
+                  | @array a4 b4 ha4 =>
+                    cases ht4 with
+                    | cons _ _ => rfl
+                    | nil =>
+                      simp only [ints4]
+                      have hx1 := valueInts_isSome_sameShape ha1
+                      have hx2 := valueInts_isSome_sameShape ha2
+                      have hx3 := valueInts_isSome_sameShape ha3
+                      have hx4 := valueInts_isSome_sameShape ha4
+                      cases h1 : valueInts a1 with
+                      | none =>
+                        cases h2 : valueInts b1 with
+                        | none => rfl
+                        | some _ => simp [h1, h2] at hx1
+                      | some _ =>
+                        cases h2 : valueInts b1 with
+                        | none => simp [h1, h2] at hx1
+                        | some _ =>
+                          cases h3 : valueInts a2 with
+                          | none =>
+                            cases h4 : valueInts b2 with
+                            | none => rfl
+                            | some _ => simp [h3, h4] at hx2
+                          | some _ =>
+                            cases h4 : valueInts b2 with
+                            | none => simp [h3, h4] at hx2
+                            | some _ =>
+                              cases h5 : valueInts a3 with
+                              | none =>
+                                cases h6 : valueInts b3 with
+                                | none => rfl
+                                | some _ => simp [h5, h6] at hx3
+                              | some _ =>
+                                cases h6 : valueInts b3 with
+                                | none => simp [h5, h6] at hx3
+                                | some _ =>
+                                  cases h7 : valueInts a4 with
+                                  | none =>
+                                    cases h8 : valueInts b4 with
+                                    | none => rfl
+                                    | some _ => simp [h7, h8] at hx4
+                                  | some _ =>
+                                    cases h8 : valueInts b4 with
+                                    | none => simp [h7, h8] at hx4
+                                    | some _ => rfl
+
+
+/-- `fzn_cumulative` decodes the same shapes. -/
+theorem ints3Int_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (ints3Int vs).isSome = (ints3Int ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int => rfl
+      | setOfInt => rfl
+      | @array a1 b1 ha1 =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a2 b2 ha2 =>
+            cases ht2 with
+            | nil => rfl
+            | cons hv3 ht3 =>
+              cases hv3 with
+              | bool => rfl
+              | int => rfl
+              | setOfInt => rfl
+              | @array a3 b3 ha3 =>
+                cases ht3 with
+                | nil => rfl
+                | cons hv4 ht4 =>
+                  cases hv4 with
+                  | bool => rfl
+                  | int =>
+                    cases ht4 with
+                    | cons _ _ => rfl
+                    | nil =>
+                      simp only [ints3Int]
+                      have hx1 := valueInts_isSome_sameShape ha1
+                      have hx2 := valueInts_isSome_sameShape ha2
+                      have hx3 := valueInts_isSome_sameShape ha3
+                      cases h1 : valueInts a1 with
+                      | none =>
+                        cases h2 : valueInts b1 with
+                        | none => rfl
+                        | some _ => simp [h1, h2] at hx1
+                      | some _ =>
+                        cases h2 : valueInts b1 with
+                        | none => simp [h1, h2] at hx1
+                        | some _ =>
+                          cases h3 : valueInts a2 with
+                          | none =>
+                            cases h4 : valueInts b2 with
+                            | none => rfl
+                            | some _ => simp [h3, h4] at hx2
+                          | some _ =>
+                            cases h4 : valueInts b2 with
+                            | none => simp [h3, h4] at hx2
+                            | some _ =>
+                              cases h5 : valueInts a3 with
+                              | none =>
+                                cases h6 : valueInts b3 with
+                                | none => rfl
+                                | some _ => simp [h5, h6] at hx3
+                              | some _ =>
+                                cases h6 : valueInts b3 with
+                                | none => simp [h5, h6] at hx3
+                                | some _ => rfl
+                  | setOfInt => rfl
+                  | array => rfl
+
+
+/-- `fzn_knapsack` decodes the same shapes. -/
+theorem ints3IntInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (ints3IntInt vs).isSome = (ints3IntInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int => rfl
+      | setOfInt => rfl
+      | @array a1 b1 ha1 =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a2 b2 ha2 =>
+            cases ht2 with
+            | nil => rfl
+            | cons hv3 ht3 =>
+              cases hv3 with
+              | bool => rfl
+              | int => rfl
+              | setOfInt => rfl
+              | @array a3 b3 ha3 =>
+                cases ht3 with
+                | nil => rfl
+                | cons hv4 ht4 =>
+                  cases hv4 with
+                  | bool => rfl
+                  | int =>
+                    cases ht4 with
+                    | nil => rfl
+                    | cons hv5 ht5 =>
+                      cases hv5 with
+                      | bool => rfl
+                      | int =>
+                        cases ht5 with
+                        | cons _ _ => rfl
+                        | nil =>
+                          simp only [ints3IntInt]
+                          have hx1 := valueInts_isSome_sameShape ha1
+                          have hx2 := valueInts_isSome_sameShape ha2
+                          have hx3 := valueInts_isSome_sameShape ha3
+                          cases h1 : valueInts a1 with
+                          | none =>
+                            cases h2 : valueInts b1 with
+                            | none => rfl
+                            | some _ => simp [h1, h2] at hx1
+                          | some _ =>
+                            cases h2 : valueInts b1 with
+                            | none => simp [h1, h2] at hx1
+                            | some _ =>
+                              cases h3 : valueInts a2 with
+                              | none =>
+                                cases h4 : valueInts b2 with
+                                | none => rfl
+                                | some _ => simp [h3, h4] at hx2
+                              | some _ =>
+                                cases h4 : valueInts b2 with
+                                | none => simp [h3, h4] at hx2
+                                | some _ =>
+                                  cases h5 : valueInts a3 with
+                                  | none =>
+                                    cases h6 : valueInts b3 with
+                                    | none => rfl
+                                    | some _ => simp [h5, h6] at hx3
+                                  | some _ =>
+                                    cases h6 : valueInts b3 with
+                                    | none => simp [h5, h6] at hx3
+                                    | some _ => rfl
+                      | setOfInt => rfl
+                      | array => rfl
+                  | setOfInt => rfl
+                  | array => rfl
+
+
+/-- `fzn_disjunctive`/`fzn_disjunctive_strict`/`fzn_table_int` decode the same shapes. -/
+theorem ints2_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (ints2 vs).isSome = (ints2 ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int => rfl
+      | setOfInt => rfl
+      | @array a1 b1 ha1 =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a2 b2 ha2 =>
+            cases ht2 with
+            | cons _ _ => rfl
+            | nil =>
+              simp only [ints2]
+              have hx1 := valueInts_isSome_sameShape ha1
+              have hx2 := valueInts_isSome_sameShape ha2
+              cases h1 : valueInts a1 with
+              | none =>
+                cases h2 : valueInts b1 with
+                | none => rfl
+                | some _ => simp [h1, h2] at hx1
+              | some _ =>
+                cases h2 : valueInts b1 with
+                | none => simp [h1, h2] at hx1
+                | some _ =>
+                  cases h3 : valueInts a2 with
+                  | none =>
+                    cases h4 : valueInts b2 with
+                    | none => rfl
+                    | some _ => simp [h3, h4] at hx2
+                  | some _ =>
+                    cases h4 : valueInts b2 with
+                    | none => simp [h3, h4] at hx2
+                    | some _ => rfl
+
+
+/-- `fzn_if_then_else_int` decodes the same shapes. -/
+theorem boolsIntsInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (boolsIntsInt vs).isSome = (boolsIntsInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int => rfl
+      | setOfInt => rfl
+      | @array a1 b1 ha1 =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a2 b2 ha2 =>
+            cases ht2 with
+            | nil => rfl
+            | cons hv3 ht3 =>
+              cases hv3 with
+              | bool => rfl
+              | int =>
+                cases ht3 with
+                | cons _ _ => rfl
+                | nil =>
+                  simp only [boolsIntsInt]
+                  have hx1 := valueBools_isSome_sameShape ha1
+                  have hx2 := valueInts_isSome_sameShape ha2
+                  cases h1 : valueBools a1 with
+                  | none =>
+                    cases h2 : valueBools b1 with
+                    | none => rfl
+                    | some _ => simp [h1, h2] at hx1
+                  | some _ =>
+                    cases h2 : valueBools b1 with
+                    | none => simp [h1, h2] at hx1
+                    | some _ =>
+                      cases h3 : valueInts a2 with
+                      | none =>
+                        cases h4 : valueInts b2 with
+                        | none => rfl
+                        | some _ => simp [h3, h4] at hx2
+                      | some _ =>
+                        cases h4 : valueInts b2 with
+                        | none => simp [h3, h4] at hx2
+                        | some _ => rfl
+              | setOfInt => rfl
+              | array => rfl
+
+
+/-- `fzn_if_then_else_bool` decodes the same shapes. -/
+theorem boolsBoolsBool_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (boolsBoolsBool vs).isSome = (boolsBoolsBool ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int => rfl
+      | setOfInt => rfl
+      | @array a1 b1 ha1 =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a2 b2 ha2 =>
+            cases ht2 with
+            | nil => rfl
+            | cons hv3 ht3 =>
+              cases hv3 with
+              | bool =>
+                cases ht3 with
+                | cons _ _ => rfl
+                | nil =>
+                  simp only [boolsBoolsBool]
+                  have hx1 := valueBools_isSome_sameShape ha1
+                  have hx2 := valueBools_isSome_sameShape ha2
+                  cases h1 : valueBools a1 with
+                  | none =>
+                    cases h2 : valueBools b1 with
+                    | none => rfl
+                    | some _ => simp [h1, h2] at hx1
+                  | some _ =>
+                    cases h2 : valueBools b1 with
+                    | none => simp [h1, h2] at hx1
+                    | some _ =>
+                      cases h3 : valueBools a2 with
+                      | none =>
+                        cases h4 : valueBools b2 with
+                        | none => rfl
+                        | some _ => simp [h3, h4] at hx2
+                      | some _ =>
+                        cases h4 : valueBools b2 with
+                        | none => simp [h3, h4] at hx2
+                        | some _ => rfl
+              | int => rfl
+              | setOfInt => rfl
+              | array => rfl
+
+
+/-- `fzn_if_then_else_set` decodes the same shapes. -/
+theorem boolsSetsSet_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (boolsSetsSet vs).isSome = (boolsSetsSet ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩
+  · cases hshape
+    rfl
+  · cases hshape with
+    | cons hv1 ht1 =>
+      cases hv1 with
+      | bool => rfl
+      | int => rfl
+      | setOfInt => rfl
+      | @array a1 b1 ha1 =>
+        cases ht1 with
+        | nil => rfl
+        | cons hv2 ht2 =>
+          cases hv2 with
+          | bool => rfl
+          | int => rfl
+          | setOfInt => rfl
+          | @array a2 b2 ha2 =>
+            cases ht2 with
+            | nil => rfl
+            | cons hv3 ht3 =>
+              cases hv3 with
+              | bool => rfl
+              | int => rfl
+              | setOfInt =>
+                cases ht3 with
+                | cons _ _ => rfl
+                | nil =>
+                  simp only [boolsSetsSet]
+                  have hx1 := valueBools_isSome_sameShape ha1
+                  have hx2 := valueSets_isSome_sameShape ha2
+                  cases h1 : valueBools a1 with
+                  | none =>
+                    cases h2 : valueBools b1 with
+                    | none => rfl
+                    | some _ => simp [h1, h2] at hx1
+                  | some _ =>
+                    cases h2 : valueBools b1 with
+                    | none => simp [h1, h2] at hx1
+                    | some _ =>
+                      cases h3 : valueSets a2 with
+                      | none =>
+                        cases h4 : valueSets b2 with
+                        | none => rfl
+                        | some _ => simp [h3, h4] at hx2
+                      | some _ =>
+                        cases h4 : valueSets b2 with
+                        | none => simp [h3, h4] at hx2
+                        | some _ => rfl
+              | array => rfl
+
+/-! ## Decodability gate -/
+
+/-- Lengths of the array arguments, in order (non-array actual arguments,
+    e.g. scalar outputs, are skipped).  Array lengths are the only
+    argument-shape information a static gate may inspect, and they are
+    invariant under `ArgsAgree`. -/
+private def arrayLens : List Value → List Nat
+  | [] => []
+  | .array xs :: rest => xs.length :: arrayLens rest
+  | _ :: rest => arrayLens rest
+
+/-- `arrayLens` is invariant under shape agreement (`ArgsAgree`). -/
+private theorem arrayLens_eq_of_sameShapeList :
+    ∀ {vs ws : List Value}, Value.SameShapeList vs ws →
+      arrayLens vs = arrayLens ws := by
+  intro vs ws h
+  induction h with
+  | nil => rfl
+  | cons hx hxs ih =>
+    cases hx with
+    | bool => exact ih
+    | int => exact ih
+    | setOfInt => exact ih
+    | array harr =>
+      simp only [arrayLens]
+      rw [ListSameShape.length_eq harr, ih]
+
+/-- Boolean decodability gate of the packing, scheduling, table and
+    if-then-else families: the `isSome` of the very decoder
+    `packSchedInterp` uses, together with the static length relations
+    that are unconditional in the raw decompositions:
+
+    - `bin_packing`: `bin.length = 0 ∨ bin.length = weight.length`
+      (the nonempty branch sums `bin` and `weight` in lockstep);
+    - `bin_packing_capa` / `bin_packing_load`: `bin.length ≤ weight.length`;
+    - `knapsack`: `weight.length ≤ xs.length ∧ profit.length ≤ xs.length`.
+
+    Every other shape condition in this family is value-dependent or
+    vacuous and therefore belongs to the interpreter, not to a static
+    gate: `diffn`/`diffn_nonstrict` and `disjunctive`/`disjunctive_strict`
+    have empty pair loops and masked disjuncts, `geost_nonoverlap_k` and
+    the six `if_then_else_*` predicates read only the witnessing
+    dimension / first true index.  Those rows are still decodable; the
+    interpreter may return `false` for a call whose selected entries are
+    missing.  Value-level conditions (index ranges, nonnegativity, sums)
+    likewise stay in the interpreters: they can be genuinely false
+    rather than undecodable.  The gate is `true` outside the family. -/
+def packSchedDecodes (n : String) (args : List Value) : Bool :=
+  match n with
+  | "fzn_bin_packing" => (intInts2 args).isSome &&
+      (match arrayLens args with
+       | [bl, wl] => decide (bl = 0 ∨ bl = wl)
+       | _ => false)
+  | "fzn_bin_packing_capa" => (ints3 args).isSome &&
+      (match arrayLens args with
+       | [_, bl, wl] => decide (bl ≤ wl)
+       | _ => false)
+  | "fzn_bin_packing_load" => (ints3 args).isSome &&
+      (match arrayLens args with
+       | [_, bl, wl] => decide (bl ≤ wl)
+       | _ => false)
+  | "fzn_knapsack" => (ints3IntInt args).isSome &&
+      (match arrayLens args with
+       | [wl, pl, xl] => decide (wl ≤ xl ∧ pl ≤ xl)
+       | _ => false)
+  | "fzn_diffn" => (ints4 args).isSome
+  | "fzn_diffn_nonstrict" => (ints4 args).isSome
+  | "fzn_geost_nonoverlap_k" => (ints4 args).isSome
+  | "fzn_disjunctive" => (ints2 args).isSome
+  | "fzn_disjunctive_strict" => (ints2 args).isSome
+  | "fzn_cumulative" => (ints3Int args).isSome
+  | "fzn_table_int" => (ints2 args).isSome
+  | "fzn_if_then_else_int" => (boolsIntsInt args).isSome
+  | "fzn_if_then_else_var_int" => (boolsIntsInt args).isSome
+  | "fzn_if_then_else_bool" => (boolsBoolsBool args).isSome
+  | "fzn_if_then_else_var_bool" => (boolsBoolsBool args).isSome
+  | "fzn_if_then_else_set" => (boolsSetsSet args).isSome
+  | "fzn_if_then_else_var_set" => (boolsSetsSet args).isSome
+  | _ => true
+
+/-- The decodability gate is invariant under `ArgsAgree`. -/
+theorem packSchedDecodes_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) (n : String) :
+    packSchedDecodes n vs = packSchedDecodes n ws := by
+  have hlens : arrayLens vs = arrayLens ws :=
+    arrayLens_eq_of_sameShapeList (ArgsAgree.sameShape h)
+  unfold packSchedDecodes
+  split
+  · simp only [intInts2_isSome_agree h, hlens]
+  · simp only [ints3_isSome_agree h, hlens]
+  · simp only [ints3_isSome_agree h, hlens]
+  · simp only [ints3IntInt_isSome_agree h, hlens]
+  · simp only [ints4_isSome_agree h]
+  · simp only [ints4_isSome_agree h]
+  · simp only [ints4_isSome_agree h]
+  · simp only [ints2_isSome_agree h]
+  · simp only [ints2_isSome_agree h]
+  · exact ints3Int_isSome_agree h
+  · exact ints2_isSome_agree h
+  · simp only [boolsIntsInt_isSome_agree h]
+  · simp only [boolsIntsInt_isSome_agree h]
+  · simp only [boolsBoolsBool_isSome_agree h]
+  · simp only [boolsBoolsBool_isSome_agree h]
+  · simp only [boolsSetsSet_isSome_agree h]
+  · simp only [boolsSetsSet_isSome_agree h]
+  · rfl
 
 end LeanFzn.Semantics.Globals.PackSched

@@ -97,3 +97,17 @@ Put new regressions beside the component they exercise. Put a test under
 `Legacy/` if its purpose requires historical solver APIs. Shared fixture data
 belongs in `Fixtures/`, not in an old implementation's test directory. Store
 generated logs, profiles and benchmark reports under ignored `tmp/`.
+
+## FlatZinc conformance regressions
+
+`Semantics/Conformance.lean` contains kernel-evaluated examples derived from
+pinned native predicate contracts, including negative/zero durations,
+asymmetric machine bounds and original machine-index offsets, all-false
+conditional partiality, knapsack nonnegativity and duplicate set enumerations. Build it with
+`lake build +Tests.Semantics.Conformance`. The inventory validator's failure
+paths run with `python3 -B -m unittest Tests.Audits.test_semantic_inventory`.
+Its independent `ConformanceGraph`, `ConformanceMatrix` and four
+`ConformanceT10*` modules cover graph, matrix and additional native contracts.
+These tests do not establish upstream equivalence or discharge the remaining
+restricted-input premises. Python tests use managed system temporary
+directories and do not require a machine-specific `/tmp/opencode` directory.

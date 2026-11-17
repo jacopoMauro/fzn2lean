@@ -283,3 +283,24 @@ witness checked.
 
 Gate logs and generated benchmark reports belong under ignored `tmp/`; input
 manifests, regression fixtures and audit programs remain in the repository.
+
+## Semantic conformance review
+
+The source-contract inventory is
+`specification/minizinc-2.10.1/semantic_conformance.json`; its readable review is
+in `predicates_and_globals_report.md` in the same directory. It distinguishes
+upstream predicates, project extensions, unsupported inputs and unresolved
+conformance findings. Boolean/Prop agreement does not establish equivalence
+to the upstream specification.
+
+`Tests/Semantics/Conformance` aggregates regressions from the independent
+`ConformanceGraph`, `ConformanceMatrix` and four `ConformanceT10*` modules.
+They exercise scheduling, graph, automaton, matrix, counting, set and
+lexicographic contracts, including partiality and invalid shapes. Nothing in
+the runtime imports these tests.
+`audits/check_semantic_inventory.py` checks coverage and source hashes;
+`--require-clean` additionally rejects unresolved findings. Its Python
+failure-path tests live in `Tests/Audits/test_semantic_inventory.py`.
+
+See [audits/STATUS.md](audits/STATUS.md) for the current certification review,
+required Git additions and the remaining upstream/CLI/completeness obligations.

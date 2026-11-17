@@ -35,6 +35,73 @@ inductive Value where
   | array (value : List Value)
   deriving Repr, Inhabited, BEq
 
+/-! ## Argument shape
+
+Decodability of a global constraint depends only on the constructor tags and
+array lengths of the evaluated arguments, plus the concrete values at the
+`par` positions (which the model's parameters fix).  The relations below
+record exactly that information. -/
+
+/-- Pointwise shape agreement of two `Value` lists, relative to a value
+relation `R`.  This is a standalone inductive rather than a
+`Forall2 SameShape`: `Value.SameShape` nests through it, whereas a direct
+`Forall2 SameShape` argument is rejected by the strict-positivity checker and
+a mutual pair of inductives blocks the `induction` tactic. -/
+inductive ListSameShape (R : Value → Value → Prop) : List Value → List Value → Prop
+  | nil : ListSameShape R [] []
+  | cons {x y : Value} {xs ys : List Value} :
+      R x y → ListSameShape R xs ys → ListSameShape R (x :: xs) (y :: ys)
+
+namespace Value
+
+/-- Constructor shape of two values: equal constructor tags, and for arrays
+pointwise shape agreement.  This preserves exactly what the decoders inspect:
+constructor tags and array lengths, recursively. -/
+inductive SameShape : Value → Value → Prop
+  | bool (b b' : Bool) : SameShape (.bool b) (.bool b')
+  | int (i i' : Int) : SameShape (.int i) (.int i')
+  | setOfInt (s s' : IntSetValue) : SameShape (.setOfInt s) (.setOfInt s')
+  | array {xs ys : List Value} :
+      ListSameShape SameShape xs ys → SameShape (.array xs) (.array ys)
+
+/-- Pointwise `SameShape` on two value lists. -/
+abbrev SameShapeList : List Value → List Value → Prop :=
+  ListSameShape SameShape
+
+/-- Agreement at a predicate parameter: definitional equality at a `par`
+position, constructor shape at a variable position. -/
+def Agree (par : Bool) (a b : Value) : Prop :=
+  match par with
+  | true => a = b
+  | false => a.SameShape b
+
+mutual
+  /-- `SameShape` is reflexive. -/
+  theorem SameShape.refl : ∀ v : Value, SameShape v v
+    | .bool _ => .bool _ _
+    | .int _ => .int _ _
+    | .setOfInt _ => .setOfInt _ _
+    | .array xs => .array (SameShapeList.refl xs)
+
+  /-- `SameShapeList` is reflexive. -/
+  theorem SameShapeList.refl : ∀ xs : List Value, SameShapeList xs xs
+    | [] => .nil
+    | x :: xs => .cons (SameShape.refl x) (SameShapeList.refl xs)
+end
+
+end Value
+
+namespace ListSameShape
+
+/-- Shape agreement preserves list length. -/
+theorem length_eq {R : Value → Value → Prop} {xs ys : List Value}
+    (h : ListSameShape R xs ys) : xs.length = ys.length := by
+  induction h with
+  | nil => rfl
+  | cons _ _ ih => simp [ih]
+
+end ListSameShape
+
 def IntSetValue.Contains (s : IntSetValue) (x : Int) : Prop :=
   match s with
   | .enumeration xs => x ∈ xs
@@ -115,9 +182,42 @@ def lookupIdent {β : Type} (x : Ident) : List (Ident × β) → Option β
   | (y, v) :: rest => if x.name = y.name then some v else lookupIdent x rest
 
 /-- Predicate signature environment (R8, A3): maps a predicate name to
-    the parameter types of its signature; `none` if the predicate is not
-    available.  The theorems quantify over this environment. -/
-abbrev SigEnv := Ident → Option (List PredParamType)
+    the *list* of its accepted parameter-type lists; `[]` if the
+    predicate is not available.  The theorems quantify over this
+    environment.
+
+    The list has more than one element exactly for the predicates where
+    upstream ships several same-named FlatZinc overloads, e.g.
+    `fzn_reachable_int` (`N, E, from, to, root, ns, es`) and
+    `fzn_reachable_enum` (`from, to, root, ns, es`).  A constraint is
+    well formed when its argument list matches *some* entry. -/
+abbrev SigEnv := Ident → List (List PredParamType)
+
+/-- The first (`primary`) signature of a name, `none` when the name is
+    unavailable.  Consumers that only need "the" signature — the
+    compiler's exact-fragment proofs — go through this projection, so
+    their shapes are unchanged by the move to several signatures. -/
+def SigEnv.primary (sig : SigEnv) (x : Ident) : Option (List PredParamType) :=
+  (sig x).head?
+
+/-- A name whose signature environment is the singleton list `[p]`
+    accepts `p` in the `List.mem` sense used by
+    `WellFormed.constraintsChecked`.  This bridges the residual
+    `… = [p]` form of the signature lemmas to the membership form. -/
+theorem SigEnv.mem_of_eq_singleton {sig : SigEnv} {x : Ident}
+    {p : List PredParamType} (h : sig x = [p]) : p ∈ sig x := by
+  rw [h]
+  exact List.mem_singleton.mpr rfl
+
+/-- The converse direction: a name with the singleton signature list
+    `[p]` accepts nothing else.  This replaces the old
+    `Option.some.inj (hsig.symm.trans …)` steps of the `some`-valued
+    signature environment. -/
+theorem SigEnv.eq_of_mem_eq_singleton {sig : SigEnv} {x : Ident}
+    {p q : List PredParamType} (hmem : p ∈ sig x) (h : sig x = [q]) :
+    p = q := by
+  rw [h] at hmem
+  exact List.mem_singleton.mp hmem
 
 /-- The static environment: for each declared name, its type and whether
     it is a decision variable (`true`) or a parameter (`false`). -/
@@ -150,17 +250,21 @@ def _root_.LeanFzn.Model.staticEnv (m : Model) : StaticEnv :=
     | some info => some info
     | none => lookupIdent x (m.variables.map (fun d => (d.name, (d.type, true))))
 
-/-- The signatures declared by the model's predicate items. -/
+/-- The signatures declared by the model's predicate items.  A
+    user-declared predicate contributes exactly one signature. -/
 def _root_.LeanFzn.Model.declaredSigs (m : Model) : SigEnv :=
-  fun x => lookupIdent x (m.predicates.map (fun p => (p.name, p.params.map (·.type))))
+  fun x =>
+    match lookupIdent x (m.predicates.map (fun p => (p.name, p.params.map (·.type)))) with
+    | some params => [params]
+    | none => []
 
 /-- Combined signature lookup (R8): model declarations first, then the
     external environment. -/
 def _root_.LeanFzn.Model.sigEnv (m : Model) (ext : SigEnv) : SigEnv :=
   fun x =>
     match m.declaredSigs x with
-    | some params => some params
-    | none => ext x
+    | [] => ext x
+    | sigs => sigs
 
 /-- The base type a predicate parameter expects. -/
 def _root_.LeanFzn.BasicPredParamType.baseType : BasicPredParamType → BaseType
@@ -175,6 +279,186 @@ def _root_.LeanFzn.BasicPredParamType.baseType : BasicPredParamType → BaseType
 def _root_.LeanFzn.BasicPredParamType.isPar : BasicPredParamType → Bool
   | .par _ => true
   | _ => false
+
+/-- Is the predicate parameter a `par` parameter?  Array parameters are
+    classified by their element type. -/
+def _root_.LeanFzn.PredParamType.isPar : PredParamType → Bool
+  | .basic bt => bt.isPar
+  | .array _ bt => bt.isPar
+
+/-- Agreement of two evaluated argument lists with a predicate signature:
+    at a `par` position the values are equal, at a variable position they
+    only need the same constructor shape.  `False` when the lengths
+    differ.  This is the information a decoder may rely on: par arguments
+    are literals or parameter identifiers (fixed by `Model.parameters`),
+    variable arguments only contribute their declared type. -/
+def ArgsAgree : List PredParamType → List Value → List Value → Prop
+  | [], [], [] => True
+  | pt :: pts, a :: as, b :: bs =>
+      Value.Agree pt.isPar a b ∧ ArgsAgree pts as bs
+  | _, _, _ => False
+
+/-- `Agree` at any par/var flag implies constructor-shape agreement. -/
+theorem Value.sameShape_of_agree {par : Bool} {a b : Value}
+    (h : Value.Agree par a b) : a.SameShape b := by
+  cases par with
+  | false => exact h
+  | true =>
+      have hab : a = b := h
+      rw [hab]
+      exact Value.SameShape.refl b
+
+/-- Signature agreement implies pointwise constructor shape. -/
+theorem ArgsAgree.sameShape {params : List PredParamType} {vs ws : List Value}
+    (h : ArgsAgree params vs ws) : Value.SameShapeList vs ws := by
+  induction vs generalizing params ws with
+  | nil =>
+      cases params with
+      | nil =>
+          cases ws with
+          | nil => exact .nil
+          | cons w ws => cases h
+      | cons pt pts => cases h
+  | cons v vs ih =>
+      cases params with
+      | nil => cases h
+      | cons pt pts =>
+          cases ws with
+          | nil => cases h
+          | cons w ws =>
+              obtain ⟨h0, h1⟩ := h
+              exact .cons (Value.sameShape_of_agree h0) (ih h1)
+
+/-- When every parameter is `par`, agreement forces the argument lists to be
+    equal. -/
+theorem ArgsAgree.eq_of_all_par {params : List PredParamType} {vs ws : List Value}
+    (h : ArgsAgree params vs ws)
+    (hpar : ∀ pt ∈ params, pt.isPar = true) : vs = ws := by
+  induction vs generalizing params ws with
+  | nil =>
+      cases params with
+      | nil =>
+          cases ws with
+          | nil => rfl
+          | cons w ws => cases h
+      | cons pt pts => cases h
+  | cons v vs ih =>
+      cases params with
+      | nil => cases h
+      | cons pt pts =>
+          cases ws with
+          | nil => cases h
+          | cons w ws =>
+              obtain ⟨h0, h1⟩ := h
+              have hp : pt.isPar = true := hpar pt (by simp)
+              have hvw : v = w := by simpa [Value.Agree, hp] using h0
+              rw [hvw]
+              rw [ih h1 (fun q hq => hpar q (by simp [hq]))]
+
+/-- With every parameter after the first one `par`, agreement of the
+    argument lists forces their tails to be equal: only the (possibly
+    variable) first argument may differ in value. -/
+theorem ArgsAgree.drop_one_eq {params : List PredParamType} {vs ws : List Value}
+    (h : ArgsAgree params vs ws)
+    (hpar : ∀ pt ∈ params.drop 1, pt.isPar = true) :
+    vs.drop 1 = ws.drop 1 := by
+  cases vs with
+  | nil =>
+      cases ws with
+      | nil => rfl
+      | cons w ws =>
+          cases params with
+          | nil => cases h
+          | cons pt pts => cases h
+  | cons v vs =>
+      cases ws with
+      | nil =>
+          cases params with
+          | nil => cases h
+          | cons pt pts => cases h
+      | cons w ws =>
+          cases params with
+          | nil => cases h
+          | cons pt pts =>
+              obtain ⟨h0, h1⟩ := h
+              have htail : vs = ws := ArgsAgree.eq_of_all_par h1 (by
+                intro q hq
+                exact hpar q (by simpa using hq))
+              rw [htail]
+              rfl
+
+/-- With every parameter except the last one `par`, agreement of the
+    argument lists decomposes them as a common prefix followed by one
+    possibly different last value of the same shape. -/
+theorem ArgsAgree.eq_init_lastShape {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws)
+    (hpar : ∀ pt ∈ params.dropLast, pt.isPar = true)
+    (hvs : vs ≠ []) (hws : ws ≠ []) :
+    ∃ pre a b, vs = pre ++ [a] ∧ ws = pre ++ [b] ∧ a.SameShape b := by
+  induction vs generalizing params ws with
+  | nil => exact (hvs rfl).elim
+  | cons v vs' ih =>
+      cases params with
+      | nil => cases h
+      | cons pt pts =>
+          cases ws with
+          | nil => exact (hws rfl).elim
+          | cons w ws' =>
+              obtain ⟨hagree, htail⟩ := h
+              cases vs' with
+              | nil =>
+                  cases ws' with
+                  | nil =>
+                      exact ⟨[], v, w, rfl, rfl,
+                        Value.sameShape_of_agree hagree⟩
+                  | cons _ _ => simp [ArgsAgree] at htail
+              | cons v' vs'' =>
+                  cases ws' with
+                  | nil => simp [ArgsAgree] at htail
+                  | cons w' ws'' =>
+                      cases pts with
+                      | nil => simp [ArgsAgree] at htail
+                      | cons pt' pts' =>
+                          have hp : pt.isPar = true := by
+                            apply hpar pt
+                            simp [List.dropLast]
+                          have hvw : v = w := by
+                            simpa [Value.Agree, hp] using hagree
+                          subst hvw
+                          obtain ⟨pre, a, b, hvs', hws', hshape⟩ :=
+                            ih htail (fun q hq => by
+                              apply hpar q
+                              simp [List.dropLast, hq]) (by simp) (by simp)
+                          exact ⟨v :: pre, a, b, by simp [hvs'],
+                            by simp [hws'], hshape⟩
+
+/-- The `drop 1` version of `ArgsAgree.eq_init_lastShape`: only the last
+    argument of the tail may differ, and then only in value. -/
+theorem ArgsAgree.drop_one_eq_init_lastShape
+    {params : List PredParamType} {vs ws : List Value}
+    (h : ArgsAgree params vs ws)
+    (hpar : ∀ pt ∈ (params.drop 1).dropLast, pt.isPar = true)
+    (hvs : vs.drop 1 ≠ []) (hws : ws.drop 1 ≠ []) :
+    ∃ pre a b, vs.drop 1 = pre ++ [a] ∧ ws.drop 1 = pre ++ [b] ∧
+      a.SameShape b := by
+  rcases vs with _ | ⟨v, vs1⟩ <;> rcases ws with _ | ⟨w, ws1⟩
+  · exact (hvs rfl).elim
+  · cases params with
+    | nil => simp [ArgsAgree] at h
+    | cons _ _ => simp [ArgsAgree] at h
+  · cases params with
+    | nil => simp [ArgsAgree] at h
+    | cons _ _ => simp [ArgsAgree] at h
+  · cases params with
+    | nil => simp [ArgsAgree] at h
+    | cons pt pts =>
+        have htail : ArgsAgree pts vs1 ws1 := h.2
+        have hpar' : ∀ q ∈ pts.dropLast, q.isPar = true := by
+          intro q hq
+          apply hpar q
+          simpa using hq
+        exact ArgsAgree.eq_init_lastShape htail hpar'
+          (by simpa using hvs) (by simpa using hws)
 
 /-- Does a scalar argument of type `t` and par/var status `isVar` match
     the predicate parameter type `bt`? -/
@@ -234,64 +518,12 @@ def Forall2 {α β : Type} (R : α → β → Prop) : List α → List β → Pr
   | a :: as, b :: bs => R a b ∧ Forall2 R as bs
   | _, _ => False
 
-/-- **Static well-formedness** of a model under the external signature
-    environment `sig` (R8, A3).  Captures the context-sensitive rules of
-    the supported fragment:
-
-    * R4: predicate names are distinct; parameters and variables share
-      one value namespace and are distinct; predicate formals are distinct.
-    * R18/R20: parameter initializers are literals of the declared type,
-      and parameter array lengths match the index set.
-    * R22: variable array lengths match the index set.
-    * R26/R6: variable initializers (fixings and aliases) have the
-      declared type.
-    * R7: `minimize`/`maximize` objectives have type `int`.
-    * R8/R13-R15: every constraint's predicate is available (declared
-      in the model or in `sig`) and its arguments match the signature,
-      with par-to-var coercion.
-
-    Reversed ranges are deliberately *not* rejected: they denote the
-    empty set (R1).  Fixed values outside a variable's domain make a
-    model unsatisfiable rather than ill-formed, and parameter data
-    outside its type is an instance error (A5), so neither is checked
-    here. -/
-structure WellFormed (sig : SigEnv) (m : Model) : Prop where
-  /-- R4: no duplicate predicate declarations. -/
-  predNamesUnique : (m.predicates.map (·.name)).Nodup
-  /-- R4: parameters and variables share one value namespace. -/
-  valueNamesUnique :
-    (m.parameters.map (·.name) ++ m.variables.map (·.name)).Nodup
-  /-- R4: predicate formal parameter names are distinct. -/
-  predParamsUnique : ∀ p ∈ m.predicates, (p.params.map (·.name)).Nodup
-  /-- R18/R20: parameter types and array lengths. -/
-  parameterTypes : ∀ d ∈ m.parameters, match d with
-    | .basic t _ v => v.type = t.base
-    | .array idx t _ vs => vs.length = idx.length ∧ ∀ v ∈ vs, v.type = t.base
-  /-- R22: variable array lengths match the declared index set. -/
-  variableArrayLengths : ∀ d ∈ m.variables, match d with
-    | .array ty _ _ values => values.length = ty.idx.length
-    | _ => True
-  /-- R26/R6: variable initializers have the declared type. -/
-  variableInitializers : ∀ d ∈ m.variables, match d with
-    | .basic t _ _ (some v) => v.hasBaseType m.staticEnv t.base
-    | .array ty _ _ values =>
-        ∀ v ∈ values, v.hasBaseType m.staticEnv ty.elem.base
-    | _ => True
-  /-- R7: optimization objectives have type `int`. -/
-  objectiveType : match m.solve with
-    | .satisfy _ => True
-    | .minimize _ e | .maximize _ e => e.hasBaseType m.staticEnv .int
-  /-- R8/R13-R15: constraints match available signatures. -/
-  constraintsChecked : ∀ c ∈ m.constraints, ∃ params,
-    m.sigEnv sig c.name = some params ∧
-    Forall2 (Expr.checkArg m.staticEnv) c.args params
-
 /-! ## An executable static checker
 
-A boolean-valued function `wellFormedB` mirroring `WellFormed`, proved
-equivalent to it by `wellFormedB_iff`.  All comparisons go through
-`decide`, so the checker computes on parsed models; the tests in
-`Tests/Semantics/WellFormed.lean` run it. -/
+The helpers below are used by `wellFormedB`, which, together with
+`WellFormed`, lives in `LeanFzn.Semantics.Globals`: the decodability
+conjunct of `WellFormed` refers to the global-constraint decoders, which
+are downstream of this module. -/
 
 /-- Boolean identifier membership, comparing names. -/
 def memIdentB (x : Ident) : List Ident → Bool
@@ -473,6 +705,24 @@ theorem checkArgsB_iff {env : StaticEnv} {args : List Expr}
       simp only [checkArgsB, Forall2, Bool.and_eq_true]
       rw [checkArgB_iff, ih]
 
+/-- Does the argument list match one of the accepted signatures? -/
+def SigEnv.matches (sig : SigEnv) (env : StaticEnv) (x : Ident)
+    (args : List Expr) : Bool :=
+  (sig x).any fun params => checkArgsB env args params
+
+/-- `matches` is true exactly when some accepted signature type-checks. -/
+theorem SigEnv.matches_iff (sig : SigEnv) (env : StaticEnv) (x : Ident)
+    (args : List Expr) :
+    sig.matches env x args = true ↔
+      ∃ params ∈ sig x, Forall2 (Expr.checkArg env) args params := by
+  unfold SigEnv.matches
+  rw [List.any_eq_true]
+  constructor
+  · rintro ⟨params, hmem, hchk⟩
+    exact ⟨params, hmem, checkArgsB_iff.mp hchk⟩
+  · rintro ⟨params, hmem, hchk⟩
+    exact ⟨params, hmem, checkArgsB_iff.mpr hchk⟩
+
 /-- Check a constraint's arguments against a resolved signature. -/
 def checkConstraintB (env : StaticEnv) (args : List Expr) :
     Option (List PredParamType) → Bool
@@ -560,42 +810,6 @@ theorem varDeclInitB_iff {env : StaticEnv} {d : VarDeclItem} :
   | array ty n a values =>
     simp only [varDeclInitB, List.all_eq_true, hasBaseTypeB_iff]
 
-/-- **Executable static checker**: `wellFormedB sig m` computes the static
-    well-formedness of `m` under the signature environment `sig`.
-    `wellFormedB_iff` proves it equivalent to the `WellFormed`
-    predicate. -/
-def wellFormedB (sig : SigEnv) (m : Model) : Bool :=
-  nodupIdentB (m.predicates.map (·.name)) &&
-  nodupIdentB (m.parameters.map (·.name) ++ m.variables.map (·.name)) &&
-  m.predicates.all (fun p => nodupIdentB (p.params.map (·.name))) &&
-  m.parameters.all (fun d => parDeclCheckB d) &&
-  m.variables.all (fun d => varDeclArrayLenB d) &&
-  m.variables.all (fun d => varDeclInitB m.staticEnv d) &&
-  solveObjB m.staticEnv m.solve &&
-  m.constraints.all (fun c =>
-    checkConstraintB m.staticEnv c.args (m.sigEnv sig c.name))
-
-theorem wellFormedB_iff (sig : SigEnv) (m : Model) :
-    wellFormedB sig m = true ↔ WellFormed sig m := by
-  unfold wellFormedB
-  simp only [Bool.and_eq_true, List.all_eq_true]
-  constructor
-  · rintro ⟨⟨⟨⟨⟨⟨⟨h1, h2⟩, h3⟩, h4⟩, h5⟩, h6⟩, h7⟩, h8⟩
-    refine ⟨nodupIdentB_iff.mp h1, nodupIdentB_iff.mp h2, ?_, ?_, ?_, ?_, ?_, ?_⟩
-    · intro p hp; exact nodupIdentB_iff.mp (h3 p hp)
-    · intro d hd; exact parDeclCheckB_iff.mp (h4 d hd)
-    · intro d hd; exact varDeclArrayLenB_iff.mp (h5 d hd)
-    · intro d hd; exact varDeclInitB_iff.mp (h6 d hd)
-    · exact solveObjB_iff.mp h7
-    · intro c hc; exact checkConstraintB_iff.mp (h8 c hc)
-  · rintro ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
-    refine ⟨⟨⟨⟨⟨⟨⟨nodupIdentB_iff.mpr h1, nodupIdentB_iff.mpr h2⟩,
-      fun p hp => nodupIdentB_iff.mpr (h3 p hp)⟩,
-      fun d hd => parDeclCheckB_iff.mpr (h4 d hd)⟩,
-      fun d hd => varDeclArrayLenB_iff.mpr (h5 d hd)⟩,
-      fun d hd => varDeclInitB_iff.mpr (h6 d hd)⟩,
-      solveObjB_iff.mpr h7⟩,
-      fun c hc => checkConstraintB_iff.mpr (h8 c hc)⟩
 /-! ## Solution semantics -/
 
 /-- Semantic equality of scalar values (R6): Booleans and integers are
@@ -633,51 +847,454 @@ def SatisfiesDyn (pred : PredicateInterpretation) (m : Model)
         vs.length = ty.idx.length ∧ ∀ v ∈ vs, ty.elem.contains v) ∧
   (∀ d ∈ m.variables, d.initializerHolds store)
 
-/-- `store` satisfies the well-formed model `m` under the predicate
-    interpretation `pred`.
-
-    `Satisfies` constrains the store on the model's *variables* only:
-    it does not require the store to give each parameter its declared
-    value.  A store that rebinds a parameter can therefore satisfy
-    constraints that the model's actual parameter values violate.
-    Statements about solutions of a FlatZinc instance must add
-    `ParamHonest m store` (as `IsSolution` does); the solution checker
-    guarantees it for the stores it accepts. -/
-def Satisfies (sig : SigEnv) (pred : PredicateInterpretation) (m : Model)
-    (store : Store) : Prop :=
-  WellFormed sig m ∧ SatisfiesDyn pred m store
-
 /-- The value a parameter declaration fixes. -/
 def _root_.LeanFzn.ParDeclItem.value : ParDeclItem → Value
   | .basic _ _ v => v.denote
   | .array _ _ _ vs => .array (vs.map (·.denote))
 
+/-- Canonical dummy value of a base type, used by the shape store. -/
+def _root_.LeanFzn.BaseType.dummy : BaseType → Value
+  | .bool => .bool false
+  | .int => .int 0
+  | .setOfInt => .setOfInt (.enumeration [])
+
+/-- Canonical dummy value of an (unfixed) variable type: the dummy of the
+    underlying base type, `0` for integer domains and the empty set for set
+    domains. -/
+def _root_.LeanFzn.BasicVarType.dummy : BasicVarType → Value
+  | .par t => _root_.LeanFzn.BaseType.dummy t.base
+  | .intRange _ _ | .intSet _ => .int 0
+  | .setOfIntRange _ _ | .setOfIntSet _ => .setOfInt (.enumeration [])
+
+/-- The shape value of a variable declaration: the canonical dummy of its
+    declared base type, or an array dummy of the declared length. -/
+def _root_.LeanFzn.VarDeclItem.shapeValue : VarDeclItem → Value
+  | .basic ty _ _ _ => ty.dummy
+  | .array ty _ _ _ => .array (List.replicate ty.idx.length ty.elem.dummy)
+
+/-- The shape store: a parameter name takes the value its declaration fixes,
+    a variable name takes the canonical dummy of its declared type.  Every
+    store whose parameters are honest and whose variables respect their
+    domains has the same decoder-relevant structure as `m.shapeStore`. -/
+def _root_.LeanFzn.Model.shapeStore (m : Model) : Store := fun x =>
+  match lookupIdent x (m.parameters.map (fun d => (d.name, d.value))) with
+  | some v => some v
+  | none => lookupIdent x (m.variables.map (fun d => (d.name, d.shapeValue)))
+
 /-- The store gives every parameter the value its declaration fixes. -/
 def ParamHonest (m : Model) (store : Store) : Prop :=
   ∀ d ∈ m.parameters, store d.name = some d.value
+
+/-! ## `lookupIdent` facts needed by the shape store -/
+
+theorem shapeLookup_cons_eq {β : Type} {y : Ident} {v : β}
+    {rest : List (Ident × β)} :
+    lookupIdent y ((y, v) :: rest) = some v := by
+  simp only [lookupIdent, reduceIte]
+
+theorem shapeLookup_cons_ne {β : Type} {x y : Ident} {v : β}
+    {rest : List (Ident × β)} (hne : x.name ≠ y.name) :
+    lookupIdent x ((y, v) :: rest) = lookupIdent x rest := by
+  simp only [lookupIdent, if_neg hne]
+
+theorem shapeLookup_of_mem {β : Type} {x : Ident} {v : β}
+    {l : List (Ident × β)} (hnu : (l.map Prod.fst).Nodup)
+    (hmem : (x, v) ∈ l) :
+    lookupIdent x l = some v := by
+  induction l with
+  | nil => cases hmem
+  | cons ab rest ih =>
+      rw [List.map_cons, List.nodup_cons] at hnu
+      rcases List.mem_cons.mp hmem with heq | htl
+      · have hxa : x = ab.1 := (Prod.mk.injEq .. ▸ heq).1
+        have hva : v = ab.2 := (Prod.mk.injEq .. ▸ heq).2
+        rw [hxa, hva]
+        exact shapeLookup_cons_eq
+      · obtain ⟨y', v'⟩ := ab
+        by_cases hname : x.name = y'.name
+        · exfalso
+          have hxmem : x ∈ rest.map Prod.fst :=
+            List.mem_map.mpr ⟨(x, v), htl, rfl⟩
+          have hyx : x = y' := Ident.eq_of_name_eq hname
+          rw [hyx] at hxmem
+          exact hnu.1 hxmem
+        · rw [shapeLookup_cons_ne hname]
+          exact ih hnu.2 htl
+
+theorem shapeLookup_inv_mem {β : Type} (x : Ident) (l : List (Ident × β))
+    (v : β) (h : lookupIdent x l = some v) :
+    ∃ y, (y, v) ∈ l ∧ y.name = x.name := by
+  induction l with
+  | nil => simp [lookupIdent] at h
+  | cons ab rest ih =>
+      simp only [lookupIdent] at h
+      by_cases hab : x.name = ab.1.name
+      · rw [if_pos hab] at h
+        have hvv : ab.2 = v := (Option.some.inj h)
+        subst hvv
+        exact ⟨ab.1, List.mem_cons_self, hab.symm⟩
+      · rw [if_neg hab] at h
+        obtain ⟨y, hy, hname⟩ := ih h
+        exact ⟨y, by simp [hy], hname⟩
+
+theorem shapeLookup_none_of_forall {β : Type} {x : Ident} {l : List (Ident × β)}
+    (h : ∀ y v, (y, v) ∈ l → y.name ≠ x.name) :
+    lookupIdent x l = none := by
+  induction l with
+  | nil => rfl
+  | cons ab rest ih =>
+      obtain ⟨y, v⟩ := ab
+      by_cases hname : x.name = y.name
+      · exact absurd hname.symm (h y v List.mem_cons_self)
+      · rw [shapeLookup_cons_ne hname]
+        exact ih (fun y' v' hmem => h y' v' (List.mem_cons_of_mem _ hmem))
+
+/-! ## Inversions of `staticEnv` -/
+
+theorem staticEnv_param {m : Model} {x : Ident} {ft : FznType}
+    (h : m.staticEnv x = some (ft, false)) :
+    ∃ d ∈ m.parameters, d.name = x ∧ d.type = ft := by
+  unfold Model.staticEnv at h
+  cases hp : lookupIdent x (m.parameters.map (fun d => (d.name, (d.type, false)))) with
+  | some info =>
+      obtain ⟨ft', isVar⟩ := info
+      rw [hp] at h
+      have hpair : (ft', isVar) = (ft, false) := Option.some.inj h
+      have hft : ft' = ft := congrArg Prod.fst hpair
+      have hfalse : isVar = false := congrArg Prod.snd hpair
+      subst ft'
+      subst isVar
+      obtain ⟨y, hy, hname⟩ := shapeLookup_inv_mem x _ (ft, false) hp
+      obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hy
+      have hdname : d.name = y := congrArg Prod.fst hdeq
+      have hdtype : d.type = ft := by
+        have := congrArg (fun p : Ident × (FznType × Bool) => p.2.1) hdeq
+        simpa using this
+      exact ⟨d, hd, hdname.trans (Ident.eq_of_name_eq hname), hdtype⟩
+  | none =>
+      rw [hp] at h
+      obtain ⟨y, hy, hname⟩ := shapeLookup_inv_mem x _ (ft, false) h
+      obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hy
+      have hsnd : (true : Bool) = false := by
+        have := congrArg (fun p : Ident × (FznType × Bool) => p.2.2) hdeq
+        simpa using this.symm
+      exact absurd hsnd (by simp)
+
+theorem staticEnv_var {m : Model} {x : Ident} {ft : FznType}
+    (h : m.staticEnv x = some (ft, true)) :
+    ∃ d ∈ m.variables, d.name = x ∧ d.type = ft := by
+  unfold Model.staticEnv at h
+  cases hp : lookupIdent x (m.parameters.map (fun d => (d.name, (d.type, false)))) with
+  | some info =>
+      obtain ⟨ft', isVar⟩ := info
+      rw [hp] at h
+      have hpair : (ft', isVar) = (ft, true) := Option.some.inj h
+      have htrue : isVar = true := congrArg Prod.snd hpair
+      obtain ⟨y, hy, _⟩ := shapeLookup_inv_mem x _ (ft', isVar) hp
+      obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hy
+      have hfalse : isVar = false := by
+        have := congrArg (fun p : Ident × (FznType × Bool) => p.2.2) hdeq
+        simpa using this
+      exact absurd (htrue.symm.trans hfalse) (by simp)
+  | none =>
+      rw [hp] at h
+      obtain ⟨y, hy, hname⟩ := shapeLookup_inv_mem x _ (ft, true) h
+      obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hy
+      have hdname : d.name = y := congrArg Prod.fst hdeq
+      have hdtype : d.type = ft := by
+        have := congrArg (fun p : Ident × (FznType × Bool) => p.2.1) hdeq
+        simpa using this
+      exact ⟨d, hd, hdname.trans (Ident.eq_of_name_eq hname), hdtype⟩
+
+/-! ## `shapeStore` lookups -/
+
+theorem shapeStore_param {m : Model}
+    (hnd : (m.parameters.map (·.name)).Nodup)
+    {d : ParDeclItem} (hd : d ∈ m.parameters) :
+    m.shapeStore d.name = some d.value := by
+  unfold Model.shapeStore
+  have hmem : (d.name, d.value) ∈
+      m.parameters.map (fun d => (d.name, d.value)) :=
+    List.mem_map.mpr ⟨d, hd, rfl⟩
+  have hnu : ((m.parameters.map (fun d => (d.name, d.value))).map Prod.fst).Nodup := by
+    rw [List.map_map]
+    simpa [Function.comp_def] using hnd
+  have hlookup := shapeLookup_of_mem hnu hmem
+  simp only [Model.shapeStore, hlookup]
+
+theorem shapeStore_var {m : Model}
+    (hnd : (m.parameters.map (·.name) ++ m.variables.map (·.name)).Nodup)
+    {d : VarDeclItem} (hd : d ∈ m.variables) :
+    m.shapeStore d.name = some d.shapeValue := by
+  unfold Model.shapeStore
+  have hsplit := List.nodup_append.mp hnd
+  obtain ⟨_, hndVar, hdisj⟩ := hsplit
+  have hnone : lookupIdent d.name
+      (m.parameters.map (fun d => (d.name, d.value))) = none := by
+    apply shapeLookup_none_of_forall
+    intro y v hmem heq
+    obtain ⟨p, hp, hp_eq⟩ := List.mem_map.mp hmem
+    have hy : p.name = y := congrArg Prod.fst hp_eq
+    have hpmem : p.name ∈ m.parameters.map (·.name) :=
+      List.mem_map.mpr ⟨p, hp, rfl⟩
+    have hdmem : d.name ∈ m.variables.map (·.name) :=
+      List.mem_map.mpr ⟨d, hd, rfl⟩
+    have hpname : p.name = d.name := by
+      rw [hy]
+      exact Ident.eq_of_name_eq heq
+    have hdmem' : p.name ∈ m.variables.map (·.name) := by
+      rw [hpname]; exact hdmem
+    exact (hdisj p.name hpmem p.name hdmem') rfl
+  rw [hnone]
+  have hmem : (d.name, d.shapeValue) ∈
+      m.variables.map (fun d => (d.name, d.shapeValue)) :=
+    List.mem_map.mpr ⟨d, hd, rfl⟩
+  have hnu : ((m.variables.map (fun d => (d.name, d.shapeValue))).map Prod.fst).Nodup := by
+    rw [List.map_map]
+    simpa [Function.comp_def] using hndVar
+  exact shapeLookup_of_mem hnu hmem
+
+
+/-! ## Dummy shapes and variable domain respect -/
+
+/-- The variable-domain conjunct of `SatisfiesDyn`. -/
+def VarsRespect (m : Model) (store : Store) : Prop :=
+  ∀ d ∈ m.variables, match d with
+    | .basic ty n _ _ => ∃ v, store n = some v ∧ ty.contains v
+    | .array ty n _ _ => ∃ vs, store n = some (.array vs) ∧
+        vs.length = ty.idx.length ∧ ∀ v ∈ vs, ty.elem.contains v
+
+theorem BasicVarType.sameShape_dummy {ty : BasicVarType} {v : Value}
+    (h : ty.contains v) : v.SameShape ty.dummy := by
+  cases ty with
+  | par t =>
+      cases t with
+      | bool => cases v with
+        | bool b => exact .bool b false
+        | int i => exact h.elim
+        | setOfInt s => exact h.elim
+        | array xs => exact h.elim
+      | int => cases v with
+        | bool b => exact h.elim
+        | int i => exact .int i 0
+        | setOfInt s => exact h.elim
+        | array xs => exact h.elim
+      | setOfInt => cases v with
+        | bool b => exact h.elim
+        | int i => exact h.elim
+        | setOfInt s => exact .setOfInt s (.enumeration [])
+        | array xs => exact h.elim
+  | intRange lo hi =>
+      cases v with
+      | bool b => exact h.elim
+      | int i => exact .int i 0
+      | setOfInt s => exact h.elim
+      | array xs => exact h.elim
+  | intSet xs =>
+      cases v with
+      | bool b => exact h.elim
+      | int i => exact .int i 0
+      | setOfInt s => exact h.elim
+      | array xs => exact h.elim
+  | setOfIntRange lo hi =>
+      cases v with
+      | bool b => exact h.elim
+      | int i => exact h.elim
+      | setOfInt s => exact .setOfInt s (.enumeration [])
+      | array xs => exact h.elim
+  | setOfIntSet xs =>
+      cases v with
+      | bool b => exact h.elim
+      | int i => exact h.elim
+      | setOfInt s => exact .setOfInt s (.enumeration [])
+      | array xs => exact h.elim
+
+theorem ListSameShape.replicate {R : Value → Value → Prop} {x : Value} :
+    ∀ (xs : List Value) (n : Nat), xs.length = n →
+      (∀ y ∈ xs, R y x) → ListSameShape R xs (List.replicate n x)
+  | [], n, hn, _ => by
+      cases n with
+      | zero => exact .nil
+      | succ n => simp at hn
+  | y :: ys, n, hn, hx => by
+      cases n with
+      | zero => simp at hn
+      | succ n =>
+          have hlen : ys.length = n := by simpa using hn
+          exact .cons (hx y List.mem_cons_self)
+            (ListSameShape.replicate ys n hlen (fun z hz => hx z (List.mem_cons_of_mem _ hz)))
+
+
+
+theorem _root_.LeanFzn.BasicVarType.dummy_eq_base_dummy (ty : BasicVarType) :
+    ty.dummy = LeanFzn.BaseType.dummy ty.base := by
+  cases ty <;> rfl
+
+theorem _root_.LeanFzn.BasicVarType.dummy_eq_of_base_eq {ty ty' : BasicVarType}
+    (h : ty.base = ty'.base) : ty.dummy = ty'.dummy := by
+  rw [BasicVarType.dummy_eq_base_dummy, BasicVarType.dummy_eq_base_dummy, h]
+
+theorem _root_.LeanFzn.VarDeclItem.shapeValue_eq_of_type_eq {d d' : VarDeclItem}
+    (h : d.type = d'.type) : d.shapeValue = d'.shapeValue := by
+  cases d with
+  | basic ty n anns v =>
+      cases d' with
+      | basic ty' n' anns' v' =>
+          simp only [VarDeclItem.type, FznType.base.injEq] at h
+          simp only [VarDeclItem.shapeValue]
+          exact BasicVarType.dummy_eq_of_base_eq h
+      | array ty' n' anns' es' =>
+          simp only [VarDeclItem.type] at h
+          cases h
+  | array ty n anns es =>
+      cases d' with
+      | basic ty' n' anns' v' =>
+          simp only [VarDeclItem.type] at h
+          cases h
+      | array ty' n' anns' es' =>
+          simp only [VarDeclItem.type, FznType.array.injEq] at h
+          obtain ⟨hlen, hbase⟩ := h
+          simp only [VarDeclItem.shapeValue, hlen]
+          rw [BasicVarType.dummy_eq_of_base_eq hbase]
+
+theorem _root_.LeanFzn.Model.shapeStore_eq_of {m m' : Model}
+    (hp : m'.parameters = m.parameters)
+    (hv : m'.variables.map (fun d => (d.name, d.shapeValue)) =
+      m.variables.map (fun d => (d.name, d.shapeValue))) :
+    m'.shapeStore = m.shapeStore := by
+  unfold Model.shapeStore
+  rw [hp, hv]
+
+theorem _root_.LeanFzn.Model.shapeStore_eq_of_map {m : Model}
+    {f : VarDeclItem → VarDeclItem}
+    (hf : ∀ d, (f d).name = d.name ∧ (f d).shapeValue = d.shapeValue) :
+    ({ m with variables := m.variables.map f } : Model).shapeStore = m.shapeStore := by
+  exact Model.shapeStore_eq_of (m := m)
+    (m' := { m with variables := m.variables.map f }) rfl (by
+      rw [List.map_map]
+      exact List.map_congr_left (fun d _ => by simp [hf d]))
+/-- Inversion for `List.mapM` on a cons. -/
+theorem mapM_cons_inv {α : Type} {f : α → Option Value} {a : α} {l : List α}
+    {vs : List Value} (h : (a :: l).mapM f = some vs) :
+    ∃ v vs', f a = some v ∧ l.mapM f = some vs' ∧ vs = v :: vs' := by
+  simp only [List.mapM_cons, Option.pure_def] at h
+  cases hfa : f a with
+  | none => rw [hfa] at h; simp at h
+  | some v =>
+      cases hfl : l.mapM f with
+      | none => rw [hfa, hfl] at h; simp at h
+      | some vs' =>
+          rw [hfa, hfl] at h
+          change some (v :: vs') = some vs at h
+          exact ⟨v, vs', rfl, rfl, (Option.some.inj h).symm⟩
+
+theorem mapM_cons_some {α : Type} {f : α → Option Value} {a : α} {l : List α}
+    {v : Value} {vs : List Value} (hfa : f a = some v)
+    (hfl : l.mapM f = some vs) :
+    (a :: l).mapM f = some (v :: vs) := by
+  rw [List.mapM_cons, hfa, hfl]
+  rfl
+
+theorem mapM_isSome {α : Type} {f : α → Option Value} {l : List α}
+    (h : ∀ a ∈ l, (f a).isSome = true) : (l.mapM f).isSome = true := by
+  have hex : ∃ vs, l.mapM f = some vs := by
+    induction l with
+    | nil => exact ⟨[], rfl⟩
+    | cons a as ih =>
+        have hfa : (f a).isSome = true := h a List.mem_cons_self
+        obtain ⟨v, hfv⟩ := Option.isSome_iff_exists.mp hfa
+        obtain ⟨vs, hvs⟩ := ih (fun b hb => h b (List.mem_cons_of_mem _ hb))
+        exact ⟨v :: vs, mapM_cons_some hfv hvs⟩
+  obtain ⟨vs, hvs⟩ := hex
+  rw [hvs]
+  rfl
+
+theorem shapeStore_exists_of_staticEnv {m : Model}
+    (hnd : (m.parameters.map (·.name) ++ m.variables.map (·.name)).Nodup)
+    {x : Ident} {ft : FznType} {isVar : Bool}
+    (henv : m.staticEnv x = some (ft, isVar)) :
+    ∃ v, m.shapeStore x = some v := by
+  cases isVar with
+  | false =>
+      obtain ⟨d, hd, hdname, _⟩ := staticEnv_param henv
+      have hndp : (m.parameters.map (·.name)).Nodup :=
+        (List.nodup_append.mp hnd).1
+      have hs : m.shapeStore d.name = some d.value := by
+        unfold Model.shapeStore
+        have hmem : (d.name, d.value) ∈
+            m.parameters.map (fun d => (d.name, d.value)) :=
+          List.mem_map.mpr ⟨d, hd, rfl⟩
+        have hnu : ((m.parameters.map (fun d => (d.name, d.value))).map Prod.fst).Nodup := by
+          rw [List.map_map]
+          simpa [Function.comp_def] using hndp
+        have hlookup := shapeLookup_of_mem hnu hmem
+        simp only [Model.shapeStore, hlookup]
+      rw [hdname] at hs
+      exact ⟨_, hs⟩
+  | true =>
+      obtain ⟨d, hd, hdname, _⟩ := staticEnv_var henv
+      have hs : m.shapeStore d.name = some d.shapeValue :=
+        shapeStore_var hnd hd
+      rw [hdname] at hs
+      exact ⟨_, hs⟩
+
+theorem eval_isSome_of_checkBase {m : Model}
+    (hnd : (m.parameters.map (·.name) ++ m.variables.map (·.name)).Nodup)
+    {b : BasicExpr} {bt : BasicPredParamType} (hb : b.checkBase m.staticEnv bt) :
+    (b.eval m.shapeStore).isSome = true := by
+  cases b with
+  | lit l => rfl
+  | ident x =>
+      simp only [BasicExpr.eval]
+      simp only [BasicExpr.checkBase] at hb
+      cases henv : m.staticEnv x with
+      | none => rw [henv] at hb; exact hb.elim
+      | some info =>
+          obtain ⟨ft, isVar⟩ := info
+          rw [henv] at hb
+          obtain ⟨v, hv⟩ := shapeStore_exists_of_staticEnv hnd henv
+          rw [hv]
+          rfl
+
+theorem eval_isSome_of_checkArg {m : Model}
+    (hnd : (m.parameters.map (·.name) ++ m.variables.map (·.name)).Nodup)
+    {e : Expr} {pt : PredParamType} (hc : e.checkArg m.staticEnv pt) :
+    (e.eval m.shapeStore).isSome = true := by
+  cases e with
+  | basic b =>
+      cases pt with
+      | basic bt =>
+          simp only [Expr.checkArg, Expr.eval] at hc ⊢
+          exact eval_isSome_of_checkBase hnd hc
+      | array idx bt =>
+          cases b with
+          | lit l => simp [Expr.checkArg] at hc
+          | ident x =>
+              simp only [Expr.checkArg, Expr.eval] at hc ⊢
+              cases henv : m.staticEnv x with
+              | none => rw [henv] at hc; exact hc.elim
+              | some info =>
+                  obtain ⟨ft, isVar⟩ := info
+                  rw [henv] at hc
+                  cases ft with
+                  | base t => exact hc.elim
+                  | array n t =>
+                      change (m.shapeStore x).isSome = true
+                      obtain ⟨v, hv⟩ := shapeStore_exists_of_staticEnv hnd henv
+                      rw [hv]
+                      rfl
+  | array es =>
+      cases pt with
+      | basic bt => simp [Expr.checkArg] at hc
+      | array idx bt =>
+          simp only [Expr.checkArg, Expr.eval] at hc ⊢
+          obtain ⟨hlen, hcheck⟩ := hc
+          rw [Option.isSome_map]
+          exact mapM_isSome (fun b hb => eval_isSome_of_checkBase hnd (hcheck b hb))
 
 def ObjectiveAttained (m : Model) (store : Store) : Prop :=
   match m.solve with
   | .satisfy _ => True
   | .minimize _ _ | .maximize _ _ => ∃ i, m.solve.objective store = some i
-
-/-- Optimality among the instance's solutions.  The competing stores
-    must be parameter-honest: otherwise a store rebinding a parameter
-    could beat the true optimum. -/
-def IsOptimal (sig : SigEnv) (pred : PredicateInterpretation) (m : Model)
-    (store : Store) : Prop :=
-  match m.solve with
-  | .satisfy _ => True
-  | .minimize _ _ => ∀ other i j, Satisfies sig pred m other → ParamHonest m other →
-      m.solve.objective store = some i → m.solve.objective other = some j → i ≤ j
-  | .maximize _ _ => ∀ other i j, Satisfies sig pred m other → ParamHonest m other →
-      m.solve.objective store = some i → m.solve.objective other = some j → j ≤ i
-
-/-- A complete, parameter-honest satisfying assignment which also
-    realizes the solve goal. -/
-def IsSolution (sig : SigEnv) (pred : PredicateInterpretation) (m : Model)
-    (store : Store) : Prop :=
-  Satisfies sig pred m store ∧ ParamHonest m store ∧ ObjectiveAttained m store ∧
-    IsOptimal sig pred m store
 
 end LeanFzn.Semantics

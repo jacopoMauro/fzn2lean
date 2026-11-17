@@ -249,69 +249,69 @@ theorem ShapeState.env_extends {taken : List String} {m : Model}
 
 theorem fullSig_bool_clause :
     fullSig (Ident.mk "bool_clause") =
-      some [.array .int (.var (.par .bool)), .array .int (.var (.par .bool))] := by
+      [[.array .int (.var (.par .bool)), .array .int (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_bool_or :
     fullSig (Ident.mk "bool_or") =
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .bool))] := by
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_int_lin_eq :
     fullSig (Ident.mk "int_lin_eq") =
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))] := by
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_int_eq :
     fullSig (Ident.mk "int_eq") =
-      some [.basic (.var (.par .int)), .basic (.var (.par .int))] := by
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_int_eq_reif :
     fullSig (Ident.mk "int_eq_reif") =
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .bool))] := by
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_bool_and :
     fullSig (Ident.mk "bool_and") =
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .bool))] := by
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_bool2int :
     fullSig (Ident.mk "bool2int") =
-      some [.basic (.var (.par .bool)), .basic (.var (.par .int))] := by
+      [[.basic (.var (.par .bool)), .basic (.var (.par .int))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_set_in_reif :
     fullSig (Ident.mk "set_in_reif") =
-      some [.basic (.var (.par .int)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .bool))] := by
+      [[.basic (.var (.par .int)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_set_in :
     fullSig (Ident.mk "set_in") =
-      some [.basic (.var (.par .int)), .basic (.var (.par .setOfInt))] := by
+      [[.basic (.var (.par .int)), .basic (.var (.par .setOfInt))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_int_le :
     fullSig (Ident.mk "int_le") =
-      some [.basic (.var (.par .int)), .basic (.var (.par .int))] := by
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_array_var_bool_element :
     fullSig (Ident.mk "array_var_bool_element") =
-      some [.basic (.var (.par .int)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .bool))] := by
+      [[.basic (.var (.par .int)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_array_var_set_element :
     fullSig (Ident.mk "array_var_set_element") =
-      some [.basic (.var (.par .int)), .array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))] := by
+      [[.basic (.var (.par .int)), .array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 /-! ## Argument checks -/
@@ -487,8 +487,7 @@ theorem arrayVarBoolElement_check {env : StaticEnv} {i : BasicExpr}
 
 /-- A constraint whose arguments check against the global signature. -/
 def ShapeState.ConstraintChecked (env : StaticEnv) (c : ConstraintItem) : Prop :=
-  ∃ params, fullSig c.name = some params ∧
-    Forall2 (Expr.checkArg env) c.args params
+  ∃ params ∈ fullSig c.name, Forall2 (Expr.checkArg env) c.args params
 
 /-- An auxiliary whose defining constraint checks. -/
 def ShapeAux.Checkable (env : StaticEnv) (a : ShapeAux) : Prop :=
@@ -498,31 +497,31 @@ theorem checkable_member {env : StaticEnv} {S : String} {v : Int} {n : String}
     (hS : ∃ isVar, env (Ident.mk S) = some (.base .setOfInt, isVar))
     (hn : ∃ isVar, env (Ident.mk n) = some (.base .bool, isVar)) :
     ShapeAux.Checkable env ⟨n, .par .bool, .member S v⟩ :=
-  ⟨_, fullSig_set_in_reif, setInReif_check hS hn⟩
+  ⟨_, SigEnv.mem_of_eq_singleton fullSig_set_in_reif, setInReif_check hS hn⟩
 
 theorem checkable_eq {env : StaticEnv} {x : String} {v : Int} {n : String}
     (hx : ∃ isVar, env (Ident.mk x) = some (.base .int, isVar))
     (hn : ∃ isVar, env (Ident.mk n) = some (.base .bool, isVar)) :
     ShapeAux.Checkable env ⟨n, .par .bool, .eq x v⟩ :=
-  ⟨_, fullSig_int_eq_reif, intEqReif_check hx hn⟩
+  ⟨_, SigEnv.mem_of_eq_singleton fullSig_int_eq_reif, intEqReif_check hx hn⟩
 
 theorem checkable_and {env : StaticEnv} {x y n : String}
     (hx : ∃ isVar, env (Ident.mk x) = some (.base .bool, isVar))
     (hy : ∃ isVar, env (Ident.mk y) = some (.base .bool, isVar))
     (hn : ∃ isVar, env (Ident.mk n) = some (.base .bool, isVar)) :
     ShapeAux.Checkable env ⟨n, .par .bool, .and x y⟩ :=
-  ⟨_, fullSig_bool_and, boolAnd_check hx hy hn⟩
+  ⟨_, SigEnv.mem_of_eq_singleton fullSig_bool_and, boolAnd_check hx hy hn⟩
 
 theorem checkable_bit {env : StaticEnv} {x n : String}
     (hx : ∃ isVar, env (Ident.mk x) = some (.base .bool, isVar))
     (hn : ∃ isVar, env (Ident.mk n) = some (.base .int, isVar)) :
     ShapeAux.Checkable env ⟨n, .intRange 0 1, .bit x⟩ :=
-  ⟨_, fullSig_bool2int, bool2int_check hx hn⟩
+  ⟨_, SigEnv.mem_of_eq_singleton fullSig_bool2int, bool2int_check hx hn⟩
 
 theorem checkable_const {env : StaticEnv} {v : Bool} {n : String}
     (hn : ∃ isVar, env (Ident.mk n) = some (.base .bool, isVar)) :
     ShapeAux.Checkable env ⟨n, .par .bool, .const v⟩ := by
-  refine ⟨_, fullSig_bool_not, ?_⟩
+  refine ⟨_, SigEnv.mem_of_eq_singleton fullSig_bool_not, ?_⟩
   exact ⟨checkArg_bool_name hn, checkArg_shape_bool_lit _, trivial⟩
 
 /-- Every row emitted by the range checks is checked, given that the index
@@ -537,13 +536,13 @@ theorem shapeRangeChecks_checked {env : StaticEnv} {i : BasicExpr} {n : Nat}
         staticEnv_int_of_checkArg hi
       have h1 : ShapeState.ConstraintChecked env
           (shapeConstraint "int_le" [shapeE (shapeInt 1), shapeE (.ident x)]) :=
-        ⟨_, fullSig_int_le, by
+        ⟨_, SigEnv.mem_of_eq_singleton fullSig_int_le, by
           simpa [shapeConstraint, shapeE, shapeName] using
             intLeLitName_check (env := env) (x := x.name) 1 hx⟩
       have h2 : ShapeState.ConstraintChecked env
           (shapeConstraint "int_le"
             [shapeE (.ident x), shapeE (shapeInt (n : Int))]) :=
-        ⟨_, fullSig_int_le, by
+        ⟨_, SigEnv.mem_of_eq_singleton fullSig_int_le, by
           simpa [shapeConstraint, shapeE, shapeName] using
             intLeNameLit_check (env := env) (x := x.name) (n : Int) hx⟩
       have hmem : c = shapeConstraint "int_le"
@@ -567,7 +566,10 @@ theorem shapeRangeChecks_checked {env : StaticEnv} {i : BasicExpr} {n : Nat}
             rw [hsingle] at hc
             rw [List.mem_singleton] at hc
             subst hc
-            exact ⟨_, falseConstraint_sig, falseConstraint_check env⟩
+            exact ⟨_, by
+              simpa [falseConstraint] using
+                SigEnv.mem_of_eq_singleton falseConstraint_sig,
+              falseConstraint_check env⟩
       | bool b =>
           simp [Expr.checkArg, BasicExpr.checkBase, BasicPredParamType.accepts,
             BasicPredParamType.baseType, BasicPredParamType.isPar,
@@ -584,7 +586,7 @@ theorem arrayElemRow_checked {env : StaticEnv} {i : BasicExpr}
     (hb : ∀ b ∈ bits, ∃ isVar, env (Ident.mk b) = some (.base .bool, isVar))
     (ht : ∃ isVar, env (Ident.mk tv) = some (.base .bool, isVar)) :
     ShapeState.ConstraintChecked env (arrayElemRow i bits tv) :=
-  ⟨_, fullSig_array_var_bool_element, by
+  ⟨_, SigEnv.mem_of_eq_singleton fullSig_array_var_bool_element, by
     simpa [arrayElemRow, shapeConstraint, shapeE] using
       arrayVarBoolElement_check (env := env) (i := i) (bits := bits) (tv := tv)
         hi hb ht⟩
@@ -1261,7 +1263,7 @@ theorem shapeRewriteConstraint_cacheOk {taken : List String} {m : Model}
 /-! ## The per-shape checking lemmas -/
 theorem checked_of_source {m : Model} {c : ConstraintItem}
     {taken : List String} {env : StaticEnv}
-    (hcheckM : ∃ params, fullSig c.name = some params ∧
+    (hcheckM : ∃ params, params ∈ fullSig c.name ∧
       Forall2 (Expr.checkArg m.staticEnv) c.args params)
     (hnames : ∀ x ∈ constraintNames c, x ∈ taken)
     (hsrcenv : ∀ x ∈ taken, env (Ident.mk x) = m.staticEnv (Ident.mk x)) :
@@ -1441,7 +1443,7 @@ theorem linkOr_newChecked {st : ShapeState} {terms : List String} {target : Stri
   cases terms with
   | nil =>
       refine ShapeState.newChecked_emit ?_
-      refine ⟨_, fullSig_bool_not, ?_⟩
+      refine ⟨_, SigEnv.mem_of_eq_singleton fullSig_bool_not, ?_⟩
       exact ⟨checkArg_bool_name (h target (by simp)),
         checkArg_shape_bool_lit _, trivial⟩
   | cons t ts =>
@@ -1449,8 +1451,8 @@ theorem linkOr_newChecked {st : ShapeState} {terms : List String} {target : Stri
       intro c hc
       simp only [List.mem_cons, List.mem_map] at hc
       rcases hc with rfl | ⟨u, hu, rfl⟩
-      · exact ⟨_, fullSig_bool_clause, boolClause_check (fun x hx => h x hx)⟩
-      · refine ⟨_, fullSig_bool_clause, ?_⟩
+      · exact ⟨_, SigEnv.mem_of_eq_singleton fullSig_bool_clause, boolClause_check (fun x hx => h x hx)⟩
+      · refine ⟨_, SigEnv.mem_of_eq_singleton fullSig_bool_clause, ?_⟩
         show Forall2 (Expr.checkArg env)
           [.array [shapeName target], .array [shapeName u]]
           [.array .int (.var (.par .bool)), .array .int (.var (.par .bool))]
@@ -1467,13 +1469,13 @@ theorem linkOr_newChecked {st : ShapeState} {terms : List String} {target : Stri
 
 theorem fullSig_set_card :
     fullSig (Ident.mk "set_card") =
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .int))] := by
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .int))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem fullSig_set_union :
     fullSig (Ident.mk "set_union") =
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))] := by
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 /-- **Static checking of the variable-membership rewrite**: all emitted
@@ -1652,7 +1654,7 @@ theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeStat
           have hrow : ShapeState.ConstraintChecked env
               (shapeConstraint "int_eq"
                 [shapeE (shapeName kn.name), shapeE (shapeInt 0)]) := by
-            refine ⟨_, fullSig_int_eq, ?_⟩
+            refine ⟨_, SigEnv.mem_of_eq_singleton fullSig_int_eq, ?_⟩
             simpa [shapeConstraint] using
               intEq_check (env := env) (x := kn.name) (k := 0) (hkty kn rfl)
           simpa [ShapeState.emitList] using ShapeState.newChecked_emit hrow
@@ -1669,7 +1671,10 @@ theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeStat
                 simp only [Option.some.injEq, Prod.mk.injEq] at h
                 obtain ⟨rfl, rfl⟩ := h
                 have hrow : ShapeState.ConstraintChecked env falseConstraint :=
-                  ⟨_, falseConstraint_sig, falseConstraint_check env⟩
+                  ⟨_, by
+                    simpa [falseConstraint] using
+                      SigEnv.mem_of_eq_singleton falseConstraint_sig,
+                    falseConstraint_check env⟩
                 simpa [ShapeState.emitList] using ShapeState.newChecked_emit hrow
           | bool b => simp at h
           | set sl => simp at h
@@ -1694,7 +1699,7 @@ theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeStat
                 exact ⟨true, env_int01_of_aux_name henvAux1 ⟨a', ha', ha'n, ha't⟩⟩
               have hrow : ShapeState.ConstraintChecked env
                   (shapeLinEq (cs.map (fun _ => 1) ++ [-1]) (cs ++ [kn.name]) 0) := by
-                refine ⟨_, fullSig_int_lin_eq, ?_⟩
+                refine ⟨_, SigEnv.mem_of_eq_singleton fullSig_int_lin_eq, ?_⟩
                 refine intLinEq_check (fun x hx => ?_)
                 rcases List.mem_append.mp hx with hx | hx
                 · exact hcs x hx
@@ -1718,7 +1723,7 @@ theorem rewriteCard_newChecked {taken : List String} {m : Model} {st : ShapeStat
                     exact ⟨true, env_int01_of_aux_name henvAux1 ⟨a', ha', ha'n, ha't⟩⟩
                   have hrow : ShapeState.ConstraintChecked env
                       (shapeLinEq (cs.map (fun _ => 1)) cs j) := by
-                    refine ⟨_, fullSig_int_lin_eq, ?_⟩
+                    refine ⟨_, SigEnv.mem_of_eq_singleton fullSig_int_lin_eq, ?_⟩
                     exact intLinEq_check (fun x hx => hcs x hx)
                   exact ShapeState.newChecked_trans
                     (cardBits_newChecked hb hc hwf hsup hsrcenv henvAux1)
@@ -1771,7 +1776,7 @@ theorem unionRows_newChecked {taken : List String} {m : Model} {a b c : Expr}
         obtain ⟨cc, hcc, hccn, hcct⟩ := memberTerm_aux hm3 hc2
         exact ⟨true, env_bool_of_aux_name henvAux3 ⟨cc, hcc, hccn, hcct⟩⟩
       have hrow : ShapeState.ConstraintChecked env (unionRow av bv cv) := by
-        refine ⟨_, fullSig_bool_or, ?_⟩
+        refine ⟨_, SigEnv.mem_of_eq_singleton fullSig_bool_or, ?_⟩
         simpa [unionRow, shapeConstraint] using boolOr_check hav hbv hcv
       exact ShapeState.newChecked_trans
         (memberTerm_newChecked hm1 hc hwf hsup hsrcenv henvAux1)
@@ -1843,7 +1848,7 @@ theorem intersectRows_newChecked {taken : List String} {m : Model} {a b c : Expr
         obtain ⟨cc, hcc, hccn, hcct⟩ := memberTerm_aux hm3 hc2
         exact ⟨true, env_bool_of_aux_name henvAux3 ⟨cc, hcc, hccn, hcct⟩⟩
       have hrow : ShapeState.ConstraintChecked env (intersectRow av bv cv) := by
-        refine ⟨_, fullSig_bool_and, ?_⟩
+        refine ⟨_, SigEnv.mem_of_eq_singleton fullSig_bool_and, ?_⟩
         simpa [intersectRow, shapeConstraint] using boolAnd_check hav hbv hcv
       exact ShapeState.newChecked_trans
         (memberTerm_newChecked hm1 hc hwf hsup hsrcenv henvAux1)
@@ -2140,7 +2145,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
             have hparams : params =
                 [.basic (.var (.par .int)), .basic (.var (.par .setOfInt)),
                   .basic (.var (.par .bool))] :=
-              Option.some.inj (hsig.symm.trans fullSig_set_in_reif)
+              SigEnv.eq_of_mem_eq_singleton hsig fullSig_set_in_reif
             subst hparams
             simp only [Forall2] at hfor
             obtain ⟨hxchk, hschk, hrchk, -⟩ := hfor
@@ -2197,7 +2202,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
             obtain ⟨params, hsig, hfor⟩ := hcheck
             have hparams : params =
                 [.basic (.var (.par .int)), .basic (.var (.par .setOfInt))] :=
-              Option.some.inj (hsig.symm.trans fullSig_set_in)
+              SigEnv.eq_of_mem_eq_singleton hsig fullSig_set_in
             subst hparams
             simp only [Forall2] at hfor
             obtain ⟨hxchk, hschk, -⟩ := hfor
@@ -2246,7 +2251,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
         obtain ⟨params, hsig, hfor⟩ := hcheck
         have hparams : params =
             [.basic (.var (.par .setOfInt)), .basic (.var (.par .int))] :=
-          Option.some.inj (hsig.symm.trans fullSig_set_card)
+          SigEnv.eq_of_mem_eq_singleton hsig fullSig_set_card
         subst hparams
         simp only [Forall2] at hfor
         obtain ⟨-, hkchk, -⟩ := hfor
@@ -2305,7 +2310,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
           have hparams : params =
               [.basic (.var (.par .int)), .array .int (.var (.par .setOfInt)),
                 .basic (.var (.par .setOfInt))] :=
-            Option.some.inj (hsig.symm.trans fullSig_array_var_set_element)
+            SigEnv.eq_of_mem_eq_singleton hsig fullSig_array_var_set_element
           subst hparams
           simp only [Forall2] at hfor
           obtain ⟨hichk, -, -, -⟩ := hfor
@@ -2329,7 +2334,7 @@ theorem shapeRewriteConstraint_newChecked {taken : List String} {m : Model}
             have hparams : params =
                 [.basic (.var (.par .int)), .array .int (.var (.par .setOfInt)),
                   .basic (.var (.par .setOfInt))] :=
-              Option.some.inj (hsig.symm.trans fullSig_array_var_set_element)
+              SigEnv.eq_of_mem_eq_singleton hsig fullSig_array_var_set_element
             subst hparams
             simp only [Forall2] at hfor
             obtain ⟨hichk, -, -, -⟩ := hfor
@@ -2422,6 +2427,727 @@ theorem shapeExpandConstraints_newChecked {taken : List String} {m : Model}
           exact ShapeState.newChecked_trans hnew
             (ih h hchecked' hcE (fun c' hc' => hsource c' (List.mem_cons_of_mem _ hc')))
 
+/-! ## Provenance of global-named constraints
+
+The shape pass keeps an unrecognized constraint verbatim and otherwise
+emits only core names (`int_lin_eq`, `bool_clause`, …), none of which is
+one of the ten `fzn_*` global families.  Hence a final constraint with a
+global name is always a source constraint, whose decodability can be
+transported from the source model. -/
+
+/-- The names emitted by the shape pass are outside the global
+    families. -/
+theorem set_in_reif_not_globals : "set_in_reif" ∉ globalsNames := by decide
+
+theorem bool_and_not_globals : "bool_and" ∉ globalsNames := by decide
+
+theorem bool2int_not_globals : "bool2int" ∉ globalsNames := by decide
+
+theorem bool_or_not_globals : "bool_or" ∉ globalsNames := by decide
+
+theorem array_var_bool_element_not_globals :
+    "array_var_bool_element" ∉ globalsNames := by decide
+
+/-- The defining constraint of an auxiliary has a core name. -/
+theorem ShapeAux.definition_not_globals (a : ShapeAux) :
+    a.definition.name.name ∉ globalsNames := by
+  obtain ⟨n, ty, k⟩ := a
+  cases k with
+  | member S v =>
+      simpa [ShapeAux.definition, shapeConstraint] using set_in_reif_not_globals
+  | eq x v =>
+      simpa [ShapeAux.definition, shapeConstraint] using int_eq_reif_not_globals
+  | and x y =>
+      simpa [ShapeAux.definition, shapeConstraint] using bool_and_not_globals
+  | bit x =>
+      simpa [ShapeAux.definition, shapeConstraint] using bool2int_not_globals
+  | const v =>
+      simpa [ShapeAux.definition, pinBoolConstraint] using bool_not_not_globals
+
+/-- Every constraint of `st'` is an old constraint or a core constraint
+    (a name outside the ten global families). -/
+def ShapeState.NewNonGlobal (st st' : ShapeState) : Prop :=
+  ∀ c ∈ st'.cons, c ∈ st.cons ∨ c.name.name ∉ globalsNames
+
+theorem ShapeState.newNonGlobal_refl (st : ShapeState) : st.NewNonGlobal st :=
+  fun _ hc => Or.inl hc
+
+theorem ShapeState.newNonGlobal_trans {st st' st'' : ShapeState}
+    (h1 : st.NewNonGlobal st') (h2 : st'.NewNonGlobal st'') :
+    st.NewNonGlobal st'' := by
+  intro c hc
+  rcases h2 c hc with hc' | hc'
+  · exact h1 c hc'
+  · exact Or.inr hc'
+
+theorem ShapeState.newNonGlobal_emit {st : ShapeState} {c : ConstraintItem}
+    (hc : c.name.name ∉ globalsNames) : st.NewNonGlobal (st.emit c) := by
+  intro c' hc'
+  simp only [ShapeState.emit, List.mem_cons] at hc'
+  rcases hc' with rfl | hc'
+  · exact Or.inr hc
+  · exact Or.inl hc'
+
+theorem ShapeState.newNonGlobal_emitList {st : ShapeState}
+    {cs : List ConstraintItem}
+    (hall : ∀ c ∈ cs, c.name.name ∉ globalsNames) :
+    st.NewNonGlobal (st.emitList cs) := by
+  intro c' hc'
+  simp only [ShapeState.emitList, List.mem_append, List.mem_reverse] at hc'
+  rcases hc' with hc' | hc'
+  · exact Or.inr (hall c' hc')
+  · exact Or.inl hc'
+
+/-- A fresh auxiliary (or a cache hit) adds only its core-named
+    defining constraint. -/
+theorem ShapeState.freshAux_newNonGlobal {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshAux taken kind = (n, st')) : st.NewNonGlobal st' := by
+  intro c hc
+  rcases ShapeState.freshAux_cons_eq_or h c hc with hc' | rfl
+  · exact Or.inl hc'
+  · exact Or.inr (ShapeAux.definition_not_globals _)
+
+theorem ShapeState.freshBool_newNonGlobal {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshBool taken kind = (n, st')) : st.NewNonGlobal st' :=
+  ShapeState.freshAux_newNonGlobal h
+
+theorem ShapeState.freshInt01_newNonGlobal {taken : List String} {st : ShapeState}
+    {kind : ShapeKind} {n : String} {st' : ShapeState}
+    (h : st.freshInt01 taken kind = (n, st')) : st.NewNonGlobal st' :=
+  ShapeState.freshAux_newNonGlobal h
+
+theorem memberTerm_newNonGlobal {taken : List String} {m : Model} {st : ShapeState}
+    {sa : Expr} {v : Int} {n : String} {st' : ShapeState}
+    (h : memberTerm taken m st sa v = some (n, st')) :
+    st.NewNonGlobal st' := by
+  cases sa with
+  | basic b =>
+      cases b with
+      | ident S =>
+          cases hus : modelSetUniverse? m S.name with
+          | none => simp [memberTerm, hus] at h
+          | some us =>
+              by_cases hv : v ∈ us
+              · simp only [memberTerm, hus, if_pos hv] at h
+                exact ShapeState.freshBool_newNonGlobal (Option.some.inj h)
+              · simp only [memberTerm, hus, if_neg hv] at h
+                exact ShapeState.freshBool_newNonGlobal (Option.some.inj h)
+      | lit l =>
+          cases l with
+          | bool bb => simp [memberTerm] at h
+          | int i => simp [memberTerm] at h
+          | set sl =>
+              simp only [memberTerm] at h
+              exact ShapeState.freshBool_newNonGlobal (Option.some.inj h)
+  | array es => simp [memberTerm] at h
+
+theorem varMemberTerms_newNonGlobal {taken : List String} {m : Model} {x s : String}
+    {st : ShapeState} {vals : List Int} {terms : List String} {st' : ShapeState}
+    (h : varMemberTerms taken m x s st vals = some (terms, st')) :
+    st.NewNonGlobal st' := by
+  induction vals generalizing st terms st' with
+  | nil =>
+      simp only [varMemberTerms, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.newNonGlobal_refl st
+  | cons v vs ih =>
+      obtain ⟨e, st1, a, st2, t, st3, ts, st4, hfb, hm, ha, hr, rfl, rfl⟩ :=
+        varMemberTerms_cons_decomp h
+      exact ShapeState.newNonGlobal_trans
+        (ShapeState.freshBool_newNonGlobal hfb)
+        (ShapeState.newNonGlobal_trans
+          (memberTerm_newNonGlobal hm)
+          (ShapeState.newNonGlobal_trans
+            (ShapeState.freshBool_newNonGlobal ha)
+            (ih hr)))
+
+theorem resultTarget_newNonGlobal {taken : List String} {st : ShapeState}
+    {r : BasicExpr} {n : String} {st' : ShapeState}
+    (h : resultTarget taken st r = some (n, st')) :
+    st.NewNonGlobal st' := by
+  cases r with
+  | ident b =>
+      simp only [resultTarget, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.newNonGlobal_refl st
+  | lit l =>
+      cases l with
+      | bool bb =>
+          cases bb
+          · simp only [resultTarget, Option.some.injEq] at h
+            exact ShapeState.freshBool_newNonGlobal h
+          · simp only [resultTarget, Option.some.injEq] at h
+            exact ShapeState.freshBool_newNonGlobal h
+      | int i => simp [resultTarget] at h
+      | set sl => simp [resultTarget] at h
+
+theorem linkOr_newNonGlobal (st : ShapeState) (terms : List String)
+    (target : String) : st.NewNonGlobal (linkOr st terms target) := by
+  cases terms with
+  | nil =>
+      apply ShapeState.newNonGlobal_emit
+      simp [pinBoolConstraint, bool_not_not_globals]
+  | cons t ts =>
+      apply ShapeState.newNonGlobal_emitList
+      intro c hc
+      simp only [List.mem_cons, List.mem_map] at hc
+      rcases hc with rfl | ⟨u, hu, rfl⟩
+      · simp [shapeConstraint, bool_clause_not_globals]
+      · simp [shapeConstraint, bool_clause_not_globals]
+
+theorem rewriteVarMember_newNonGlobal {taken : List String} {m : Model}
+    {st : ShapeState} {x s : String} {vals : List Int} {r : BasicExpr}
+    {st' : ShapeState} {cs' : List ConstraintItem}
+    (h : rewriteVarMember taken m st x s vals r = some (st', cs')) :
+    st.NewNonGlobal st' := by
+  obtain ⟨tms, st1, target, st2, hterms, hres, rfl, _⟩ :=
+    rewriteVarMember_decomp h
+  exact ShapeState.newNonGlobal_trans
+    (varMemberTerms_newNonGlobal hterms)
+    (ShapeState.newNonGlobal_trans
+      (resultTarget_newNonGlobal hres)
+      (linkOr_newNonGlobal st2 tms target))
+
+theorem cardBits_newNonGlobal {taken : List String} {m : Model} {s : String}
+    {st : ShapeState} {vals : List Int} {cs : List String} {st' : ShapeState}
+    (h : cardBits taken m s st vals = some (cs, st')) :
+    st.NewNonGlobal st' := by
+  induction vals generalizing st cs st' with
+  | nil =>
+      simp only [cardBits, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.newNonGlobal_refl st
+  | cons v vs ih =>
+      simp only [cardBits] at h
+      cases hm : memberTerm taken m st (.basic (.ident (Ident.mk s))) v with
+      | none => simp [hm] at h
+      | some p =>
+          obtain ⟨a, st1⟩ := p
+          cases hb : st1.freshInt01 taken (.bit a) with
+          | mk c0 st2 =>
+              cases hr : cardBits taken m s st2 vs with
+              | none => simp [hm, hb, hr] at h
+              | some q =>
+                  obtain ⟨cs0, st3⟩ := q
+                  simp only [hm, hb, hr, Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact ShapeState.newNonGlobal_trans
+                    (memberTerm_newNonGlobal hm)
+                    (ShapeState.newNonGlobal_trans
+                      (ShapeState.freshInt01_newNonGlobal hb)
+                      (ih hr))
+
+theorem rewriteCard_newNonGlobal {taken : List String} {m : Model} {st : ShapeState}
+    {S : String} {k : BasicExpr} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : rewriteCard taken m st S k = some (st', cs')) :
+    st.NewNonGlobal st' ∧ (∀ d ∈ cs', d.name.name ∉ globalsNames) := by
+  unfold rewriteCard at h
+  cases hus : (modelSetUniverse? m S).getD [] with
+  | nil =>
+      rw [hus] at h
+      simp only [List.isEmpty_nil, ite_true] at h
+      cases k with
+      | ident kn =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ⟨by
+            apply ShapeState.newNonGlobal_emit
+            simp [shapeConstraint, int_eq_not_globals],
+            fun d hd => by simp at hd⟩
+      | lit l =>
+          cases l with
+          | int n =>
+              by_cases hz : n = 0
+              · simp only [hz, ite_true] at h
+                simp only [Option.some.injEq, Prod.mk.injEq] at h
+                obtain ⟨rfl, rfl⟩ := h
+                exact ⟨ShapeState.newNonGlobal_refl st, fun d hd => by simp at hd⟩
+              · simp only [hz, ite_false] at h
+                simp only [Option.some.injEq, Prod.mk.injEq] at h
+                obtain ⟨rfl, rfl⟩ := h
+                exact ⟨by
+                  apply ShapeState.newNonGlobal_emit
+                  simp [falseConstraint, int_lin_le_not_globals],
+                  fun d hd => by simp at hd⟩
+          | bool b => simp at h
+          | set sl => simp at h
+  | cons u us =>
+      rw [hus] at h
+      simp only [List.isEmpty_cons, Bool.false_eq_true, ite_false] at h
+      cases hb : cardBits taken m S st (u :: us) with
+      | none => simp [hb] at h
+      | some p =>
+          obtain ⟨cs, st1⟩ := p
+          simp only [hb] at h
+          cases k with
+          | ident kn =>
+              simp only [Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h
+              exact ⟨ShapeState.newNonGlobal_trans (cardBits_newNonGlobal hb)
+                (by
+                  apply ShapeState.newNonGlobal_emit
+                  simp [shapeLinEq, shapeConstraint, int_lin_eq_not_globals]),
+                fun d hd => by simp at hd⟩
+          | lit l =>
+              cases l with
+              | int j =>
+                  simp only [Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact ⟨ShapeState.newNonGlobal_trans (cardBits_newNonGlobal hb)
+                    (by
+                      apply ShapeState.newNonGlobal_emit
+                      simp [shapeLinEq, shapeConstraint, int_lin_eq_not_globals]),
+                    fun d hd => by simp at hd⟩
+              | bool b => simp at h
+              | set sl => simp at h
+
+theorem unionRows_newNonGlobal {taken : List String} {m : Model} {a b c : Expr}
+    {st st' : ShapeState} {vals : List Int}
+    (h : unionRows taken m a b c st vals = some st') :
+    st.NewNonGlobal st' := by
+  induction vals generalizing st st' with
+  | nil =>
+      simp only [unionRows, Option.some.injEq] at h
+      subst h
+      exact ShapeState.newNonGlobal_refl st
+  | cons v vs ih =>
+      obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
+        unionRows_cons_decomp h
+      exact ShapeState.newNonGlobal_trans
+        (memberTerm_newNonGlobal hm1)
+        (ShapeState.newNonGlobal_trans
+          (memberTerm_newNonGlobal hm2)
+          (ShapeState.newNonGlobal_trans
+            (memberTerm_newNonGlobal hm3)
+            (ShapeState.newNonGlobal_trans
+              (ShapeState.newNonGlobal_emit (by
+                simp [unionRow, shapeConstraint, bool_or_not_globals]))
+              (ih hr))))
+
+theorem rewriteUnion_newNonGlobal {taken : List String} {m : Model}
+    {st : ShapeState} {a b c : Expr} {ua ub uc : List Int}
+    {st' : ShapeState} {cs' : List ConstraintItem}
+    (h : rewriteUnion taken m st a b c ua ub uc = some (st', cs')) :
+    st.NewNonGlobal st' := by
+  obtain ⟨st1, hr, rfl, _⟩ := rewriteUnion_decomp h
+  exact unionRows_newNonGlobal hr
+
+theorem intersectRows_newNonGlobal {taken : List String} {m : Model}
+    {a b c : Expr} {st st' : ShapeState} {vals : List Int}
+    (h : intersectRows taken m a b c st vals = some st') :
+    st.NewNonGlobal st' := by
+  induction vals generalizing st st' with
+  | nil =>
+      simp only [intersectRows, Option.some.injEq] at h
+      subst h
+      exact ShapeState.newNonGlobal_refl st
+  | cons v vs ih =>
+      obtain ⟨av, st1, bv, st2, cv, st3, hm1, hm2, hm3, hr⟩ :=
+        intersectRows_cons_decomp h
+      exact ShapeState.newNonGlobal_trans
+        (memberTerm_newNonGlobal hm1)
+        (ShapeState.newNonGlobal_trans
+          (memberTerm_newNonGlobal hm2)
+          (ShapeState.newNonGlobal_trans
+            (memberTerm_newNonGlobal hm3)
+            (ShapeState.newNonGlobal_trans
+              (ShapeState.newNonGlobal_emit (by
+                simp [intersectRow, shapeConstraint, bool_and_not_globals]))
+              (ih hr))))
+
+theorem rewriteIntersect_newNonGlobal {taken : List String} {m : Model}
+    {st : ShapeState} {a b c : Expr} {ua ub uc : List Int}
+    {st' : ShapeState} {cs' : List ConstraintItem}
+    (h : rewriteIntersect taken m st a b c ua ub uc = some (st', cs')) :
+    st.NewNonGlobal st' := by
+  obtain ⟨st1, hr, rfl, _⟩ := rewriteIntersect_decomp h
+  exact intersectRows_newNonGlobal hr
+
+theorem arrayElemBits_newNonGlobal {taken : List String} {m : Model} {v : Int} :
+    ∀ (es : List BasicExpr) (st : ShapeState) (bits : List String)
+      (st' : ShapeState),
+      arrayElemBits taken m es st v = some (bits, st') →
+      st.NewNonGlobal st' := by
+  intro es
+  induction es with
+  | nil =>
+      intro st bits st' h
+      simp only [arrayElemBits, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.newNonGlobal_refl st
+  | cons e rest ih =>
+      intro st bits st' h
+      simp only [arrayElemBits] at h
+      cases hm : memberTerm taken m st (.basic e) v with
+      | none => simp only [hm] at h; simp at h
+      | some p =>
+          obtain ⟨b, st1⟩ := p
+          simp only [hm] at h
+          cases hr : arrayElemBits taken m rest st1 v with
+          | none => simp only [hr] at h; simp at h
+          | some q =>
+              obtain ⟨bs, st2⟩ := q
+              simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl⟩ := h
+              exact ShapeState.newNonGlobal_trans
+                (memberTerm_newNonGlobal hm) (ih st1 bs st2 hr)
+
+theorem arrayElemRows_newNonGlobal {taken : List String} {m : Model}
+    {i : BasicExpr} {es : List BasicExpr} {T : String} :
+    ∀ (vals : List Int) (st : ShapeState)
+      (rows : List (Int × List String × String)) (st' : ShapeState),
+      arrayElemRows taken m i es T st vals = some (rows, st') →
+      st.NewNonGlobal st' := by
+  intro vals
+  induction vals with
+  | nil =>
+      intro st rows st' h
+      simp only [arrayElemRows, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ShapeState.newNonGlobal_refl st
+  | cons v vs ih =>
+      intro st rows st' h
+      simp only [arrayElemRows] at h
+      cases hb : arrayElemBits taken m es st v with
+      | none => simp only [hb] at h; simp at h
+      | some p =>
+          obtain ⟨bits, st1⟩ := p
+          simp only [hb] at h
+          cases hm : memberTerm taken m st1 (.basic (.ident (Ident.mk T))) v with
+          | none => simp only [hm] at h; simp at h
+          | some q =>
+              obtain ⟨tv, st2⟩ := q
+              simp only [hm] at h
+              cases hr : arrayElemRows taken m i es T st2 vs with
+              | none => simp only [hr] at h; simp at h
+              | some r' =>
+                  obtain ⟨rows', st3⟩ := r'
+                  simp only [hr, Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl⟩ := h
+                  exact ShapeState.newNonGlobal_trans
+                    (arrayElemBits_newNonGlobal es st bits st1 hb)
+                    (ShapeState.newNonGlobal_trans
+                      (memberTerm_newNonGlobal hm) (ih st2 rows' st3 hr))
+
+theorem arrayElemRow_name_not_globals (i : BasicExpr) (bits : List String)
+    (tv : String) : (arrayElemRow i bits tv).name.name ∉ globalsNames := by
+  simp [arrayElemRow, shapeConstraint, array_var_bool_element_not_globals]
+
+theorem arrayElemRowList_not_globals (i : BasicExpr) :
+    ∀ (rows : List (Int × List String × String)) (c : ConstraintItem),
+      c ∈ arrayElemRowList i rows → c.name.name ∉ globalsNames := by
+  intro rows
+  induction rows with
+  | nil =>
+      intro c hc
+      simp [arrayElemRowList] at hc
+  | cons r rs ih =>
+      intro c hc
+      simp only [arrayElemRowList, List.mem_cons] at hc
+      rcases hc with rfl | hc
+      · exact arrayElemRow_name_not_globals _ _ _
+      · exact ih c hc
+
+theorem shapeRangeChecks_not_globals (i : BasicExpr) (n : Nat) :
+    ∀ c ∈ shapeRangeChecks i n, c.name.name ∉ globalsNames := by
+  intro c hc
+  cases i with
+  | ident x =>
+      simp only [shapeRangeChecks, List.mem_cons, List.not_mem_nil,
+        or_false] at hc
+      rcases hc with rfl | rfl <;> simp [shapeConstraint, int_le_not_globals]
+  | lit l =>
+      cases l with
+      | int k =>
+          by_cases hk : 1 ≤ k ∧ k ≤ (n : Int)
+          · simp [shapeRangeChecks, hk] at hc
+          · simp only [shapeRangeChecks, hk, if_false] at hc
+            rw [List.mem_singleton] at hc
+            subst hc
+            simp [falseConstraint, int_lin_le_not_globals]
+      | bool b =>
+          simp only [shapeRangeChecks, List.mem_cons, List.not_mem_nil,
+            or_false] at hc
+          rcases hc with rfl | rfl <;> simp [shapeConstraint, int_le_not_globals]
+      | set sl =>
+          simp only [shapeRangeChecks, List.mem_cons, List.not_mem_nil,
+            or_false] at hc
+          rcases hc with rfl | rfl <;> simp [shapeConstraint, int_le_not_globals]
+
+theorem rewriteArrayElem_newNonGlobal {taken : List String} {m : Model}
+    {st : ShapeState} {i : BasicExpr} {es : List BasicExpr} {T : String}
+    {st' : ShapeState} {cs' : List ConstraintItem}
+    (h : rewriteArrayElem taken m st i es T = some (st', cs')) :
+    st.NewNonGlobal st' ∧
+      (∀ c ∈ cs', c.name.name ∉ globalsNames) := by
+  obtain ⟨vals, rows, hvals, hrows, hcs⟩ := rewriteArrayElem_decomp h
+  refine ⟨?_, ?_⟩
+  · exact arrayElemRows_newNonGlobal vals st rows st' hrows
+  · intro c hc
+    rw [hcs] at hc
+    rcases List.mem_append.mp hc with hc | hc
+    · exact arrayElemRowList_not_globals i rows c hc
+    · exact shapeRangeChecks_not_globals i es.length c hc
+
+/-- **Provenance of the per-constraint rewrite**: the new state keeps old
+    constraints or adds core-named ones, and every output row is either
+    the source constraint itself or core-named. -/
+theorem shapeRewriteConstraint_newNonGlobal {taken : List String} {m : Model}
+    {st : ShapeState} {c : ConstraintItem} {st' : ShapeState}
+    {cs' : List ConstraintItem}
+    (h : shapeRewriteConstraint taken m st c = some (st', cs')) :
+    st.NewNonGlobal st' ∧
+      (∀ d ∈ cs', d = c ∨ d.name.name ∉ globalsNames) := by
+  rcases c with ⟨nm, args, anns⟩
+  unfold shapeRewriteConstraint at h
+  split at h
+  case h_1 =>
+    rename_i xarg sarg rarg hnm hargs
+    have hnm' : nm = Ident.mk "set_in_reif" := ident_eq_of_name hnm
+    have hargs' : args = [.basic xarg, .basic sarg, .basic rarg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact ⟨ShapeState.newNonGlobal_refl st,
+          fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+      case h_2 =>
+        rename_i us hus
+        split at h
+        case h_1 =>
+          rename_i x
+          split at h
+          case h_1 =>
+            rename_i vals hvals
+            refine ⟨rewriteVarMember_newNonGlobal h, ?_⟩
+            obtain ⟨tms, st1', target, st2', hterms, hres, _, hcs⟩ :=
+              rewriteVarMember_decomp h
+            rw [hcs]
+            intro y hy
+            simp at hy
+          case h_2 => simp at h
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ⟨ShapeState.newNonGlobal_refl st,
+            fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+        case h_3 => simp at h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨ShapeState.newNonGlobal_refl st,
+        fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+    case h_3 => simp at h
+  case h_2 =>
+    rename_i xarg sarg hnm hargs
+    have hnm' : nm = Ident.mk "set_in" := ident_eq_of_name hnm
+    have hargs' : args = [.basic xarg, .basic sarg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact ⟨ShapeState.newNonGlobal_refl st,
+          fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+      case h_2 =>
+        rename_i us hus
+        split at h
+        case h_1 =>
+          rename_i x
+          split at h
+          case h_1 =>
+            rename_i vals hvals
+            refine ⟨rewriteVarMember_newNonGlobal h, ?_⟩
+            obtain ⟨tms, st1', target, st2', hterms, hres, _, hcs⟩ :=
+              rewriteVarMember_decomp h
+            rw [hcs]
+            intro y hy
+            simp at hy
+          case h_2 => simp at h
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ⟨ShapeState.newNonGlobal_refl st,
+            fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+        case h_3 => simp at h
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨ShapeState.newNonGlobal_refl st,
+        fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+    case h_3 => simp at h
+  case h_3 =>
+    rename_i sarg karg hnm hargs
+    have hnm' : nm = Ident.mk "set_card" := ident_eq_of_name hnm
+    have hargs' : args = [.basic sarg, .basic karg] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i S
+      split at h
+      case h_1 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact ⟨ShapeState.newNonGlobal_refl st,
+          fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+      case h_2 =>
+        rename_i us hus
+        obtain ⟨hng, hcs⟩ := rewriteCard_newNonGlobal h
+        exact ⟨hng, fun y hy => Or.inr (hcs y hy)⟩
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨ShapeState.newNonGlobal_refl st,
+        fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+    case h_3 => simp at h
+  case h_4 =>
+    rename_i sa sb sc hnm hargs
+    have hnm' : nm = Ident.mk "set_union" := ident_eq_of_name hnm
+    have hargs' : args = [sa, sb, sc] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i ua ub uc hA hB hC
+      refine ⟨rewriteUnion_newNonGlobal h, ?_⟩
+      obtain ⟨st1', hr', _, hcs⟩ := rewriteUnion_decomp h
+      rw [hcs]
+      intro y hy
+      simp at hy
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨ShapeState.newNonGlobal_refl st,
+        fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+  case h_5 =>
+    rename_i iarg es targ hnm hargs
+    have hnm' : nm = Ident.mk "array_var_set_element" := ident_eq_of_name hnm
+    have hargs' : args = [.basic iarg, .array es, .basic targ] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i T
+      split at h
+      case h_1 =>
+        rename_i i
+        split at h
+        case h_1 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ⟨ShapeState.newNonGlobal_refl st,
+            fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+        case h_2 =>
+          rename_i vals hvals
+          obtain ⟨hng, hout⟩ := rewriteArrayElem_newNonGlobal h
+          exact ⟨hng, fun y hy => Or.inr (hout y hy)⟩
+      case h_2 =>
+        rename_i x
+        split at h
+        case h_1 =>
+          rename_i vals hvals
+          split at h
+          case h_1 =>
+            simp only [Option.some.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl⟩ := h
+            exact ⟨ShapeState.newNonGlobal_refl st,
+              fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+          case h_2 =>
+            rename_i us hus
+            obtain ⟨hng, hout⟩ := rewriteArrayElem_newNonGlobal h
+            exact ⟨hng, fun y hy => Or.inr (hout y hy)⟩
+        case h_2 =>
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl⟩ := h
+          exact ⟨ShapeState.newNonGlobal_refl st,
+            fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+      case h_3 =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        exact ⟨ShapeState.newNonGlobal_refl st,
+          fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨ShapeState.newNonGlobal_refl st,
+        fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+  case h_6 =>
+    rename_i sa sb sc hnm hargs
+    have hnm' : nm = Ident.mk "set_intersect" := ident_eq_of_name hnm
+    have hargs' : args = [sa, sb, sc] := hargs
+    subst nm
+    subst args
+    split at h
+    case h_1 =>
+      rename_i ua ub uc hA hB hC
+      refine ⟨rewriteIntersect_newNonGlobal h, ?_⟩
+      obtain ⟨st1', hr', _, hcs⟩ := rewriteIntersect_decomp h
+      rw [hcs]
+      intro y hy
+      simp at hy
+    case h_2 =>
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨ShapeState.newNonGlobal_refl st,
+        fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+  case h_7 =>
+    simp only [Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact ⟨ShapeState.newNonGlobal_refl st,
+      fun d hd => Or.inl (List.mem_singleton.mp hd)⟩
+
+/-- **Traversal provenance**: with an empty initial state, every final
+    constraint is a source constraint or core-named. -/
+theorem shapeExpandConstraints_global_source {taken : List String} {m : Model}
+    {cs : List ConstraintItem} {st stF : ShapeState}
+    (h : shapeExpandConstraints taken m cs st = some stF)
+    (hsrc : ∀ c ∈ cs, c ∈ m.constraints)
+    (hst : ∀ c ∈ st.cons, c ∈ m.constraints ∨ c.name.name ∉ globalsNames) :
+    ∀ c ∈ stF.cons, c ∈ m.constraints ∨ c.name.name ∉ globalsNames := by
+  induction cs generalizing st with
+  | nil =>
+      simp only [shapeExpandConstraints, Option.some.injEq] at h
+      subst h
+      exact hst
+  | cons d cs ih =>
+      have hdmem : d ∈ m.constraints := hsrc d (by simp)
+      simp only [shapeExpandConstraints] at h
+      cases hr : shapeRewriteConstraint taken m st d with
+      | none => simp [hr] at h
+      | some p =>
+          obtain ⟨st1, cs'⟩ := p
+          simp only [hr] at h
+          obtain ⟨hng, hout⟩ := shapeRewriteConstraint_newNonGlobal hr
+          have hst1 : ∀ y ∈ (st1.emitList cs').cons,
+              y ∈ m.constraints ∨ y.name.name ∉ globalsNames := by
+            intro y hy
+            simp only [ShapeState.emitList, List.mem_append, List.mem_reverse] at hy
+            rcases hy with hy | hy
+            · rcases hout y hy with hy' | hng'
+              · rw [hy']; exact Or.inl hdmem
+              · exact Or.inr hng'
+            · rcases hng y hy with hy' | hng'
+              · exact hst y hy'
+              · exact Or.inr hng'
+          exact ih h (fun y hy => hsrc y (List.mem_cons_of_mem _ hy)) hst1
+
+/-- The initial state contributes no constraints. -/
+theorem ShapeState.initial_cons_nil (taken : List String) :
+    (ShapeState.initial taken).cons = [] := rfl
+
 /-- The final shape model's static environment is the state's environment. -/
 theorem ShapeExpansion.staticEnv_apply {m : Model} {sh : ShapeExpansion}
     {stF : ShapeState}
@@ -2457,6 +3183,85 @@ theorem ShapeState.auxDecl_not_mem {taken : List String} {m : Model}
   intro hxset
   exact hwf.namesAvoid a ha (hsup a.name (hxn ▸ hxset))
 
+/-- The shape stores of the source and shape-expanded models agree on
+    every declared source name. -/
+theorem ShapeExpansion.shapeStore_eq {taken : List String} {m : Model}
+    {sh : ShapeExpansion} {stF : ShapeState}
+    (hpar : sh.model.parameters = m.parameters)
+    (hvars : sh.model.variables = stF.decls.reverse ++ m.variables)
+    (hstwf : stF.WF taken m) {x : Ident} (hx : x.name ∈ taken) :
+    sh.model.shapeStore x = m.shapeStore x := by
+  unfold Model.shapeStore
+  rw [hpar, hvars]
+  cases hp : lookupIdent x (m.parameters.map (fun d => (d.name, d.value))) with
+  | some v => rfl
+  | none =>
+      show lookupIdent x ((stF.decls.reverse ++ m.variables).map
+          (fun d => (d.name, d.shapeValue))) =
+        lookupIdent x (m.variables.map (fun d => (d.name, d.shapeValue)))
+      rw [List.map_append, lookupIdent_append]
+      have hnone : lookupIdent x (stF.decls.reverse.map
+          (fun d => (d.name, d.shapeValue))) = none := by
+        apply lookupIdent_none_of_forall
+        intro p hp' hpn
+        obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp'
+        rw [hstwf.auxDecls] at hd
+        obtain ⟨a, ha, rfl⟩ := List.mem_map.mp (List.mem_reverse.mp hd)
+        have hpn' : a.name = x.name := by
+          simpa [VarDeclItem.name] using hpn
+        exact hstwf.namesAvoid a ha (hpn'.symm ▸ hx)
+      rw [hnone]
+
+/-- Evaluating an expression under the shape-expanded store agrees with
+    the source store when all its names are declared source names. -/
+theorem basicExpr_eval_shapeExpStore {taken : List String} {m : Model}
+    {sh : ShapeExpansion} {stF : ShapeState}
+    (hpar : sh.model.parameters = m.parameters)
+    (hvars : sh.model.variables = stF.decls.reverse ++ m.variables)
+    (hstwf : stF.WF taken m) {b : BasicExpr}
+    (h : ∀ x ∈ basicNames b, x ∈ taken) :
+    b.eval sh.model.shapeStore = b.eval m.shapeStore := by
+  cases b with
+  | lit l => rfl
+  | ident x =>
+      exact ShapeExpansion.shapeStore_eq hpar hvars hstwf
+        (h x.name (by simp [basicNames]))
+
+theorem expr_eval_shapeExpStore {taken : List String} {m : Model}
+    {sh : ShapeExpansion} {stF : ShapeState}
+    (hpar : sh.model.parameters = m.parameters)
+    (hvars : sh.model.variables = stF.decls.reverse ++ m.variables)
+    (hstwf : stF.WF taken m) {e : Expr}
+    (h : ∀ x ∈ exprNames e, x ∈ taken) :
+    e.eval sh.model.shapeStore = e.eval m.shapeStore := by
+  cases e with
+  | basic b =>
+      exact basicExpr_eval_shapeExpStore hpar hvars hstwf
+        (fun x hx => h x (by simpa [exprNames] using hx))
+  | array es =>
+      show (es.mapM (BasicExpr.eval sh.model.shapeStore)).map Value.array =
+        (es.mapM (BasicExpr.eval m.shapeStore)).map Value.array
+      rw [mapM_congr_set (g := BasicExpr.eval m.shapeStore)]
+      intro b hb
+      exact basicExpr_eval_shapeExpStore hpar hvars hstwf
+        (fun x hx => h x (by
+          simp only [exprNames, List.mem_flatMap]
+          exact ⟨b, hb, hx⟩))
+
+theorem constraint_eval_shapeExpStore {taken : List String} {m : Model}
+    {sh : ShapeExpansion} {stF : ShapeState}
+    (hpar : sh.model.parameters = m.parameters)
+    (hvars : sh.model.variables = stF.decls.reverse ++ m.variables)
+    (hstwf : stF.WF taken m) {c : ConstraintItem}
+    (h : ∀ x ∈ constraintNames c, x ∈ taken) :
+    c.args.mapM (Expr.eval sh.model.shapeStore) =
+      c.args.mapM (Expr.eval m.shapeStore) := by
+  rw [mapM_congr_set (g := Expr.eval m.shapeStore)]
+  intro e he
+  exact expr_eval_shapeExpStore hpar hvars hstwf (fun x hx => h x (by
+    simp only [constraintNames, List.mem_flatMap]
+    exact ⟨e, he, hx⟩))
+
 /-- **Static well-formedness is preserved by the shape pass.** -/
 theorem wf_shapeExpand {taken : List String} {m : Model} {sh : ShapeExpansion}
     (hwf : WellFormed fullSig m) (hpred : m.predicates = [])
@@ -2486,18 +3291,9 @@ theorem wf_shapeExpand {taken : List String} {m : Model} {sh : ShapeExpansion}
     exact List.mem_append_right _ (by
       obtain ⟨d, hd, hdn⟩ := List.mem_map.mp hx
       exact List.mem_map.mpr ⟨d, hd, congrArg Ident.name hdn⟩)
-  refine
-    { predNamesUnique := ?_
-      valueNamesUnique := ?_
-      predParamsUnique := ?_
-      parameterTypes := ?_
-      variableArrayLengths := ?_
-      variableInitializers := ?_
-      objectiveType := ?_
-      constraintsChecked := ?_ }
-  · rw [hpred']
-    exact hwf.predNamesUnique
-  · rw [hpar, hvars, List.map_append, List.nodup_append]
+  have hndSh : (sh.model.parameters.map (·.name) ++
+      sh.model.variables.map (·.name)).Nodup := by
+    rw [hpar, hvars, List.map_append, List.nodup_append]
     refine ⟨(List.nodup_append.mp hwf.valueNamesUnique).1, ?_, ?_⟩
     · rw [List.nodup_append]
       exact ⟨hdeclNodup, (List.nodup_append.mp hwf.valueNamesUnique).2.1,
@@ -2509,6 +3305,40 @@ theorem wf_shapeExpand {taken : List String} {m : Model} {sh : ShapeExpansion}
             obtain ⟨d, hd, hdn⟩ := List.mem_map.mp ha
             exact List.mem_map.mpr ⟨d, hd, congrArg Ident.name hdn⟩))
       · exact (List.nodup_append.mp hwf.valueNamesUnique).2.2 a ha b hb' hab
+  have hchecked0 : (ShapeState.initial taken).CheckedIn (stF.env m) := by
+    intro c hc
+    simp [ShapeState.initial] at hc
+  have hsrcsig : m.sigEnv fullSig = fullSig :=
+    Model.sigEnv_eq_of_predicates_nil hpred
+  have hsource : ∀ c ∈ m.constraints,
+      ShapeState.ConstraintChecked (stF.env m) c := by
+    intro c hc
+    obtain ⟨params, hp, hfor⟩ := hwf.constraintsChecked c hc
+    have hp' : params ∈ fullSig c.name := by
+      rw [← hsrcsig]
+      exact hp
+    exact checked_of_source ⟨params, hp', hfor⟩
+      (fun x hx => hsup x (wf_constraint_names_taken hwf c hc x hx))
+      (fun x hx => ShapeState.env_source hstwf hx)
+  have henvAux : ∀ a ∈ stF.aux,
+      (stF.env m) (Ident.mk a.name) = some (.base a.ty.base, true) :=
+    fun a ha => ShapeState.env_aux hstwf hwf hsup ha
+  have hnew := shapeExpandConstraints_newChecked hexp hchecked0
+    (ShapeState.initial_cacheOk taken) hsource hwf hsup
+    (fun x hx => ShapeState.env_source hstwf hx) henvAux
+  refine
+    { predNamesUnique := ?_
+      valueNamesUnique := ?_
+      predParamsUnique := ?_
+      parameterTypes := ?_
+      variableArrayLengths := ?_
+      variableInitializers := ?_
+      objectiveType := ?_
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
+  · rw [hpred']
+    exact hwf.predNamesUnique
+  · exact hndSh
   · rw [hpred']
     exact hwf.predParamsUnique
   · rw [hpar]
@@ -2571,27 +3401,6 @@ theorem wf_shapeExpand {taken : List String} {m : Model} {sh : ShapeExpansion}
   · intro c' hc'
     rw [hcons] at hc'
     have hc'F : c' ∈ stF.cons := List.mem_reverse.mp hc'
-    have hchecked0 : (ShapeState.initial taken).CheckedIn (stF.env m) := by
-      intro c hc
-      simp [ShapeState.initial] at hc
-    have hsrcsig : m.sigEnv fullSig = fullSig :=
-      Model.sigEnv_eq_of_predicates_nil hpred
-    have hsource : ∀ c ∈ m.constraints,
-        ShapeState.ConstraintChecked (stF.env m) c := by
-      intro c hc
-      obtain ⟨params, hp, hfor⟩ := hwf.constraintsChecked c hc
-      have hp' : fullSig c.name = some params := by
-        rw [← hsrcsig]
-        exact hp
-      exact checked_of_source ⟨params, hp', hfor⟩
-        (fun x hx => hsup x (wf_constraint_names_taken hwf c hc x hx))
-        (fun x hx => ShapeState.env_source hstwf hx)
-    have henvAux : ∀ a ∈ stF.aux,
-        (stF.env m) (Ident.mk a.name) = some (.base a.ty.base, true) :=
-      fun a ha => ShapeState.env_aux hstwf hwf hsup ha
-    have hnew := shapeExpandConstraints_newChecked hexp hchecked0
-      (ShapeState.initial_cacheOk taken) hsource hwf hsup
-      (fun x hx => ShapeState.env_source hstwf hx) henvAux
     rcases hnew c' hc'F with hmem | hcc
     · simp [ShapeState.initial] at hmem
     · obtain ⟨params, hfull, hfor⟩ := hcc
@@ -2600,5 +3409,38 @@ theorem wf_shapeExpand {taken : List String} {m : Model} {sh : ShapeExpansion}
         exact hfull
       · rw [henv]
         exact hfor
+  · intro c' hc'
+    rw [hcons] at hc'
+    have hc'F : c' ∈ stF.cons := List.mem_reverse.mp hc'
+    have hprov : c' ∈ m.constraints ∨ c'.name.name ∉ globalsNames :=
+      shapeExpandConstraints_global_source hexp (fun c hc => hc)
+        (fun c hc0 => by simp [ShapeState.initial] at hc0) c' hc'F
+    rcases hprov with hsrc | hng
+    · obtain ⟨params, hp, vs, hfor, hev, hdec⟩ := hwf.constraintsDecode c' hsrc
+      have hnames : ∀ x ∈ constraintNames c', x ∈ taken :=
+        fun x hx => hsup x (wf_constraint_names_taken hwf c' hsrc x hx)
+      refine ⟨params, ?_, vs, ?_, ?_, hdec⟩
+      · have hp' : params ∈ fullSig c'.name := by
+          rw [← hsrcsig]
+          exact hp
+        rw [hsig]
+        exact hp'
+      · rw [henv]
+        exact forall2_checkArg_staticEnv_eq hfor (fun e he x hx =>
+          ShapeState.env_source hstwf (hnames x (by
+            simp only [constraintNames, List.mem_flatMap]
+            exact ⟨e, he, hx⟩)))
+      · rw [constraint_eval_shapeExpStore hpar hvars hstwf hnames]
+        exact hev
+    · rcases hnew c' hc'F with hmem | hcc
+      · simp [ShapeState.initial] at hmem
+      · obtain ⟨params, hfull, hfor⟩ := hcc
+        have hforSh : Forall2 (Expr.checkArg sh.model.staticEnv) c'.args params := by
+          rw [henv]
+          exact hfor
+        obtain ⟨vs, hev⟩ :=
+          exists_mapM_eval_of_forall2 (m := sh.model) hndSh hforSh
+        exact ⟨params, by rw [hsig]; exact hfull, vs, hforSh, hev,
+          fullDecodes_true_of_not_mem_globals hng params vs⟩
 
 end LeanFzn.Compiler

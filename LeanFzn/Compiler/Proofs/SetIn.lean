@@ -711,6 +711,34 @@ theorem restrictVarType_base {m : Model} {name : String}
   | setOfIntRange lo hi => rfl
   | setOfIntSet xs => rfl
 
+theorem restrictVarType_dummy {m : Model} {name : String} {ty : BasicVarType} :
+    (restrictVarType m name ty).dummy = ty.dummy := by
+  cases ty with
+  | intRange lo hi =>
+      by_cases hc : setInConds m name = []
+      · rw [restrictVarType_range_nil hc]
+      · obtain ⟨q, conds, hq⟩ := exists_setInConds_cons hc
+        rw [restrictVarType_range_cons hq]
+        rfl
+  | intSet xs =>
+      by_cases hc : setInConds m name = []
+      · rw [restrictVarType_set_nil hc]
+      · obtain ⟨q, conds, hq⟩ := exists_setInConds_cons hc
+        rw [restrictVarType_set_cons hq]
+        rfl
+  | par t => rfl
+  | setOfIntRange lo hi => rfl
+  | setOfIntSet xs => rfl
+
+theorem restrictVarDecl_shapeValue (m : Model) (d : VarDeclItem) :
+    (restrictVarDecl m d).shapeValue = d.shapeValue := by
+  cases d with
+  | basic ty n anns init =>
+      cases init with
+      | none => exact restrictVarType_dummy
+      | some e => rfl
+  | array ty n anns es => rfl
+
 theorem restrictVarDecl_type (m : Model) (d : VarDeclItem) :
     (restrictVarDecl m d).type = d.type := by
   cases d with
@@ -722,6 +750,16 @@ theorem restrictVarDecl_type (m : Model) (d : VarDeclItem) :
           rw [restrictVarType_base]
       | some e => rfl
   | array ty n anns es => rfl
+
+theorem shapeStore_restrict (m : Model) :
+    (restrictSetInModel m).shapeStore = m.shapeStore := by
+  apply Model.shapeStore_eq_of (m := m) (m' := restrictSetInModel m)
+  · rfl
+  · rw [show (restrictSetInModel m).variables =
+        m.variables.map (restrictVarDecl m) from rfl, List.map_map]
+    apply List.map_congr_left
+    intro d _
+    simp [Function.comp_def, restrictVarDecl_name, restrictVarDecl_shapeValue]
 
 /-- The rewrite preserves the global static environment. -/
 theorem staticEnv_restrict (m : Model) :
@@ -773,7 +811,8 @@ theorem wf_restrict {m : Model} (hwf : WellFormed fullSig m)
       variableArrayLengths := ?_
       variableInitializers := ?_
       objectiveType := ?_
-      constraintsChecked := ?_ }
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · rw [hp, hv]
     exact hwf.valueNamesUnique
   · intro d hd
@@ -810,5 +849,11 @@ theorem wf_restrict {m : Model} (hwf : WellFormed fullSig m)
     obtain ⟨params, hsig, hca⟩ := hwf.constraintsChecked c hc0
     refine ⟨params, hsig, ?_⟩
     simpa [staticEnv_restrict] using hca
+  · intro c hc
+    have hc0 : c ∈ m.constraints := (List.mem_filter.mp hc).1
+    obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc0
+    refine ⟨params, hsig, vs, by simpa [staticEnv_restrict] using hF, ?_, hdec⟩
+    rw [shapeStore_restrict]
+    exact hev
 
 end LeanFzn.Compiler

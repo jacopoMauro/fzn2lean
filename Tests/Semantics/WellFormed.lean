@@ -19,11 +19,11 @@ open LeanFzn
     FlatZinc builtins used below, with their MiniZinc signatures. -/
 def testSig : SigEnv := fun x =>
   match x.name with
-  | "int_eq" => some [.basic (.par .int), .basic (.var (.par .int))]
-  | "bool_eq" => some [.basic (.par .bool), .basic (.var (.par .bool))]
-  | "set_in" => some [.basic (.var (.par .int)), .basic (.var (.par .setOfInt))]
-  | "all_different" => some [.array (.range ⟨3⟩) (.var (.par .int))]
-  | _ => none
+  | "int_eq" => [[.basic (.par .int), .basic (.var (.par .int))]]
+  | "bool_eq" => [[.basic (.par .bool), .basic (.var (.par .bool))]]
+  | "set_in" => [[.basic (.var (.par .int)), .basic (.var (.par .setOfInt))]]
+  | "all_different" => [[.array (.range ⟨3⟩) (.var (.par .int))]]
+  | _ => []
 
 /-- Parse a source string, or panic on failure (all cases are syntactically
     valid). -/

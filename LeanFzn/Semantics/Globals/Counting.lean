@@ -253,88 +253,156 @@ theorem exactlySetB_iff (n : Int) (ss : List IntSetValue) (v : IntSetValue) :
 
 /-- `fzn_distribute(count, cover, xs)`: `count[i]` is the number of
     occurrences of `cover[i]` in `xs` ("The values in cover need not
-    be distinct"). -/
+    be distinct").
+
+    The pinned decomposition (`fzn_distribute.mzn`, line 7) is
+    `forall (i in index_set(count)) (count(xs, cover[i], count[i]))`:
+    the loop runs over `index_set(count)`, and every iteration reads
+    `cover[i]`.  Hence `count` must be no longer than `cover`
+    (`count.length ≤ cover.length`); entries of `cover` past
+    `count.length` are never read and are permitted.  A longer `count`
+    would read `cover[i]` outside its index set: undefined, so false. -/
 def distributeProp (count cover xs : List Int) : Prop :=
-  ∀ i : Nat, i < cover.length →
-    (count[i]! : Int) = (intCount xs cover[i]! : Int)
+  count.length ≤ cover.length ∧
+    ∀ i : Nat, i < count.length →
+      -- `i < count.length` bounds the `count` read; the conjunct
+      -- `count.length ≤ cover.length` bounds the `cover` read.
+      (count[i]! : Int) = (intCount xs cover[i]! : Int)
 
 /-- Boolean twin of `distributeProp`. -/
 def distributeB (count cover xs : List Int) : Bool :=
-  (List.range cover.length).all (fun i =>
-    decide ((count[i]! : Int) = (intCount xs cover[i]! : Int)))
+  decide (count.length ≤ cover.length) &&
+    (List.range count.length).all (fun i =>
+      -- see `distributeProp`: the range bounds `count`, the conjunct
+      -- above bounds `cover`.
+      decide ((count[i]! : Int) = (intCount xs cover[i]! : Int)))
 
 theorem distributeB_iff (count cover xs : List Int) :
     distributeB count cover xs = true ↔ distributeProp count cover xs := by
-  simp only [distributeB, distributeProp, List.all_eq_true, List.mem_range,
-    decide_eq_true_iff]
+  simp only [distributeB, distributeProp, Bool.and_eq_true, List.all_eq_true,
+    List.mem_range, decide_eq_true_iff]
 
 /-- `fzn_global_cardinality(xs, cover, counts)`: for each `i`, the
-    number of occurrences of `cover[i]` in `xs` is `counts[i]`.  Values
-    of `xs` outside `cover` are unconstrained. -/
+    number of occurrences of `cover[i]` in `xs` is `counts[i]`; the
+    implied constraint `length(xs) >= sum(counts)` also holds. Values
+    of `xs` outside `cover` are unconstrained. `counts` must be at
+    least as long as `cover`: upstream (`fzn_global_cardinality.mzn`,
+    line 8) iterates `i in index_set(cover)` and reads `count[i]`, so
+    a shorter `counts` is undefined and false; extra `counts` entries
+    are only summed by the implied length bound. -/
 def gccProp (xs cover counts : List Int) : Prop :=
-  ∀ i : Nat, i < cover.length →
-    (intCount xs cover[i]! : Int) = (counts[i]! : Int)
+  cover.length ≤ counts.length ∧
+    (∀ i : Nat, i < cover.length →
+      -- `i < cover.length` bounds the `cover` read; the conjunct
+      -- `cover.length ≤ counts.length` bounds the `counts` read.
+      (intCount xs cover[i]! : Int) = (counts[i]! : Int)) ∧
+      (xs.length : Int) ≥ counts.sum
 
 /-- Boolean twin of `gccProp`. -/
 def gccB (xs cover counts : List Int) : Bool :=
-  (List.range cover.length).all (fun i =>
-    decide ((intCount xs cover[i]! : Int) = (counts[i]! : Int)))
+  decide (cover.length ≤ counts.length) &&
+    (List.range cover.length).all (fun i =>
+      -- see `gccProp`: the range bounds `cover`, the conjunct above
+      -- bounds `counts`.
+      decide ((intCount xs cover[i]! : Int) = (counts[i]! : Int))) &&
+    decide ((xs.length : Int) ≥ counts.sum)
+
+/-- `counts` is long enough and every covered value has the stated
+    multiplicity, with the implied length bound. -/
+private theorem gccB_parts (xs cover counts : List Int) :
+    gccB xs cover counts = true ↔
+      cover.length ≤ counts.length ∧
+        -- the binder `i < cover.length` bounds the `cover` read; the
+        -- conjunct above bounds the `counts` read.
+        (∀ i : Nat, i < cover.length →
+          (intCount xs cover[i]! : Int) = (counts[i]! : Int)) ∧
+          (xs.length : Int) ≥ counts.sum := by
+  unfold gccB
+  simp only [Bool.and_eq_true, List.all_eq_true, List.mem_range,
+    decide_eq_true_iff, and_assoc]
 
 theorem gccB_iff (xs cover counts : List Int) :
     gccB xs cover counts = true ↔ gccProp xs cover counts := by
-  simp only [gccB, gccProp, List.all_eq_true, List.mem_range, decide_eq_true_iff]
+  rw [gccB_parts]
+  rfl
 
 /-- `fzn_global_cardinality_closed(xs, cover, counts)`: the
     global-cardinality condition plus "The elements of xs must take
     their values from cover". -/
 def gccClosedProp (xs cover counts : List Int) : Prop :=
-  gccProp xs cover counts ∧ ∀ j : Nat, j < xs.length → xs[j]! ∈ cover
+  gccProp xs cover counts ∧
+    -- the binder `j < xs.length` bounds the `xs` read.
+    ∀ j : Nat, j < xs.length → xs[j]! ∈ cover
 
 /-- Boolean twin of `gccClosedProp`. -/
 def gccClosedB (xs cover counts : List Int) : Bool :=
   gccB xs cover counts &&
-  (List.range xs.length).all (fun j => decide (xs[j]! ∈ cover))
+  (List.range xs.length).all (fun j =>
+    -- the range bounds the `xs` read.
+    decide (xs[j]! ∈ cover))
 
 theorem gccClosedB_iff (xs cover counts : List Int) :
     gccClosedB xs cover counts = true ↔ gccClosedProp xs cover counts := by
-  simp only [gccClosedB, gccClosedProp, gccB, gccProp, Bool.and_eq_true,
-    List.all_eq_true, List.mem_range, decide_eq_true_iff]
+  simp only [gccClosedB, gccClosedProp, Bool.and_eq_true,
+    List.all_eq_true, List.mem_range, decide_eq_true_iff, gccB_iff]
 
 /-- `fzn_global_cardinality_low_up(xs, cover, low, up)`: for each
     `i`, the value `cover[i]` appears at least `low[i]` and at most
     `up[i]` times in `xs` (deprecated, NOT closed: elements of `xs`
-    outside `cover` are unconstrained). -/
+    outside `cover` are unconstrained).
+
+    The pinned decomposition (`fzn_global_cardinality_low_up.mzn`,
+    line 9) is `forall (i in index_set(cover)) (... lower_bound[i] ...
+    upper_bound[i])`: the loop runs over `index_set(cover)` and reads
+    both bound arrays at `i`, so `cover` must be no longer than `low`
+    and no longer than `up`.  Extra bound entries are never read and
+    are permitted; a shorter bound array is undefined, so false.  (The
+    three upstream `if` branches are equivalent to the two
+    inequalities: `upper_bound[i] >= length(xs)` makes the upper
+    inequality automatic and `lower_bound[i] <= 0` makes the lower one
+    automatic.) -/
 def gccLowUpProp (xs cover low up : List Int) : Prop :=
-  ∀ i : Nat, i < cover.length →
-    (low[i]! : Int) ≤ (intCount xs cover[i]! : Int) ∧
-      (intCount xs cover[i]! : Int) ≤ (up[i]! : Int)
+  cover.length ≤ low.length ∧ cover.length ≤ up.length ∧
+    ∀ i : Nat, i < cover.length →
+      -- `i < cover.length` bounds the `cover` read; the two conjuncts
+      -- above bound the `low` and `up` reads.
+      (low[i]! : Int) ≤ (intCount xs cover[i]! : Int) ∧
+        (intCount xs cover[i]! : Int) ≤ (up[i]! : Int)
 
 /-- Boolean twin of `gccLowUpProp`. -/
 def gccLowUpB (xs cover low up : List Int) : Bool :=
-  (List.range cover.length).all (fun i =>
-    decide ((low[i]! : Int) ≤ (intCount xs cover[i]! : Int) ∧
-      (intCount xs cover[i]! : Int) ≤ (up[i]! : Int)))
+  decide (cover.length ≤ low.length) &&
+    decide (cover.length ≤ up.length) &&
+    (List.range cover.length).all (fun i =>
+      -- see `gccLowUpProp`: the range bounds `cover`, the two
+      -- conjuncts above bound `low` and `up`.
+      decide ((low[i]! : Int) ≤ (intCount xs cover[i]! : Int) ∧
+        (intCount xs cover[i]! : Int) ≤ (up[i]! : Int)))
 
 theorem gccLowUpB_iff (xs cover low up : List Int) :
     gccLowUpB xs cover low up = true ↔ gccLowUpProp xs cover low up := by
-  simp only [gccLowUpB, gccLowUpProp, List.all_eq_true, List.mem_range,
-    decide_eq_true_iff]
+  simp only [gccLowUpB, gccLowUpProp, Bool.and_eq_true, List.all_eq_true,
+    List.mem_range, decide_eq_true_iff, and_assoc]
 
 /-- `fzn_global_cardinality_low_up_closed(xs, cover, low, up)`: the
     low/up condition plus "The elements of x must take their values
     from cover". -/
 def gccLowUpClosedProp (xs cover low up : List Int) : Prop :=
-  gccLowUpProp xs cover low up ∧ ∀ j : Nat, j < xs.length → xs[j]! ∈ cover
+  gccLowUpProp xs cover low up ∧
+    -- the binder `j < xs.length` bounds the `xs` read.
+    ∀ j : Nat, j < xs.length → xs[j]! ∈ cover
 
 /-- Boolean twin of `gccLowUpClosedProp`. -/
 def gccLowUpClosedB (xs cover low up : List Int) : Bool :=
   gccLowUpB xs cover low up &&
-  (List.range xs.length).all (fun j => decide (xs[j]! ∈ cover))
+  (List.range xs.length).all (fun j =>
+    -- the range bounds the `xs` read.
+    decide (xs[j]! ∈ cover))
 
 theorem gccLowUpClosedB_iff (xs cover low up : List Int) :
     gccLowUpClosedB xs cover low up = true ↔ gccLowUpClosedProp xs cover low up := by
-  simp only [gccLowUpClosedB, gccLowUpClosedProp, gccLowUpB, gccLowUpProp,
-    Bool.and_eq_true, List.all_eq_true, List.mem_range, decide_eq_true_iff]
+  simp only [gccLowUpClosedB, gccLowUpClosedProp, Bool.and_eq_true,
+    List.all_eq_true, List.mem_range, decide_eq_true_iff, gccLowUpB_iff]
 
 /-! ## The interpretations -/
 
@@ -1216,5 +1284,118 @@ theorem fzn_exactly_set_iff (args : List Value) :
     obtain ⟨n, ss, v⟩ := p
     simp only
     exact exactlySetB_iff n ss v
+
+private theorem intArrSet_isSome_eq (i : Int) (xs : List Value) (S : IntSetValue) :
+    (intArrSet [.int i, .array xs, .setOfInt S]).isSome = (valueInts xs).isSome := by
+  simp only [intArrSet]
+  cases valueInts xs <;> rfl
+
+theorem intArrSet_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (intArrSet vs).isSome = (intArrSet ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int i i' =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array xs ys harr =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt S S' =>
+          rw [intArrSet_isSome_eq, intArrSet_isSome_eq]
+          exact valueInts_isSome_sameShape harr
+        | array _ => rfl
+    | setOfInt _ _ => rfl
+    | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+/-- Boolean decodability gate of the `counting` family.  Neutral (`true`)
+    outside the family. -/
+def countingDecodes (n : String) (args : List Value) : Bool :=
+  match n with
+  | "fzn_nvalue" => (intAndArr args).isSome
+  | "fzn_among" => (intArrSet args).isSome
+  | "fzn_at_least_int" => (intArrInt args).isSome
+  | "fzn_at_most_int" => (intArrInt args).isSome
+  | "fzn_exactly_int" => (intArrInt args).isSome
+  | "fzn_count_eq" => (arrIntInt args).isSome
+  | "fzn_count_eq_par" => (arrIntInt args).isSome
+  | "fzn_count_geq" => (arrIntInt args).isSome
+  | "fzn_count_geq_par" => (arrIntInt args).isSome
+  | "fzn_count_gt" => (arrIntInt args).isSome
+  | "fzn_count_gt_par" => (arrIntInt args).isSome
+  | "fzn_count_leq" => (arrIntInt args).isSome
+  | "fzn_count_leq_par" => (arrIntInt args).isSome
+  | "fzn_count_lt" => (arrIntInt args).isSome
+  | "fzn_count_lt_par" => (arrIntInt args).isSome
+  | "fzn_count_neq" => (arrIntInt args).isSome
+  | "fzn_count_neq_par" => (arrIntInt args).isSome
+  | "fzn_distribute" => (threeIntArrs args).isSome
+  | "fzn_global_cardinality" => (threeIntArrs args).isSome
+  | "fzn_global_cardinality_closed" => (threeIntArrs args).isSome
+  | "fzn_global_cardinality_low_up" => (fourIntArrs args).isSome
+  | "fzn_global_cardinality_low_up_closed" => (fourIntArrs args).isSome
+  | "fzn_count_eq_set" => (setCountArgs args).isSome
+  | "fzn_count_eq_set_par" => (setCountArgs args).isSome
+  | "fzn_count_geq_set" => (setCountArgs args).isSome
+  | "fzn_count_gt_set" => (setCountArgs args).isSome
+  | "fzn_count_leq_set" => (setCountArgs args).isSome
+  | "fzn_count_lt_set" => (setCountArgs args).isSome
+  | "fzn_count_neq_set" => (setCountArgs args).isSome
+  | "fzn_at_least_set" => (atLeastSetArgs args).isSome
+  | "fzn_at_most_set" => (atLeastSetArgs args).isSome
+  | "fzn_exactly_set" => (atLeastSetArgs args).isSome
+  | _ => true
+
+/-- The decodability gate is invariant under `ArgsAgree`. -/
+theorem countingDecodes_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) (n : String) :
+    countingDecodes n vs = countingDecodes n ws := by
+  unfold countingDecodes
+  split
+  · exact intAndArr_isSome_agree h
+  · exact intArrSet_isSome_agree h
+  · exact intArrInt_isSome_agree h
+  · exact intArrInt_isSome_agree h
+  · exact intArrInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact arrIntInt_isSome_agree h
+  · exact threeIntArrs_isSome_agree h
+  · exact threeIntArrs_isSome_agree h
+  · exact threeIntArrs_isSome_agree h
+  · exact fourIntArrs_isSome_agree h
+  · exact fourIntArrs_isSome_agree h
+  · exact setCountArgs_isSome_agree h
+  · exact setCountArgs_isSome_agree h
+  · exact setCountArgs_isSome_agree h
+  · exact setCountArgs_isSome_agree h
+  · exact setCountArgs_isSome_agree h
+  · exact setCountArgs_isSome_agree h
+  · exact setCountArgs_isSome_agree h
+  · exact atLeastSetArgs_isSome_agree h
+  · exact atLeastSetArgs_isSome_agree h
+  · exact atLeastSetArgs_isSome_agree h
+  · rfl
 
 end LeanFzn.Semantics.Globals.Counting

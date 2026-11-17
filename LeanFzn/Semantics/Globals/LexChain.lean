@@ -33,15 +33,26 @@ Per the pinned decompositions (recorded in
   these are `lexChainLess`/`lexChainLesseq`/`orbitopeProp` on the
   *reversed* column list (`cols.reverse`).
 
-**Representation (G24):** the 2D predicates are declared
-`array [int,int] of var int` upstream, but FlatZinc's grammar has
-only 1D arrays and flat literals.  The matrix therefore arrives as a
-*nested* array value (one inner list per column, in FlatZinc
-row-major order) — an explicit, documented extension of the value
-model used only by these predicates.  Real `.fzn` files cannot carry
-such arguments; the interpretation exists so the supported-name
-inventory is complete and the checker reports genuine semantic
-content rather than guessing.
+**Representation (G24), and SC-03 status:** the 2D predicates are
+declared `array [int,int] of var int` upstream, but FlatZinc's grammar
+has only 1D arrays (`fzn-spec.md` §4.3.1.2).  The matrix therefore
+arrives in this project as a *nested* array value (one inner list per
+column, in FlatZinc row-major order) — an explicit, documented
+extension of the value model, **not** FlatZinc ABI.  Real `.fzn` files
+cannot carry such arguments.
+
+The column count (`index_set_2of2(xs)`) is not recoverable from any
+FlatZinc argument: a flat `array[int]` call has no row width, and only
+`fzn_lex_chain_lesseq_orbitope` carries an extra `_kind`, which is a
+row-sum mode and not a dimension.  Consequently `fzn_lex_chain_less_int`,
+`fzn_lex_chain_lesseq_int`, `fzn_lex2`, `fzn_strict_lex2` and
+`fzn_lex_chain_lesseq_orbitope` are **unsupported at the FlatZinc ABI**
+(SC-03): a flat call decodes to `none` and evaluates to `false`.  The
+nested interpretation is kept for the project-specific
+greater-direction extensions (`fzn_lex_chain_greater_int`,
+`fzn_lex_chain_greatereq_int`,
+`fzn_lex_chain_greatereq_orbitope`), which have no upstream `fzn_`
+file and exist only in this project.
 -/
 
 open LeanFzn.Semantics
@@ -220,24 +231,36 @@ theorem orbitopeGreatereqB_iff (kind : Int) (cols : List (List Int)) :
 
 /-! ## Argument decoders -/
 
-/-- Decode a nested-array matrix argument: a list of columns. -/
+/-- Decode a nested-array matrix argument: a list of columns.
+    **Not FlatZinc ABI** (SC-03): a flat `array[int]` argument returns
+    `none`, which is the required rejection for the five unsupported
+    lex/matrix rows.  The nested value representation is the
+    project-internal extension described in the module comment. -/
 private def matrixArg (args : List Value) : Option (List (List Int)) :=
   match args with
   | [Value.array outer] =>
-      (outer.mapM (fun v => match v with
-        | Value.array col => valueInts col
-        | _ => none))
+      match outer with
+      | [] => none
+      | _ =>
+        (outer.mapM (fun v => match v with
+          | Value.array col => valueInts col
+          | _ => none))
   | _ => none
 
-/-- Decode (matrix, int-kind) arguments. -/
+/-- Decode (matrix, int-kind) arguments.  **Not FlatZinc ABI** (SC-03):
+    `_kind` is a row-sum mode, not a matrix width; a flat call returns
+    `none`. -/
 private def matrixAndKind (args : List Value) : Option (List (List Int) × Int) :=
   match args with
   | [Value.array outer, Value.int k] =>
-      match (outer.mapM (fun v => match v with
-        | Value.array col => valueInts col
-        | _ => none)) with
-      | some m => some (m, k)
-      | none => none
+      match outer with
+      | [] => none
+      | _ =>
+        match (outer.mapM (fun v => match v with
+          | Value.array col => valueInts col
+          | _ => none)) with
+        | some m => some (m, k)
+        | none => none
   | _ => none
 
 /-! ## The interpretations -/
@@ -538,5 +561,185 @@ theorem fzn_lex_chain_greatereq_orbitope_iff (args : List Value) :
     obtain ⟨cols, kind⟩ := p
     simp only
     exact orbitopeGreatereqB_iff kind cols
+
+/-! ## Decodability gates
+
+`lexChainDecodes` is the Boolean decodability gate of the family: the `isSome`
+of the very decoder `lexChainInterp` uses, and `true` outside the family.
+`lexChainDecodes_agree` states that the gate cannot distinguish two argument
+lists which agree on the shape information that is statically known from a
+well-typed call (`ArgsAgree`).  The matrix decoders inspect only constructor
+tags and array lengths (the `_kind` value is carried but never tested), so the
+plain `ArgsAgree` hypothesis suffices. -/
+
+/-- Consing a decoded column onto a decoded matrix preserves `isSome`. -/
+private theorem option_bind_cons_isSome (o : Option (List (List Int)))
+    (a : List Int) :
+    (o.bind (fun bs => some (a :: bs))).isSome = o.isSome := by
+  cases o <;> rfl
+
+/-- Pairing a decoded matrix with an integer preserves `isSome`. -/
+private theorem option_pair_isSome (o : Option (List (List Int))) (k : Int) :
+    (match o with
+      | some m => some (m, k)
+      | none => none).isSome = o.isSome := by
+  cases o <;> rfl
+
+/-- The column map of a matrix argument accepts exactly the same shapes. -/
+private theorem valueIntMatrix_isSome_sameShape {xss yss : List Value}
+    (h : Value.SameShapeList xss yss) :
+    (xss.mapM (fun v => match v with
+       | Value.array col => valueInts col
+       | _ => none)).isSome =
+    (yss.mapM (fun v => match v with
+       | Value.array col => valueInts col
+       | _ => none)).isSome := by
+  induction h with
+  | nil => rfl
+  | cons hxy htail ih =>
+    cases hxy with
+    | bool _ _ => simp [List.mapM_cons]
+    | int _ _ => simp [List.mapM_cons]
+    | setOfInt _ _ => simp [List.mapM_cons]
+    | @array axs ays harr =>
+      have hx : (valueInts axs).isSome = (valueInts ays).isSome :=
+        valueInts_isSome_sameShape harr
+      cases h1 : valueInts axs with
+      | none =>
+        have h2 : valueInts ays = none := by
+          have : (valueInts ays).isSome = false := by rw [← hx, h1]; rfl
+          simpa using this
+        simp [List.mapM_cons, h1, h2]
+      | some a =>
+        have h2 : (valueInts ays).isSome = true := by rw [← hx, h1]; rfl
+        obtain ⟨a', ha'⟩ := Option.isSome_iff_exists.mp h2
+        simp only [List.mapM_cons]
+        rw [h1, ha']
+        change (Option.bind (some a) (fun b =>
+            Option.bind (List.mapM (fun v => match v with
+              | Value.array col => valueInts col
+              | _ => none) _) (fun bs => some (b :: bs)))).isSome =
+          (Option.bind (some a') (fun b =>
+            Option.bind (List.mapM (fun v => match v with
+              | Value.array col => valueInts col
+              | _ => none) _) (fun bs => some (b :: bs)))).isSome
+        rw [Option.bind_some, Option.bind_some]
+        rw [option_bind_cons_isSome, option_bind_cons_isSome]
+        exact ih
+
+/-- The matrix decoder accepts exactly the same argument shapes. -/
+theorem matrixArg_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (matrixArg vs).isSome = (matrixArg ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩ <;> rcases ws with _ | ⟨w0, ws1⟩
+  · rfl
+  · cases hshape
+  · cases hshape
+  · cases hshape with
+    | cons hhead htail =>
+      cases htail with
+      | nil =>
+        cases hhead with
+        | bool _ _ => simp [matrixArg]
+        | int _ _ => simp [matrixArg]
+        | setOfInt _ _ => simp [matrixArg]
+        | @array outer outer' harr =>
+          have hlen : outer.length = outer'.length :=
+            ListSameShape.length_eq harr
+          cases outer with
+          | nil =>
+            have hnil : outer' = [] :=
+              List.eq_nil_of_length_eq_zero (by simpa using hlen.symm)
+            subst hnil
+            simp [matrixArg]
+          | cons c cs =>
+            rcases outer' with _ | ⟨c', cs'⟩
+            · simp at hlen
+            · simp only [matrixArg]
+              exact valueIntMatrix_isSome_sameShape harr
+      | cons _ _ => simp [matrixArg]
+
+/-- The (matrix, int-kind) decoder accepts exactly the same argument
+    shapes. -/
+theorem matrixAndKind_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (matrixAndKind vs).isSome = (matrixAndKind ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩ <;> rcases ws with _ | ⟨w0, ws1⟩
+  · rfl
+  · cases hshape
+  · cases hshape
+  · cases hshape with
+    | cons hhead htail =>
+      cases htail with
+      | nil =>
+        cases hhead with
+        | bool _ _ => simp [matrixAndKind]
+        | int _ _ => simp [matrixAndKind]
+        | setOfInt _ _ => simp [matrixAndKind]
+        | @array _ _ _ => simp [matrixAndKind]
+      | cons hhead2 htail2 =>
+        cases htail2 with
+        | nil =>
+          cases hhead with
+          | bool _ _ => simp [matrixAndKind]
+          | int _ _ => simp [matrixAndKind]
+          | setOfInt _ _ => simp [matrixAndKind]
+          | @array outer outer' harr =>
+            cases hhead2 with
+            | bool _ _ => simp [matrixAndKind]
+            | int k k' =>
+              have hlen : outer.length = outer'.length :=
+                ListSameShape.length_eq harr
+              cases outer with
+              | nil =>
+                have hnil : outer' = [] :=
+                  List.eq_nil_of_length_eq_zero (by simpa using hlen.symm)
+                subst hnil
+                simp [matrixAndKind]
+              | cons c cs =>
+                rcases outer' with _ | ⟨c', cs'⟩
+                · simp at hlen
+                · simp only [matrixAndKind]
+                  rw [option_pair_isSome, option_pair_isSome]
+                  exact valueIntMatrix_isSome_sameShape harr
+            | setOfInt _ _ => simp [matrixAndKind]
+            | @array _ _ _ => simp [matrixAndKind]
+        | cons _ _ => simp [matrixAndKind]
+
+/-- Boolean decodability gate of the reverse and 2D lex family.
+    Neutral (`true`) outside the family. -/
+def lexChainDecodes (n : String) (args : List Value) : Bool :=
+  match n with
+  | "fzn_lex_greater_int" => (LexSort.twoIntArrays' args).isSome
+  | "fzn_lex_greatereq_int" => (LexSort.twoIntArrays' args).isSome
+  | "fzn_lex_chain_less_int" => (matrixArg args).isSome
+  | "fzn_lex_chain_lesseq_int" => (matrixArg args).isSome
+  | "fzn_lex2" => (matrixArg args).isSome
+  | "fzn_strict_lex2" => (matrixArg args).isSome
+  | "fzn_lex_chain_greater_int" => (matrixArg args).isSome
+  | "fzn_lex_chain_greatereq_int" => (matrixArg args).isSome
+  | "fzn_lex_chain_lesseq_orbitope" => (matrixAndKind args).isSome
+  | "fzn_lex_chain_greatereq_orbitope" => (matrixAndKind args).isSome
+  | _ => true
+
+/-- The decodability gate is invariant under `ArgsAgree`. -/
+theorem lexChainDecodes_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) (n : String) :
+    lexChainDecodes n vs = lexChainDecodes n ws := by
+  unfold lexChainDecodes
+  split
+  · exact LexSort.twoIntArrays'_isSome_agree h
+  · exact LexSort.twoIntArrays'_isSome_agree h
+  · exact matrixArg_isSome_agree h
+  · exact matrixArg_isSome_agree h
+  · exact matrixArg_isSome_agree h
+  · exact matrixArg_isSome_agree h
+  · exact matrixArg_isSome_agree h
+  · exact matrixArg_isSome_agree h
+  · exact matrixAndKind_isSome_agree h
+  · exact matrixAndKind_isSome_agree h
+  · rfl
 
 end LeanFzn.Semantics.Globals.LexChain

@@ -281,6 +281,99 @@ theorem staticEnvFast_eq (m : Model)
   | none => rw [helim]
   | some info => rfl
 
+/-- `Model.shapeStore` agrees with the fast shape store when the
+    parameter and variable names are unique.  The layer structure is
+    identical to `staticEnvFast_eq`: both folds are `insert`s over the
+    name-keyed pair lists, each agrees with first-match lookup
+    (`insertFold_get?_eq`), and inserting parameters after variables
+    realizes `shapeStore`'s parameters-first preference. -/
+theorem shapeStoreFast_eq (m : Model)
+    (hpar : (m.parameters.map (·.name.name)).Nodup)
+    (hvar : (m.variables.map (·.name.name)).Nodup)
+    (x : Ident) :
+    (shapeStoreFast m).get? x.name = m.shapeStore x := by
+  have hvarfold : insertVarShapeVals m.variables {} =
+      (m.variables.map (fun d => (d.name.name, d.shapeValue))).foldl
+        (fun mm (kv : String × Value) => mm.insert kv.1 kv.2) {} := by
+    have gen : ∀ (acc : Std.HashMap String Value) (l : List VarDeclItem),
+        insertVarShapeVals l acc =
+          List.foldl (fun mm kv => mm.insert kv.1 kv.2) acc
+            (List.map (fun d => (d.name.name, d.shapeValue)) l) := by
+      intro acc l
+      induction l generalizing acc with
+      | nil => rfl
+      | cons d rest ih =>
+          simp only [insertVarShapeVals, List.map_cons, List.foldl_cons]
+          exact ih _
+    exact gen _ _
+  have hparfold : ∀ (acc : Std.HashMap String Value),
+      insertParVals m.parameters acc =
+      (m.parameters.map (fun d => (d.name.name, d.value))).foldl
+        (fun mm (kv : String × Value) => mm.insert kv.1 kv.2) acc := by
+    intro acc
+    have gen : ∀ (l : List ParDeclItem) (acc : Std.HashMap String Value),
+        insertParVals l acc =
+          List.foldl (fun mm kv => mm.insert kv.1 kv.2) acc
+            (List.map (fun d => (d.name.name, d.value)) l) := by
+      intro l acc
+      induction l generalizing acc with
+      | nil => rfl
+      | cons d rest ih =>
+          simp only [insertParVals, List.map_cons, List.foldl_cons]
+          exact ih _
+    exact gen _ _
+  have hinner : ∀ x', (insertVarShapeVals m.variables {}).get? x' =
+      (lookupPair x' (m.variables.map (fun d => (d.name.name, d.shapeValue)))).elim
+        ((∅ : Std.HashMap String Value).get? x') some := by
+    intro x'
+    rw [hvarfold]
+    have hmap : ((m.variables.map (fun d => (d.name.name, d.shapeValue))).map Prod.fst) =
+        m.variables.map (·.name.name) := by
+      simp [List.map_map]
+    exact insertFold_get?_eq _ (hmap ▸ hvar) _ x'
+  have houter : ∀ x',
+      (insertParVals m.parameters (insertVarShapeVals m.variables {})).get? x' =
+      (lookupPair x' (m.parameters.map (fun d => (d.name.name, d.value)))).elim
+        ((insertVarShapeVals m.variables {}).get? x') some := by
+    intro x'
+    rw [hparfold]
+    have hmap : ((m.parameters.map (fun d => (d.name.name, d.value))).map Prod.fst) =
+        m.parameters.map (·.name.name) := by
+      simp [List.map_map]
+    exact insertFold_get?_eq _ (hmap ▸ hpar) _ x'
+  unfold shapeStoreFast
+  rw [houter x.name, hinner x.name]
+  have hempty : ((∅ : Std.HashMap String Value).get? x.name) = none := by simp
+  rw [hempty]
+  have hshape : m.shapeStore x =
+      (lookupPair x.name (m.parameters.map (fun d => (d.name.name, d.value)))).elim
+        (lookupPair x.name (m.variables.map (fun d => (d.name.name, d.shapeValue)))) some := by
+    unfold Model.shapeStore
+    rw [lookupIdent_eq_lookupPair, lookupIdent_eq_lookupPair]
+    have hcomppar : (m.parameters.map (fun d => (d.name, d.value))).map
+        (fun p => (p.1.name, p.2)) =
+        m.parameters.map (fun d => (d.name.name, d.value)) := by
+      simp [List.map_map]
+    have hcompvar : (m.variables.map (fun d => (d.name, d.shapeValue))).map
+        (fun p => (p.1.name, p.2)) =
+        m.variables.map (fun d => (d.name.name, d.shapeValue)) := by
+      simp [List.map_map]
+    rw [hcomppar, hcompvar]
+    cases lookupPair x.name
+        (m.parameters.map (fun d => (d.name.name, d.value))) with
+    | none => rfl
+    | some info => rfl
+  rw [hshape]
+  have helim : ∀ (o : Option Value), o.elim none some = o := by
+    intro o
+    cases o with
+    | none => rfl
+    | some v => rfl
+  cases lookupPair x.name
+      (m.parameters.map (fun d => (d.name.name, d.value))) with
+  | none => rw [helim]
+  | some info => rfl
+
 /-- The seen-set loop decides: every entry is declared and fresh
     w.r.t. the seen-set, and the assigned names are pairwise
     distinct. -/
@@ -386,6 +479,11 @@ theorem entriesOkB_iff (m : Model) (es : List Entry) :
 theorem staticEnvBox_f (m : Model) : (staticEnvBox m).f = staticEnvFastAsEnv m :=
   rfl
 
+/-- The boxed shape store is the fast shape store (definitionally:
+    zeta-reducing the `let` gives exactly `shapeStoreFastAsStore`). -/
+theorem shapeStoreBox_f (m : Model) : (shapeStoreBox m).f = shapeStoreFastAsStore m :=
+  rfl
+
 /-- The environment-dependent sub-checks agree under pointwise
     environment agreement (`funext` + `List.all` congruence). -/
 private theorem all_ext {α : Type} (l : List α) (p q : α → Bool)
@@ -450,6 +548,15 @@ private theorem staticEnvFastAsEnv_eq (m : Model)
   unfold staticEnvFastAsEnv
   exact funext (fun x => staticEnvFast_eq m hpar hvar x)
 
+/-- Under name-uniqueness of the model's declarations, the fast shape
+    store *is* the declarative one. -/
+private theorem shapeStoreFastAsStore_eq (m : Model)
+    (hpar : (m.parameters.map (·.name.name)).Nodup)
+    (hvar : (m.variables.map (·.name.name)).Nodup) :
+    shapeStoreFastAsStore m = m.shapeStore := by
+  unfold shapeStoreFastAsStore
+  exact funext (fun x => shapeStoreFast_eq m hpar hvar x)
+
 /-- **The fast twin agrees with `WellFormed`.** -/
 theorem wellFormedFastB_iff (m : Model) :
     wellFormedFastB m = true ↔ WellFormed fullSig m := by
@@ -485,6 +592,8 @@ theorem wellFormedFastB_iff (m : Model) :
         List.Nodup.sublist (List.sublist_append_right _ _) hnd
       have henv : staticEnvFastAsEnv m = m.staticEnv :=
         staticEnvFastAsEnv_eq m hpar hvar
+      have hshp : shapeStoreFastAsStore m = m.shapeStore :=
+        shapeStoreFastAsStore_eq m hpar hvar
       -- rewrite the fast checker into the slow one, componentwise
       have h1 : nodupIdentsFast (m.predicates.map (·.name)) = true ↔
           nodupIdentB (m.predicates.map (·.name)) = true := by
@@ -509,7 +618,7 @@ theorem wellFormedFastB_iff (m : Model) :
                 exact Bool.noConfusion ha
             | false => rfl
       simp only [wellFormedFastB, wellFormedB, wellFormedEnvFastB, h1eq, henv,
-        staticEnvBox_f]
+        staticEnvBox_f, hshp, shapeStoreBox_f]
       have hcongr : m.predicates.all (fun p => nodupIdentsFast (p.params.map (·.name)))
           = m.predicates.all (fun p => nodupIdentB (p.params.map (·.name))) :=
         all_ext _ _ _ (fun p hp => by
@@ -563,6 +672,8 @@ theorem wellFormedFastB_iff (m : Model) :
         exact List.nodup_append.mpr ⟨hpar', hvar',
           fun p hp v hv heq => hno p hp v hv (congrArg (·.name) heq)⟩
       simp only [hvals, hslownd, Bool.and_assoc]
+      simp only [Bool.true_and]
+      exact Iff.rfl
 
 /-- `List.find? p l = none` exactly when `p` fails on every element. -/
 private theorem find?_none_iff {α : Type} (p : α → Bool) :

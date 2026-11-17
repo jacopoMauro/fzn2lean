@@ -2112,15 +2112,20 @@ theorem holds_int_lin_eq_reif {store : Store} {c : ConstraintItem}
       [.array vs1, .array vs2, .int k, vr] := interp_of_hname hname hinterp
   rw [fullInterp_of_extracted_reif "int_lin_eq_reif"
     (Or.inr (Or.inr (Or.inr (Or.inl rfl))))] at h1
+  simp only [stdInterp] at h1
   cases vr with
   | bool rb =>
-      have hdisj : (rb = true ∧ dotProduct vs1 vs2 = some k) ∨
-          (rb = false ∧ ¬ dotProduct vs1 vs2 = some k) := by
-        rcases h1 with ⟨hrb, hdot⟩ | ⟨hrb, hdot⟩
-        · exact Or.inl ⟨hrb, hdot⟩
-        · exact Or.inr ⟨hrb, hdot⟩
-      exact ⟨vs1, vs2, rb, hvs1, hvs2, hsr,
-        (reif_disj_iff (dotProduct vs1 vs2 = some k) rb).mp hdisj⟩
+      change (match dotProduct vs1 vs2 with
+        | some d => (rb = true ∧ d = k) ∨ (rb = false ∧ d ≠ k)
+        | none => False) at h1
+      cases hd : dotProduct vs1 vs2 with
+      | none =>
+          simp [hd] at h1
+      | some d =>
+          have hdisj : (rb = true ∧ d = k) ∨ (rb = false ∧ d ≠ k) := by
+            simpa [hd] using h1
+          refine ⟨vs1, vs2, rb, hvs1, hvs2, hsr, ?_⟩
+          simpa [hd] using (reif_disj_iff (d = k) rb).mp hdisj
   | int w => exfalso; exact h1.elim
   | setOfInt w => exfalso; exact h1.elim
   | array w => exfalso; exact h1.elim
@@ -2145,15 +2150,20 @@ theorem holds_int_lin_le_reif {store : Store} {c : ConstraintItem}
       [.array vs1, .array vs2, .int k, vr] := interp_of_hname hname hinterp
   rw [fullInterp_of_extracted_reif "int_lin_le_reif"
     (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl rfl)))))] at h1
+  simp only [stdInterp] at h1
   cases vr with
   | bool rb =>
-      have hdisj : (rb = true ∧ dotLe vs1 vs2 k = true) ∨
-          (rb = false ∧ ¬ dotLe vs1 vs2 k = true) := by
-        rcases h1 with ⟨hrb, hle⟩ | ⟨hrb, hle⟩
-        · exact Or.inl ⟨hrb, hle⟩
-        · exact Or.inr ⟨hrb, fun htrue => by rw [hle] at htrue; exact absurd htrue (by simp)⟩
-      exact ⟨vs1, vs2, rb, hvs1, hvs2, hsr,
-        (reif_disj_iff (dotLe vs1 vs2 k = true) rb).mp hdisj⟩
+      change (match dotProduct vs1 vs2 with
+        | some d => (rb = true ∧ d ≤ k) ∨ (rb = false ∧ ¬ d ≤ k)
+        | none => False) at h1
+      cases hd : dotProduct vs1 vs2 with
+      | none =>
+          simp [hd] at h1
+      | some d =>
+          have hdisj : (rb = true ∧ d ≤ k) ∨ (rb = false ∧ ¬ d ≤ k) := by
+            simpa [hd] using h1
+          exact ⟨vs1, vs2, rb, hvs1, hvs2, hsr,
+            by simpa [dotLe, hd] using (reif_disj_iff (d ≤ k) rb).mp hdisj⟩
   | int w => exfalso; exact h1.elim
   | setOfInt w => exfalso; exact h1.elim
   | array w => exfalso; exact h1.elim
@@ -2178,15 +2188,24 @@ theorem holds_int_lin_ne_reif {store : Store} {c : ConstraintItem}
       [.array vs1, .array vs2, .int k, vr] := interp_of_hname hname hinterp
   rw [fullInterp_of_extracted_reif "int_lin_ne_reif"
     (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr rfl)))))] at h1
+  simp only [stdInterp] at h1
   cases vr with
   | bool rb =>
-      have hdisj : (rb = true ∧ dotNe vs1 vs2 k = true) ∨
-          (rb = false ∧ ¬ dotNe vs1 vs2 k = true) := by
-        rcases h1 with ⟨hrb, hne⟩ | ⟨hrb, hne⟩
-        · exact Or.inl ⟨hrb, hne⟩
-        · exact Or.inr ⟨hrb, fun htrue => by rw [hne] at htrue; exact absurd htrue (by simp)⟩
-      exact ⟨vs1, vs2, rb, hvs1, hvs2, hsr,
-        (reif_disj_iff (dotNe vs1 vs2 k = true) rb).mp hdisj⟩
+      change (match dotProduct vs1 vs2 with
+        | some d => (rb = true ∧ d ≠ k) ∨ (rb = false ∧ d = k)
+        | none => False) at h1
+      cases hd : dotProduct vs1 vs2 with
+      | none =>
+          simp [hd] at h1
+      | some d =>
+          have hdisj : (rb = true ∧ d ≠ k) ∨ (rb = false ∧ d = k) := by
+            simpa [hd] using h1
+          have hdisj' : (rb = true ∧ d ≠ k) ∨ (rb = false ∧ ¬ d ≠ k) := by
+            rcases hdisj with ⟨hrb, hne⟩ | ⟨hrb, heq⟩
+            · exact Or.inl ⟨hrb, hne⟩
+            · exact Or.inr ⟨hrb, by rw [heq]; intro h; exact h rfl⟩
+          exact ⟨vs1, vs2, rb, hvs1, hvs2, hsr,
+            by simpa [dotNe, hd] using (reif_disj_iff (d ≠ k) rb).mp hdisj'⟩
   | int w => exfalso; exact h1.elim
   | setOfInt w => exfalso; exact h1.elim
   | array w => exfalso; exact h1.elim
@@ -2456,6 +2475,47 @@ theorem linIndices_lt {names : List String} :
                   cases hi with
                   | head => exact hxlt
                   | tail _ hitl => exact ih rest hrest i hitl
+
+/-- Every position produced by `linIndices` comes from an identifier in
+    the source array and resolves to that position.  This is the
+    membership companion of `linIndices_lt`. -/
+theorem linIndices_mem {names : List String} :
+    ∀ (elems : ArrayLiteral) (is : List Nat),
+    linIndices names elems = some is →
+    ∀ i, i ∈ is → ∃ x, BasicExpr.ident x ∈ elems ∧
+      nameIndex names x.name = some i := by
+  intro elems
+  induction elems with
+  | nil =>
+      intro is hidx i hi
+      have hnil : linIndices names [] = some [] := rfl
+      rw [hnil] at hidx
+      have his : is = [] := (Option.some.inj hidx).symm
+      rw [his] at hi
+      exact absurd hi (by simp)
+  | cons e es ih =>
+      intro is hidx i hi
+      cases he : e with
+      | lit l =>
+          rw [he] at hidx
+          exact absurd hidx (by simp [linIndices])
+      | ident x =>
+          rw [he] at hidx
+          simp only [linIndices] at hidx
+          cases hn : nameIndex names x.name with
+          | none => rw [hn] at hidx; exact absurd hidx (by simp)
+          | some n =>
+              rw [hn] at hidx
+              cases hrest : linIndices names es with
+              | none => rw [hrest] at hidx; exact absurd hidx (by simp)
+              | some rest =>
+                  rw [hrest] at hidx
+                  have his : is = n :: rest := by simpa using hidx.symm
+                  subst his
+                  rcases List.mem_cons.mp hi with rfl | hmem
+                  · exact ⟨x, by simp [he], hn⟩
+                  · obtain ⟨y, hy, hyi⟩ := ih rest hrest i hmem
+                    exact ⟨y, by simp [he, hy], hyi⟩
 
 /-- The evaluated values of a slot array that produced `is` via
     `linIndices` are exactly the assignment's values at those
