@@ -1,3 +1,4 @@
-/- Shared historical reference semantics required by compiler/propagation proofs.
-Executable comparison strategies are isolated under Legacy/Solver/Reference. -/
+/- Shared reference definitions required by compiler/propagation proofs.
+Depends on Reference.Engine; retained as a proof foundation for the Core solver.
+-/
 import LeanFzn.Solver.Reference.Engine

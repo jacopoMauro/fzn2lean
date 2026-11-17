@@ -39,9 +39,10 @@ supported in annotations.
 
 ## Repository status and maintenance
 
-The production CLI uses the certified Core solver. Historical solver code is
-retained under `LeanFzn/Legacy/` for explicit regression tests and differential
-checks; it remains part of the full validation build.
+The production CLI uses the certified Core solver. The retired Legacy solver,
+its exclusive tests and build targets have been removed. Shared proof foundations
+remain under `Solver/`; current tests retain exhaustive-enumeration checks and
+independent Gecode comparisons.
 
 The repository review on **17 November 2026** found a verified solver for a
 restricted finite-domain fragment, with remaining language-conformance,
@@ -63,7 +64,7 @@ acceptance/release result is inferred from the existence of the gate scripts.
 Keep generated logs, benchmark runs and temporary experiments under ignored
 `tmp/`. Python bytecode caches, `.lake/` build outputs and machine-local editor,
 container and MCP settings are ignored. Preserve the committed PGO profile,
-vendored specification, benchmark inputs and Legacy regression tools: they
+vendored specification, benchmark inputs and current validation tools: they
 support builds, reproducibility or validation. See [Tests/README.md](Tests/README.md)
 and [audits/README.md](audits/README.md) for the maintained checks.
 
@@ -333,13 +334,11 @@ exhaustion such as a conflict cap or give-up.
 | `Integration/Public/` | Core-only source solving, linear/seeded optimization and CLI driver |
 | `Integration/Config/`, `Integration/Emit/` | Shared options, source annotations and output rendering |
 | `Integration/Report/` | Typed solver reports, JSONL transport and report correctness proofs |
-| `Legacy/` | Old list search, exclusive propagation machinery, old option drivers and fallback APIs |
 | `Cli/` | Parser/checker I/O and the Core-only solve command |
 
 Paths above are relative to `LeanFzn/`. The public `LeanFzn.lean` and
-`Integration.lean` umbrellas expose Core APIs. Historical APIs require an
-explicit `LeanFzn.Legacy...` import; their declaration namespaces and theorem
-statements are preserved.
+`Integration.lean` umbrellas expose Core APIs. Shared reference definitions
+needed by current compiler and propagation proofs remain under `Solver/`.
 
 ### Solver structure
 
@@ -373,8 +372,6 @@ lake build LeanFzn leanfzn
 # Build individual components.
 lake build LeanFzn.Parser LeanFzn.Checker
 lake build LeanFzn.Engine
-# Optional historical search and development comparisons.
-lake build LeanFzn.Legacy
 
 # Parse a model, printing its AST.
 lake env leanfzn model.fzn
@@ -449,9 +446,8 @@ flushed immediately; external timeouts can therefore retain partial progress.
 
 ## Tests and audits
 
-[Tests/README.md](Tests/README.md) maps test suites to the source components. Current tests build with `lake build Tests`; historical
-solver tests are isolated under `Tests/Legacy` and build with
-`lake build Tests.Legacy`.
+[Tests/README.md](Tests/README.md) maps test suites to the source components.
+Lean tests build with `lake build Tests`; Python suites run separately.
 
 For a focused parser/checker check:
 
@@ -472,8 +468,8 @@ bash audits/run_gates.sh
 ```
 
 The runner builds the libraries and registered executables, checks the clean
-semantic inventory, and runs the applicable tests, harness battery/crosscheck, axiom and boundary audits, fuzzing, a short
-performance suite and Core differential checks. It writes logs under `tmp/`.
+semantic inventory, and runs the applicable tests, axiom and boundary audits,
+a short performance suite, witness oracles and optional Gecode coverage fuzz. It writes logs under `tmp/`.
 Some executables require arguments and have dedicated gate steps. The target
 inventory is [lakefile.toml](lakefile.toml); audit usage and measurement
 provenance are in [audits/README.md](audits/README.md).

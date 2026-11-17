@@ -38,16 +38,6 @@ globs = ["LeanFzn.Solver.Propagation", "LeanFzn.Solver.Propagation.+"]
 moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_lib]]
-name = "LeanFzn.Solver.Chronological"
-globs = ["LeanFzn.Legacy.Solver.Chronological", "LeanFzn.Legacy.Solver.Chronological.+"]
-moreLeanArgs = ["-j2", "-s131072"]
-
-[[lean_lib]]
-name = "LeanFzn.Solver.UIP"
-globs = ["LeanFzn.Legacy.Solver.UIP", "LeanFzn.Legacy.Solver.UIP.+"]
-moreLeanArgs = ["-j2", "-s131072"]
-
-[[lean_lib]]
 name = "LeanFzn.Solver.Reference"
 globs = ["LeanFzn.Solver.Reference", "LeanFzn.Solver.Reference.+"]
 moreLeanArgs = ["-j2", "-s131072"]
@@ -63,11 +53,6 @@ globs = ["LeanFzn.Integration", "LeanFzn.Integration.+"]
 moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_lib]]
-name = "LeanFzn.Legacy"
-globs = ["LeanFzn.Legacy", "LeanFzn.Legacy.+"]
-moreLeanArgs = ["-j2", "-s131072"]
-
-[[lean_lib]]
 name = "LeanFzn"
 globs = ["LeanFzn"]
 moreLeanArgs = ["-j2", "-s131072"]
@@ -75,11 +60,6 @@ moreLeanArgs = ["-j2", "-s131072"]
 [[lean_lib]]
 name = "Tests"
 globs = ["Tests.Parser.+", "Tests.Semantics.+", "Tests.Checker.+", "Tests.Compiler.+", "Tests.Engine.+", "Tests.Integration.+"]
-moreLeanArgs = ["-j2", "-s131072"]
-
-[[lean_lib]]
-name = "Tests.Legacy"
-globs = ["Tests.Legacy.+"]
 moreLeanArgs = ["-j2", "-s131072"]
 
 [[lean_exe]]
@@ -131,48 +111,8 @@ name = "tests_check"
 root = "Tests.Checker.Check"
 
 [[lean_exe]]
-name = "tests_solver"
-root = "Tests.Legacy.Integration.Solver"
-
-[[lean_exe]]
-name = "tests_prop"
-root = "Tests.Legacy.Solver.Propagation.Propagators"
-
-[[lean_exe]]
 name = "tests_fast"
 root = "Tests.Checker.Fast"
-
-[[lean_exe]]
-name = "tests_lcg"
-root = "Tests.Legacy.Solver.Chronological.Solver"
-
-[[lean_exe]]
-name = "tests_lcg_analysis"
-root = "Tests.Legacy.Solver.UIP.LCGAnalysis"
-
-[[lean_exe]]
-name = "tests_oracle"
-root = "Tests.Legacy.Solver.UIP.OracleRunner"
-
-[[lean_exe]]
-name = "tests_lcg_scheduler_fixtures"
-root = "Tests.Legacy.Solver.UIP.SchedulerRunner"
-
-[[lean_exe]]
-name = "tests_lcg_scheduler_activation"
-root = "Tests.Legacy.Solver.UIP.SchedulerActivationRunner"
-
-[[lean_exe]]
-name = "tests_scheduler_computability"
-root = "Tests.Legacy.Solver.UIP.SchedulerComputability"
-
-[[lean_exe]]
-name = "tests_lcg_public_fixtures"
-root = "Tests.Legacy.Integration.PublicSchedulerFixtures"
-
-[[lean_exe]]
-name = "tests_lcg_harness"
-root = "Tests.Legacy.Solver.UIP.LcgHarnessRunner"
 
 [[lean_lib]]
 name = "LeanFzn.Cli"
@@ -182,10 +122,6 @@ moreLeanArgs = ["-j2", "-s131072"]
 [[lean_exe]]
 name = "challenge_scan"
 root = "Tests.Compiler.ChallengeScan"
-
-[[lean_exe]]
-name = "tests_lcg_proto"
-root = "Tests.Legacy.Solver.UIP.LcgProtoRunner"
 
 [[lean_exe]]
 name = "tests_array_params"
@@ -222,70 +158,6 @@ root = "Tests.Compiler.SetEmitTest"
 [[lean_exe]]
 name = "tests_lns"
 root = "Tests.Integration.Public.LnsTest"
-
-[[lean_exe]]
-name = "tests_optimize"
-root = "Tests.Legacy.Integration.Optimize"
-
-[[lean_exe]]
-name = "tests_optimize_bnb"
-root = "Tests.Legacy.Integration.OptimizeBnB"
-
-[[lean_exe]]
-name = "tests_lcg_kernel"
-root = "Tests.Legacy.Solver.UIP.LcgKernelRunner"
-
-[[lean_exe]]
-name = "tests_lcg_optimize"
-root = "Tests.Legacy.Integration.LcgOptimize"
-
-[[lean_exe]]
-name = "tests_seed_runner"
-root = "Tests.Legacy.Integration.SeedRunner"
-
-[[lean_exe]]
-name = "tests_public_lcg"
-root = "Tests.Legacy.Integration.PublicLcgRunner"
-
-[[lean_exe]]
-name = "tests_search_config"
-root = "Tests.Legacy.Integration.SearchConfigRunner"
-
-[[lean_exe]]
-name = "tests_annot"
-root = "Tests.Legacy.Integration.Annot"
-
-[[lean_exe]]
-name = "tests_dbscan"
-root = "Tests.Legacy.Benchmarks.DbScanCounts"
-
-[[lean_exe]]
-name = "tests_heur_timing"
-root = "Tests.Legacy.Benchmarks.HeurTiming"
-
-[[lean_exe]]
-name = "tests_p3b_gate"
-root = "Tests.Legacy.Benchmarks.P3bGateTiming"
-
-[[lean_exe]]
-name = "tests_wide_micro"
-root = "Tests.Legacy.Benchmarks.WideMicro"
-
-[[lean_exe]]
-name = "tests_lcg_heur"
-root = "Tests.Legacy.Integration.HeurLcgRunner"
-
-[[lean_exe]]
-name = "tests_budget_runner"
-root = "Tests.Legacy.Integration.BudgetRunner"
-
-[[lean_exe]]
-name = "tests_bisect_runner"
-root = "Tests.Legacy.Integration.BisectRunner"
-
-[[lean_exe]]
-name = "tests_core_spike"
-root = "Tests.Legacy.Integration.CoreDifferential"
 
 [[lean_exe]]
 name = "tests_engine_prop"
@@ -342,10 +214,6 @@ root = "Tests.Engine.Props.ElementTest"
 [[lean_exe]]
 name = "tests_engine_reduce"
 root = "Tests.Engine.ReduceTest"
-
-[[lean_exe]]
-name = "tests_integration_core_optimize"
-root = "Tests.Legacy.Integration.CoreOptimizeTest"
 
 [[lean_exe]]
 name = "tests_integration_core_seed"

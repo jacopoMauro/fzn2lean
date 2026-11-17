@@ -1,7 +1,8 @@
 # Tests
 
-Paths mirror the components under `LeanFzn/`. Current tests never import Legacy;
-the module-boundary audit enforces that rule transitively.
+Paths mirror the components under `LeanFzn/`. The retired Legacy solver and
+its exclusive tests have been removed. The module-boundary audit rejects imports
+that would reintroduce that dependency.
 
 | Directory | Coverage |
 | --- | --- |
@@ -15,15 +16,10 @@ the module-boundary audit enforces that rule transitively.
 | `Cli/` | Python subprocess tests of exit codes, output, options and checked witnesses |
 | `Architecture/` | Imports, cycles, active proof holes and public/test independence from Legacy |
 | `Audits/` | Benchmark outcomes, incomplete allowances, validation failure paths and MiniZinc wrapper streaming/flags |
-| `Fixtures/Solver/` | Shared FlatZinc regressions used by current tests and the Legacy oracle |
-| `Legacy/Integration/` | Historical adapters, options, fallback behavior and the Core/Legacy differential tool |
-| `Legacy/Solver/` | Chronological, propagation and UIP historical regressions/harnesses |
-| `Legacy/Benchmarks/` | Retained diagnostic tools for the list-based solver |
+| `Fixtures/Solver/` | Shared FlatZinc regressions used by current tests |
 
-`Tests` is the current Lean test library. `Tests.Legacy` is a separate explicit
-library. Python tests are run separately. Existing executable names are retained
-so scripts can keep calling the same Lake targets; their `root` entries in
-`lakefile.toml` point to the new locations.
+`Tests` is the maintained Lean test library. Python tests run separately.
+`lakefile.toml` registers the current native executable targets.
 
 ## Current tests
 
@@ -78,25 +74,22 @@ candidate solution (exit 4), and malformed marker prefixes are rejected as
 assignment content. `Tests/Cli/test_check_separators.py` exercises those exit
 classes through the compiled CLI.
 
-## Historical tests and full validation
+## Full validation
 
 ```bash
-lake build LeanFzn.Legacy Tests.Legacy tests_lcg_harness
-.lake/build/bin/tests_lcg_harness --fixtures
 bash audits/run_gates.sh
 ```
 
-The full gate builds both libraries and all registered executable targets,
-runs the applicable native/Python suites, differential checks, proof/import
-audits, the Legacy fuzz harness and the public quick suite. Argument-driven
-profilers are not correctness suites and are skipped or run with dedicated
-arguments. The differential tool deliberately imports Legacy; it remains a
-development oracle, not a public solver path.
+The full gate builds current libraries and all registered executable targets,
+runs applicable native/Python suites, proof/import audits, witness checks, the
+public quick suite and optional independent Gecode coverage fuzz. The retired
+Legacy battery, harness fuzz and Core/Legacy differential are removed; these
+checks are not reported as passing. Small exhaustive comparisons remain in the
+compiler array suite.
 
-Put new regressions beside the component they exercise. Put a test under
-`Legacy/` if its purpose requires historical solver APIs. Shared fixture data
-belongs in `Fixtures/`, not in an old implementation's test directory. Store
-generated logs, profiles and benchmark reports under ignored `tmp/`.
+Put new regressions beside the component they exercise. Shared fixture data
+belongs in `Fixtures/`. Store generated logs, profiles and benchmark reports
+under ignored `tmp/`.
 
 ## FlatZinc conformance regressions
 

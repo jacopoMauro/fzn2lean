@@ -23,14 +23,10 @@ flowchart TD
   Public --> Cli
   Parser --> Cli
   Checker --> Cli
-  Shared --> Legacy[Legacy: old solver and adapters]
-  Compiler --> Legacy
-  Generic --> Legacy
 ```
 
-The public CLI, Core engine, shared foundations and `Integration/` have no
-imports of `LeanFzn.Legacy`. `LeanFzn.lean` and `Integration.lean` expose the
-Core-only API. The boundary audit verifies these properties transitively.
+The retired Legacy implementation and its exclusive tests have been removed.
+`LeanFzn.lean` and `Integration.lean` expose the Core-only API. The boundary audit verifies these properties transitively.
 It masks nested comments and strings, so an import immediately after `-/`
 cannot evade the check. It also rejects missing project imports and cycles.
 
@@ -39,8 +35,7 @@ and the retained `Solver/Propagation/` modules. Those foundations contain
 problems, finite domains, constraint/literal semantics and proof infrastructure;
 they are not a second public engine. Historical executable helper definitions
 still appear in some shared reference/proof modules and need further extraction
-before their corresponding old definitions can be deleted. The public drivers
-never call the old search implementations.
+before those helpers can be removed. The public drivers call the Core engine.
 
 ## Solution syntax and emission proofs
 
@@ -77,7 +72,6 @@ making proof changes rebuild the solver's computational foundations.
 | Source correspondence | `Compiler/{Domain,Extract,Compile,Normalize,Fragment,LiteralFold,SetIn,SetShape,SetExpand,Bounds}` → `Compiler/Proofs/{Exact,Normalize,Fragment,LiteralFold,SetIn,SetShape,SetShapeWF,SetExpand,Bounds,Objective}` |
 | TSP rank evidence | `Compiler/RankCircuit` → `Engine/Proofs/RankCircuit` → `Tests/Compiler/RankCircuitTest` |
 | Generic optimization | `Integration/Optimization/Basic` → `Optimization/Partial` → `Public/Optimize` |
-| Historical solver | Explicit `Legacy/Solver/{UIP,Chronological}` and `Legacy/Integration/` imports |
 
 Paths are relative to `LeanFzn/` and omit `.lean`.
 
@@ -140,9 +134,8 @@ Integration/
 
 Declarations for the new public solver live in `LeanFzn.Core`. Shared generic
 optimization, rendering and configuration declarations remain in
-`LeanFzn.Integration`. Old solver declarations keep their original namespaces
-but require explicit `LeanFzn.Legacy...` imports. This preserves their theorem
-statements without making the old execution contract part of the public API.
+`LeanFzn.Integration`. Shared proof/reference definitions retain their existing
+namespaces; the retired solver and its exclusive historical proofs are removed.
 
 | Module | Contract |
 | --- | --- |
@@ -153,7 +146,7 @@ statements without making the old execution contract part of the public API.
 | `Public/Seed` | Carries the certified clause database across stronger bounds using Engine.Incremental. Its invariant and streaming correspondence cover incomplete runs; no legacy fallback or unconditional completion theorem is used. |
 | `Public/Driver` | Validates Core-only options, prints valid incumbents immediately, uses exit 4 for unknown/incomplete, and emits terminal markers only on certified completion. For `--threads=N` it runs independent certified workers over the four measured strategies, sharing only the parsed model and a mutex-guarded incumbent/proof state; an optimization proof is reported only when its optimum equals the best checked printed incumbent, while a satisfaction run reports the first completed verdict after checking a SAT witness. |
 | `Public/PhaseStats` | Dev-only `--phase-stats` observation layer: it re-runs the same compiler composition and the same `initState`/`coreSolveFrom` calls as the certified entries, separated by stderr timestamps and `/proc/self/status` reads. It changes no verdict, solution or counter and is not on the ordinary path. |
-| `Config/Parse` | `parseCoreSolveFlags` disables implicit legacy routing and rejects the kernel engine. The older compatibility parser is used only by explicit legacy APIs. |
+| `Config/Parse` | `parseCoreSolveFlags` validates Core options and rejects the retired kernel engine. Compatibility parsing helpers remain for a separate shared-code cleanup. |
 | `Emit/Model` | Source-store rendering extracted from old source solving, with no backend dependency. |
 
 `Solver/Core` still defines the shared compact `Dom`; Engine defines its own
@@ -177,17 +170,16 @@ can produce give-up results.
 
 `Optimization/Basic` preserves the existing `CertSolver`, generic loops,
 termination measure, solution/optimality theorems and streaming specifications.
-The chronological instance has moved to
-`Legacy/Integration/Optimization/Chronological`. Basic now imports compiler
-correspondence and shared domain lemmas directly, rather than old source solving.
+Basic imports compiler correspondence and shared domain lemmas directly. The
+retired chronological solver instance has been removed.
 
 `Optimization/Partial` introduces `PartialCertSolver`: SAT/UNSAT soundness
 without a promise to decide every run. Its adapter uses the existing generic
 interface's false completeness gate explicitly. That gate is a proof-side
 optional guarantee, not a runtime admission test: the optimizer runs, retains
 incumbents when a round fails, and proves optimality/UNSAT only when complete.
-No old generic theorem has been weakened. The old unconditional completion
-proofs remain attached to the preserved legacy definitions.
+The generic theorems retain their original hypotheses. Unconditional completion
+proofs exclusive to the retired solver were removed with that implementation.
 
 ## Engine code and proofs
 
@@ -213,26 +205,14 @@ correctness modules have separate umbrella imports. Semantics, some Engine
 modules and the new seeded optimizer still mix executable definitions and
 proofs; absence of a `Proofs/` folder does not imply absence of verification.
 
-## Preserved legacy layer
+## Shared reference foundations
 
-`Legacy/` contains the old UIP and chronological implementations, their
-exclusive propagation machinery, reference strategies, integration adapters,
-old option drivers and historical Core-to-kernel fallback wrappers. The move
-preserves mathematical declaration names and certified theorem statements.
-Old imports were migrated explicitly; there are no active compatibility shims
-outside Legacy that pull the old solver into the production graph.
-
-Build the historical implementation with `lake build LeanFzn.Legacy`. The old
-`LeanFzn.Solver.UIP` and `LeanFzn.Solver.Chronological` Lake target names remain
-explicit development build aliases for the relocated modules. Existing legacy
-regression tests and theorem-profile queries now import the relocated modules.
-`tests_core_spike --engine=kernel` is a development comparison tool, not public
-CLI routing.
-
-Removing Legacy entirely is later work: identify shared proof/reference
-helpers still needed by compiler/propagator correctness, preserve useful test
-oracles, and then delete old algorithms and their historical theorems together.
-No list-based completeness fallback is used to hide missing Core coverage now.
+`Solver/Core`, `Solver/Propagation` and `Solver/Reference` retain definitions
+and lemmas used by current compiler and propagation proofs. They must not be
+deleted merely because some names or comments describe historical algorithms.
+The production solver lives in `Engine/`. The isolated `Legacy/` implementation,
+its umbrella, exclusive tests, Lake targets and comparison harness are removed.
+The boundary audit retains guards against reintroducing Legacy imports.
 
 ## Validation and maintenance
 
@@ -247,16 +227,11 @@ The source audit masks nested comments and strings before rejecting active
 `sorry`, `admit` or user axiom declarations, avoiding the old CI grep's false
 positives on documentation.
 
-Historical integration and list-solver tests live under
-`Tests/Legacy/{Integration,Solver/Chronological,Solver/Propagation,Solver/UIP}`.
-Retained old profiling tools live in `Tests/Legacy/Benchmarks/`. The differential
-comparison tool is `Tests/Legacy/Integration/CoreDifferential.lean` because it
-deliberately imports both engines. Native executable target names remain stable.
-
-The Lake `Tests` library contains current tests only; `Tests.Legacy` is explicit.
-The boundary audit also checks test imports, preventing current tests from
-depending on Legacy directly or through historical test helpers. Details and
-commands are in [Tests/README.md](Tests/README.md).
+The Lake `Tests` library contains the maintained tests. Small exhaustive
+oracles remain in compiler tests; the Python coverage fuzzer compares the public
+CLI against independent Gecode when installed. The retired Core/Legacy
+comparison and Legacy harness battery/fuzz are no longer acceptance gates.
+Details and commands are in [Tests/README.md](Tests/README.md).
 
 `tests_core_only` checks Core defaults, option rejection, SAT/UNSAT,
 sparse-domain solving and unknown on zero fuel, linear and seeded min/max, clause reuse,
@@ -265,13 +240,12 @@ later round is incomplete. `Tests/Cli/test_solve.py` checks exit codes,
 markers, statistics and witness text. `Tests/Architecture/test_boundaries.py`
 regresses nested-comment import scanning, strings, missing modules and cycles.
 
-The full gate builds public and Legacy code explicitly, runs the registered
-executables and both regression suites, audits theorem axioms and imports,
-compares Core against the explicit legacy development oracle, fuzzes 3,000
-instances and runs the quick performance suite. Historical gate and benchmark
-records describe their source snapshots; they do not establish current Core-only
-decision coverage. Record new measurements with their own source snapshot and
-budget.
+The full gate builds current libraries and registered executables, runs native
+and Python regressions, audits theorem axioms and imports, and runs the public
+quick suite, witness oracles and optional Gecode coverage fuzz. Historical gate
+and benchmark records describe their source snapshots; they do not establish
+current decision coverage. Record new measurements with their own source
+snapshot and budget.
 
 Benchmark reports distinguish completed mathematical agreement from explicit
 incomplete allowances, when a manifest declares one. The nonunit-jump fixture

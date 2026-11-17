@@ -1,4 +1,4 @@
-/- Public tools and the Core-only solver. Historical solver APIs require LeanFzn.Legacy. -/
+/- Public tools and the Core-only solver. -/
 import LeanFzn.Syntax
 import LeanFzn.Parser
 import LeanFzn.Semantics
