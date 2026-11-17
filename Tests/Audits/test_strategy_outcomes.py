@@ -10,9 +10,28 @@ import unittest
 TOOLS = runpy.run_path(
     str(Path(__file__).resolve().parents[2] / 'audits/strategy_matrix.py'))
 outcome_of = TOOLS['outcome_of']
+FUZZ_TOOLS = runpy.run_path(
+    str(Path(__file__).resolve().parents[2] / 'audits/coverage_fuzz.py'))
 
 
 class StrategyOutcomes(unittest.TestCase):
+    def test_objective_accepts_canonical_emitter_padding(self):
+        self.assertEqual(TOOLS['objective_value'](['x = -7 ; '], 'x'), '-7')
+        self.assertEqual(TOOLS['objective_value'](['x = 3;\t'], 'x'), '3')
+
+    def test_objective_rejects_trailing_content(self):
+        self.assertEqual(TOOLS['objective_value'](['x = 3; junk'], 'x'), '-')
+
+    def test_fuzzer_counts_empty_ground_solution(self):
+        self.assertEqual(FUZZ_TOOLS['split_blocks']('----------\n'), [[]])
+        run = {'rc': 0, 'timed_out': False, 'stdout': '----------\n'}
+        self.assertEqual(FUZZ_TOOLS['classify_core'](run, None), 'sat')
+
+    def test_fuzzer_requires_solution_terminator(self):
+        self.assertEqual(FUZZ_TOOLS['split_blocks']('x = 1;\n'), [])
+        run = {'rc': 0, 'timed_out': False, 'stdout': 'x = 1;\n'}
+        self.assertEqual(FUZZ_TOOLS['classify_core'](run, None), 'none')
+
     def test_exit_four_is_not_none(self):
         self.assertEqual(outcome_of(4, False, '', 0), 'unknown')
         self.assertEqual(outcome_of(4, False, '----------\n', 2),

@@ -1242,26 +1242,505 @@ theorem basic_initializerHolds_fullStore {m : Model} (hnu : NamesNodup m)
   exact ⟨val, val', by rw [basicExpr_eval_fullStore hnu hv]; exact hval,
     by rw [fullStore_of_none hn]; exact hn', hsem⟩
 
+/-! ## The shape store of the normalized model -/
+
+/-- A parameter that survives normalization keeps its shape-store value. -/
+theorem normalize_shapeStore_par {m : Model}
+    (hnd : (m.parameters.map (·.name)).Nodup)
+    {d : ParDeclItem} (hd : d ∈ m.parameters.filter (fun d => !isArrayPar d)) :
+    (normalizeModel m).shapeStore d.name = some d.value := by
+  have hnu : (((m.parameters.filter (fun d => !isArrayPar d)).map
+      (fun d => (d.name, d.value))).map Prod.fst).Nodup := by
+    have hnd' : ((m.parameters.filter (fun d => !isArrayPar d)).map
+        (·.name)).Nodup :=
+      (List.Sublist.map _ List.filter_sublist).nodup hnd
+    simpa [Function.comp_def, List.map_map] using hnd'
+  have hmem : (d.name, d.value) ∈
+      ((m.parameters.filter (fun d => !isArrayPar d)).map
+        (fun d => (d.name, d.value))) :=
+    List.mem_map.mpr ⟨d, hd, rfl⟩
+  have hlookup : lookupIdent d.name
+      ((m.parameters.filter (fun d => !isArrayPar d)).map
+        (fun d => (d.name, d.value))) = some d.value :=
+    shapeLookup_of_mem hnu hmem
+  unfold Model.shapeStore
+  simp only [normalizeModel]
+  rw [hlookup]
+
+/-- A basic variable keeps its shape-store value under normalization. -/
+theorem normalize_shapeStore_var {m : Model}
+    (hnd : (m.parameters.map (·.name) ++ m.variables.map (·.name)).Nodup)
+    {d : VarDeclItem} (hd : d ∈ m.variables.filter isBasicVar) :
+    (normalizeModel m).shapeStore d.name = some d.shapeValue := by
+  have hd' : d ∈ m.variables := (List.mem_filter.mp hd).1
+  obtain ⟨hndPar, hndVar, hdisj⟩ := List.nodup_append.mp hnd
+  have hnone : lookupIdent d.name
+      ((m.parameters.filter (fun d => !isArrayPar d)).map
+        (fun d => (d.name, d.value))) = none := by
+    apply shapeLookup_none_of_forall
+    intro y v hmem heq
+    obtain ⟨p, hp, hp_eq⟩ := List.mem_map.mp hmem
+    have hpPar : p ∈ m.parameters := (List.mem_filter.mp hp).1
+    have hpmem : p.name ∈ m.parameters.map (·.name) :=
+      List.mem_map.mpr ⟨p, hpPar, rfl⟩
+    have hdmem : d.name ∈ m.variables.map (·.name) :=
+      List.mem_map.mpr ⟨d, hd', rfl⟩
+    have hpname : p.name = d.name := by
+      have hp1 : p.name = y := congrArg Prod.fst hp_eq
+      exact hp1.trans (Ident.eq_of_name_eq heq)
+    exact (hdisj p.name hpmem d.name hdmem) hpname
+  have hnu : (((m.variables.filter isBasicVar).map
+      (fun d => (d.name, d.shapeValue))).map Prod.fst).Nodup := by
+    have hnd' : ((m.variables.filter isBasicVar).map (·.name)).Nodup :=
+      (List.Sublist.map _ List.filter_sublist).nodup hndVar
+    simpa [Function.comp_def, List.map_map] using hnd'
+  have hmem : (d.name, d.shapeValue) ∈
+      ((m.variables.filter isBasicVar).map
+        (fun d => (d.name, d.shapeValue))) :=
+    List.mem_map.mpr ⟨d, hd, rfl⟩
+  have hlookup : lookupIdent d.name
+      ((m.variables.filter isBasicVar).map
+        (fun d => (d.name, d.shapeValue))) = some d.shapeValue :=
+    shapeLookup_of_mem hnu hmem
+  unfold Model.shapeStore
+  simp only [normalizeModel]
+  rw [hnone]
+  exact hlookup
+
+/-- A scalar declaration's shape-store value is unchanged by
+    normalization. -/
+theorem normalize_shapeStore_base {m : Model} (hnu : NamesNodup m)
+    {x : Ident} {t : BaseType} {b : Bool}
+    (hx : m.staticEnv x = some (.base t, b)) :
+    (normalizeModel m).shapeStore x = m.shapeStore x := by
+  have hndPar : (m.parameters.map (·.name)).Nodup :=
+    (List.nodup_append.mp hnu).1
+  cases b with
+  | false =>
+      obtain ⟨d, hd, hdname, hdtype⟩ := LeanFzn.Semantics.staticEnv_param hx
+      cases d with
+      | basic ty n v =>
+          have hdmem : (ParDeclItem.basic ty n v) ∈
+              m.parameters.filter (fun d => !isArrayPar d) := by
+            refine List.mem_filter.mpr ⟨hd, ?_⟩
+            simp [isArrayPar]
+          have h1 := normalize_shapeStore_par hndPar hdmem
+          have h2 := shapeStore_param hndPar hd
+          simp only [ParDeclItem.name] at hdname h1 h2
+          subst hdname
+          rw [h1, h2]
+      | array idx ty n lits =>
+          exact absurd hdtype (by simp [ParDeclItem.type])
+  | true =>
+      obtain ⟨d, hd, hdname, hdtype⟩ := LeanFzn.Semantics.staticEnv_var hx
+      cases d with
+      | basic ty n anns v =>
+          have hdmem : (VarDeclItem.basic ty n anns v) ∈
+              m.variables.filter isBasicVar := by
+            refine List.mem_filter.mpr ⟨hd, ?_⟩
+            simp [isBasicVar]
+          have h1 := normalize_shapeStore_var hnu hdmem
+          have h2 := shapeStore_var hnu hd
+          simp only [VarDeclItem.name] at hdname h1 h2
+          subst hdname
+          rw [h1, h2]
+      | array ty n anns es =>
+          exact absurd hdtype (by simp [VarDeclItem.type])
+
+/-- A literal's denotation has the shape of its base type's dummy. -/
+theorem basicLiteral_denote_sameShape_dummy {l : BasicLiteral} {t : BaseType}
+    (h : l.type = t) : l.denote.SameShape (LeanFzn.BaseType.dummy t) := by
+  subst h
+  cases l with
+  | bool b => exact .bool b false
+  | int i => exact .int i 0
+  | set s => exact .setOfInt s.denote (.enumeration [])
+
+/-- A checked basic expression evaluates in the shape store to a value with
+    the shape of the expected base type's dummy. -/
+theorem shapeStore_eval_sameShape_dummy {m : Model}
+    (hwf : WellFormed fullSig m) {b : BasicExpr} {t : BaseType}
+    (hb : b.hasBaseType m.staticEnv t) :
+    ∀ {v}, b.eval m.shapeStore = some v →
+      v.SameShape (LeanFzn.BaseType.dummy t) := by
+  intro v hv
+  cases b with
+  | lit l =>
+      simp only [BasicExpr.eval, Option.some.injEq] at hv
+      subst hv
+      exact basicLiteral_denote_sameShape_dummy hb
+  | ident x =>
+      simp only [BasicExpr.eval] at hv
+      cases hx : m.staticEnv x with
+      | none =>
+          simp only [BasicExpr.hasBaseType] at hb
+          rw [hx] at hb
+          exact hb.elim
+      | some info =>
+          obtain ⟨ft, isVar⟩ := info
+          cases ft with
+          | array n ty =>
+              simp only [BasicExpr.hasBaseType] at hb
+              rw [hx] at hb
+              exact hb.elim
+          | base t' =>
+              simp only [BasicExpr.hasBaseType, hx] at hb
+              cases isVar with
+              | false =>
+                  obtain ⟨d, hd, hdname, hdtype⟩ :=
+                    LeanFzn.Semantics.staticEnv_param hx
+                  cases d with
+                  | basic ty n l =>
+                      have hs : m.shapeStore n = some
+                          (ParDeclItem.basic ty n l).value := by
+                        simpa [ParDeclItem.name] using
+                          shapeStore_param
+                            (List.nodup_append.mp hwf.valueNamesUnique).1 hd
+                      simp only [ParDeclItem.value] at hs
+                      simp only [ParDeclItem.name] at hdname
+                      subst hdname
+                      rw [hs] at hv
+                      have hvv : BasicLiteral.denote l = v :=
+                        Option.some.inj hv
+                      subst hvv
+                      have hty : ty.base = t := by
+                        have hdt : ParDeclItem.type
+                            (ParDeclItem.basic ty n l) = .base t' := hdtype
+                        simp only [ParDeclItem.type, FznType.base.injEq] at hdt
+                        exact hdt.trans hb
+                      have hl := hwf.parameterTypes
+                        (ParDeclItem.basic ty n l) hd
+                      simp only [ParDeclItem.type, FznType.base.injEq] at hl
+                      exact basicLiteral_denote_sameShape_dummy
+                        (by rw [hl, hty])
+                  | array idx ty n lits =>
+                      exact absurd hdtype (by simp [ParDeclItem.type])
+              | true =>
+                  obtain ⟨d, hd, hdname, hdtype⟩ :=
+                    LeanFzn.Semantics.staticEnv_var hx
+                  cases d with
+                  | basic ty n anns init =>
+                      have hs : m.shapeStore n = some
+                          (VarDeclItem.basic ty n anns init).shapeValue := by
+                        simpa [VarDeclItem.name] using
+                          shapeStore_var hwf.valueNamesUnique hd
+                      simp only [VarDeclItem.shapeValue] at hs
+                      simp only [VarDeclItem.name] at hdname
+                      subst hdname
+                      rw [hs] at hv
+                      have hvv : BasicVarType.dummy ty = v :=
+                        Option.some.inj hv
+                      subst hvv
+                      have hty : ty.base = t := by
+                        have hdt : VarDeclItem.type
+                            (VarDeclItem.basic ty n anns init) = .base t' :=
+                          hdtype
+                        simp only [VarDeclItem.type, FznType.base.injEq] at hdt
+                        exact hdt.trans hb
+                      rw [BasicVarType.dummy_eq_base_dummy, hty]
+                      exact Value.SameShape.refl _
+                  | array ty n anns es =>
+                      exact absurd hdtype (by simp [VarDeclItem.type])
+
+/-- The normalized shape store agrees with the source shape store on
+    checked basic expressions. -/
+theorem normalize_eval_eq_of_checkBase {m : Model}
+    (hwf : WellFormed fullSig m) {b : BasicExpr} {bt : BasicPredParamType}
+    (hb : b.checkBase m.staticEnv bt) :
+    b.eval (normalizeModel m).shapeStore = b.eval m.shapeStore := by
+  cases b with
+  | lit l => rfl
+  | ident x =>
+      show (normalizeModel m).shapeStore x = m.shapeStore x
+      cases hx : m.staticEnv x with
+      | none =>
+          simp only [BasicExpr.checkBase, hx] at hb
+      | some info =>
+          obtain ⟨ft, isVar⟩ := info
+          cases ft with
+          | array n ty =>
+              simp only [BasicExpr.checkBase, hx] at hb
+          | base t =>
+              exact normalize_shapeStore_base hwf.valueNamesUnique hx
+
+/-- Checked basic expressions evaluate in the normalized shape store to a
+    value with the shape of the dummy of their base type. -/
+theorem normalize_eval_sameShape_dummy {m : Model}
+    (hwf : WellFormed fullSig m) {b : BasicExpr} {t : BaseType}
+    (hb : b.hasBaseType m.staticEnv t) :
+    ∀ {v}, b.eval (normalizeModel m).shapeStore = some v →
+      v.SameShape (LeanFzn.BaseType.dummy t) := by
+  intro v hv
+  cases b with
+  | lit l =>
+      simp only [BasicExpr.eval, Option.some.injEq] at hv
+      subst hv
+      exact basicLiteral_denote_sameShape_dummy hb
+  | ident x =>
+      simp only [BasicExpr.eval] at hv
+      cases hx : m.staticEnv x with
+      | none =>
+          simp only [BasicExpr.hasBaseType] at hb
+          rw [hx] at hb
+          exact hb.elim
+      | some info =>
+          obtain ⟨ft, isVar⟩ := info
+          cases ft with
+          | array n ty =>
+              simp only [BasicExpr.hasBaseType] at hb
+              rw [hx] at hb
+              exact hb.elim
+          | base t' =>
+              rw [normalize_shapeStore_base hwf.valueNamesUnique hx] at hv
+              exact shapeStore_eval_sameShape_dummy hwf hb hv
+
+/-- Elementwise shape agreement of a variable array's evaluated
+    initializer with the declared dummy array. -/
+theorem normalize_sameShapeList_replicate {m : Model}
+    (hwf : WellFormed fullSig m) {es : List BasicExpr} {bt : BasicVarType}
+    (hcheck : ∀ b ∈ es, b.hasBaseType m.staticEnv bt.base) :
+    ∀ {vs}, es.mapM (BasicExpr.eval (normalizeModel m).shapeStore) = some vs →
+      Value.SameShapeList vs
+        (List.replicate es.length (LeanFzn.BaseType.dummy bt.base)) := by
+  induction es with
+  | nil =>
+      intro vs hv
+      simp only [List.mapM_nil, Option.pure_def, Option.some.injEq] at hv
+      subst hv
+      exact .nil
+  | cons b es ih =>
+      intro vs hv
+      obtain ⟨v, vs', hvb, hvs, rfl⟩ := mapM_cons_inv hv
+      have hhead := normalize_eval_sameShape_dummy hwf
+        (hcheck b List.mem_cons_self) hvb
+      have htail := ih (fun b' hb' => hcheck b' (List.mem_cons_of_mem _ hb')) hvs
+      simp only [List.length_cons, List.replicate_succ]
+      exact .cons hhead htail
+
+/-- Inlining preserves the shape-of-arguments relation between the
+    normalized and the source shape stores. -/
+theorem inline_shapeStore_agree {m : Model} (hwf : WellFormed fullSig m)
+    (hgate : arraysOkB m = true) :
+    ∀ {e : Expr} {pt : PredParamType}, e.checkArg m.staticEnv pt →
+    ∀ {v w : Value},
+      (inlineExpr (arrayDefs m) e).eval (normalizeModel m).shapeStore = some v →
+      e.eval m.shapeStore = some w → Value.Agree pt.isPar v w := by
+  intro e pt hc v w hv hw
+  cases pt with
+  | basic bt =>
+      change Value.Agree bt.isPar v w
+      cases e with
+      | basic b =>
+          cases b with
+          | lit l =>
+              simp only [inlineExpr, Expr.eval, BasicExpr.eval,
+                Option.some.injEq] at hv hw
+              subst hv
+              subst hw
+              cases bt.isPar with
+              | false => exact Value.SameShape.refl _
+              | true => rfl
+          | ident x =>
+              change BasicExpr.checkBase m.staticEnv (.ident x) bt at hc
+              obtain ⟨t, isVar, hx⟩ :
+                  ∃ t isVar, m.staticEnv x = some (.base t, isVar) := by
+                cases h : m.staticEnv x with
+                | none =>
+                    rw [BasicExpr.checkBase, h] at hc
+                    exact hc.elim
+                | some info =>
+                    obtain ⟨ft, isVar⟩ := info
+                    cases ft with
+                    | array n ty =>
+                        rw [BasicExpr.checkBase, h] at hc
+                        exact hc.elim
+                    | base t => exact ⟨t, isVar, rfl⟩
+              have hnone : lookupIdent x (arrayDefs m) = none :=
+                lookup_arrayDefs_none_of_base hwf.valueNamesUnique hx
+              have hieq : inlineExpr (arrayDefs m) (.basic (.ident x)) =
+                  .basic (.ident x) := by
+                simp [inlineExpr, hnone]
+              rw [hieq] at hv
+              simp only [Expr.eval, BasicExpr.eval] at hv
+              have hs := normalize_shapeStore_base hwf.valueNamesUnique hx
+              rw [hs] at hv
+              have hvw : v = w := Option.some.inj (hv.symm.trans hw)
+              subst hvw
+              cases bt.isPar with
+              | false => exact Value.SameShape.refl _
+              | true => rfl
+      | array es => simp [Expr.checkArg] at hc
+  | array idx bt =>
+      change Value.Agree bt.isPar v w
+      cases e with
+      | basic b =>
+          cases b with
+          | lit l => simp [Expr.checkArg] at hc
+          | ident x =>
+              obtain ⟨n, t, isVar, hx, hlen, hacc⟩ :
+                  ∃ n t isVar, m.staticEnv x = some (.array n t, isVar) ∧
+                    idx.acceptsLength n ∧ bt.accepts t isVar := by
+                cases h : m.staticEnv x with
+                | none =>
+                    simp only [Expr.checkArg, h] at hc
+                | some info =>
+                    obtain ⟨ft, isVar⟩ := info
+                    cases ft with
+                    | base t =>
+                        simp only [Expr.checkArg, h] at hc
+                    | array n t =>
+                        simp only [Expr.checkArg, h] at hc
+                        exact ⟨n, t, isVar, rfl, hc.1, hc.2⟩
+              obtain ⟨es, hl⟩ := staticEnv_array_defs hx
+              have hieq : inlineExpr (arrayDefs m) (.basic (.ident x)) =
+                  .array es := by
+                simp [inlineExpr, hl]
+              rw [hieq] at hv
+              change (es.mapM
+                (BasicExpr.eval (normalizeModel m).shapeStore)).map
+                  Value.array = some v at hv
+              obtain ⟨vs, hvs, rfl⟩ := eval_array_inv hv
+              obtain ⟨y, hy, hyn⟩ := lookupIdent_inv_mem x (arrayDefs m) es hl
+              have hyx : y = x := ident_eq_of_name hyn
+              rw [hyx] at hy
+              rcases mem_arrayDefs hy with
+                ⟨d, hd, idx', t', lits, rfl, rfl⟩ |
+                ⟨d, hd, ty, anns, rfl⟩
+              · have hs : m.shapeStore x = some
+                    (ParDeclItem.array idx' t' x lits).value := by
+                  simpa [ParDeclItem.name] using
+                    shapeStore_param
+                      (List.nodup_append.mp hwf.valueNamesUnique).1 hd
+                simp only [ParDeclItem.value] at hs
+                simp only [Expr.eval, BasicExpr.eval] at hw
+                rw [hs] at hw
+                have hw' : Value.array (lits.map BasicLiteral.denote) = w :=
+                  Option.some.inj hw
+                have hlit := mapM_lit_eval (normalizeModel m).shapeStore lits
+                rw [hlit] at hvs
+                have hvs' : lits.map BasicLiteral.denote = vs :=
+                  Option.some.inj hvs
+                have hwv : w = Value.array vs := by
+                  rw [← hw', ← hvs']
+                subst hwv
+                cases bt.isPar with
+                | false => exact Value.SameShape.refl _
+                | true => rfl
+              · have hs : m.shapeStore x = some
+                    (VarDeclItem.array ty x anns es).shapeValue := by
+                  simpa [VarDeclItem.name] using
+                    shapeStore_var hwf.valueNamesUnique hd
+                simp only [VarDeclItem.shapeValue] at hs
+                simp only [Expr.eval, BasicExpr.eval] at hw
+                rw [hs] at hw
+                have hw' : Value.array
+                    (List.replicate ty.idx.length ty.elem.dummy) = w :=
+                  Option.some.inj hw
+                have hinit : ∀ b ∈ es,
+                    b.hasBaseType m.staticEnv ty.elem.base :=
+                  hwf.variableInitializers (.array ty x anns es) hd
+                have hlen : es.length = ty.idx.length :=
+                  hwf.variableArrayLengths (.array ty x anns es) hd
+                have hlist := normalize_sameShapeList_replicate hwf hinit hvs
+                rw [hlen] at hlist
+                rw [← BasicVarType.dummy_eq_base_dummy ty.elem] at hlist
+                have hvar : m.staticEnv x = some
+                    (FznType.array ty.idx.length ty.elem.base, true) := by
+                  have hv := staticEnv_var hwf.valueNamesUnique hd
+                  rwa [show (VarDeclItem.array ty x anns es).name = x from rfl,
+                    VarDeclItem.type] at hv
+                rw [hx] at hvar
+                have hisVar : isVar = true := by
+                  simpa using congrArg Prod.snd (Option.some.inj hvar)
+                have hparFalse : bt.isPar = false := by
+                  cases hbpar : bt.isPar with
+                  | false => rfl
+                  | true =>
+                      exact absurd (hacc.2 hbpar) (by rw [hisVar]; simp)
+                have hwv : w = Value.array
+                    (List.replicate ty.idx.length ty.elem.dummy) := hw'.symm
+                subst hwv
+                rw [hparFalse]
+                exact .array hlist
+      | array es =>
+          simp only [inlineExpr] at hv
+          simp only [Expr.checkArg] at hc
+          obtain ⟨hlen, hcheck⟩ := hc
+          change (es.mapM
+            (BasicExpr.eval (normalizeModel m).shapeStore)).map
+              Value.array = some v at hv
+          obtain ⟨vs, hvs, rfl⟩ := eval_array_inv hv
+          obtain ⟨ws, hws, rfl⟩ := eval_array_inv hw
+          have heqM : es.mapM (BasicExpr.eval (normalizeModel m).shapeStore) =
+              es.mapM (BasicExpr.eval m.shapeStore) := by
+            apply mapM_congr
+            intro b hb
+            exact normalize_eval_eq_of_checkBase hwf (hcheck b hb)
+          rw [heqM] at hvs
+          have heq : vs = ws := Option.some.inj (hvs.symm.trans hws)
+          subst heq
+          cases bt.isPar with
+          | true => rfl
+          | false => exact .array (Value.SameShapeList.refl vs)
+
+/-- Argument lists of the normalized and source models agree in the
+    `ArgsAgree` sense, hence the decodability gate is preserved. -/
+theorem argsAgree_inline_shape {m : Model} (hwf : WellFormed fullSig m)
+    (hgate : arraysOkB m = true) :
+    ∀ {args : List Expr} {params : List PredParamType},
+      Forall2 (Expr.checkArg m.staticEnv) args params →
+      ∀ {vs ws : List Value},
+        (args.map (inlineExpr (arrayDefs m))).mapM
+            (Expr.eval (normalizeModel m).shapeStore) = some vs →
+        args.mapM (Expr.eval m.shapeStore) = some ws →
+        ArgsAgree params vs ws := by
+  intro args
+  induction args with
+  | nil =>
+      intro params h vs ws hv hw
+      cases params with
+      | nil =>
+          simp only [List.map_nil, List.mapM_nil, Option.pure_def,
+            Option.some.injEq] at hv hw
+          subst hv
+          subst hw
+          exact trivial
+      | cons p ps => cases h
+  | cons e es ih =>
+      intro params h vs ws hv hw
+      cases params with
+      | nil => cases h
+      | cons pt pts =>
+          obtain ⟨hhead, htail⟩ := h
+          obtain ⟨v, vs', hve, hvs, rfl⟩ := mapM_cons_inv hv
+          obtain ⟨w, ws', hwe, hws, rfl⟩ := mapM_cons_inv hw
+          have hag := inline_shapeStore_agree hwf hgate hhead hve hwe
+          have htl := ih htail hvs hws
+          exact ⟨hag, htl⟩
+
 theorem wf_normalize {m : Model} (hwf : WellFormed fullSig m)
     (hgate : arraysOkB m = true)
     (hsolve : ∃ anns, m.solve = .satisfy anns) :
     WellFormed fullSig (normalizeModel m) := by
   have hnu : NamesNodup m := hwf.valueNamesUnique
   obtain ⟨anns, hs⟩ := hsolve
+  have hndN : ((normalizeModel m).parameters.map (·.name) ++
+      (normalizeModel m).variables.map (·.name)).Nodup := by
+    have h := hwf.valueNamesUnique
+    refine List.Nodup.sublist ?_ h
+    exact List.Sublist.append
+      (List.Sublist.map _ List.filter_sublist)
+      (List.Sublist.map _ List.filter_sublist)
   refine
     { predNamesUnique := hwf.predNamesUnique
-      valueNamesUnique := ?_
+      valueNamesUnique := hndN
       predParamsUnique := hwf.predParamsUnique
       parameterTypes := ?_
       variableArrayLengths := ?_
       variableInitializers := ?_
       objectiveType := ?_
-      constraintsChecked := ?_ }
-  · have h := hwf.valueNamesUnique
-    refine List.Nodup.sublist ?_ h
-    exact List.Sublist.append
-      (List.Sublist.map _ List.filter_sublist)
-      (List.Sublist.map _ List.filter_sublist)
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · intro d hd
     exact hwf.parameterTypes d (List.mem_filter.mp hd).1
   · intro d hd
@@ -1290,6 +1769,26 @@ theorem wf_normalize {m : Model} (hwf : WellFormed fullSig m)
     intro e he pt hca
     exact checkArg_inline hwf hgate hca
       (gate_cons hgate c hc e he)
+  · intro c' hc'
+    obtain ⟨c, hc, rfl⟩ := List.mem_map.mp hc'
+    obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc
+    have hsig' : params ∈ (normalizeModel m).sigEnv fullSig c.name := by
+      show params ∈ m.sigEnv fullSig c.name
+      exact hsig
+    have hF' : Forall2 (Expr.checkArg (normalizeModel m).staticEnv)
+        (c.args.map (inlineExpr (arrayDefs m))) params := by
+      apply forall2_map_left _ _ _ c.args params hF
+      intro e he pt hca
+      exact checkArg_inline hwf hgate hca
+        (gate_cons hgate c hc e he)
+    obtain ⟨vs', hev'⟩ := exists_mapM_eval_of_forall2 (m := normalizeModel m)
+      hndN hF'
+    have hag : ArgsAgree params vs' vs :=
+      argsAgree_inline_shape hwf hgate hF hev' hev
+    refine ⟨params, hsig', vs', hF', hev', ?_⟩
+    rw [show (inlineConstraint (arrayDefs m) c).name.name = c.name.name from rfl]
+    rw [fullDecodes_agree hag c.name.name]
+    exact hdec
 
 
 /-! ## Parameter reads of the compiled store -/

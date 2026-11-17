@@ -3251,20 +3251,20 @@ theorem Model.sigEnv_eq_of_predicates_nil {m : Model} (hpred : m.predicates = []
 /-- The standard `bool_not` signature. -/
 theorem fullSig_bool_not :
     fullSig (Ident.mk "bool_not") =
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool))] := by
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 /-- The standard `bool_eq` signature. -/
 theorem fullSig_bool_eq :
     fullSig (Ident.mk "bool_eq") =
-      some [.basic (.var (.par .bool)), .basic (.var (.par .bool))] := by
+      [[.basic (.var (.par .bool)), .basic (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 /-- The standard `int_lin_le` signature. -/
 theorem fullSig_int_lin_le :
     fullSig (Ident.mk "int_lin_le") =
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))] :=
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]] :=
   falseConstraint_sig
 
 /-- A name in the set table is a set name. -/
@@ -3397,8 +3397,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
     {taken : List String} (inv : se.Inv taken m) (hwf : WellFormed fullSig m) (hpred : m.predicates = [])
     {c : ConstraintItem} (hc : c ∈ m.constraints) {cs : List ConstraintItem}
     (h : rewriteConstraint se c = some cs) :
-    ∀ c' ∈ cs, ∃ params,
-      se.model.sigEnv fullSig c'.name = some params ∧
+    ∀ c' ∈ cs, ∃ params ∈ se.model.sigEnv fullSig c'.name,
       Forall2 (Expr.checkArg se.model.staticEnv) c'.args params := by
   have hpredse : se.model.predicates = [] := by rw [inv.predicates, hpred]
   have hsig : se.model.sigEnv fullSig = fullSig :=
@@ -3407,8 +3406,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
     Model.sigEnv_eq_of_predicates_nil hpred
   have kept : ∀ {c0 : ConstraintItem}, c0 ∈ m.constraints →
       constraintMentionsSet se c0 = false →
-      ∀ c' ∈ [c0], ∃ params,
-        se.model.sigEnv fullSig c'.name = some params ∧
+      ∀ c' ∈ [c0], ∃ params ∈ se.model.sigEnv fullSig c'.name,
         Forall2 (Expr.checkArg se.model.staticEnv) c'.args params := by
     intro c0 hc0 hfree c' hc'
     rw [List.mem_singleton] at hc'
@@ -3451,7 +3449,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
           rw [← hpb]
           exact inv.fresh_staticEnv hi hp
         exact ⟨[.basic (.var (.par .bool)), .basic (.var (.par .bool))],
-          by rw [hsig]; exact fullSig_bool_not,
+          by rw [hsig]; exact SigEnv.mem_of_eq_singleton fullSig_bool_not,
           pinBool_check ⟨true, hbstat⟩⟩
       case h_2 =>
         rename_i hbnone
@@ -3462,7 +3460,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
         subst hc'
         exact ⟨[.array .int (.par .int), .array .int (.var (.par .int)),
           .basic (.var (.par .int))],
-          by rw [hsig]; exact fullSig_int_lin_le,
+          by rw [hsig]; exact SigEnv.mem_of_eq_singleton fullSig_int_lin_le,
           falseConstraint_check _⟩
     case h_2 =>
       rename_i hinone
@@ -3509,16 +3507,18 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
               exact inv.fresh_staticEnv hi hp
             obtain ⟨params, hsigc, hF⟩ := hwf.constraintsChecked _ hc
             have hsigc' : m.sigEnv fullSig (Ident.mk "set_in_reif") =
-                some [.basic (.var (.par .int)),
+                [[.basic (.var (.par .int)),
                   .basic (.var (.par .setOfInt)),
-                  .basic (.var (.par .bool))] := by
+                  .basic (.var (.par .bool))]] := by
               rw [hsig_src]
               simp [fullSig, globalsSig, stdSig]
             have hparams : params =
                 [.basic (.var (.par .int)),
                   .basic (.var (.par .setOfInt)),
-                  .basic (.var (.par .bool))] :=
-              Option.some.inj (hsigc.symm.trans hsigc')
+                  .basic (.var (.par .bool))] := by
+              have h1 : params ∈ m.sigEnv fullSig (Ident.mk "set_in_reif") := hsigc
+              rw [hsigc'] at h1
+              exact List.mem_singleton.mp h1
             subst hparams
             have hFz : Expr.checkArg m.staticEnv (.basic (.ident hz))
                 (.basic (.var (.par .bool))) :=
@@ -3539,7 +3539,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
                   simp [exprNames, basicNames])
                 exact staticEnv_mem_setTaken hinv
             exact ⟨[.basic (.var (.par .bool)), .basic (.var (.par .bool))],
-              by rw [hsig]; exact fullSig_bool_eq,
+              by rw [hsig]; exact SigEnv.mem_of_eq_singleton fullSig_bool_eq,
               boolEq_check ⟨true, hbstat⟩ hzstat⟩
         case h_2 =>
           rename_i r' hr'
@@ -3555,7 +3555,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
             rw [← hpb]
             exact inv.fresh_staticEnv hi hp
           exact ⟨[.basic (.var (.par .bool)), .basic (.var (.par .bool))],
-            by rw [hsig]; exact fullSig_bool_not,
+            by rw [hsig]; exact SigEnv.mem_of_eq_singleton fullSig_bool_not,
             pinBool_check ⟨true, hbstat⟩⟩
         case h_3 =>
           rename_i r' hr'
@@ -3571,7 +3571,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
             rw [← hpb]
             exact inv.fresh_staticEnv hi hp
           exact ⟨[.basic (.var (.par .bool)), .basic (.var (.par .bool))],
-            by rw [hsig]; exact fullSig_bool_not,
+            by rw [hsig]; exact SigEnv.mem_of_eq_singleton fullSig_bool_not,
             pinBool_check ⟨true, hbstat⟩⟩
         case h_4 => cases h
       case h_2 =>
@@ -3591,16 +3591,18 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
             subst hc'
             obtain ⟨params, hsigc, hF⟩ := hwf.constraintsChecked _ hc
             have hsigc' : m.sigEnv fullSig (Ident.mk "set_in_reif") =
-                some [.basic (.var (.par .int)),
+                [[.basic (.var (.par .int)),
                   .basic (.var (.par .setOfInt)),
-                  .basic (.var (.par .bool))] := by
+                  .basic (.var (.par .bool))]] := by
               rw [hsig_src]
               simp [fullSig, globalsSig, stdSig]
             have hparams : params =
                 [.basic (.var (.par .int)),
                   .basic (.var (.par .setOfInt)),
-                  .basic (.var (.par .bool))] :=
-              Option.some.inj (hsigc.symm.trans hsigc')
+                  .basic (.var (.par .bool))] := by
+              have h1 : params ∈ m.sigEnv fullSig (Ident.mk "set_in_reif") := hsigc
+              rw [hsigc'] at h1
+              exact List.mem_singleton.mp h1
             subst hparams
             have hFz : Expr.checkArg m.staticEnv (.basic (.ident hz))
                 (.basic (.var (.par .bool))) :=
@@ -3621,7 +3623,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
                   simp [exprNames, basicNames])
                 exact staticEnv_mem_setTaken hinv
             exact ⟨[.basic (.var (.par .bool)), .basic (.var (.par .bool))],
-              by rw [hsig]; exact fullSig_bool_not,
+              by rw [hsig]; exact SigEnv.mem_of_eq_singleton fullSig_bool_not,
               pinBool_check hzstat⟩
         case h_2 =>
           rename_i r' hr'
@@ -3632,7 +3634,7 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
           subst hc'
           exact ⟨[.array .int (.par .int), .array .int (.var (.par .int)),
             .basic (.var (.par .int))],
-            by rw [hsig]; exact fullSig_int_lin_le,
+            by rw [hsig]; exact SigEnv.mem_of_eq_singleton fullSig_int_lin_le,
             falseConstraint_check _⟩
         case h_3 =>
           rename_i r' hr'
@@ -3662,6 +3664,329 @@ theorem rewriteConstraint_wf {m : Model} {se : SetExpansion}
         (Option.some.inj h).symm
       rw [hcs]
       exact kept hc (by simpa using hno)
+
+theorem bool_eq_not_globals : "bool_eq" ∉ globalsNames := by decide
+
+/-- A rewrite either keeps the source constraint or emits a core
+    constraint whose name is outside the global fragment. -/
+theorem rewriteConstraint_output {se : SetExpansion} {c : ConstraintItem}
+    {cs : List ConstraintItem} (h : rewriteConstraint se c = some cs) :
+    ∀ c' ∈ cs, c' = c ∨ c'.name.name ∉ globalsNames := by
+  rcases c with ⟨nm, args, anns⟩
+  unfold rewriteConstraint at h
+  split at h
+  · rename_i k S hname hargs
+    dsimp only at hname hargs
+    have hnm : nm = Ident.mk "set_in" := ident_eq_of_name hname
+    split at h
+    · rename_i i hinfo
+      split at h
+      · rename_i b hb
+        intro c' hc'
+        have hcs : cs = [pinBoolConstraint b true] := (Option.some.inj h).symm
+        rw [hcs, List.mem_singleton] at hc'
+        subst hc'
+        exact Or.inr (by simp [pinBoolConstraint, bool_not_not_globals])
+      · intro c' hc'
+        have hcs : cs = [falseConstraint] := (Option.some.inj h).symm
+        rw [hcs, List.mem_singleton] at hc'
+        subst hc'
+        exact Or.inr (by simp [falseConstraint, int_lin_le_not_globals])
+    · rename_i hnone
+      split at h
+      case isTrue => cases h
+      case isFalse =>
+        rename_i hno
+        intro c' hc'
+        have hcs : cs = [⟨nm, args, anns⟩] := (Option.some.inj h).symm
+        rw [hcs, List.mem_singleton] at hc'
+        exact Or.inl hc'
+  · rename_i k S r hname hargs
+    dsimp only at hname hargs
+    have hnm : nm = Ident.mk "set_in_reif" := ident_eq_of_name hname
+    split at h
+    · rename_i i hinfo
+      split at h
+      · rename_i b hb
+        split at h
+        · rename_i z hz
+          split at h
+          case isTrue => cases h
+          case isFalse =>
+            rename_i hznot
+            intro c' hc'
+            have hcs : cs = [boolEqConstraint b hz.name] := (Option.some.inj h).symm
+            rw [hcs, List.mem_singleton] at hc'
+            subst hc'
+            exact Or.inr (by simp [boolEqConstraint, bool_eq_not_globals])
+        · intro c' hc'
+          have hcs : cs = [pinBoolConstraint b true] := (Option.some.inj h).symm
+          rw [hcs, List.mem_singleton] at hc'
+          subst hc'
+          exact Or.inr (by simp [pinBoolConstraint, bool_not_not_globals])
+        · intro c' hc'
+          have hcs : cs = [pinBoolConstraint b false] := (Option.some.inj h).symm
+          rw [hcs, List.mem_singleton] at hc'
+          subst hc'
+          exact Or.inr (by simp [pinBoolConstraint, bool_not_not_globals])
+        · cases h
+      · split at h
+        · rename_i z hz
+          split at h
+          case isTrue => cases h
+          case isFalse =>
+            rename_i hznot
+            intro c' hc'
+            have hcs : cs = [pinBoolConstraint hz.name false] :=
+              (Option.some.inj h).symm
+            rw [hcs, List.mem_singleton] at hc'
+            subst hc'
+            exact Or.inr (by simp [pinBoolConstraint, bool_not_not_globals])
+        · intro c' hc'
+          have hcs : cs = [falseConstraint] := (Option.some.inj h).symm
+          rw [hcs, List.mem_singleton] at hc'
+          subst hc'
+          exact Or.inr (by simp [falseConstraint, int_lin_le_not_globals])
+        · intro c' hc'
+          have hcs : cs = [] := (Option.some.inj h).symm
+          rw [hcs] at hc'
+          simp at hc'
+        · cases h
+    · rename_i hnone
+      split at h
+      case isTrue => cases h
+      case isFalse =>
+        rename_i hno
+        intro c' hc'
+        have hcs : cs = [⟨nm, args, anns⟩] := (Option.some.inj h).symm
+        rw [hcs, List.mem_singleton] at hc'
+        exact Or.inl hc'
+  · rename_i hother
+    split at h
+    case isTrue => cases h
+    case isFalse =>
+      rename_i hno
+      intro c' hc'
+      have hcs : cs = [⟨nm, args, anns⟩] := (Option.some.inj h).symm
+      rw [hcs, List.mem_singleton] at hc'
+      exact Or.inl hc'
+
+/-- A source constraint kept by a rewrite mentions no removed set name. -/
+theorem rewriteConstraint_kept_mentionsSet {se : SetExpansion}
+    {c : ConstraintItem} {cs : List ConstraintItem}
+    (h : rewriteConstraint se c = some cs) (hc : c ∈ cs) :
+    constraintMentionsSet se c = false := by
+  rcases c with ⟨nm, args, anns⟩
+  unfold rewriteConstraint at h
+  split at h
+  · rename_i k S hname hargs
+    dsimp only at hname hargs
+    have hnm : nm = Ident.mk "set_in" := ident_eq_of_name hname
+    split at h
+    · rename_i i hinfo
+      split at h
+      · rename_i b hb
+        have hcs : cs = [pinBoolConstraint b true] := (Option.some.inj h).symm
+        rw [hcs, List.mem_singleton] at hc
+        have hnmEq : nm = (pinBoolConstraint b true).name := congrArg (fun c : ConstraintItem => c.name) hc
+        rw [hnm] at hnmEq
+        exact absurd hnmEq (by simp [pinBoolConstraint])
+      · have hcs : cs = [falseConstraint] := (Option.some.inj h).symm
+        rw [hcs, List.mem_singleton] at hc
+        have hnmEq : nm = (falseConstraint).name := congrArg (fun c : ConstraintItem => c.name) hc
+        rw [hnm] at hnmEq
+        exact absurd hnmEq (by simp [falseConstraint])
+    · split at h
+      case isTrue => cases h
+      case isFalse =>
+        rename_i hno
+        simpa using hno
+  · rename_i k S r hname hargs
+    dsimp only at hname hargs
+    have hnm : nm = Ident.mk "set_in_reif" := ident_eq_of_name hname
+    split at h
+    · rename_i i hinfo
+      split at h
+      · rename_i b hb
+        split at h
+        · rename_i z hz
+          split at h
+          case isTrue => cases h
+          case isFalse =>
+            have hcs : cs = [boolEqConstraint b hz.name] := (Option.some.inj h).symm
+            rw [hcs, List.mem_singleton] at hc
+            have hnmEq : nm = (boolEqConstraint b hz.name).name :=
+              congrArg (fun c : ConstraintItem => c.name) hc
+            rw [hnm] at hnmEq
+            exact absurd hnmEq (by simp [boolEqConstraint])
+        · have hcs : cs = [pinBoolConstraint b true] := (Option.some.inj h).symm
+          rw [hcs, List.mem_singleton] at hc
+          have hnmEq : nm = (pinBoolConstraint b true).name := congrArg (fun c : ConstraintItem => c.name) hc
+          rw [hnm] at hnmEq
+          exact absurd hnmEq (by simp [pinBoolConstraint])
+        · have hcs : cs = [pinBoolConstraint b false] := (Option.some.inj h).symm
+          rw [hcs, List.mem_singleton] at hc
+          have hnmEq : nm = (pinBoolConstraint b false).name := congrArg (fun c : ConstraintItem => c.name) hc
+          rw [hnm] at hnmEq
+          exact absurd hnmEq (by simp [pinBoolConstraint])
+        · cases h
+      · split at h
+        · rename_i z hz
+          split at h
+          case isTrue => cases h
+          case isFalse =>
+            have hcs : cs = [pinBoolConstraint hz.name false] :=
+              (Option.some.inj h).symm
+            rw [hcs, List.mem_singleton] at hc
+            have hnmEq : nm = (pinBoolConstraint hz.name false).name :=
+              congrArg (fun c : ConstraintItem => c.name) hc
+            rw [hnm] at hnmEq
+            exact absurd hnmEq (by simp [pinBoolConstraint])
+        · have hcs : cs = [falseConstraint] := (Option.some.inj h).symm
+          rw [hcs, List.mem_singleton] at hc
+          have hnmEq : nm = (falseConstraint).name := congrArg (fun c : ConstraintItem => c.name) hc
+          rw [hnm] at hnmEq
+          exact absurd hnmEq (by simp [falseConstraint])
+        · have hcs : cs = [] := (Option.some.inj h).symm
+          rw [hcs] at hc
+          simp at hc
+        · cases h
+    · split at h
+      case isTrue => cases h
+      case isFalse =>
+        rename_i hno
+        simpa using hno
+  · split at h
+    case isTrue => cases h
+    case isFalse =>
+      rename_i hno
+      simpa using hno
+
+/-- The shape stores of the source and expanded models agree on every
+    declared source name that is not a removed set variable. -/
+theorem SetExpansion.Inv.shapeStore_eq {m : Model} {se : SetExpansion}
+    {taken : List String} (inv : se.Inv taken m) (hwf : WellFormed fullSig m)
+    {x : Ident} (htaken : x.name ∈ setTaken m) (hnot : x.name ∉ se.setNames) :
+    se.model.shapeStore x = m.shapeStore x := by
+  obtain ⟨n', D⟩ := inv.decls
+  have hnuVar : ((se.model.variables.map (fun d => (d.name, d.shapeValue))).map
+      Prod.fst).Nodup := by
+    rw [show ((se.model.variables.map (fun d => (d.name, d.shapeValue))).map Prod.fst) =
+        se.model.variables.map (fun d => d.name) from by simp [List.map_map]]
+    exact nodup_ident_of_nodup_name D.vars_nodup
+  have hnuM : ((m.variables.map (fun d => (d.name, d.shapeValue))).map
+      Prod.fst).Nodup := by
+    rw [show ((m.variables.map (fun d => (d.name, d.shapeValue))).map Prod.fst) =
+        m.variables.map (fun d => d.name) from by simp [List.map_map]]
+    exact (List.nodup_append.mp hwf.valueNamesUnique).2.1
+  have hleft : ∀ {v : Value},
+      lookupIdent x (se.model.variables.map (fun d => (d.name, d.shapeValue))) =
+        some v →
+      lookupIdent x (m.variables.map (fun d => (d.name, d.shapeValue))) = some v := by
+    intro v hlk
+    obtain ⟨y, hy, hyn⟩ := lookupIdent_inv_mem x _ v hlk
+    obtain ⟨d, hd, hde⟩ := List.mem_map.mp hy
+    have hdn : d.name.name = x.name := by
+      have h1 : d.name = y := (Prod.mk.injEq ..).mp hde |>.1
+      rw [h1]; exact hyn
+    have hv : v = d.shapeValue := by
+      exact ((Prod.mk.injEq ..).mp hde |>.2).symm
+    rcases D.expanded d hd with hsrc | ⟨i, hi, p, hp, hdeq⟩
+    · have hmem : (d.name, d.shapeValue) ∈
+          m.variables.map (fun d => (d.name, d.shapeValue)) :=
+        List.mem_map.mpr ⟨d, hsrc, rfl⟩
+      have hlook := lookupIdent_of_mem hnuM hmem
+      rw [ident_eq_of_name hdn] at hlook
+      rw [hlook, hv]
+    · have hpd : d.name.name = p.1 := by rw [hdeq]; rfl
+      have hp' : p.1 = x.name := hpd.symm.trans hdn
+      exfalso
+      exact (D.fresh i hi p.1 (List.mem_map.mpr ⟨p, hp, rfl⟩))
+        (by rw [hp']; exact inv.superset x.name htaken)
+  have hright : ∀ {v : Value},
+      lookupIdent x (m.variables.map (fun d => (d.name, d.shapeValue))) =
+        some v →
+      lookupIdent x (se.model.variables.map (fun d => (d.name, d.shapeValue))) = some v := by
+    intro v hlk
+    obtain ⟨y, hy, hyn⟩ := lookupIdent_inv_mem x _ v hlk
+    obtain ⟨d, hd, hde⟩ := List.mem_map.mp hy
+    have hdn : d.name.name = x.name := by
+      have h1 : d.name = y := (Prod.mk.injEq ..).mp hde |>.1
+      rw [h1]; exact hyn
+    have hv : v = d.shapeValue := by
+      exact ((Prod.mk.injEq ..).mp hde |>.2).symm
+    rcases D.source d hd with hsrc | ⟨i, hi, ty, anns, heq, hty, huniv⟩
+    · have hmem : (d.name, d.shapeValue) ∈
+          se.model.variables.map (fun d => (d.name, d.shapeValue)) :=
+        List.mem_map.mpr ⟨d, hsrc, rfl⟩
+      have hlook := lookupIdent_of_mem hnuVar hmem
+      rw [ident_eq_of_name hdn] at hlook
+      rw [hlook, hv]
+    · exfalso
+      apply hnot
+      have hdname : d.name.name = i.name := by rw [heq]; rfl
+      rw [← hdn, hdname]
+      exact List.mem_map.mpr ⟨i, hi, rfl⟩
+  unfold Model.shapeStore
+  rw [inv.parameters]
+  cases hp : lookupIdent x (m.parameters.map (fun d => (d.name, d.value))) with
+  | some v => rfl
+  | none =>
+      show lookupIdent x (se.model.variables.map (fun d => (d.name, d.shapeValue))) =
+        lookupIdent x (m.variables.map (fun d => (d.name, d.shapeValue)))
+      cases hr : lookupIdent x (m.variables.map (fun d => (d.name, d.shapeValue))) with
+      | none =>
+          cases hl : lookupIdent x (se.model.variables.map
+              (fun d => (d.name, d.shapeValue))) with
+          | none => rfl
+          | some v => exact absurd (hleft hl) (by rw [hr]; simp)
+      | some v => exact hright hr
+
+/-- Evaluating an expression under the expanded shape store agrees with
+    the source shape store when all its names survive the expansion. -/
+theorem basicExpr_eval_shapeStore_eq {m : Model} {se : SetExpansion}
+    {taken : List String} (inv : se.Inv taken m) (hwf : WellFormed fullSig m)
+    {b : BasicExpr}
+    (h : ∀ x ∈ basicNames b, x ∈ setTaken m ∧ x ∉ se.setNames) :
+    b.eval se.model.shapeStore = b.eval m.shapeStore := by
+  cases b with
+  | lit l => rfl
+  | ident x =>
+      obtain ⟨ht, hn⟩ := h x.name (by simp [basicNames])
+      exact inv.shapeStore_eq hwf ht hn
+
+theorem expr_eval_shapeStore_eq {m : Model} {se : SetExpansion}
+    {taken : List String} (inv : se.Inv taken m) (hwf : WellFormed fullSig m)
+    {e : Expr}
+    (h : ∀ x ∈ exprNames e, x ∈ setTaken m ∧ x ∉ se.setNames) :
+    e.eval se.model.shapeStore = e.eval m.shapeStore := by
+  cases e with
+  | basic b => exact basicExpr_eval_shapeStore_eq inv hwf h
+  | array es =>
+      show (es.mapM (BasicExpr.eval se.model.shapeStore)).map Value.array =
+        (es.mapM (BasicExpr.eval m.shapeStore)).map Value.array
+      rw [mapM_congr_set (g := BasicExpr.eval m.shapeStore)]
+      intro b hb
+      exact basicExpr_eval_shapeStore_eq inv hwf
+        (fun x hx => h x (by
+          simp only [exprNames, List.mem_flatMap]
+          exact ⟨b, hb, hx⟩))
+
+theorem constraint_eval_shapeStore_eq {m : Model} {se : SetExpansion}
+    {taken : List String} (inv : se.Inv taken m) (hwf : WellFormed fullSig m)
+    {c : ConstraintItem} (hc : c ∈ m.constraints)
+    (hfree : constraintMentionsSet se c = false) :
+    c.args.mapM (Expr.eval se.model.shapeStore) =
+      c.args.mapM (Expr.eval m.shapeStore) := by
+  rw [mapM_congr_set (g := Expr.eval m.shapeStore)]
+  intro e he
+  exact expr_eval_shapeStore_eq inv hwf (fun x hx => by
+    refine ⟨wf_constraint_names_taken hwf c hc x ?_, ?_⟩
+    · simp only [constraintNames, List.mem_flatMap]
+      exact ⟨e, he, hx⟩
+    · exact constraintMentionsSet_eq_false hfree (by
+        simp only [constraintNames, List.mem_flatMap]
+        exact ⟨e, he, hx⟩))
 
 /-- A checked initializer or objective stays checked after the
     expansion. -/
@@ -3695,7 +4020,8 @@ theorem wf_setExpand {taken : List String} {m : Model} {se : SetExpansion}
       variableArrayLengths := ?_
       variableInitializers := ?_
       objectiveType := ?_
-      constraintsChecked := ?_ }
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · rw [inv.predicates]
     exact hwf.predNamesUnique
   · rw [inv.parameters, List.nodup_append]
@@ -3762,6 +4088,60 @@ theorem wf_setExpand {taken : List String} {m : Model} {se : SetExpansion}
     rw [hcons] at hc'
     obtain ⟨c, hc, cs, hcs, hc'cs⟩ := mem_flatten_of_mapM_some hmap c' hc'
     exact rewriteConstraint_wf inv hwf hpred hc hcs c' hc'cs
+  · intro c' hc'
+    have hpredse : se.model.predicates = [] := by
+      rw [inv.predicates]; exact hpred
+    have hndSe : (se.model.parameters.map (·.name) ++
+        se.model.variables.map (·.name)).Nodup := by
+      rw [inv.parameters, List.nodup_append]
+      have hsrc := hwf.valueNamesUnique
+      rw [List.nodup_append] at hsrc
+      obtain ⟨hpnd, _, hdisj⟩ := hsrc
+      refine ⟨hpnd, nodup_ident_of_nodup_name D.vars_nodup, ?_⟩
+      intro a ha b hb hab
+      obtain ⟨d, hd, hdn⟩ := List.mem_map.mp hb
+      rcases D.expanded d hd with hsrc' | ⟨i, hi, p, hp, heq⟩
+      · have hbv : b ∈ m.variables.map VarDeclItem.name :=
+          List.mem_map.mpr ⟨d, hsrc', hdn⟩
+        exact hdisj a ha b hbv hab
+      · have hpd : d.name.name = p.1 := by rw [heq]; rfl
+        have hbn : b.name = p.1 := (congrArg Ident.name hdn).symm.trans hpd
+        have hpa : p.1 = a.name := ((congrArg Ident.name hab).trans hbn).symm
+        have hfresh := D.fresh i hi p.1 (List.mem_map.mpr ⟨p, hp, rfl⟩)
+        have hat : a.name ∈ setTaken m := by
+          obtain ⟨d0, hd0, hd0n⟩ := List.mem_map.mp ha
+          exact List.mem_append_left _
+            (List.mem_map.mpr ⟨d0, hd0, congrArg Ident.name hd0n⟩)
+        exact hfresh (by rw [hpa]; exact inv.superset _ hat)
+    obtain ⟨css, hmap, hcons⟩ := inv.constraints
+    rw [hcons] at hc'
+    obtain ⟨c, hc, cs, hcs, hc'cs⟩ := mem_flatten_of_mapM_some hmap c' hc'
+    rcases rewriteConstraint_output hcs c' hc'cs with hEq | hng
+    · have hc'cs' : c ∈ cs := hEq ▸ hc'cs
+      have hfree := rewriteConstraint_kept_mentionsSet hcs hc'cs'
+      obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc
+      refine ⟨params, ?_, vs, ?_, ?_, ?_⟩
+      · rw [hEq]
+        rw [Model.sigEnv_eq_of_predicates_nil hpredse,
+          ← Model.sigEnv_eq_of_predicates_nil hpred]
+        exact hsig
+      · rw [hEq]
+        apply forall2_checkArg_staticEnv_eq hF
+        intro e he x hx
+        have hxnames : x ∈ constraintNames c := by
+          simp only [constraintNames, List.mem_flatMap]
+          exact ⟨e, he, hx⟩
+        exact inv.staticEnv_eq hwf (wf_constraint_names_taken hwf c hc x hxnames)
+          (constraintMentionsSet_eq_false hfree hxnames)
+      · rw [hEq, constraint_eval_shapeStore_eq inv hwf hc hfree]
+        exact hev
+      · rw [hEq]
+        exact hdec
+    · obtain ⟨params, hsig, hF⟩ :=
+        rewriteConstraint_wf inv hwf hpred hc hcs c' hc'cs
+      obtain ⟨vs, hev⟩ := exists_mapM_eval_of_forall2 (m := se.model) hndSe hF
+      exact ⟨params, hsig, vs, hF, hev,
+        fullDecodes_true_of_not_mem_globals hng _ _⟩
 
 end LeanFzn.Compiler
 

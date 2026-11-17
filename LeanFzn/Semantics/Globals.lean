@@ -131,460 +131,514 @@ def globalsSig : LeanFzn.Semantics.SigEnv := fun x =>
   match x.name with
   -- all-different family
   | "fzn_all_different_int" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_all_different_set" =>
-      some [.array .int (.var (.par .setOfInt))]
+      [[.array .int (.var (.par .setOfInt))]]
   | "fzn_all_disjoint" =>
-      some [.array .int (.var (.par .setOfInt))]
-  | "fzn_all_equal_int" => some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .setOfInt))]]
+  | "fzn_all_equal_int" =>
+      [[.array .int (.var (.par .int))]]
   | "fzn_all_equal_set" =>
-      some [.array .int (.var (.par .setOfInt))]
+      [[.array .int (.var (.par .setOfInt))]]
   | "fzn_alldifferent_except" =>
-      some [.array .int (.var (.par .int)), .basic (.par .setOfInt)]
+      [[.array .int (.var (.par .int)), .basic (.par .setOfInt)]]
   | "fzn_alldifferent_except_0" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_symmetric_all_different" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   -- counting
   | "fzn_nvalue" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .int))]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_among" =>
-      some [.basic (.var (.par .int)), .array .int (.var (.par .int)),
-        .basic (.par .setOfInt)]
+      [[.basic (.var (.par .int)), .array .int (.var (.par .int)),
+        .basic (.par .setOfInt)]]
   | "fzn_at_least_int" =>
-      some [.basic (.par .int), .array .int (.var (.par .int)),
-        .basic (.par .int)]
+      [[.basic (.par .int), .array .int (.var (.par .int)),
+        .basic (.par .int)]]
   | "fzn_at_most_int" =>
-      some [.basic (.par .int), .array .int (.var (.par .int)),
-        .basic (.par .int)]
+      [[.basic (.par .int), .array .int (.var (.par .int)),
+        .basic (.par .int)]]
   | "fzn_exactly_int" =>
-      some [.basic (.par .int), .array .int (.var (.par .int)),
-        .basic (.par .int)]
+      [[.basic (.par .int), .array .int (.var (.par .int)),
+        .basic (.par .int)]]
   | "fzn_count_eq" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "fzn_count_eq_par" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
-        .basic (.par .int)]
+      [[.array .int (.var (.par .int)), .basic (.par .int),
+        .basic (.par .int)]]
   | "fzn_count_geq" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "fzn_count_geq_par" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
-        .basic (.par .int)]
+      [[.array .int (.var (.par .int)), .basic (.par .int),
+        .basic (.par .int)]]
   | "fzn_count_gt" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "fzn_count_gt_par" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
-        .basic (.par .int)]
+      [[.array .int (.var (.par .int)), .basic (.par .int),
+        .basic (.par .int)]]
   | "fzn_count_leq" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "fzn_count_leq_par" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
-        .basic (.par .int)]
+      [[.array .int (.var (.par .int)), .basic (.par .int),
+        .basic (.par .int)]]
   | "fzn_count_lt" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "fzn_count_lt_par" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
-        .basic (.par .int)]
+      [[.array .int (.var (.par .int)), .basic (.par .int),
+        .basic (.par .int)]]
   | "fzn_count_neq" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "fzn_count_neq_par" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
-        .basic (.par .int)]
+      [[.array .int (.var (.par .int)), .basic (.par .int),
+        .basic (.par .int)]]
   | "fzn_distribute" =>
-      some [.array .int (.var (.par .int)), .array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_global_cardinality" =>
-      some [.array .int (.var (.par .int)), .array .int (.par .int),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .array .int (.par .int),
+        .array .int (.var (.par .int))]]
   | "fzn_global_cardinality_closed" =>
-      some [.array .int (.var (.par .int)), .array .int (.par .int),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .array .int (.par .int),
+        .array .int (.var (.par .int))]]
   | "fzn_global_cardinality_low_up" =>
-      some [.array .int (.var (.par .int)), .array .int (.par .int),
-        .array .int (.par .int), .array .int (.par .int)]
+      [[.array .int (.var (.par .int)), .array .int (.par .int),
+        .array .int (.par .int), .array .int (.par .int)]]
   | "fzn_global_cardinality_low_up_closed" =>
-      some [.array .int (.var (.par .int)), .array .int (.par .int),
-        .array .int (.par .int), .array .int (.par .int)]
+      [[.array .int (.var (.par .int)), .array .int (.par .int),
+        .array .int (.par .int), .array .int (.par .int)]]
   -- set counting
   | "fzn_count_eq_set" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "fzn_count_eq_set_par" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.par .setOfInt), .basic (.par .int)]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.par .setOfInt), .basic (.par .int)]]
   | "fzn_count_geq_set" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "fzn_count_gt_set" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "fzn_count_leq_set" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "fzn_count_lt_set" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "fzn_count_neq_set" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "fzn_at_least_set" =>
-      some [.basic (.par .int), .array .int (.var (.par .setOfInt)),
-        .basic (.par .setOfInt)]
+      [[.basic (.par .int), .array .int (.var (.par .setOfInt)),
+        .basic (.par .setOfInt)]]
   | "fzn_at_most_set" =>
-      some [.basic (.par .int), .array .int (.var (.par .setOfInt)),
-        .basic (.par .setOfInt)]
+      [[.basic (.par .int), .array .int (.var (.par .setOfInt)),
+        .basic (.par .setOfInt)]]
   | "fzn_exactly_set" =>
-      some [.basic (.par .int), .array .int (.var (.par .setOfInt)),
-        .basic (.par .setOfInt)]
+      [[.basic (.par .int), .array .int (.var (.par .setOfInt)),
+        .basic (.par .setOfInt)]]
   -- lex (1-D int only; the flat ones)
   | "fzn_lex_less_int" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_lex_lesseq_int" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   -- sorting
-  | "fzn_increasing_int" => some [.array .int (.var (.par .int))]
-  | "fzn_increasing_bool" => some [.array .int (.var (.par .bool))]
+  | "fzn_increasing_int" =>
+      [[.array .int (.var (.par .int))]]
+  | "fzn_increasing_bool" =>
+      [[.array .int (.var (.par .bool))]]
   | "fzn_strictly_increasing_int" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_sort" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_arg_sort_int" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_maximum_arg_int" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int))]]
   | "fzn_minimum_arg_int" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int))]]
   -- channeling
   | "fzn_inverse" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_inverse_in_range" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_int_set_channel" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .setOfInt))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .setOfInt))]]
   | "fzn_link_set_to_booleans" =>
-      some [.basic (.var (.par .setOfInt)),
-        .array .int (.var (.par .bool))]
+      [[.basic (.var (.par .setOfInt)),
+        .array .int (.var (.par .bool))]]
   -- array-related
   | "fzn_member_int" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int))]]
   | "fzn_member_bool" =>
-      some [.array .int (.var (.par .bool)), .basic (.var (.par .bool))]
+      [[.array .int (.var (.par .bool)), .basic (.var (.par .bool))]]
   | "fzn_member_set" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "fzn_arg_val_int" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int))]]
   | "fzn_arg_val_bool" =>
-      some [.array .int (.var (.par .bool)), .basic (.var (.par .bool)),
-        .basic (.var (.par .int))]
+      [[.array .int (.var (.par .bool)), .basic (.var (.par .bool)),
+        .basic (.var (.par .int))]]
   | "fzn_write" =>
-      some [.array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int)), .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_writes" =>
-      some [.array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)),
         .array .int (.var (.par .int)),
         .array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+        .array .int (.var (.par .int))]]
   -- set-related
   | "fzn_disjoint" =>
-      some [.basic (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.basic (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "fzn_set_member" =>
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "fzn_partition_set" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.par .setOfInt)]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.par .setOfInt)]]
   | "fzn_at_most1" =>
-      some [.array .int (.var (.par .setOfInt))]
+      [[.array .int (.var (.par .setOfInt))]]
   -- mathematical
   | "fzn_sum_set" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]
+      [[.array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .setOfInt)), .basic (.var (.par .int))]]
   | "fzn_sum_pred" =>
-      some [.basic (.var (.par .int)), .array .int (.par .setOfInt),
-        .array .int (.par .int), .basic (.var (.par .int))]
+      [[.basic (.var (.par .int)), .array .int (.par .setOfInt),
+        .array .int (.par .int), .basic (.var (.par .int))]]
   | "fzn_range" =>
-      some [.array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)),
         .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+        .basic (.var (.par .setOfInt))]]
   | "fzn_roots" =>
-      some [.array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)),
         .basic (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+        .basic (.var (.par .setOfInt))]]
   | "fzn_array_int_union" =>
-      some [.array .int (.var (.par .int)),
-        .basic (.var (.par .setOfInt))]
+      [[.array .int (.var (.par .int)),
+        .basic (.var (.par .setOfInt))]]
   | "fzn_array_set_union" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "fzn_array_set_intersect" =>
-      some [.array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+      [[.array .int (.var (.par .setOfInt)),
+        .basic (.var (.par .setOfInt))]]
   | "fzn_sliding_sum" =>
-      some [.basic (.par .int), .basic (.par .int),
-        .basic (.par .int), .array .int (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .basic (.par .int), .array .int (.var (.par .int))]]
   | "fzn_sliding_among_int" =>
-      some [.basic (.par .int), .basic (.par .int), .basic (.par .int),
-        .array .int (.var (.par .int)), .basic (.par .setOfInt)]
+      [[.basic (.par .int), .basic (.par .int), .basic (.par .int),
+        .array .int (.var (.par .int)), .basic (.par .setOfInt)]]
   | "fzn_sliding_among_bool" =>
-      some [.basic (.par .int), .basic (.par .int), .basic (.par .int),
-        .array .int (.var (.par .bool)), .basic (.par .bool)]
+      [[.basic (.par .int), .basic (.par .int), .basic (.par .int),
+        .array .int (.var (.par .bool)), .basic (.par .bool)]]
   -- packing
   | "fzn_bin_packing" =>
-      some [.basic (.par .int), .array .int (.var (.par .int)),
-        .array .int (.par .int)]
+      [[.basic (.par .int), .array .int (.var (.par .int)),
+        .array .int (.par .int)]]
   | "fzn_bin_packing_capa" =>
-      some [.array .int (.par .int),
-        .array .int (.var (.par .int)), .array .int (.par .int)]
+      [[.array .int (.par .int),
+        .array .int (.var (.par .int)), .array .int (.par .int)]]
   | "fzn_bin_packing_load" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int)), .array .int (.par .int)]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int)), .array .int (.par .int)]]
   | "fzn_knapsack" =>
-      some [.array .int (.par .int), .array .int (.par .int),
+      [[.array .int (.par .int), .array .int (.par .int),
         .array .int (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+        .basic (.var (.par .int))]]
   | "fzn_diffn" =>
-      some [.array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)),
         .array .int (.var (.par .int)),
         .array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+        .array .int (.var (.par .int))]]
   | "fzn_diffn_nonstrict" =>
-      some [.array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)),
         .array .int (.var (.par .int)),
         .array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+        .array .int (.var (.par .int))]]
   | "fzn_geost_nonoverlap_k" =>
-      some [.array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)),
         .array .int (.par .int),
         .array .int (.var (.par .int)),
-        .array .int (.par .int)]
+        .array .int (.par .int)]]
   -- scheduling
   | "fzn_disjunctive" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_disjunctive_strict" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_cumulative" =>
-      some [.array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)),
         .array .int (.var (.par .int)),
         .array .int (.var (.par .int)),
-        .basic (.var (.par .int))]
+        .basic (.var (.par .int))]]
   -- if-then-else (table-like)
   | "fzn_if_then_else_int" =>
-      some [.array .int (.var (.par .bool)),
-        .array .int (.par .int), .basic (.var (.par .int))]
+      [[.array .int (.var (.par .bool)),
+        .array .int (.par .int), .basic (.var (.par .int))]]
   | "fzn_if_then_else_bool" =>
-      some [.array .int (.var (.par .bool)),
-        .array .int (.par .bool), .basic (.var (.par .bool))]
+      [[.array .int (.var (.par .bool)),
+        .array .int (.par .bool), .basic (.var (.par .bool))]]
   | "fzn_if_then_else_set" =>
-      some [.array .int (.var (.par .bool)),
+      [[.array .int (.var (.par .bool)),
         .array .int (.par .setOfInt),
-        .basic (.var (.par .setOfInt))]
+        .basic (.var (.par .setOfInt))]]
   | "fzn_if_then_else_var_int" =>
-      some [.array .int (.var (.par .bool)),
+      [[.array .int (.var (.par .bool)),
         .array .int (.var (.par .int)),
-        .basic (.var (.par .int))]
+        .basic (.var (.par .int))]]
   | "fzn_if_then_else_var_bool" =>
-      some [.array .int (.var (.par .bool)),
+      [[.array .int (.var (.par .bool)),
         .array .int (.var (.par .bool)),
-        .basic (.var (.par .bool))]
+        .basic (.var (.par .bool))]]
   | "fzn_if_then_else_var_set" =>
-      some [.array .int (.var (.par .bool)),
+      [[.array .int (.var (.par .bool)),
         .array .int (.var (.par .setOfInt)),
-        .basic (.var (.par .setOfInt))]
+        .basic (.var (.par .setOfInt))]]
   -- extensional
   | "fzn_table_int" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.par .int)]
+      [[.array .int (.var (.par .int)),
+        .array .int (.par .int)]]
   -- value precedence
   | "fzn_value_precede_int" =>
-      some [.basic (.par .int), .basic (.par .int),
-        .array .int (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.var (.par .int))]]
   | "fzn_value_precede_chain_int" =>
-      some [.array .int (.par .int),
-        .array .int (.var (.par .int))]
+      [[.array .int (.par .int),
+        .array .int (.var (.par .int))]]
   | "fzn_seq_precede_chain_int" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   -- LexChain family (G24)
   | "fzn_lex_greater_int" =>
-      some [.array .int (.var (.par .int)), .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_lex_greatereq_int" =>
-      some [.array .int (.var (.par .int)), .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_lex_chain_less_int" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_lex_chain_lesseq_int" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_lex2" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_strict_lex2" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_lex_chain_lesseq_orbitope" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int)]
+      [[.array .int (.var (.par .int)), .basic (.par .int)]]
   | "fzn_lex_chain_greater_int" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_lex_chain_greatereq_int" =>
-      some [.array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int))]]
   | "fzn_lex_chain_greatereq_orbitope" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int)]
+      [[.array .int (.var (.par .int)), .basic (.par .int)]]
   -- Graph family (G25/G29)
-  | "fzn_circuit" => some [.array .int (.var (.par .int))]
-  | "fzn_subcircuit" => some [.array .int (.var (.par .int))]
+  | "fzn_circuit" =>
+      [[.array .int (.var (.par .int))]]
+  | "fzn_subcircuit" =>
+      [[.array .int (.var (.par .int))]]
   | "fzn_subgraph" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_dag" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]
+      [[.array .int (.par .int), .array .int (.par .int),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_connected" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]
+      [[.array .int (.par .int), .array .int (.par .int),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_dconnected" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]
+      [[.array .int (.par .int), .array .int (.par .int),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_reachable" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_dreachable" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_tree" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_dtree" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_path" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int)), .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)), .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)), .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_dpath" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int)), .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)), .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .basic (.var (.par .int)), .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool))]]
   | "fzn_bounded_path" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.par .int), .array .int (.var (.par .bool)),
-        .array .int (.var (.par .bool)), .basic (.var (.par .int)),
-        .basic (.var (.par .int)), .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .array .int (.par .int),
+        .basic (.var (.par .int)), .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .array .int (.par .int),
+        .basic (.var (.par .int)), .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))]]
   | "fzn_bounded_dpath" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.par .int), .array .int (.var (.par .bool)),
-        .array .int (.var (.par .bool)), .basic (.var (.par .int)),
-        .basic (.var (.par .int)), .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .array .int (.par .int),
+        .basic (.var (.par .int)), .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))],
+       [.array .int (.par .int), .array .int (.par .int),
+        .array .int (.par .int),
+        .basic (.var (.par .int)), .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))]]
   | "fzn_steiner" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.par .int), .array .int (.var (.par .bool)),
-        .array .int (.var (.par .bool)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .array .int (.par .int),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))]]
   | "fzn_dsteiner" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.par .int), .array .int (.var (.par .bool)),
-        .array .int (.var (.par .bool)), .basic (.var (.par .int)),
-        .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))]]
   | "fzn_wst" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.par .int), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .array .int (.par .int),
+        .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))]]
   | "fzn_dwst" =>
-      some [.array .int (.par .int), .array .int (.par .int),
-        .array .int (.par .int), .array .int (.var (.par .bool)),
-        .basic (.var (.par .int)), .basic (.var (.par .int))]
+      [[.basic (.par .int), .basic (.par .int),
+        .array .int (.par .int), .array .int (.par .int),
+        .array .int (.par .int),
+        .basic (.var (.par .int)),
+        .array .int (.var (.par .bool)),
+        .basic (.var (.par .int))]]
   -- Regular family (G27/G28)
   | "fzn_regular" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
+      [[.array .int (.var (.par .int)), .basic (.par .int),
         .basic (.par .int), .array .int (.par .int), .basic (.par .int),
-        .array .int (.par .int)]
+        .basic (.par .setOfInt)]]
   | "fzn_regular_nfa" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
+      [[.array .int (.var (.par .int)), .basic (.par .int),
         .basic (.par .int), .array .int (.par .setOfInt), .basic (.par .int),
-        .array .int (.par .int)]
+        .basic (.par .setOfInt)]]
   | "fzn_cost_regular" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
+      [[.array .int (.var (.par .int)), .basic (.par .int),
         .basic (.par .int), .array .int (.par .int), .basic (.par .int),
-        .array .int (.par .int), .array .int (.par .int),
-        .basic (.var (.par .int))]
+        .basic (.par .setOfInt), .array .int (.par .int),
+        .basic (.var (.par .int))]]
   | "fzn_mdd" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
+      [[.array .int (.var (.par .int)), .basic (.par .int),
         .array .int (.par .int), .basic (.par .int),
         .array .int (.par .int), .array .int (.par .setOfInt),
-        .array .int (.par .int)]
+        .array .int (.par .int)]]
   | "fzn_mdd_nondet" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
+      [[.array .int (.var (.par .int)), .basic (.par .int),
         .array .int (.par .int), .basic (.par .int),
         .array .int (.par .int), .array .int (.par .setOfInt),
-        .array .int (.par .int)]
+        .array .int (.par .int)]]
   | "fzn_cost_mdd" =>
-      some [.array .int (.var (.par .int)), .basic (.par .int),
+      [[.array .int (.var (.par .int)), .basic (.par .int),
         .array .int (.par .int), .basic (.par .int),
         .array .int (.par .int), .array .int (.par .setOfInt),
         .array .int (.par .int), .array .int (.par .int),
-        .basic (.var (.par .int))]
+        .basic (.var (.par .int))]]
   -- Sched2 family (G26/G30/G31/G32)
   | "fzn_cumulatives" =>
-      some [.array .int (.var (.par .int)), .array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)), .array .int (.var (.par .int)),
         .array .int (.var (.par .int)), .array .int (.var (.par .int)),
         .array .int (.var (.par .int)), .basic (.par .bool),
-        .basic (.par .int)]
+        .basic (.par .int)]]
   | "fzn_cumulatives_decomp" =>
-      some [.array .int (.var (.par .int)), .array .int (.var (.par .int)),
+      [[.array .int (.var (.par .int)), .array .int (.var (.par .int)),
         .array .int (.var (.par .int)), .array .int (.var (.par .int)),
-        .array .int (.var (.par .int)), .basic (.par .bool)]
+        .array .int (.var (.par .int)), .basic (.par .bool)]]
   | "fzn_geost" =>
-      some [.basic (.par .int), .array .int (.par .int),
+      [[.basic (.par .int), .array .int (.par .int),
         .array .int (.par .int), .array .int (.par .setOfInt),
-        .array .int (.var (.par .int)), .array .int (.var (.par .int))]
+        .array .int (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_geost_bb" =>
-      some [.basic (.par .int), .array .int (.par .int),
+      [[.basic (.par .int), .array .int (.par .int),
         .array .int (.par .int), .array .int (.par .setOfInt),
         .array .int (.var (.par .int)), .array .int (.var (.par .int)),
-        .array .int (.var (.par .int)), .array .int (.var (.par .int))]
+        .array .int (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_geost_smallest_bb" =>
-      some [.basic (.par .int), .array .int (.par .int),
+      [[.basic (.par .int), .array .int (.par .int),
         .array .int (.par .int), .array .int (.par .setOfInt),
         .array .int (.var (.par .int)), .array .int (.var (.par .int)),
-        .array .int (.var (.par .int)), .array .int (.var (.par .int))]
+        .array .int (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_diffn_nonoverlap_k" =>
-      some [.array .int (.var (.par .int)), .array .int (.var (.par .int)),
-        .array .int (.var (.par .int)), .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .array .int (.var (.par .int)),
+        .array .int (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_diffn_k" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_diffn_nonstrict_k" =>
-      some [.array .int (.var (.par .int)),
-        .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)),
+        .array .int (.var (.par .int))]]
   | "fzn_writes_seq" =>
-      some [.array .int (.var (.par .int)), .array .int (.var (.par .int)),
-        .array .int (.var (.par .int)), .array .int (.var (.par .int))]
+      [[.array .int (.var (.par .int)), .array .int (.var (.par .int)),
+        .array .int (.var (.par .int)), .array .int (.var (.par .int))]]
   | "fzn_if_then_else_partiality" =>
-      some [.array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
-        .basic (.var (.par .bool))]
-  | _ => none
+      [[.array .int (.var (.par .bool)), .array .int (.var (.par .bool)),
+        .basic (.var (.par .bool))]]
+  | _ => []
 
 /-- The combined signature environment: the standard FlatZinc
     builtins plus the global constraints. -/
 def fullSig : LeanFzn.Semantics.SigEnv := fun x =>
   match globalsSig x with
-  | some ps => some ps
-  | none => LeanFzn.Semantics.stdSig x
+  | [] => LeanFzn.Semantics.stdSig x
+  | ps => ps
 
 /-! ## The unsupported global constraints
 
@@ -732,6 +786,58 @@ def globalsInterpB : LeanFzn.Ident → List Value → Bool := fun x =>
   else if x.name ∈ regularNames then Regular.regularInterpB x
   else if x.name ∈ sched2Names then Sched2.sched2InterpB x
   else fun _ => false
+
+/-- **Decodability gate of the global fragment.**  For each supported
+    name it is the `isSome` of the very decoder the family interpreter
+    uses; it is neutral (`true`) on every other name.  The dispatch
+    order is exactly that of `globalsInterp`. -/
+def globalsDecodes (n : String) (args : List Value) : Bool :=
+  if n ∈ allDiffNames then AllDiffCounting.allDiffDecodes n args
+  else if n ∈ lexSortNames then LexSort.lexSortDecodes n args
+  else if n ∈ packSchedNames then PackSched.packSchedDecodes n args
+  else if n ∈ countingNames then Counting.countingDecodes n args
+  else if n ∈ channelingNames then Channeling.channelingDecodes n args
+  else if n ∈ setMathNames then SetMath.setMathDecodes n args
+  else if n ∈ lexChainNames then LexChain.lexChainDecodes n args
+  else if n ∈ graphNames then Graph.graphDecodes n args
+  else if n ∈ regularNames then Regular.regularDecodes n args
+  else if n ∈ sched2Names then Sched2.sched2Decodes n args
+  else true
+
+/-- **Full decodability**: the family decoder succeeds and, for the
+    `regular` family, the signature's parameter positions satisfy the
+    par condition the decoder's agreement proof needs (only `xs` and the
+    trailing total-cost output may be variables).  The gate is `true`
+    outside `regularNames`. -/
+def fullDecodes (n : String) (params : List PredParamType) (args : List Value) : Bool :=
+  globalsDecodes n args && Regular.regularGateParB n params
+
+/-- `fullDecodes` is invariant under `ArgsAgree`: no separate parameter
+    hypothesis is needed, because the regular gate is a Boolean conjunct
+    of the conclusion.  When the gate fails, both sides are `false`. -/
+theorem fullDecodes_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) (n : String) :
+    fullDecodes n params vs = fullDecodes n params ws := by
+  unfold fullDecodes
+  cases hgate : Regular.regularGateParB n params with
+  | false => simp [hgate]
+  | true =>
+    simp only [hgate, Bool.and_true]
+    unfold globalsDecodes
+    repeat' split
+    all_goals
+      first
+      | exact AllDiffCounting.allDiffDecodes_agree h n
+      | exact LexSort.lexSortDecodes_agree h n
+      | exact PackSched.packSchedDecodes_agree h n
+      | exact Counting.countingDecodes_agree h n
+      | exact Channeling.channelingDecodes_agree h n
+      | exact SetMath.setMathDecodes_agree h n
+      | exact LexChain.lexChainDecodes_agree h n
+      | exact Graph.graphDecodes_agree h n
+      | exact Regular.regularDecodes_agree_gated h n hgate
+      | exact Sched2.sched2Decodes_agree h n
+      | rfl
 
 /-! ### Family disjointness
 
@@ -1520,7 +1626,7 @@ private theorem fullInterpB_std_iff {n : String} {args : List Value}
 /-- Every checkable standard-library name is outside the ten family
     name lists (no standard name starts with `fzn_`; each family list
     contains only such names). -/
-private theorem std_name_not_global {n : String}
+theorem std_name_not_global {n : String}
     (h : n ∈ LeanFzn.Semantics.Evaluation.checkableNames) : n ∉ globalsNames := by
   intro hmem
   rw [LeanFzn.Semantics.Evaluation.checkableNames, List.mem_append] at h
@@ -2441,3 +2547,500 @@ theorem dispatchMap_isSome_iff_mem {n : String} :
     rfl
 
 end LeanFzn.Semantics.Globals
+
+/-! ## Static well-formedness with decodability
+
+`WellFormed` and its executable twin live here rather than in
+`LeanFzn.Semantics.Model`, because the decodability conjunct refers to
+the global-constraint decoders, which are downstream of `Model`. -/
+
+namespace LeanFzn.Semantics
+
+open LeanFzn
+open LeanFzn.Semantics.Globals
+
+/-- **Static well-formedness** of a model under the external signature
+    environment `sig` (R8, A3).  Captures the context-sensitive rules of
+    the supported fragment:
+
+    * R4: predicate names are distinct; parameters and variables share
+      one value namespace and are distinct; predicate formals are distinct.
+    * R18/R20: parameter initializers are literals of the declared type,
+      and parameter array lengths match the index set.
+    * R22: variable array lengths match the index set.
+    * R26/R6: variable initializers (fixings and aliases) have the
+      declared type.
+    * R7: `minimize`/`maximize` objectives have type `int`.
+    * R8/R13-R15: every constraint's predicate is available (declared
+      in the model or in `sig`) and its arguments match the signature,
+      with par-to-var coercion.
+    * H2: every constraint's arguments, evaluated in the shape store,
+      are accepted by the decodability gate of a matching signature, so
+      a well-formed model never reaches a decoder's "wrong shape" case
+      for a parameter-honest store whose variables respect their domains.
+
+    Reversed ranges are deliberately *not* rejected: they denote the
+    empty set (R1).  Fixed values outside a variable's domain make a
+    model unsatisfiable rather than ill-formed, and parameter data
+    outside its type is an instance error (A5), so neither is checked
+    here. -/
+structure WellFormed (sig : SigEnv) (m : Model) : Prop where
+  /-- R4: no duplicate predicate declarations. -/
+  predNamesUnique : (m.predicates.map (·.name)).Nodup
+  /-- R4: parameters and variables share one value namespace. -/
+  valueNamesUnique :
+    (m.parameters.map (·.name) ++ m.variables.map (·.name)).Nodup
+  /-- R4: predicate formal parameter names are distinct. -/
+  predParamsUnique : ∀ p ∈ m.predicates, (p.params.map (·.name)).Nodup
+  /-- R18/R20: parameter types and array lengths. -/
+  parameterTypes : ∀ d ∈ m.parameters, match d with
+    | .basic t _ v => v.type = t.base
+    | .array idx t _ vs => vs.length = idx.length ∧ ∀ v ∈ vs, v.type = t.base
+  /-- R22: variable array lengths match the declared index set. -/
+  variableArrayLengths : ∀ d ∈ m.variables, match d with
+    | .array ty _ _ values => values.length = ty.idx.length
+    | _ => True
+  /-- R26/R6: variable initializers have the declared type. -/
+  variableInitializers : ∀ d ∈ m.variables, match d with
+    | .basic t _ _ (some v) => v.hasBaseType m.staticEnv t.base
+    | .array ty _ _ values =>
+        ∀ v ∈ values, v.hasBaseType m.staticEnv ty.elem.base
+    | _ => True
+  /-- R7: optimization objectives have type `int`. -/
+  objectiveType : match m.solve with
+    | .satisfy _ => True
+    | .minimize _ e | .maximize _ e => e.hasBaseType m.staticEnv .int
+  /-- R8/R13-R15: constraints match one of the available signatures. -/
+  constraintsChecked : ∀ c ∈ m.constraints, ∃ params ∈ m.sigEnv sig c.name,
+    Forall2 (Expr.checkArg m.staticEnv) c.args params
+  /-- H2: the constraint's arguments, evaluated in the shape store, are
+      accepted by the decodability gate of a matching signature.  The
+      signature is bundled so that a user-declared overload is handled
+      by the same gate. -/
+  constraintsDecode : ∀ c ∈ m.constraints, ∃ params ∈ m.sigEnv sig c.name,
+    ∃ vs, Forall2 (Expr.checkArg m.staticEnv) c.args params ∧
+      c.args.mapM (Expr.eval m.shapeStore) = some vs ∧
+      fullDecodes c.name.name params vs = true
+
+/-- **Executable static checker**: `wellFormedB sig m` computes the static
+    well-formedness of `m` under the signature environment `sig`.
+    `wellFormedB_iff` proves it equivalent to the `WellFormed`
+    predicate. -/
+def wellFormedB (sig : SigEnv) (m : Model) : Bool :=
+  nodupIdentB (m.predicates.map (·.name)) &&
+  nodupIdentB (m.parameters.map (·.name) ++ m.variables.map (·.name)) &&
+  m.predicates.all (fun p => nodupIdentB (p.params.map (·.name))) &&
+  m.parameters.all (fun d => parDeclCheckB d) &&
+  m.variables.all (fun d => varDeclArrayLenB d) &&
+  m.variables.all (fun d => varDeclInitB m.staticEnv d) &&
+  solveObjB m.staticEnv m.solve &&
+  m.constraints.all (fun c =>
+    (m.sigEnv sig c.name).any (fun params =>
+      checkArgsB m.staticEnv c.args params &&
+      (match c.args.mapM (Expr.eval m.shapeStore) with
+       | some vs => fullDecodes c.name.name params vs
+       | none => false)))
+
+theorem wellFormedB_iff (sig : SigEnv) (m : Model) :
+    wellFormedB sig m = true ↔ WellFormed sig m := by
+  unfold wellFormedB
+  simp only [Bool.and_eq_true, List.all_eq_true]
+  constructor
+  · rintro ⟨⟨⟨⟨⟨⟨⟨h1, h2⟩, h3⟩, h4⟩, h5⟩, h6⟩, h7⟩, h8⟩
+    refine ⟨nodupIdentB_iff.mp h1, nodupIdentB_iff.mp h2, ?_, ?_, ?_, ?_, ?_,
+      ?_, ?_⟩
+    · intro p hp; exact nodupIdentB_iff.mp (h3 p hp)
+    · intro d hd; exact parDeclCheckB_iff.mp (h4 d hd)
+    · intro d hd; exact varDeclArrayLenB_iff.mp (h5 d hd)
+    · intro d hd; exact varDeclInitB_iff.mp (h6 d hd)
+    · exact solveObjB_iff.mp h7
+    · intro c hc
+      obtain ⟨params, hmem, hboth⟩ := List.any_eq_true.mp (h8 c hc)
+      have hboth' : checkArgsB m.staticEnv c.args params = true ∧
+          (match c.args.mapM (Expr.eval m.shapeStore) with
+            | some vs => fullDecodes c.name.name params vs
+            | none => false) = true := by
+        simpa only [Bool.and_eq_true] using hboth
+      have hchk : checkArgsB m.staticEnv c.args params = true := hboth'.1
+      have hdec : (match c.args.mapM (Expr.eval m.shapeStore) with
+          | some vs => fullDecodes c.name.name params vs
+          | none => false) = true := hboth'.2
+      exact ⟨params, hmem, checkArgsB_iff.mp hchk⟩
+    · intro c hc
+      obtain ⟨params, hmem, hboth⟩ := List.any_eq_true.mp (h8 c hc)
+      have hboth' : checkArgsB m.staticEnv c.args params = true ∧
+          (match c.args.mapM (Expr.eval m.shapeStore) with
+            | some vs => fullDecodes c.name.name params vs
+            | none => false) = true := by
+        simpa only [Bool.and_eq_true] using hboth
+      have hchk : checkArgsB m.staticEnv c.args params = true := hboth'.1
+      have hdec : (match c.args.mapM (Expr.eval m.shapeStore) with
+          | some vs => fullDecodes c.name.name params vs
+          | none => false) = true := hboth'.2
+      cases hev : c.args.mapM (Expr.eval m.shapeStore) with
+      | none => rw [hev] at hdec; simp at hdec
+      | some vs =>
+        refine ⟨params, hmem, vs, checkArgsB_iff.mp hchk, rfl, ?_⟩
+        rw [hev] at hdec
+        simpa using hdec
+  · rintro ⟨h1, h2, h3, h4, h5, h6, h7, _, h9⟩
+    refine ⟨⟨⟨⟨⟨⟨⟨nodupIdentB_iff.mpr h1, nodupIdentB_iff.mpr h2⟩,
+      fun p hp => nodupIdentB_iff.mpr (h3 p hp)⟩,
+      fun d hd => parDeclCheckB_iff.mpr (h4 d hd)⟩,
+      fun d hd => varDeclArrayLenB_iff.mpr (h5 d hd)⟩,
+      fun d hd => varDeclInitB_iff.mpr (h6 d hd)⟩,
+      solveObjB_iff.mpr h7⟩,
+      fun c hc => by
+        obtain ⟨params, hmem, vs, hpk, hev, hdec⟩ := h9 c hc
+        refine List.any_eq_true.mpr ⟨params, hmem, ?_⟩
+        simp only [checkArgsB_iff.mpr hpk, hev, hdec, Bool.true_and]⟩
+
+/-- The decodability gate is neutral on every name outside the ten
+    global families. -/
+theorem fullDecodes_true_of_not_mem_globals {n : String}
+    (h : n ∉ globalsNames) (params : List PredParamType) (args : List Value) :
+    fullDecodes n params args = true := by
+  have h1 : n ∉ allDiffNames := fun hn => h (globals_mem_of_family.1 hn)
+  have h2 : n ∉ lexSortNames := fun hn => h (globals_mem_of_family.2.1 hn)
+  have h3 : n ∉ packSchedNames := fun hn => h (globals_mem_of_family.2.2.1 hn)
+  have h4 : n ∉ countingNames := fun hn => h (globals_mem_of_family.2.2.2.1 hn)
+  have h5 : n ∉ channelingNames := fun hn => h (globals_mem_of_family.2.2.2.2.1 hn)
+  have h6 : n ∉ setMathNames := fun hn => h (globals_mem_of_family.2.2.2.2.2.1 hn)
+  have h7 : n ∉ lexChainNames := fun hn => h (globals_mem_of_family.2.2.2.2.2.2.1 hn)
+  have h8 : n ∉ graphNames := fun hn => h (globals_mem_of_family.2.2.2.2.2.2.2.1 hn)
+  have h9 : n ∉ regularNames := fun hn => h (globals_mem_of_family.2.2.2.2.2.2.2.2.1 hn)
+  have h10 : n ∉ sched2Names := fun hn => h (globals_mem_of_family.2.2.2.2.2.2.2.2.2 hn)
+  have hgate : Regular.regularGateParB n params = true := by
+    have hreg : n ∉ regularNames := h9
+    simp only [regularNames, List.mem_cons, List.not_mem_nil, or_false,
+      not_or] at hreg
+    obtain ⟨hr1, hr2, hr3, hr4, hr5, hr6⟩ := hreg
+    simp [Regular.regularGateParB, hr1, hr2, hr3, hr4, hr5, hr6]
+  simp [fullDecodes, globalsDecodes, h1, h2, h3, h4,
+    h5, h6, h7, h8, h9, h10, hgate]
+
+
+/-- A statically checked argument list has a successful shape evaluation. -/
+theorem exists_mapM_eval_of_forall2 {m : Model} {args : List Expr}
+    {params : List PredParamType}
+    (hnd : (m.parameters.map (·.name) ++ m.variables.map (·.name)).Nodup)
+    (h : Forall2 (Expr.checkArg m.staticEnv) args params) :
+    ∃ vs, args.mapM (Expr.eval m.shapeStore) = some vs := by
+  induction args generalizing params with
+  | nil =>
+      cases params with
+      | nil => exact ⟨[], rfl⟩
+      | cons p ps => simp [Forall2] at h
+  | cons a rest ih =>
+      cases params with
+      | nil => simp [Forall2] at h
+      | cons p ps =>
+          simp only [Forall2] at h
+          obtain ⟨hhead, htail⟩ := h
+          obtain ⟨v, hv⟩ := Option.isSome_iff_exists.mp
+            (eval_isSome_of_checkArg hnd hhead)
+          obtain ⟨vs, hvs⟩ := ih htail
+          exact ⟨v :: vs, mapM_cons_some hv hvs⟩
+
+
+/-- Convenience: static well-formedness under the standard signatures. -/
+def stdWellFormed (m : Model) : Bool := wellFormedB stdSig m
+
+/-- `store` satisfies the well-formed model `m` under the predicate
+    interpretation `pred`.
+
+    `Satisfies` constrains the store on the model's *variables* only:
+    it does not require the store to give each parameter its declared
+    value.  A store that rebinds a parameter can therefore satisfy
+    constraints that the model's actual parameter values violate.
+    Statements about solutions of a FlatZinc instance must add
+    `ParamHonest m store` (as `IsSolution` does); the solution checker
+    guarantees it for the stores it accepts. -/
+def Satisfies (sig : SigEnv) (pred : PredicateInterpretation) (m : Model)
+    (store : Store) : Prop :=
+  WellFormed sig m ∧ SatisfiesDyn pred m store
+
+/-- Optimality among the instance's solutions.  The competing stores
+    must be parameter-honest: otherwise a store rebinding a parameter
+    could beat the true optimum. -/
+def IsOptimal (sig : SigEnv) (pred : PredicateInterpretation) (m : Model)
+    (store : Store) : Prop :=
+  match m.solve with
+  | .satisfy _ => True
+  | .minimize _ _ => ∀ other i j, Satisfies sig pred m other → ParamHonest m other →
+      m.solve.objective store = some i → m.solve.objective other = some j → i ≤ j
+  | .maximize _ _ => ∀ other i j, Satisfies sig pred m other → ParamHonest m other →
+      m.solve.objective store = some i → m.solve.objective other = some j → j ≤ i
+
+/-- A complete, parameter-honest satisfying assignment which also
+    realizes the solve goal. -/
+def IsSolution (sig : SigEnv) (pred : PredicateInterpretation) (m : Model)
+    (store : Store) : Prop :=
+  Satisfies sig pred m store ∧ ParamHonest m store ∧ ObjectiveAttained m store ∧
+    IsOptimal sig pred m store
+
+/-- Parameters have the same value in every parameter-honest store and in
+    the shape store. -/
+theorem shapeStore_eq_param {m : Model} {store : Store}
+    (hwf : WellFormed sig m) (hpar : ParamHonest m store)
+    {d : ParDeclItem} (hd : d ∈ m.parameters) :
+    store d.name = m.shapeStore d.name ∧ m.shapeStore d.name = some d.value := by
+  have hnd : (m.parameters.map (·.name)).Nodup :=
+    (List.nodup_append.mp hwf.valueNamesUnique).1
+  exact ⟨(hpar d hd).trans (shapeStore_param hnd hd).symm,
+    shapeStore_param hnd hd⟩
+
+/-- A variable's value in a domain-respecting store has the same shape as
+    its declared dummy in the shape store. -/
+theorem var_value_sameShape_shapeStore {m : Model} {store : Store}
+    (hwf : WellFormed sig m) (hdom : VarsRespect m store)
+    {d : VarDeclItem} (hd : d ∈ m.variables)
+    {v w : Value} (hv : store d.name = some v) (hw : m.shapeStore d.name = some w) :
+    v.SameShape w := by
+  have hnd := hwf.valueNamesUnique
+  have hshape := shapeStore_var hnd hd
+  rw [hshape] at hw
+  have hwv : d.shapeValue = w := Option.some.inj hw
+  rw [← hwv]
+  cases d with
+  | basic ty n ints init =>
+      obtain ⟨v0, hv0, hc⟩ := hdom _ hd
+      simp only [VarDeclItem.name] at hv hv0
+      rw [hv0] at hv
+      have hvv : v0 = v := Option.some.inj hv
+      rw [← hvv]
+      exact BasicVarType.sameShape_dummy hc
+  | array ty n ints init =>
+      obtain ⟨vs, hvs, hlen, hc⟩ := hdom _ hd
+      simp only [VarDeclItem.name] at hv hvs
+      rw [hvs] at hv
+      have hvv : Value.array vs = v := Option.some.inj hv
+      rw [← hvv]
+      exact .array (ListSameShape.replicate vs ty.idx.length hlen
+        (fun z hz => BasicVarType.sameShape_dummy (hc z hz)))
+
+
+/-- Static environment lookup at a parameter: the store and the shape store
+    agree definitionally. -/
+theorem store_eq_shapeStore_of_param_ident {m : Model} {store : Store} {sig}
+    (hwf : WellFormed sig m) (hpar : ParamHonest m store) {x : Ident} {ft : FznType}
+    (henv : m.staticEnv x = some (ft, false)) :
+    store x = m.shapeStore x := by
+  obtain ⟨d, hd, hdname, _⟩ := staticEnv_param henv
+  have hnd : (m.parameters.map (·.name)).Nodup :=
+    (List.nodup_append.mp hwf.valueNamesUnique).1
+  have hs := shapeStore_param hnd hd
+  have hp := hpar d hd
+  rw [hdname] at hs hp
+  rw [hp, hs]
+
+/-- Static environment lookup at a variable: the value in a
+    domain-respecting store has the shape of the declared dummy. -/
+theorem sameShape_of_var_ident {m : Model} {store : Store} {sig}
+    (hwf : WellFormed sig m) (hdom : VarsRespect m store) {x : Ident} {ft : FznType}
+    (henv : m.staticEnv x = some (ft, true)) {v w : Value}
+    (hv : store x = some v) (hw : m.shapeStore x = some w) :
+    v.SameShape w := by
+  obtain ⟨d, hd, hdname, _⟩ := staticEnv_var henv
+  rw [← hdname] at hv hw
+  exact var_value_sameShape_shapeStore hwf hdom hd hv hw
+
+/-- Agreement at an identifier occurrence, given the static environment
+    says parameter (`false`) or variable (`true`). -/
+theorem agree_of_ident_at {m : Model} {store : Store} {sig}
+    (hwf : WellFormed sig m) (hpar : ParamHonest m store)
+    (hdom : VarsRespect m store) {x : Ident} {ft : FznType} {isVar : Bool}
+    (henv : m.staticEnv x = some (ft, isVar)) {par : Bool}
+    (hparb : par = true → isVar = false) {v w : Value}
+    (hv : store x = some v) (hw : m.shapeStore x = some w) :
+    Value.Agree par v w := by
+  cases par with
+  | true =>
+      have hisVar : isVar = false := hparb rfl
+      subst hisVar
+      have heq := store_eq_shapeStore_of_param_ident hwf hpar henv
+      rw [heq] at hv
+      exact Option.some.inj (hv.symm.trans hw)
+  | false =>
+      cases isVar with
+      | false =>
+          have heq := store_eq_shapeStore_of_param_ident hwf hpar henv
+          rw [heq] at hv
+          rw [Option.some.inj (hv.symm.trans hw)]
+          exact Value.SameShape.refl _
+      | true =>
+          exact sameShape_of_var_ident hwf hdom henv hv hw
+
+/-- A basic expression that checks against a predicate parameter type has
+    agreeing values in a parameter-honest, domain-respecting store and in
+    the shape store. -/
+theorem agree_of_checkBase {m : Model} {store : Store} {sig}
+    (hwf : WellFormed sig m) (hpar : ParamHonest m store)
+    (hdom : VarsRespect m store)
+    {b : BasicExpr} {bt : BasicPredParamType} (hb : b.checkBase m.staticEnv bt)
+    {v w : Value} (hv : b.eval store = some v) (hw : b.eval m.shapeStore = some w) :
+    Value.Agree bt.isPar v w := by
+  cases b with
+  | lit l =>
+      simp only [BasicExpr.eval, Option.some.injEq] at hv hw
+      subst hv; subst hw
+      cases bt.isPar with
+      | false => exact Value.SameShape.refl _
+      | true => rfl
+  | ident x =>
+      simp only [BasicExpr.eval] at hv hw
+      simp only [BasicExpr.checkBase] at hb
+      cases henv : m.staticEnv x with
+      | none => rw [henv] at hb; exact hb.elim
+      | some info =>
+          obtain ⟨ft, isVar⟩ := info
+          simp only [henv] at hb
+          cases ft with
+          | array n t => exact hb.elim
+          | base t => exact agree_of_ident_at hwf hpar hdom henv hb.2 hv hw
+
+theorem eval_array_inv {es : List BasicExpr} {store : Store} {v : Value}
+    (h : (es.mapM (BasicExpr.eval store)).map Value.array = some v) :
+    ∃ vs, es.mapM (BasicExpr.eval store) = some vs ∧ v = .array vs := by
+  cases hm : es.mapM (BasicExpr.eval store) with
+  | none => rw [hm] at h; simp at h
+  | some vs =>
+      rw [hm] at h
+      change some (Value.array vs) = some v at h
+      exact ⟨vs, rfl, (Option.some.inj h).symm⟩
+
+/-- Elementwise agreement for an array literal whose elements all check
+    against the same basic parameter type. -/
+theorem argsAgree_replicate_of_forall {m : Model} {store : Store} {sig}
+    (hwf : WellFormed sig m) (hpar : ParamHonest m store)
+    (hdom : VarsRespect m store) {es : List BasicExpr} {bt : BasicPredParamType}
+    (hcheck : ∀ b ∈ es, b.checkBase m.staticEnv bt) :
+    ∀ {vs ws : List Value},
+      es.mapM (BasicExpr.eval store) = some vs →
+      es.mapM (BasicExpr.eval m.shapeStore) = some ws →
+      ArgsAgree (List.replicate es.length (.basic bt)) vs ws := by
+  induction es with
+  | nil =>
+      intro vs ws hv hw
+      simp only [List.mapM_nil, Option.pure_def, Option.some.injEq] at hv hw
+      subst hv; subst hw
+      exact trivial
+  | cons e es ih =>
+      intro vs ws hv hw
+      obtain ⟨v, vs', hve, hvs, rfl⟩ := mapM_cons_inv hv
+      obtain ⟨w, ws', hwe, hws, rfl⟩ := mapM_cons_inv hw
+      have hhead : e.checkBase m.staticEnv bt := hcheck e List.mem_cons_self
+      have htail : ∀ b ∈ es, b.checkBase m.staticEnv bt :=
+        fun b hb => hcheck b (List.mem_cons_of_mem _ hb)
+      have hag := agree_of_checkBase hwf hpar hdom hhead hve hwe
+      have htl := ih htail hvs hws
+      simp only [List.length_cons, List.replicate_succ]
+      exact ⟨hag, htl⟩
+
+/-- An expression that checks against a predicate parameter type has
+    agreeing values in a parameter-honest, domain-respecting store and in
+    the shape store. -/
+theorem agree_of_checkArg {m : Model} {store : Store} {sig}
+    (hwf : WellFormed sig m) (hpar : ParamHonest m store)
+    (hdom : VarsRespect m store)
+    {e : Expr} {pt : PredParamType} (hc : e.checkArg m.staticEnv pt)
+    {v w : Value} (hv : e.eval store = some v) (hw : e.eval m.shapeStore = some w) :
+    Value.Agree pt.isPar v w := by
+  cases e with
+  | basic b =>
+      cases pt with
+      | basic bt =>
+          simp only [Expr.checkArg, Expr.eval] at hc ⊢
+          exact agree_of_checkBase hwf hpar hdom hc hv hw
+      | array idx bt =>
+          cases b with
+          | lit l => simp [Expr.checkArg] at hc
+          | ident x =>
+              simp only [Expr.checkArg, Expr.eval] at hc ⊢
+              cases henv : m.staticEnv x with
+              | none => rw [henv] at hc; exact hc.elim
+              | some info =>
+                  obtain ⟨ft, isVar⟩ := info
+                  rw [henv] at hc
+                  cases ft with
+                  | base t => exact hc.elim
+                  | array n t =>
+                      change store x = some v at hv
+                      change m.shapeStore x = some w at hw
+                      exact agree_of_ident_at hwf hpar hdom henv hc.2.2 hv hw
+  | array es =>
+      cases pt with
+      | basic bt => simp [Expr.checkArg] at hc
+      | array idx bt =>
+          simp only [Expr.checkArg, Expr.eval] at hc ⊢
+          obtain ⟨hlen, hcheck⟩ := hc
+          obtain ⟨vs, hvs, rfl⟩ := eval_array_inv hv
+          obtain ⟨ws, hws, rfl⟩ := eval_array_inv hw
+          have hag := argsAgree_replicate_of_forall hwf hpar hdom hcheck hvs hws
+          cases hparb : bt.isPar with
+          | true =>
+              have hall : ∀ q ∈ List.replicate es.length (PredParamType.basic bt),
+                  q.isPar = true := by
+                intro q hq
+                simp only [List.mem_replicate] at hq
+                rw [hq.2]
+                exact hparb
+              have hveq : vs = ws := ArgsAgree.eq_of_all_par hag hall
+              simp only [PredParamType.isPar, hparb, Value.Agree, hveq]
+          | false =>
+              simp only [PredParamType.isPar, hparb, Value.Agree]
+              exact .array (ArgsAgree.sameShape hag)
+
+/-- A checked argument list agrees with its shape evaluation. -/
+theorem argsAgree_of_forall2 {m : Model} {store : Store} {sig}
+    (hwf : WellFormed sig m) (hpar : ParamHonest m store)
+    (hdom : VarsRespect m store)
+    {args : List Expr} {params : List PredParamType}
+    (hcheck : Forall2 (Expr.checkArg m.staticEnv) args params) :
+    ∀ {vs ws : List Value},
+      args.mapM (Expr.eval store) = some vs →
+      args.mapM (Expr.eval m.shapeStore) = some ws →
+      ArgsAgree params vs ws := by
+  induction args generalizing params with
+  | nil =>
+      intro vs ws hv hw
+      cases params with
+      | nil =>
+          simp only [List.mapM_nil, Option.pure_def, Option.some.injEq] at hv hw
+          subst hv; subst hw
+          exact trivial
+      | cons pt pts => cases hcheck
+  | cons e es ih =>
+      intro vs ws hv hw
+      cases params with
+      | nil => cases hcheck
+      | cons pt pts =>
+          obtain ⟨hhead, htail⟩ := hcheck
+          obtain ⟨v, vs', hve, hvs, rfl⟩ := mapM_cons_inv hv
+          obtain ⟨w, ws', hwe, hws, rfl⟩ := mapM_cons_inv hw
+          exact ⟨agree_of_checkArg hwf hpar hdom hhead hve hwe,
+            ih htail hvs hws⟩
+
+
+
+/-- **Decodability from well-formedness.**  In a parameter-honest store
+    whose variables respect their declared domains, every constraint's
+    evaluated arguments are accepted by the decodability gate of a
+    matching signature.  This is the H2 bridge from the static shape
+    check to the real values. -/
+theorem WellFormed.constraint_decodes
+    (h : WellFormed sig m) {c : ConstraintItem} (hc : c ∈ m.constraints)
+    (hpar : ParamHonest m store) (hdom : VarsRespect m store) {vs : List Value}
+    (heval : c.args.mapM (Expr.eval store) = some vs) :
+    ∃ params ∈ m.sigEnv sig c.name,
+      Forall2 (Expr.checkArg m.staticEnv) c.args params ∧
+      fullDecodes c.name.name params vs = true := by
+  obtain ⟨params, hmem, shvs, hcheck, hshape, hdec⟩ := h.constraintsDecode c hc
+  have hag : ArgsAgree params vs shvs :=
+    argsAgree_of_forall2 h hpar hdom hcheck heval hshape
+  exact ⟨params, hmem, hcheck, by
+    rw [fullDecodes_agree hag c.name.name]
+    exact hdec⟩
+
+
+end LeanFzn.Semantics

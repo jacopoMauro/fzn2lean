@@ -116,6 +116,157 @@ def valueBool : Value → Option Bool
   | .bool b => some b
   | _ => none
 
+/-! ## Shape agreement of the typed views
+
+The typed views above inspect only constructor tags and array lengths, so they
+return `some` on exactly the same argument shapes.  The lemmas are stated for
+`Value.SameShapeList`; family decoders instantiate them with the shape
+agreement supplied by `ArgsAgree`. -/
+
+theorem valueInts_isSome_sameShape {xs ys : List Value}
+    (h : Value.SameShapeList xs ys) :
+    (valueInts xs).isSome = (valueInts ys).isSome := by
+  induction h with
+  | nil => rfl
+  | cons hx _ ih =>
+    cases hx with
+    | bool => simp [valueInts]
+    | int => simp [valueInts, ih]
+    | setOfInt => simp [valueInts]
+    | array => simp [valueInts]
+
+theorem valueBools_isSome_sameShape {xs ys : List Value}
+    (h : Value.SameShapeList xs ys) :
+    (valueBools xs).isSome = (valueBools ys).isSome := by
+  induction h with
+  | nil => rfl
+  | cons hx _ ih =>
+    cases hx with
+    | bool => simp [valueBools, ih]
+    | int => simp [valueBools]
+    | setOfInt => simp [valueBools]
+    | array => simp [valueBools]
+
+theorem valueSets_isSome_sameShape {xs ys : List Value}
+    (h : Value.SameShapeList xs ys) :
+    (valueSets xs).isSome = (valueSets ys).isSome := by
+  induction h with
+  | nil => rfl
+  | cons hx _ ih =>
+    cases hx with
+    | bool => simp [valueSets]
+    | int => simp [valueSets]
+    | setOfInt => simp [valueSets, ih]
+    | array => simp [valueSets]
+
+theorem valueInt_isSome_sameShape {a b : Value} (h : a.SameShape b) :
+    (valueInt a).isSome = (valueInt b).isSome := by
+  cases h <;> rfl
+
+theorem valueBool_isSome_sameShape {a b : Value} (h : a.SameShape b) :
+    (valueBool a).isSome = (valueBool b).isSome := by
+  cases h <;> rfl
+
+theorem valueSet_isSome_sameShape {a b : Value} (h : a.SameShape b) :
+    (valueSet a).isSome = (valueSet b).isSome := by
+  cases h <;> rfl
+
+/-- The integer list read from `xs` has as many entries as `xs`. -/
+theorem valueInts_length_of_some {xs : List Value} {a : List Int}
+    (h : valueInts xs = some a) : a.length = xs.length := by
+  induction xs generalizing a with
+  | nil =>
+      cases h
+      rfl
+  | cons x xs ih =>
+      cases x with
+      | int i =>
+          simp only [valueInts] at h
+          cases h' : valueInts xs with
+          | none =>
+              rw [h'] at h
+              cases h
+          | some a' =>
+              rw [h'] at h
+              have ha : a = i :: a' := by simpa using h.symm
+              rw [ha]
+              simp [ih h']
+      | bool b => simp [valueInts] at h
+      | setOfInt s => simp [valueInts] at h
+      | array vs => simp [valueInts] at h
+
+/-- The boolean list read from `xs` has as many entries as `xs`. -/
+theorem valueBools_length_of_some {xs : List Value} {a : List Bool}
+    (h : valueBools xs = some a) : a.length = xs.length := by
+  induction xs generalizing a with
+  | nil =>
+      cases h
+      rfl
+  | cons x xs ih =>
+      cases x with
+      | bool b =>
+          simp only [valueBools] at h
+          cases h' : valueBools xs with
+          | none =>
+              rw [h'] at h
+              cases h
+          | some a' =>
+              rw [h'] at h
+              have ha : a = b :: a' := by simpa using h.symm
+              rw [ha]
+              simp [ih h']
+      | int i => simp [valueBools] at h
+      | setOfInt s => simp [valueBools] at h
+      | array vs => simp [valueBools] at h
+
+/-- The set list read from `xs` has as many entries as `xs`. -/
+theorem valueSets_length_of_some {xs : List Value} {a : List IntSetValue}
+    (h : valueSets xs = some a) : a.length = xs.length := by
+  induction xs generalizing a with
+  | nil =>
+      cases h
+      rfl
+  | cons x xs ih =>
+      cases x with
+      | setOfInt s =>
+          simp only [valueSets] at h
+          cases h' : valueSets xs with
+          | none =>
+              rw [h'] at h
+              cases h
+          | some a' =>
+              rw [h'] at h
+              have ha : a = s :: a' := by simpa using h.symm
+              rw [ha]
+              simp [ih h']
+      | bool b => simp [valueSets] at h
+      | int i => simp [valueSets] at h
+      | array vs => simp [valueSets] at h
+
+/-- Agreeing value lists read to integer lists of equal length. -/
+theorem valueInts_length_eq {xs ys : List Value}
+    (h : Value.SameShapeList xs ys) {a b : List Int}
+    (ha : valueInts xs = some a) (hb : valueInts ys = some b) :
+    a.length = b.length := by
+  rw [valueInts_length_of_some ha, valueInts_length_of_some hb,
+    ListSameShape.length_eq h]
+
+/-- Agreeing value lists read to boolean lists of equal length. -/
+theorem valueBools_length_eq {xs ys : List Value}
+    (h : Value.SameShapeList xs ys) {a b : List Bool}
+    (ha : valueBools xs = some a) (hb : valueBools ys = some b) :
+    a.length = b.length := by
+  rw [valueBools_length_of_some ha, valueBools_length_of_some hb,
+    ListSameShape.length_eq h]
+
+/-- Agreeing value lists read to set lists of equal length. -/
+theorem valueSets_length_eq {xs ys : List Value}
+    (h : Value.SameShapeList xs ys) {a b : List IntSetValue}
+    (ha : valueSets xs = some a) (hb : valueSets ys = some b) :
+    a.length = b.length := by
+  rw [valueSets_length_of_some ha, valueSets_length_of_some hb,
+    ListSameShape.length_eq h]
+
 /-! ## Occurrence counting -/
 
 /-- Number of occurrences of integer `v` in an integer list. -/

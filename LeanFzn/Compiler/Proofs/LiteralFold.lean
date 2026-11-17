@@ -144,24 +144,27 @@ theorem stdInterp_int_lin_eq_reif_apply (args : List Value) :
     stdInterp (Ident.mk "int_lin_eq_reif") args =
       match args with
       | [.array as_, .array xs, .int b, .bool r] =>
-          (r = true ∧ dotProduct as_ xs = some b) ∨
-            (r = false ∧ dotProduct as_ xs ≠ some b)
+          match dotProduct as_ xs with
+          | some d => (r = true ∧ d = b) ∨ (r = false ∧ d ≠ b)
+          | none => False
       | _ => False := rfl
 
 theorem stdInterp_int_lin_le_reif_apply (args : List Value) :
     stdInterp (Ident.mk "int_lin_le_reif") args =
       match args with
       | [.array as_, .array xs, .int b, .bool r] =>
-          (r = true ∧ dotLe as_ xs b = true) ∨
-            (r = false ∧ dotLe as_ xs b = false)
+          match dotProduct as_ xs with
+          | some d => (r = true ∧ d ≤ b) ∨ (r = false ∧ ¬ d ≤ b)
+          | none => False
       | _ => False := rfl
 
 theorem stdInterp_int_lin_ne_reif_apply (args : List Value) :
     stdInterp (Ident.mk "int_lin_ne_reif") args =
       match args with
       | [.array as_, .array xs, .int b, .bool r] =>
-          (r = true ∧ dotNe as_ xs b = true) ∨
-            (r = false ∧ dotNe as_ xs b = false)
+          match dotProduct as_ xs with
+          | some d => (r = true ∧ d ≠ b) ∨ (r = false ∧ d = b)
+          | none => False
       | _ => False := rfl
 
 theorem falseConstraint_args_eval (s : Store) :
@@ -183,8 +186,8 @@ theorem falseConstraint_holds_false (s : Store) :
 
 theorem falseConstraint_sig :
     fullSig (Ident.mk "int_lin_le") =
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))] := by
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem falseConstraint_check (env : StaticEnv) :
@@ -265,7 +268,8 @@ theorem wf_groundFold {m : Model} (hwf : WellFormed fullSig m)
       variableArrayLengths := hwf.variableArrayLengths
       variableInitializers := hwf.variableInitializers
       objectiveType := hwf.objectiveType
-      constraintsChecked := ?_ }
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · simpa [foldGroundModel, hpred] using hwf.predNamesUnique
   · intro c' hc'
     obtain ⟨c, hc, hfold⟩ := List.mem_flatMap.mp hc'
@@ -284,7 +288,7 @@ theorem wf_groundFold {m : Model} (hwf : WellFormed fullSig m)
             simp [Model.sigEnv, Model.declaredSigs, foldGroundModel, hpred,
               lookupIdent]
           rw [hsig]
-          exact falseConstraint_sig
+          simp [falseConstraint, falseConstraint_sig]
       · rename_i hmem
         simp only [List.mem_singleton] at hfold
         subst hfold
@@ -293,6 +297,40 @@ theorem wf_groundFold {m : Model} (hwf : WellFormed fullSig m)
       simp only [List.mem_singleton] at hfold
       subst hfold
       exact hwf.constraintsChecked _ hc
+  · intro c' hc'
+    obtain ⟨c, hc, hfold⟩ := List.mem_flatMap.mp hc'
+    unfold groundFold at hfold
+    split at hfold
+    · rename_i vals hg
+      split at hfold
+      · rename_i hmem
+        split at hfold
+        · simp at hfold
+        · simp only [List.mem_singleton] at hfold
+          subst hfold
+          have hsig : (foldGroundModel m).sigEnv fullSig
+              falseConstraint.name = fullSig falseConstraint.name := by
+            simp [Model.sigEnv, Model.declaredSigs, foldGroundModel, hpred,
+              lookupIdent]
+          refine ⟨[.array .int (.par .int), .array .int (.var (.par .int)),
+            .basic (.var (.par .int))], ?_,
+            [.array [], .array [], .int (-1)], falseConstraint_check _, ?_, ?_⟩
+          · rw [hsig]
+            simp [falseConstraint, falseConstraint_sig]
+          · simp [falseConstraint, Expr.eval, BasicExpr.eval,
+              BasicLiteral.denote]
+          · exact fullDecodes_true_of_not_mem_globals
+              int_lin_le_not_globals _ _
+      · rename_i hmem
+        simp only [List.mem_singleton] at hfold
+        subst c'
+        obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc
+        exact ⟨params, hsig, vs, hF, hev, hdec⟩
+    · rename_i hg
+      simp only [List.mem_singleton] at hfold
+      subst c'
+      obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc
+      exact ⟨params, hsig, vs, hF, hev, hdec⟩
 
 
 /-! ## Evaluating fixed argument shapes -/
@@ -614,6 +652,7 @@ theorem int_lin_eq_reif_true_val (va vb vk : Value) :
     fullInterp_std_of_not_mem int_lin_eq_not_globals,
     stdInterp_int_lin_eq_reif_apply, stdInterp_int_lin_eq_apply]
   cases va <;> cases vb <;> cases vk <;> simp
+  all_goals split <;> simp_all
 
 theorem int_lin_le_reif_true_val (va vb vk : Value) :
     fullInterp (Ident.mk "int_lin_le_reif") [va, vb, vk, .bool true] ↔
@@ -622,6 +661,7 @@ theorem int_lin_le_reif_true_val (va vb vk : Value) :
     fullInterp_std_of_not_mem int_lin_le_not_globals,
     stdInterp_int_lin_le_reif_apply, stdInterp_int_lin_le_apply]
   cases va <;> cases vb <;> cases vk <;> simp
+  all_goals split <;> simp_all [dotLe]
 
 theorem int_lin_ne_reif_true_val (va vb vk : Value) :
     fullInterp (Ident.mk "int_lin_ne_reif") [va, vb, vk, .bool true] ↔
@@ -630,6 +670,7 @@ theorem int_lin_ne_reif_true_val (va vb vk : Value) :
     fullInterp_std_of_not_mem int_lin_ne_not_globals,
     stdInterp_int_lin_ne_reif_apply, stdInterp_int_lin_ne_apply]
   cases va <;> cases vb <;> cases vk <;> simp
+  all_goals split <;> simp_all [dotNe]
 
 /-! ## Constant-set cardinality -/
 
@@ -940,21 +981,38 @@ theorem sigEnv_two_int {m : Model} (hpred : m.predicates = [])
     (hn : n = "int_eq" ∨ n = "int_ne" ∨ n = "int_le" ∨ n = "int_lt" ∨
       n = "int_ge" ∨ n = "int_gt") :
     m.sigEnv fullSig (Ident.mk n) =
-      some [.basic (.var (.par .int)), .basic (.var (.par .int))] := by
+      [[.basic (.var (.par .int)), .basic (.var (.par .int))]] := by
   rcases hn with rfl | rfl | rfl | rfl | rfl | rfl <;>
     simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
       globalsSig, stdSig]
+
+theorem sigEnv_two_int_mem {m : Model} (hpred : m.predicates = [])
+    {n : String}
+    (hn : n = "int_eq" ∨ n = "int_ne" ∨ n = "int_le" ∨ n = "int_lt" ∨
+      n = "int_ge" ∨ n = "int_gt") :
+    [.basic (.var (.par .int)), .basic (.var (.par .int))] ∈
+      m.sigEnv fullSig (Ident.mk n) := by
+  rw [sigEnv_two_int hpred hn]
+  exact List.mem_singleton.mpr rfl
 
 /-- Signature of the plain linear integer predicates. -/
 theorem sigEnv_three_linear {m : Model} (hpred : m.predicates = [])
     {n : String}
     (hn : n = "int_lin_eq" ∨ n = "int_lin_le" ∨ n = "int_lin_ne") :
     m.sigEnv fullSig (Ident.mk n) =
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.var (.par .int))] := by
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.var (.par .int))]] := by
   rcases hn with rfl | rfl | rfl <;>
     simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
       globalsSig, stdSig]
+
+theorem sigEnv_three_linear_mem {m : Model} (hpred : m.predicates = [])
+    {n : String}
+    (hn : n = "int_lin_eq" ∨ n = "int_lin_le" ∨ n = "int_lin_ne") :
+    [.array .int (.par .int), .array .int (.var (.par .int)),
+      .basic (.var (.par .int))] ∈ m.sigEnv fullSig (Ident.mk n) := by
+  rw [sigEnv_three_linear hpred hn]
+  exact List.mem_singleton.mpr rfl
 
 /-- Signature of the scalar reified integer predicates. -/
 theorem sigEnv_two_int_reif {m : Model} (hpred : m.predicates = [])
@@ -962,8 +1020,8 @@ theorem sigEnv_two_int_reif {m : Model} (hpred : m.predicates = [])
     (hn : n = "int_eq_reif" ∨ n = "int_ne_reif" ∨ n = "int_le_reif" ∨
       n = "int_lt_reif" ∨ n = "int_ge_reif" ∨ n = "int_gt_reif") :
     m.sigEnv fullSig (Ident.mk n) =
-      some [.basic (.var (.par .int)), .basic (.var (.par .int)),
-        .basic (.var (.par .bool))] := by
+      [[.basic (.var (.par .int)), .basic (.var (.par .int)),
+        .basic (.var (.par .bool))]] := by
   rcases hn with rfl | rfl | rfl | rfl | rfl | rfl <;>
     simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
       globalsSig, stdSig]
@@ -974,8 +1032,8 @@ theorem sigEnv_three_linear_reif {m : Model} (hpred : m.predicates = [])
     (hn : n = "int_lin_eq_reif" ∨ n = "int_lin_le_reif" ∨
       n = "int_lin_ne_reif") :
     m.sigEnv fullSig (Ident.mk n) =
-      some [.array .int (.par .int), .array .int (.var (.par .int)),
-        .basic (.par .int), .basic (.var (.par .bool))] := by
+      [[.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.par .int), .basic (.var (.par .bool))]] := by
   rcases hn with rfl | rfl | rfl <;>
     simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
       globalsSig, stdSig]
@@ -983,7 +1041,7 @@ theorem sigEnv_three_linear_reif {m : Model} (hpred : m.predicates = [])
 /-- Signature of `set_card`. -/
 theorem sigEnv_set_card {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "set_card") =
-      some [.basic (.var (.par .setOfInt)), .basic (.var (.par .int))] := by
+      [[.basic (.var (.par .setOfInt)), .basic (.var (.par .int))]] := by
   simp [Model.sigEnv, Model.declaredSigs, hpred, lookupIdent, fullSig,
     globalsSig, stdSig]
 
@@ -997,7 +1055,7 @@ theorem checkArg_int_lit {env : StaticEnv} (k : Int) :
 theorem setCard_wf {m : Model} (hpred : m.predicates = [])
     {c d : ConstraintItem} (h : setCardFold c = [d])
     (hwf : WellFormed fullSig m) (hc : c ∈ m.constraints) :
-    ∃ params, m.sigEnv fullSig d.name = some params ∧
+    ∃ params ∈ m.sigEnv fullSig d.name,
       Forall2 (Expr.checkArg m.staticEnv) d.args params := by
   obtain ⟨cn, cargs, canns⟩ := c
   obtain ⟨ps, hsig, hca⟩ := hwf.constraintsChecked ⟨cn, cargs, canns⟩ hc
@@ -1013,11 +1071,11 @@ theorem setCard_wf {m : Model} (hpred : m.predicates = [])
         .basic (.var (.par .int))] := by
       have hstd := sigEnv_set_card hpred
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-      sigEnv_two_int hpred (Or.inl rfl), hca.2, checkArg_int_lit _, trivial⟩
+      sigEnv_two_int_mem hpred (Or.inl rfl), hca.2, checkArg_int_lit _, trivial⟩
   · rename_i hnone
     rw [List.cons.injEq] at h
     obtain ⟨rfl, -⟩ := h
@@ -1029,7 +1087,7 @@ theorem setCard_wf {m : Model} (hpred : m.predicates = [])
 theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
     {c d : ConstraintItem} (h : reifScalar c = some d)
     (hwf : WellFormed fullSig m) (hc : c ∈ m.constraints) :
-    ∃ params, m.sigEnv fullSig d.name = some params ∧
+    ∃ params ∈ m.sigEnv fullSig d.name,
       Forall2 (Expr.checkArg m.staticEnv) d.args params := by
   obtain ⟨cn, cargs, canns⟩ := c
   obtain ⟨ps, hsig, hca⟩ := hwf.constraintsChecked ⟨cn, cargs, canns⟩ hc
@@ -1047,16 +1105,16 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
         .basic (.var (.par .bool))] := by
       have hstd := sigEnv_two_int_reif hpred (n := "int_eq_reif") (Or.inl rfl)
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     cases r
     · simp only [Bool.false_eq_true, if_false]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inl rfl)), hca.1, hca.2.1, trivial⟩
+        sigEnv_two_int_mem hpred (Or.inr (Or.inl rfl)), hca.1, hca.2.1, trivial⟩
     · simp only [if_true]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inl rfl), hca.1, hca.2.1, trivial⟩
+        sigEnv_two_int_mem hpred (Or.inl rfl), hca.1, hca.2.1, trivial⟩
   · rename_i a b r heqn heqa
     have hd : d = { name := Ident.mk (if r then "int_ne" else "int_eq")
                     args := [a, b], anns := [] } :=
@@ -1070,16 +1128,16 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
       have hstd := sigEnv_two_int_reif hpred (n := "int_ne_reif")
         (Or.inr (Or.inl rfl))
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     cases r
     · simp only [Bool.false_eq_true, if_false]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inl rfl), hca.1, hca.2.1, trivial⟩
+        sigEnv_two_int_mem hpred (Or.inl rfl), hca.1, hca.2.1, trivial⟩
     · simp only [if_true]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inl rfl)), hca.1, hca.2.1, trivial⟩
+        sigEnv_two_int_mem hpred (Or.inr (Or.inl rfl)), hca.1, hca.2.1, trivial⟩
   · rename_i a b r heqn heqa
     have hd : d = { name := Ident.mk (if r then "int_le" else "int_lt")
                     args := if r then [a, b] else [b, a], anns := [] } :=
@@ -1093,17 +1151,17 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
       have hstd := sigEnv_two_int_reif hpred (n := "int_le_reif")
         (Or.inr (Or.inr (Or.inl rfl)))
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     cases r
     · simp only [Bool.false_eq_true, if_false]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inr (Or.inr (Or.inl rfl)))),
+        sigEnv_two_int_mem hpred (Or.inr (Or.inr (Or.inr (Or.inl rfl)))),
         hca.2.1, hca.1, trivial⟩
     · simp only [if_true]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inr (Or.inl rfl))),
+        sigEnv_two_int_mem hpred (Or.inr (Or.inr (Or.inl rfl))),
         hca.1, hca.2.1, trivial⟩
   · rename_i a b r heqn heqa
     have hd : d = { name := Ident.mk (if r then "int_lt" else "int_le")
@@ -1118,17 +1176,17 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
       have hstd := sigEnv_two_int_reif hpred (n := "int_lt_reif")
         (Or.inr (Or.inr (Or.inr (Or.inl rfl))))
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     cases r
     · simp only [Bool.false_eq_true, if_false]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inr (Or.inl rfl))),
+        sigEnv_two_int_mem hpred (Or.inr (Or.inr (Or.inl rfl))),
         hca.2.1, hca.1, trivial⟩
     · simp only [if_true]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inr (Or.inr (Or.inl rfl)))),
+        sigEnv_two_int_mem hpred (Or.inr (Or.inr (Or.inr (Or.inl rfl)))),
         hca.1, hca.2.1, trivial⟩
   · rename_i a b r heqn heqa
     have hd : d = { name := Ident.mk (if r then "int_le" else "int_lt")
@@ -1143,17 +1201,17 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
       have hstd := sigEnv_two_int_reif hpred (n := "int_ge_reif")
         (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl rfl)))))
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     cases r
     · simp only [Bool.false_eq_true, if_false]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inr (Or.inr (Or.inl rfl)))),
+        sigEnv_two_int_mem hpred (Or.inr (Or.inr (Or.inr (Or.inl rfl)))),
         hca.1, hca.2.1, trivial⟩
     · simp only [if_true]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inr (Or.inl rfl))),
+        sigEnv_two_int_mem hpred (Or.inr (Or.inr (Or.inl rfl))),
         hca.2.1, hca.1, trivial⟩
   · rename_i a b r heqn heqa
     have hd : d = { name := Ident.mk (if r then "int_lt" else "int_le")
@@ -1168,17 +1226,17 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
       have hstd := sigEnv_two_int_reif hpred (n := "int_gt_reif")
         (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr rfl)))))
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     cases r
     · simp only [Bool.false_eq_true, if_false]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inr (Or.inl rfl))),
+        sigEnv_two_int_mem hpred (Or.inr (Or.inr (Or.inl rfl))),
         hca.1, hca.2.1, trivial⟩
     · simp only [if_true]
       exact ⟨[.basic (.var (.par .int)), .basic (.var (.par .int))],
-        sigEnv_two_int hpred (Or.inr (Or.inr (Or.inr (Or.inl rfl)))),
+        sigEnv_two_int_mem hpred (Or.inr (Or.inr (Or.inr (Or.inl rfl)))),
         hca.2.1, hca.1, trivial⟩
   · rename_i a b k heqn heqa
     have hd : d = { name := Ident.mk "int_lin_eq"
@@ -1193,12 +1251,12 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
       have hstd := sigEnv_three_linear_reif hpred (n := "int_lin_eq_reif")
         (Or.inl rfl)
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     exact ⟨[.array .int (.par .int), .array .int (.var (.par .int)),
       .basic (.var (.par .int))],
-      sigEnv_three_linear hpred (Or.inl rfl),
+      sigEnv_three_linear_mem hpred (Or.inl rfl),
       hca.1, hca.2.1, checkArg_par_var hca.2.2.1, trivial⟩
   · rename_i a b k heqn heqa
     have hd : d = { name := Ident.mk "int_lin_le"
@@ -1213,12 +1271,12 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
       have hstd := sigEnv_three_linear_reif hpred (n := "int_lin_le_reif")
         (Or.inr (Or.inl rfl))
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     exact ⟨[.array .int (.par .int), .array .int (.var (.par .int)),
       .basic (.var (.par .int))],
-      sigEnv_three_linear hpred (Or.inr (Or.inl rfl)),
+      sigEnv_three_linear_mem hpred (Or.inr (Or.inl rfl)),
       hca.1, hca.2.1, checkArg_par_var hca.2.2.1, trivial⟩
   · rename_i a b k heqn heqa
     have hd : d = { name := Ident.mk "int_lin_ne"
@@ -1233,12 +1291,12 @@ theorem reifScalar_wf {m : Model} (hpred : m.predicates = [])
       have hstd := sigEnv_three_linear_reif hpred (n := "int_lin_ne_reif")
         (Or.inr (Or.inr rfl))
       rw [hstd] at hsig
-      exact (Option.some.inj hsig).symm
+      exact List.mem_singleton.mp hsig
     subst hps
     simp [Forall2] at hca
     exact ⟨[.array .int (.par .int), .array .int (.var (.par .int)),
       .basic (.var (.par .int))],
-      sigEnv_three_linear hpred (Or.inr (Or.inr rfl)),
+      sigEnv_three_linear_mem hpred (Or.inr (Or.inr rfl)),
       hca.1, hca.2.1, checkArg_par_var hca.2.2.1, trivial⟩
   · cases h
 
@@ -1255,7 +1313,8 @@ theorem wf_reifFold {m : Model} (hwf : WellFormed fullSig m)
       variableArrayLengths := hwf.variableArrayLengths
       variableInitializers := hwf.variableInitializers
       objectiveType := hwf.objectiveType
-      constraintsChecked := ?_ }
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · simpa [foldReifModel, hpred] using hwf.predNamesUnique
   · simpa [foldReifModel] using hwf.valueNamesUnique
   · intro c' hc'
@@ -1276,6 +1335,42 @@ theorem wf_reifFold {m : Model} (hwf : WellFormed fullSig m)
       refine ⟨params, ?_, ?_⟩
       · rw [hsig]; exact hpsig
       · rw [hstat]; exact hpca
+  · intro c' hc'
+    obtain ⟨c, hc, hfold⟩ := List.mem_flatMap.mp hc'
+    unfold reifFold at hfold
+    split at hfold
+    · rename_i d hsome
+      rw [List.mem_singleton] at hfold
+      subst c'
+      obtain ⟨params, hpsig, hpca⟩ := reifScalar_wf hpred hsome hwf hc
+      have hnd : ((foldReifModel m).parameters.map (·.name) ++
+          (foldReifModel m).variables.map (·.name)).Nodup := by
+        simpa [foldReifModel] using hwf.valueNamesUnique
+      obtain ⟨vs, hev⟩ := exists_mapM_eval_of_forall2
+        (m := foldReifModel m) hnd hpca
+      have hng : d.name.name ∉ globalsNames := by
+        unfold reifScalar at hsome
+        split at hsome <;>
+          first
+          | (rw [← Option.some.inj hsome]
+             dsimp only
+             first
+             | (split <;>
+                simp [int_eq_not_globals, int_ne_not_globals, int_le_not_globals,
+                  int_lt_not_globals, int_lin_eq_not_globals,
+                  int_lin_le_not_globals, int_lin_ne_not_globals])
+             | simp [int_eq_not_globals, int_ne_not_globals, int_le_not_globals,
+                 int_lt_not_globals, int_lin_eq_not_globals,
+                 int_lin_le_not_globals, int_lin_ne_not_globals])
+          | cases hsome
+      refine ⟨params, ?_, vs, hpca, hev, ?_⟩
+      · rw [hsig]; exact hpsig
+      · exact fullDecodes_true_of_not_mem_globals hng _ _
+    · rename_i hnone
+      rw [List.mem_singleton] at hfold
+      subst c'
+      obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc
+      exact ⟨params, hsig, vs, hF, hev, hdec⟩
 
 theorem wf_setCard {m : Model} (hwf : WellFormed fullSig m)
     (hpred : m.predicates = []) :
@@ -1288,13 +1383,35 @@ theorem wf_setCard {m : Model} (hwf : WellFormed fullSig m)
       variableArrayLengths := hwf.variableArrayLengths
       variableInitializers := hwf.variableInitializers
       objectiveType := hwf.objectiveType
-      constraintsChecked := ?_ }
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · simpa [foldSetCardModel, hpred] using hwf.predNamesUnique
   · intro c' hc'
     obtain ⟨c, hc, hfold⟩ := List.mem_flatMap.mp hc'
     have hsingle : setCardFold c = [c'] := setCard_eq_of_mem hfold
     obtain ⟨params, hpsig, hpca⟩ := setCard_wf hpred hsingle hwf hc
     exact ⟨params, hpsig, hpca⟩
+  · intro c' hc'
+    obtain ⟨c, hc, hfold⟩ := List.mem_flatMap.mp hc'
+    have hsingle' : setCardFold c = [c'] := setCard_eq_of_mem hfold
+    have hsingle : setCardFold c = [c'] := hsingle'
+    unfold setCardFold at hsingle
+    split at hsingle
+    · rename_i s x heqn heqa
+      simp only [List.cons.injEq, and_true] at hsingle
+      subst c'
+      obtain ⟨params, hpsig, hpca⟩ := setCard_wf hpred hsingle' hwf hc
+      have hnd : ((foldSetCardModel m).parameters.map (·.name) ++
+          (foldSetCardModel m).variables.map (·.name)).Nodup := by
+        simpa [foldSetCardModel] using hwf.valueNamesUnique
+      obtain ⟨vs, hev⟩ := exists_mapM_eval_of_forall2
+        (m := foldSetCardModel m) hnd hpca
+      exact ⟨params, hpsig, vs, hpca, hev,
+        fullDecodes_true_of_not_mem_globals int_eq_not_globals _ _⟩
+    · simp only [List.cons.injEq, and_true] at hsingle
+      subst c'
+      obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc
+      exact ⟨params, hsig, vs, hF, hev, hdec⟩
 
 theorem wf_fold {m : Model} (hwf : WellFormed fullSig m)
     (hpred : m.predicates = []) :

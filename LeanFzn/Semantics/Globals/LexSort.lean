@@ -16,8 +16,10 @@ Semantics per the MiniZinc 2.10.1 handbook, Section 4.2.2.3
 ("Lexicographic constraints") and 4.2.2.12 ("Sorting constraints"),
 cross-checked against the pinned stdlib decompositions.  The
 interpretive decisions specific to this family (prefix order for lex,
-permutation-plus-sortedness for `sort`, *stability* for
-`arg_sort_int`, least-index tie-breaking for
+sortedness plus sub-multiset containment for `sort` — the pinned
+decomposition's injective index array `p : index_set(xs) → index_set(ys)`
+admits a longer `ys` — *stability* plus the "permutation of the positions
+of `xs`" gate for `arg_sort_int`, least-index tie-breaking for
 `maximum_arg`/`minimum_arg`, and the vacuous no-`after` case of
 value precedence) are recorded in
 `specification/flatzinc_specification_assumptions.md`, G12–G13.
@@ -566,57 +568,107 @@ theorem seqPrecedeChainB_iff (xs : List Int) :
 
 /-! ## Stable argument sort -/
 
-/-- Sortedness and stability over 1-based permutation values:
-    consecutive positions of `perm` must index `xs` in non-decreasing
-    order, with ties broken by ascending permutation value (stability). -/
+/-- The upstream loop `forall (j in 1..length(xs)-1)` reads the 1-based
+    positions `permutation[j]` and `permutation[j+1]`, and evaluates
+    `xs[permutation[j]]` and `xs[permutation[j+1]]`.  This predicate states
+    exactly that loop: both positions of `perm` must exist and be valid
+    1-based indices of `xs`, the values of `xs` there are nondecreasing, and
+    equal values force the earlier position to have the smaller index
+    (stability). -/
 private def idxSortedStable (xs : List Int) (perm : List Int) : Prop :=
-  ∀ j, j + 1 < perm.length →
-    (xs[perm[j]!.toNat - 1]?.getD 0) ≤ (xs[perm[j+1]!.toNat - 1]?.getD 0) ∧
-    ((xs[perm[j]!.toNat - 1]?.getD 0) = (xs[perm[j+1]!.toNat - 1]?.getD 0) →
+  ∀ j, j + 1 < xs.length →
+    -- The conjunct `j + 1 < perm.length` proves both `perm[j]!` and
+    -- `perm[j+1]!` in bounds; the two range conjuncts prove the
+    -- `xs[...]!` accesses in bounds.
+    j + 1 < perm.length ∧
+    1 ≤ perm[j]! ∧ perm[j]! ≤ (xs.length : Int) ∧
+    1 ≤ perm[j+1]! ∧ perm[j+1]! ≤ (xs.length : Int) ∧
+    xs[(perm[j]!).toNat - 1]! ≤ xs[(perm[j+1]!).toNat - 1]! ∧
+    (xs[(perm[j]!).toNat - 1]! = xs[(perm[j+1]!).toNat - 1]! →
       perm[j]! < perm[j+1]!)
 
+/-- Boolean twin of `idxSortedStable`.  The `decide (j + 1 < perm.length ∧
+    ...)` conjunct inside the body carries the same in-bounds premises as the
+    Prop version. -/
 private def idxSortedStableB (xs : List Int) (perm : List Int) : Bool :=
-  (List.range (perm.length - 1)).all (fun j =>
-    decide ((xs[perm[j]!.toNat - 1]?.getD 0) ≤ (xs[perm[j+1]!.toNat - 1]?.getD 0)) &&
-    decide ((xs[perm[j]!.toNat - 1]?.getD 0) = (xs[perm[j+1]!.toNat - 1]?.getD 0) →
-      perm[j]! < perm[j+1]!))
+  (List.range (xs.length - 1)).all (fun j =>
+    decide (j + 1 < perm.length ∧
+      1 ≤ perm[j]! ∧ perm[j]! ≤ (xs.length : Int) ∧
+      1 ≤ perm[j+1]! ∧ perm[j+1]! ≤ (xs.length : Int) ∧
+      xs[(perm[j]!).toNat - 1]! ≤ xs[(perm[j+1]!).toNat - 1]! ∧
+      (xs[(perm[j]!).toNat - 1]! = xs[(perm[j+1]!).toNat - 1]! →
+        perm[j]! < perm[j+1]!)))
 
 private theorem idxSortedStableB_iff (xs : List Int) (perm : List Int) :
     idxSortedStableB xs perm = true ↔ idxSortedStable xs perm := by
   unfold idxSortedStableB idxSortedStable
   rw [List.all_eq_true]
   constructor
-  · intro h j hjlt
-    have := h j (by simp only [List.mem_range]; omega)
-    simp only [Bool.and_eq_true, decide_eq_true_iff] at this
-    exact this
+  · intro h j hj
+    have hdec := h j (by simp only [List.mem_range]; omega)
+    exact of_decide_eq_true hdec
   · intro h j hjmem
     simp only [List.mem_range] at hjmem
-    simp only [Bool.and_eq_true, decide_eq_true_iff]
-    exact h j (by omega)
+    exact decide_eq_true (h j (by omega))
 
-/-- Full arg-sort specification: `perm` (1-based values) is a
-    permutation of `1..n` ordering the values of `xs` non-decreasingly,
-    stably.  The conditions are:
-    (a) every `k` of `1..n` occurs exactly once in `perm`;
-    (b) `perm` has exactly `n` elements;
-    (c) sortedness and stability over consecutive positions. -/
+/-- Full arg-sort specification: `perm` is globally duplicate-free and the
+    upstream loop, read literally, holds.
+
+    The upstream decomposition `fzn_arg_sort_int.mzn` is
+    `all_different(permutation) /\
+     forall (j in 1..length(xs)-1)
+       (xs[permutation[j]] <= xs[permutation[j+1]] /\
+        (xs[permutation[j]] == xs[permutation[j+1]] ->
+         permutation[j] < permutation[j+1]))`.
+    For `length(xs) ≥ 2` the loop reads `permutation[1..length(xs)]`; a
+    shorter `perm` or a loop entry outside `1..xs.length` leaves an access
+    undefined, and `idxSortedStable` rejects such a call.  For
+    `length(xs) ≤ 1` the range `1..length(xs)-1` is empty, so the loop is
+    vacuous: only `all_different(permutation)` remains, and an empty or
+    arbitrary-position `perm` is accepted when duplicate-free.  There is
+    therefore no unconditional `xs.length ≤ perm.length` gate and no
+    prefix range gate beyond the per-iteration premises in
+    `idxSortedStable`. -/
 def argSortProp (xs perm : List Int) : Prop :=
-  (List.range xs.length).all (fun k => perm.count ((k + 1 : Nat) : Int) = 1) ∧
-  perm.length = xs.length ∧
+  perm.Nodup ∧
   idxSortedStable xs perm
 
+/-- Boolean twin of `argSortProp`. -/
 def argSortB (xs perm : List Int) : Bool :=
-  (List.range xs.length).all (fun k => decide (perm.count ((k + 1 : Nat) : Int) = 1)) &&
-  decide (perm.length = xs.length) &&
+  decide perm.Nodup &&
   idxSortedStableB xs perm
 
 theorem argSortB_iff (xs perm : List Int) :
     argSortB xs perm = true ↔ argSortProp xs perm := by
-  unfold argSortB argSortProp
-  rw [Bool.and_assoc]
-  simp only [Bool.and_eq_true, decide_eq_true_iff, List.all_eq_true,
-    idxSortedStableB_iff (xs := xs) (perm := perm)]
+  simp only [argSortB, argSortProp, Bool.and_eq_true, decide_eq_true_iff,
+    idxSortedStableB_iff]
+
+/-! ## Sort -/
+
+/-- `fzn_sort(xs, ys)`: the pinned decomposition
+    `let { array [index_set(xs)] of var index_set(ys): p; }
+     in forall (i in index_set(xs)) (ys[p[i]] == xs[i]) /\
+        alldifferent(p) /\ increasing(ys)`
+    existentially quantifies the index array `p`: it is injective and takes
+    values in `index_set(ys)`.  Picking a distinct position of `ys` for every
+    occurrence of `xs` is possible exactly when every value occurs in `ys` at
+    least as often as in `xs`, so the relation is: `ys` is nondecreasing and
+    `xs` is a sub-multiset of `ys`.  A longer `ys` is therefore permitted by
+    the raw decomposition (its extra entries only have to respect
+    `increasing`); equality of the two lengths is not an upstream premise.
+    For equal lengths the relation is the usual "`ys` is a sorted permutation
+    of `xs`". -/
+def sortProp (xs ys : List Int) : Prop :=
+  increasing ys ∧ ∀ v, v ∈ xs → xs.count v ≤ ys.count v
+
+/-- Boolean twin of `sortProp`. -/
+def sortB (xs ys : List Int) : Bool :=
+  increasingB ys && xs.all (fun v => decide (xs.count v ≤ ys.count v))
+
+theorem sortB_iff (xs ys : List Int) :
+    sortB xs ys = true ↔ sortProp xs ys := by
+  simp only [sortB, sortProp, Bool.and_eq_true, List.all_eq_true,
+    increasingB_iff, decide_eq_true_iff]
 
 /-! ## Argument decoders -/
 
@@ -685,7 +737,7 @@ def lexSortInterp : LeanFzn.Semantics.PredicateInterpretation := fun x =>
     | none => False
   | "fzn_sort" => fun args =>
     match twoIntArrays args with
-    | some (a, b) => a.Perm b ∧ increasing b
+    | some (a, b) => sortProp a b
     | none => False
   | "fzn_arg_sort_int" => fun args =>
     match twoIntArrays args with
@@ -746,7 +798,7 @@ def lexSortInterpB : LeanFzn.Ident → List Value → Bool := fun x =>
     | none => false
   | "fzn_sort" => fun args =>
     match twoIntArrays args with
-    | some (a, b) => decide (List.mergeSort a (fun x y => decide (x ≤ y)) = b)
+    | some (a, b) => sortB a b
     | none => false
   | "fzn_arg_sort_int" => fun args =>
     match twoIntArrays args with
@@ -890,12 +942,12 @@ theorem fzn_sort_iff (args : List Value) :
       lexSortInterp (Ident.mk "fzn_sort") args := by
   have hB : ∀ args, lexSortInterpB (Ident.mk "fzn_sort") args
       = match twoIntArrays args with
-      | some (a, b) => decide (List.mergeSort a (fun x y => decide (x ≤ y)) = b)
+      | some (a, b) => sortB a b
       | none => false
       := fun _ => rfl
   have hI : ∀ args, lexSortInterp (Ident.mk "fzn_sort") args
       = match twoIntArrays args with
-      | some (a, b) => a.Perm b ∧ increasing b
+      | some (a, b) => sortProp a b
       | none => False
       := fun _ => rfl
   rw [hB args, hI args]
@@ -904,21 +956,7 @@ theorem fzn_sort_iff (args : List Value) :
   | some p =>
     obtain ⟨a, b⟩ := p
     simp only
-    rw [decide_eq_true_iff]
-    constructor
-    · intro heq
-      have hperm : (List.mergeSort a (fun x y => decide (x ≤ y))).Perm a :=
-        List.mergeSort_perm a _
-      rw [heq] at hperm
-      refine ⟨hperm.symm, ?_⟩
-      rw [← heq]
-      exact mergeSort_increasing a
-    · rintro ⟨hperm, hinc⟩
-      have hp2 : (List.mergeSort a (fun x y => decide (x ≤ y))).Perm a :=
-        List.mergeSort_perm a _
-      have hp3 : (List.mergeSort a (fun x y => decide (x ≤ y))).Perm b :=
-        List.Perm.trans hp2 hperm
-      exact sorted_perm_unique hp3 (mergeSort_increasing a) hinc
+    exact sortB_iff a b
 
 theorem fzn_arg_sort_int_iff (args : List Value) :
     lexSortInterpB (Ident.mk "fzn_arg_sort_int") args = true ↔
@@ -1072,5 +1110,237 @@ theorem fzn_seq_precede_chain_int_iff (args : List Value) :
   | some a =>
     simp only
     exact seqPrecedeChainB_iff a
+
+/-! ## Decodability gates
+
+`lexSortDecodes` is the Boolean decodability gate of the family: the `isSome`
+of the very decoder `lexSortInterp` uses, and `true` outside the family.
+`lexSortDecodes_agree` states that the gate cannot distinguish two argument
+lists which agree on the shape information that is statically known from a
+well-typed call (`ArgsAgree`).  Every decoder in this family inspects the
+arguments through `valueInts`/`valueBools`, which see only constructor tags
+and array lengths, so the plain `ArgsAgree` hypothesis suffices. -/
+
+/-- Pairing two integer-list decodings preserves `isSome` agreement. -/
+private theorem optionPair_isSome_agree {a a' b b' : Option (List Int)}
+    (ha : a.isSome = a'.isSome) (hb : b.isSome = b'.isSome) :
+    (match a, b with
+      | some x, some y => some (x, y)
+      | _, _ => none).isSome =
+    (match a', b' with
+      | some x, some y => some (x, y)
+      | _, _ => none).isSome := by
+  cases a <;> cases b <;> cases a' <;> cases b' <;> simp_all
+
+/-- The two-integer-array decoder accepts exactly the same argument shapes. -/
+theorem twoIntArrays'_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (twoIntArrays' vs).isSome = (twoIntArrays' ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩ <;> rcases ws with _ | ⟨w0, ws1⟩
+  · rfl
+  · cases hshape
+  · cases hshape
+  · cases hshape with
+    | cons hhead htail =>
+      cases htail with
+      | nil =>
+        cases hhead with
+        | bool _ _ => simp [twoIntArrays']
+        | int _ _ => simp [twoIntArrays']
+        | setOfInt _ _ => simp [twoIntArrays']
+        | @array _ _ _ => simp [twoIntArrays']
+      | cons hhead2 htail2 =>
+        cases htail2 with
+        | nil =>
+          cases hhead with
+          | bool _ _ => simp [twoIntArrays']
+          | int _ _ => simp [twoIntArrays']
+          | setOfInt _ _ => simp [twoIntArrays']
+          | @array xs ys harr =>
+            cases hhead2 with
+            | bool _ _ => simp [twoIntArrays']
+            | int _ _ => simp [twoIntArrays']
+            | setOfInt _ _ => simp [twoIntArrays']
+            | @array xs2 ys2 harr2 =>
+              simp only [twoIntArrays']
+              exact optionPair_isSome_agree
+                (valueInts_isSome_sameShape harr)
+                (valueInts_isSome_sameShape harr2)
+        | cons _ _ => simp [twoIntArrays']
+
+/-- The private alias `twoIntArrays` accepts exactly the same argument
+    shapes. -/
+theorem twoIntArrays_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (twoIntArrays vs).isSome = (twoIntArrays ws).isSome :=
+  twoIntArrays'_isSome_agree h
+
+/-- The single-integer-array decoder accepts exactly the same argument
+    shapes. -/
+theorem oneIntArray_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (oneIntArray vs).isSome = (oneIntArray ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩ <;> rcases ws with _ | ⟨w0, ws1⟩
+  · rfl
+  · cases hshape
+  · cases hshape
+  · cases hshape with
+    | cons hhead htail =>
+      cases htail with
+      | nil =>
+        cases hhead with
+        | bool _ _ => simp [oneIntArray]
+        | int _ _ => simp [oneIntArray]
+        | setOfInt _ _ => simp [oneIntArray]
+        | @array xs ys harr =>
+          simp only [oneIntArray]
+          exact valueInts_isSome_sameShape harr
+      | cons _ _ => simp [oneIntArray]
+
+/-- The single-boolean-array decoder accepts exactly the same argument
+    shapes. -/
+theorem oneBoolArray_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (oneBoolArray vs).isSome = (oneBoolArray ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩ <;> rcases ws with _ | ⟨w0, ws1⟩
+  · rfl
+  · cases hshape
+  · cases hshape
+  · cases hshape with
+    | cons hhead htail =>
+      cases htail with
+      | nil =>
+        cases hhead with
+        | bool _ _ => simp [oneBoolArray]
+        | int _ _ => simp [oneBoolArray]
+        | setOfInt _ _ => simp [oneBoolArray]
+        | @array xs ys harr =>
+          simp only [oneBoolArray]
+          exact valueBools_isSome_sameShape harr
+      | cons _ _ => simp [oneBoolArray]
+
+/-- The (array, int) decoder accepts exactly the same argument shapes. -/
+theorem arrayAndInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (arrayAndInt vs).isSome = (arrayAndInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩ <;> rcases ws with _ | ⟨w0, ws1⟩
+  · rfl
+  · cases hshape
+  · cases hshape
+  · cases hshape with
+    | cons hhead htail =>
+      cases htail with
+      | nil =>
+        cases hhead with
+        | bool _ _ => simp [arrayAndInt]
+        | int _ _ => simp [arrayAndInt]
+        | setOfInt _ _ => simp [arrayAndInt]
+        | @array _ _ _ => simp [arrayAndInt]
+      | cons hhead2 htail2 =>
+        cases htail2 with
+        | nil =>
+          cases hhead with
+          | bool _ _ => simp [arrayAndInt]
+          | int _ _ => simp [arrayAndInt]
+          | setOfInt _ _ => simp [arrayAndInt]
+          | @array xs ys harr =>
+            cases hhead2 with
+            | bool _ _ => simp [arrayAndInt]
+            | int y y' =>
+              simp only [arrayAndInt, Option.isSome_map]
+              exact valueInts_isSome_sameShape harr
+            | setOfInt _ _ => simp [arrayAndInt]
+            | @array _ _ _ => simp [arrayAndInt]
+        | cons _ _ => simp [arrayAndInt]
+
+/-- The (int, int, array) decoder accepts exactly the same argument shapes. -/
+theorem twoIntsAndArray_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (twoIntsAndArray vs).isSome = (twoIntsAndArray ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases vs with _ | ⟨v0, vs1⟩ <;> rcases ws with _ | ⟨w0, ws1⟩
+  · rfl
+  · cases hshape
+  · cases hshape
+  · cases hshape with
+    | cons hhead htail =>
+      cases htail with
+      | nil =>
+        cases hhead with
+        | bool _ _ => simp [twoIntsAndArray]
+        | int _ _ => simp [twoIntsAndArray]
+        | setOfInt _ _ => simp [twoIntsAndArray]
+        | @array _ _ _ => simp [twoIntsAndArray]
+      | cons hhead2 htail2 =>
+        cases htail2 with
+        | nil =>
+          cases hhead with
+          | bool _ _ => simp [twoIntsAndArray]
+          | int _ _ => simp [twoIntsAndArray]
+          | setOfInt _ _ => simp [twoIntsAndArray]
+          | @array _ _ _ => simp [twoIntsAndArray]
+        | cons hhead3 htail3 =>
+          cases htail3 with
+          | nil =>
+            cases hhead with
+            | bool _ _ => simp [twoIntsAndArray]
+            | int _ _ =>
+              cases hhead2 with
+              | bool _ _ => simp [twoIntsAndArray]
+              | int _ _ =>
+                cases hhead3 with
+                | bool _ _ => simp [twoIntsAndArray]
+                | int _ _ => simp [twoIntsAndArray]
+                | setOfInt _ _ => simp [twoIntsAndArray]
+                | @array xs ys harr =>
+                  simp only [twoIntsAndArray, Option.isSome_map]
+                  exact valueInts_isSome_sameShape harr
+              | setOfInt _ _ => simp [twoIntsAndArray]
+              | @array _ _ _ => simp [twoIntsAndArray]
+            | setOfInt _ _ => simp [twoIntsAndArray]
+            | @array _ _ _ => simp [twoIntsAndArray]
+          | cons _ _ => simp [twoIntsAndArray]
+
+/-- Boolean decodability gate of the lex/sort/value-precedence family.
+    Neutral (`true`) outside the family. -/
+def lexSortDecodes (n : String) (args : List Value) : Bool :=
+  match n with
+  | "fzn_lex_less_int" => (twoIntArrays args).isSome
+  | "fzn_lex_lesseq_int" => (twoIntArrays args).isSome
+  | "fzn_increasing_int" => (oneIntArray args).isSome
+  | "fzn_increasing_bool" => (oneBoolArray args).isSome
+  | "fzn_strictly_increasing_int" => (oneIntArray args).isSome
+  | "fzn_sort" => (twoIntArrays args).isSome
+  | "fzn_arg_sort_int" => (twoIntArrays args).isSome
+  | "fzn_maximum_arg_int" => (arrayAndInt args).isSome
+  | "fzn_minimum_arg_int" => (arrayAndInt args).isSome
+  | "fzn_value_precede_int" => (twoIntsAndArray args).isSome
+  | "fzn_value_precede_chain_int" => (twoIntArrays args).isSome
+  | "fzn_seq_precede_chain_int" => (oneIntArray args).isSome
+  | _ => true
+
+/-- The decodability gate is invariant under `ArgsAgree`. -/
+theorem lexSortDecodes_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) (n : String) :
+    lexSortDecodes n vs = lexSortDecodes n ws := by
+  unfold lexSortDecodes
+  split
+  · exact twoIntArrays_isSome_agree h
+  · exact twoIntArrays_isSome_agree h
+  · exact oneIntArray_isSome_agree h
+  · exact oneBoolArray_isSome_agree h
+  · exact oneIntArray_isSome_agree h
+  · exact twoIntArrays_isSome_agree h
+  · exact twoIntArrays_isSome_agree h
+  · exact arrayAndInt_isSome_agree h
+  · exact arrayAndInt_isSome_agree h
+  · exact twoIntsAndArray_isSome_agree h
+  · exact twoIntArrays_isSome_agree h
+  · exact oneIntArray_isSome_agree h
+  · rfl
 
 end LeanFzn.Semantics.Globals.LexSort

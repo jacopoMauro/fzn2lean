@@ -205,14 +205,11 @@ theorem sat_aux_xor {m : Model}
     bool-var parameter types. -/
 theorem sigEnv_bool_xor {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "bool_xor") =
-    some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-      .basic (.var (.par .bool))] := by
-  show (match m.declaredSigs (Ident.mk "bool_xor") with
-    | some params => some params
-    | none => fullSig (Ident.mk "bool_xor")) = _
-  have hdecl : m.declaredSigs (Ident.mk "bool_xor") = none := by
-    show lookupIdent (Ident.mk "bool_xor")
-      (m.predicates.map (fun p => (p.name, p.params.map (·.type)))) = none
+    [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+      .basic (.var (.par .bool))]] := by
+  unfold LeanFzn.Model.sigEnv
+  have hdecl : m.declaredSigs (Ident.mk "bool_xor") = [] := by
+    unfold LeanFzn.Model.declaredSigs
     rw [hpred]
     rfl
   rw [hdecl]

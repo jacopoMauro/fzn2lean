@@ -336,6 +336,12 @@ theorem substParamVarDecl_type (env : Store) (d : VarDeclItem) :
   | basic ty n anns init => cases init <;> rfl
   | array ty n anns es => rfl
 
+theorem substParamVarDecl_shapeValue (env : Store) (d : VarDeclItem) :
+    (substParamVarDecl env d).shapeValue = d.shapeValue := by
+  cases d with
+  | basic ty n anns init => cases init <;> rfl
+  | array ty n anns es => rfl
+
 theorem expandInitDecl_fst_name (d : VarDeclItem) :
     (expandInitDecl d).1.name = d.name := by
   cases d with
@@ -352,6 +358,20 @@ theorem expandInitDecl_fst_name (d : VarDeclItem) :
 
 theorem expandInitDecl_fst_type (d : VarDeclItem) :
     (expandInitDecl d).1.type = d.type := by
+  cases d with
+  | basic ty n anns init =>
+      cases init with
+      | none => rfl
+      | some e =>
+          cases hc : initConstraint (.basic ty n anns (some e)) with
+          | none => simp [expandInitDecl, hc]
+          | some c =>
+              simp only [expandInitDecl, hc, Prod.fst]
+              rfl
+  | array ty n anns es => rfl
+
+theorem expandInitDecl_fst_shapeValue (d : VarDeclItem) :
+    (expandInitDecl d).1.shapeValue = d.shapeValue := by
   cases d with
   | basic ty n anns init =>
       cases init with
@@ -429,6 +449,25 @@ theorem staticEnv_expandInit (m : Model) :
   unfold Model.staticEnv
   rw [show (expandInitModel m).parameters = m.parameters from rfl,
     expandInit_variables_static]
+
+theorem shapeStore_substParams (m : Model) :
+    (substParamsModel m).shapeStore = m.shapeStore := by
+  apply Model.shapeStore_eq_of (m := m) (m' := substParamsModel m)
+  · rfl
+  · rw [substParams_variables_eq, List.map_map]
+    apply List.map_congr_left
+    intro d _
+    simp [Function.comp_def, substParamVarDecl_name, substParamVarDecl_shapeValue]
+
+theorem shapeStore_expandInit (m : Model) :
+    (expandInitModel m).shapeStore = m.shapeStore := by
+  apply Model.shapeStore_eq_of (m := m) (m' := expandInitModel m)
+  · rfl
+  · rw [expandInit_variables_eq, List.map_map]
+    apply List.map_congr_left
+    intro d _
+    exact Prod.ext (expandInitDecl_fst_name d)
+      (expandInitDecl_fst_shapeValue d)
 
 /-! ## Domains are untouched -/
 
@@ -840,11 +879,11 @@ theorem expandInit_variables_names (m : Model) :
   exact expandInitDecl_fst_name d
 
 theorem intEq_sig : fullSig (Ident.mk "int_eq") =
-    some [.basic (.var (.par .int)), .basic (.var (.par .int))] := by
+    [[.basic (.var (.par .int)), .basic (.var (.par .int))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem boolNot_sig : fullSig (Ident.mk "bool_not") =
-    some [.basic (.var (.par .bool)), .basic (.var (.par .bool))] := by
+    [[.basic (.var (.par .bool)), .basic (.var (.par .bool))]] := by
   simp [fullSig, globalsSig, stdSig]
 
 theorem intEqConstraint_checkArg {m : Model} {ty : BasicVarType} {n : Ident}
@@ -895,6 +934,11 @@ theorem wf_substParams {m : Model} (hwf : WellFormed fullSig m) :
     WellFormed fullSig (substParamsModel m) := by
   have htyped : EnvStaticTyped m (parEnv m) :=
     parEnv_agrees_static hwf.valueNamesUnique
+  have hshape : (substParamsModel m).shapeStore = m.shapeStore :=
+    shapeStore_substParams m
+  have hhenv : ∀ x v, parEnv m x = some v → m.shapeStore x = some v :=
+    parEnv_sound (s := m.shapeStore) (fun d hd =>
+      shapeStore_param (List.nodup_append.mp hwf.valueNamesUnique).1 hd)
   refine
     { predNamesUnique := hwf.predNamesUnique
       valueNamesUnique := ?_
@@ -903,7 +947,8 @@ theorem wf_substParams {m : Model} (hwf : WellFormed fullSig m) :
       variableArrayLengths := ?_
       variableInitializers := ?_
       objectiveType := ?_
-      constraintsChecked := ?_ }
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · rw [substParams_variables_eq, List.map_map]
     simpa [substParamsModel, Function.comp_def, substParamVarDecl_name] using
       hwf.valueNamesUnique
@@ -940,10 +985,30 @@ theorem wf_substParams {m : Model} (hwf : WellFormed fullSig m) :
     obtain ⟨c, hc, rfl⟩ := List.mem_map.mp hc'
     obtain ⟨params, hsig, hF⟩ := hwf.constraintsChecked c hc
     exact ⟨params, hsig, forall2_substParamExpr_checkArg htyped c.args params hF⟩
+  · intro c' hc'
+    rw [substParams_constraints_eq] at hc'
+    obtain ⟨c, hc, rfl⟩ := List.mem_map.mp hc'
+    obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c hc
+    refine ⟨params, hsig, vs, forall2_substParamExpr_checkArg htyped c.args params hF,
+      ?_, hdec⟩
+    rw [hshape]
+    simp only [substParamConstraint]
+    rw [mapM_map_eq, mapM_congr'
+      (f := fun e => Expr.eval m.shapeStore (substParamExpr (parEnv m) e))
+      (g := fun e => Expr.eval m.shapeStore e)
+      (fun e _ => substParamExpr_eval hhenv e)]
+    exact hev
 
 theorem wf_expandInit {m : Model} (hwf : WellFormed fullSig m)
     (hpred : m.predicates = []) :
     WellFormed fullSig (expandInitModel m) := by
+  have hnd : ((expandInitModel m).parameters.map (·.name) ++
+      (expandInitModel m).variables.map (·.name)).Nodup := by
+    rw [show (expandInitModel m).parameters = m.parameters from rfl,
+      expandInit_variables_names]
+    exact hwf.valueNamesUnique
+  have hshape : (expandInitModel m).shapeStore = m.shapeStore :=
+    shapeStore_expandInit m
   refine
     { predNamesUnique := hwf.predNamesUnique
       valueNamesUnique := ?_
@@ -952,7 +1017,8 @@ theorem wf_expandInit {m : Model} (hwf : WellFormed fullSig m)
       variableArrayLengths := ?_
       variableInitializers := ?_
       objectiveType := ?_
-      constraintsChecked := ?_ }
+      constraintsChecked := ?_
+      constraintsDecode := ?_ }
   · rw [expandInit_variables_names]
     exact hwf.valueNamesUnique
   · intro d' hd'
@@ -1019,7 +1085,7 @@ theorem wf_expandInit {m : Model} (hwf : WellFormed fullSig m)
                         · have hpred' : (expandInitModel m).predicates = [] := by
                             simpa [expandInitModel] using hpred
                           simpa [expandInitModel, intEqConstraint] using
-                            sigEnv_int_eq hpred'
+                            SigEnv.mem_of_eq_singleton (sigEnv_int_eq hpred')
                         · simpa [staticEnv_expandInit] using
                             intEqConstraint_checkArg hwf hd0 hty
                       · simp [expandInitDecl, initConstraint, hty] at hpc
@@ -1035,9 +1101,90 @@ theorem wf_expandInit {m : Model} (hwf : WellFormed fullSig m)
                         · have hpred' : (expandInitModel m).predicates = [] := by
                             simpa [expandInitModel] using hpred
                           simpa [expandInitModel, boolNotConstraint] using
-                            sigEnv_bool_not hpred'
+                            SigEnv.mem_of_eq_singleton (sigEnv_bool_not hpred')
                         · simpa [staticEnv_expandInit] using
                             boolNotConstraint_checkArg hwf hd0 hty
+                      · simp [expandInitDecl, initConstraint, hty] at hpc
+
+  · intro c' hc'
+    rw [expandInit_constraints_eq] at hc'
+    rcases List.mem_append.mp hc' with hc1 | hc2
+    · obtain ⟨params, hsig, vs, hF, hev, hdec⟩ := hwf.constraintsDecode c' hc1
+      refine ⟨params, hsig, vs, by simpa [staticEnv_expandInit] using hF, ?_, hdec⟩
+      rw [hshape]
+      exact hev
+    · obtain ⟨p, hp, hpc⟩ := List.mem_flatMap.mp hc2
+      obtain ⟨d0, hd0, rfl⟩ := List.mem_map.mp hp
+      cases d0 with
+      | array ty n anns es => simp [expandInitDecl] at hpc
+      | basic ty n anns init =>
+          cases init with
+          | none => simp [expandInitDecl] at hpc
+          | some e =>
+              cases e with
+              | ident x => simp [expandInitDecl, initConstraint] at hpc
+              | lit l =>
+                  cases l with
+                  | set sl => simp [expandInitDecl, initConstraint] at hpc
+                  | int k =>
+                      by_cases hty : ty.base = .int
+                      · have hpc' : c' ∈ [intEqConstraint n k] := by
+                          simpa [expandInitDecl, initConstraint, hty,
+                            intEqConstraint] using hpc
+                        simp only [List.mem_singleton] at hpc'
+                        subst hpc'
+                        have hsig : [.basic (.var (.par .int)),
+                            .basic (.var (.par .int))] ∈
+                            (expandInitModel m).sigEnv fullSig
+                              (intEqConstraint n k).name := by
+                          have hpred' : (expandInitModel m).predicates = [] := by
+                            simpa [expandInitModel] using hpred
+                          simpa [expandInitModel, intEqConstraint] using
+                            SigEnv.mem_of_eq_singleton (sigEnv_int_eq hpred')
+                        have hF : Forall2
+                            (Expr.checkArg (expandInitModel m).staticEnv)
+                            (intEqConstraint n k).args
+                            [.basic (.var (.par .int)),
+                             .basic (.var (.par .int))] := by
+                          simpa [staticEnv_expandInit] using
+                            intEqConstraint_checkArg hwf hd0 hty
+                        obtain ⟨vs, hev⟩ :=
+                          exists_mapM_eval_of_forall2 (m := expandInitModel m)
+                            hnd hF
+                        exact ⟨_, hsig, vs, hF, hev, by
+                          simpa [intEqConstraint] using
+                            fullDecodes_true_of_not_mem_globals
+                              int_eq_not_globals _ _⟩
+                      · simp [expandInitDecl, initConstraint, hty] at hpc
+                  | bool b =>
+                      by_cases hty : ty.base = .bool
+                      · have hpc' : c' ∈ [boolNotConstraint n b] := by
+                          simpa [expandInitDecl, initConstraint, hty,
+                            boolNotConstraint] using hpc
+                        simp only [List.mem_singleton] at hpc'
+                        subst hpc'
+                        have hsig : [.basic (.var (.par .bool)),
+                            .basic (.var (.par .bool))] ∈
+                            (expandInitModel m).sigEnv fullSig
+                              (boolNotConstraint n b).name := by
+                          have hpred' : (expandInitModel m).predicates = [] := by
+                            simpa [expandInitModel] using hpred
+                          simpa [expandInitModel, boolNotConstraint] using
+                            SigEnv.mem_of_eq_singleton (sigEnv_bool_not hpred')
+                        have hF : Forall2
+                            (Expr.checkArg (expandInitModel m).staticEnv)
+                            (boolNotConstraint n b).args
+                            [.basic (.var (.par .bool)),
+                             .basic (.var (.par .bool))] := by
+                          simpa [staticEnv_expandInit] using
+                            boolNotConstraint_checkArg hwf hd0 hty
+                        obtain ⟨vs, hev⟩ :=
+                          exists_mapM_eval_of_forall2 (m := expandInitModel m)
+                            hnd hF
+                        exact ⟨_, hsig, vs, hF, hev, by
+                          simpa [boolNotConstraint] using
+                            fullDecodes_true_of_not_mem_globals
+                              bool_not_not_globals _ _⟩
                       · simp [expandInitDecl, initConstraint, hty] at hpc
 
 theorem wf_fragment {m : Model} (hwf : WellFormed fullSig m)

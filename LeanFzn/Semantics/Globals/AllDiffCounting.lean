@@ -960,4 +960,395 @@ theorem fzn_symmetric_all_different_iff (args : List Value) :
     simp only
     exact symmetricAllDiffB_iff xs
 
+/-! ## Decodability gates -/
+
+private theorem oneIntArr_isSome_eq (xs : List Value) :
+    (oneIntArr [.array xs]).isSome = (valueInts xs).isSome := by
+  simp only [oneIntArr]
+
+private theorem oneSetArr_isSome_eq (xs : List Value) :
+    (oneSetArr [.array xs]).isSome = (valueSets xs).isSome := by
+  simp only [oneSetArr]
+
+private theorem arrAndSet_isSome_eq (xs : List Value) (es : IntSetValue) :
+    (arrAndSet [.array xs, .setOfInt es]).isSome = (valueInts xs).isSome := by
+  simp only [arrAndSet]
+  cases valueInts xs <;> rfl
+
+private theorem intAndArr_isSome_eq (i : Int) (xs : List Value) :
+    (intAndArr [.int i, .array xs]).isSome = (valueInts xs).isSome := by
+  simp only [intAndArr]
+  cases valueInts xs <;> rfl
+
+private theorem intArrInt_isSome_eq (i : Int) (xs : List Value) (v : Int) :
+    (intArrInt [.int i, .array xs, .int v]).isSome = (valueInts xs).isSome := by
+  simp only [intArrInt]
+  cases valueInts xs <;> rfl
+
+private theorem arrIntInt_isSome_eq (xs : List Value) (v n : Int) :
+    (arrIntInt [.array xs, .int v, .int n]).isSome = (valueInts xs).isSome := by
+  simp only [arrIntInt]
+  cases valueInts xs <;> rfl
+
+private theorem threeIntArrs_isSome_eq (a b c : List Value) :
+    (threeIntArrs [.array a, .array b, .array c]).isSome =
+      ((valueInts a).isSome && (valueInts b).isSome && (valueInts c).isSome) := by
+  simp only [threeIntArrs]
+  cases valueInts a <;> cases valueInts b <;> cases valueInts c <;> rfl
+
+private theorem threeIntArrs'_isSome_eq (a b c : List Value) :
+    (threeIntArrs' [.array a, .array b, .array c]).isSome =
+      ((valueInts a).isSome && (valueInts b).isSome && (valueInts c).isSome) := by
+  simp only [threeIntArrs']
+  cases valueInts a <;> cases valueInts b <;> cases valueInts c <;> rfl
+
+private theorem fourIntArrs_isSome_eq (a b c d : List Value) :
+    (fourIntArrs [.array a, .array b, .array c, .array d]).isSome =
+      ((valueInts a).isSome && (valueInts b).isSome &&
+        (valueInts c).isSome && (valueInts d).isSome) := by
+  simp only [fourIntArrs]
+  cases valueInts a <;> cases valueInts b <;> cases valueInts c <;>
+    cases valueInts d <;> rfl
+
+private theorem setCountArgs_isSome_eq (xs : List Value) (v : IntSetValue) (n : Int) :
+    (setCountArgs [.array xs, .setOfInt v, .int n]).isSome =
+      (valueSets xs).isSome := by
+  simp only [setCountArgs]
+  cases valueSets xs <;> rfl
+
+private theorem atLeastSetArgs_isSome_eq (n : Int) (xs : List Value)
+    (v : IntSetValue) :
+    (atLeastSetArgs [.int n, .array xs, .setOfInt v]).isSome =
+      (valueSets xs).isSome := by
+  simp only [atLeastSetArgs]
+  cases valueSets xs <;> rfl
+
+theorem oneIntArr_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (oneIntArr vs).isSome = (oneIntArr ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array xs ys harr =>
+      rw [oneIntArr_isSome_eq, oneIntArr_isSome_eq]
+      exact valueInts_isSome_sameShape harr
+  · cases hx <;> rfl
+
+theorem oneSetArr_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (oneSetArr vs).isSome = (oneSetArr ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array xs ys harr =>
+      rw [oneSetArr_isSome_eq, oneSetArr_isSome_eq]
+      exact valueSets_isSome_sameShape harr
+  · cases hx <;> rfl
+
+theorem arrAndSet_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (arrAndSet vs).isSome = (arrAndSet ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array xs ys harr =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt es et =>
+        rw [arrAndSet_isSome_eq, arrAndSet_isSome_eq]
+        exact valueInts_isSome_sameShape harr
+      | array _ => rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem intAndArr_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (intAndArr vs).isSome = (intAndArr ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int i i' =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array xs ys harr =>
+        rw [intAndArr_isSome_eq, intAndArr_isSome_eq]
+        exact valueInts_isSome_sameShape harr
+    | setOfInt _ _ => rfl
+    | array _ => rfl
+  · cases hx <;> cases hy <;> rfl
+
+theorem intArrInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (intArrInt vs).isSome = (intArrInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int i i' =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array xs ys harr =>
+        cases hz with
+        | bool _ _ => rfl
+        | int v v' =>
+          rw [intArrInt_isSome_eq, intArrInt_isSome_eq]
+          exact valueInts_isSome_sameShape harr
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+    | setOfInt _ _ => rfl
+    | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+theorem arrIntInt_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (arrIntInt vs).isSome = (arrIntInt ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array xs ys harr =>
+      cases hy with
+      | bool _ _ => rfl
+      | int v v' =>
+        cases hz with
+        | bool _ _ => rfl
+        | int n n' =>
+          rw [arrIntInt_isSome_eq, arrIntInt_isSome_eq]
+          exact valueInts_isSome_sameShape harr
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+      | setOfInt _ _ => rfl
+      | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+theorem threeIntArrs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (threeIntArrs vs).isSome = (threeIntArrs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array b b' hb =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt _ _ => rfl
+        | @array c c' hc =>
+          rw [threeIntArrs_isSome_eq, threeIntArrs_isSome_eq,
+            valueInts_isSome_sameShape ha, valueInts_isSome_sameShape hb,
+            valueInts_isSome_sameShape hc]
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+theorem threeIntArrs'_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (threeIntArrs' vs).isSome = (threeIntArrs' ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array b b' hb =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt _ _ => rfl
+        | @array c c' hc =>
+          rw [threeIntArrs'_isSome_eq, threeIntArrs'_isSome_eq,
+            valueInts_isSome_sameShape ha, valueInts_isSome_sameShape hb,
+            valueInts_isSome_sameShape hc]
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+theorem fourIntArrs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (fourIntArrs vs).isSome = (fourIntArrs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+  rcases hws with _ | ⟨hu, hus⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array a a' ha =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array b b' hb =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt _ _ => rfl
+        | @array c c' hc =>
+          cases hw with
+          | bool _ _ => rfl
+          | int _ _ => rfl
+          | setOfInt _ _ => rfl
+          | @array d d' hd =>
+            rw [fourIntArrs_isSome_eq, fourIntArrs_isSome_eq,
+              valueInts_isSome_sameShape ha, valueInts_isSome_sameShape hb,
+              valueInts_isSome_sameShape hc, valueInts_isSome_sameShape hd]
+  · cases hx <;> cases hy <;> cases hz <;> cases hw <;> rfl
+
+theorem setCountArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (setCountArgs vs).isSome = (setCountArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int _ _ => rfl
+    | setOfInt _ _ => rfl
+    | @array xs ys harr =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt v v' =>
+        cases hz with
+        | bool _ _ => rfl
+        | int n n' =>
+          rw [setCountArgs_isSome_eq, setCountArgs_isSome_eq]
+          exact valueSets_isSome_sameShape harr
+        | setOfInt _ _ => rfl
+        | array _ => rfl
+      | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+theorem atLeastSetArgs_isSome_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) :
+    (atLeastSetArgs vs).isSome = (atLeastSetArgs ws).isSome := by
+  have hshape : Value.SameShapeList vs ws := ArgsAgree.sameShape h
+  rcases hshape with _ | ⟨hx, hxs⟩
+  · rfl
+  rcases hxs with _ | ⟨hy, hys⟩
+  · cases hx <;> rfl
+  rcases hys with _ | ⟨hz, hzs⟩
+  · cases hx <;> cases hy <;> rfl
+  rcases hzs with _ | ⟨hw, hws⟩
+  · cases hx with
+    | bool _ _ => rfl
+    | int n n' =>
+      cases hy with
+      | bool _ _ => rfl
+      | int _ _ => rfl
+      | setOfInt _ _ => rfl
+      | @array xs ys harr =>
+        cases hz with
+        | bool _ _ => rfl
+        | int _ _ => rfl
+        | setOfInt v v' =>
+          rw [atLeastSetArgs_isSome_eq, atLeastSetArgs_isSome_eq]
+          exact valueSets_isSome_sameShape harr
+        | array _ => rfl
+    | setOfInt _ _ => rfl
+    | array _ => rfl
+  · cases hx <;> cases hy <;> cases hz <;> rfl
+
+/-- Boolean decodability gate of the `all_different` family.  Neutral
+    (`true`) outside the family. -/
+def allDiffDecodes (n : String) (args : List Value) : Bool :=
+  match n with
+  | "fzn_all_different_int" => (oneIntArr args).isSome
+  | "fzn_all_different_set" => (oneSetArr args).isSome
+  | "fzn_all_disjoint" => (oneSetArr args).isSome
+  | "fzn_all_equal_int" => (oneIntArr args).isSome
+  | "fzn_all_equal_set" => (oneSetArr args).isSome
+  | "fzn_alldifferent_except" => (arrAndSet args).isSome
+  | "fzn_alldifferent_except_0" => (oneIntArr args).isSome
+  | "fzn_symmetric_all_different" => (oneIntArr args).isSome
+  | _ => true
+
+/-- The decodability gate is invariant under `ArgsAgree`. -/
+theorem allDiffDecodes_agree {params : List PredParamType}
+    {vs ws : List Value} (h : ArgsAgree params vs ws) (n : String) :
+    allDiffDecodes n vs = allDiffDecodes n ws := by
+  unfold allDiffDecodes
+  split
+  · exact oneIntArr_isSome_agree h
+  · exact oneSetArr_isSome_agree h
+  · exact oneSetArr_isSome_agree h
+  · exact oneIntArr_isSome_agree h
+  · exact oneSetArr_isSome_agree h
+  · exact arrAndSet_isSome_agree h
+  · exact oneIntArr_isSome_agree h
+  · exact oneIntArr_isSome_agree h
+  · rfl
+
 end LeanFzn.Semantics.Globals.AllDiffCounting

@@ -1,4 +1,5 @@
 import LeanFzn.Semantics.StdLib
+import LeanFzn.Semantics.Globals
 import LeanFzn.Parser.Parser
 
 open LeanFzn.Semantics LeanFzn.Parser

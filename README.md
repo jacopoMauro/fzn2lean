@@ -37,6 +37,36 @@ The language reference is **MiniZinc 2.10.1**, pinned to commit
 Float syntax and semantics are outside the supported fragment; strings are
 supported in annotations.
 
+## Repository status and maintenance
+
+The production CLI uses the certified Core solver. Historical solver code is
+retained under `LeanFzn/Legacy/` for explicit regression tests and differential
+checks; it remains part of the full validation build.
+
+The repository review on **17 November 2026** found a verified solver for a
+restricted finite-domain fragment, with remaining language-conformance,
+completeness and release-validation obligations. The current semantic
+inventory passes `--require-clean`: 218 implemented names, 281 reviewed rows
+and no open recorded findings. Thirteen rows still have explicit restrictions;
+the inventory check does not prove upstream equivalence or enforce every
+restriction on text input. Solver compilation supports fewer shapes than the
+solution checker.
+
+Required reporting modules, conformance tests, audit programs, fixtures and
+protocol/review evidence are still untracked. The release cohort was also
+hidden by `.gitignore`; it is now visible for addition. Include these files
+and the existing modified proofs together when preparing a complete revision.
+See [the repository review](audits/STATUS.md) for the assurance boundaries,
+validation results, files to add and prioritized next steps. No complete
+acceptance/release result is inferred from the existence of the gate scripts.
+
+Keep generated logs, benchmark runs and temporary experiments under ignored
+`tmp/`. Python bytecode caches, `.lake/` build outputs and machine-local editor,
+container and MCP settings are ignored. Preserve the committed PGO profile,
+vendored specification, benchmark inputs and Legacy regression tools: they
+support builds, reproducibility or validation. See [Tests/README.md](Tests/README.md)
+and [audits/README.md](audits/README.md) for the maintained checks.
+
 ## Using LeanFzn from MiniZinc
 
 [minizinc-wrapper/](minizinc-wrapper/README.md) registers LeanFzn as a MiniZinc
@@ -56,6 +86,17 @@ passes on only the verdicts `leanfzn solve` prints.
 
 ## Guarantees and supported scope
 
+The [reviewed FlatZinc semantic inventory](specification/minizinc-2.10.1/predicates_and_globals_report.md)
+compares every implemented predicate with pinned upstream contracts. It records
+signature, representation and semantic restrictions alongside repaired findings;
+the assurance table below is relative to the project's formal semantics and
+must not be read as unconditional upstream conformance. Check review freshness
+with `python3 -B audits/check_semantic_inventory.py`; the gate also runs it
+with `--require-clean`. All 15 recorded findings are
+marked repaired, including repairs that explicitly restrict the admitted ABI.
+Passing this check establishes review coverage and freshness; upstream semantic
+correspondence remains a separate proof obligation.
+
 The table below is the assurance map for the whole release.  A row is a
 *claim* plus the theorem or executable gate that establishes it; the last
 column states the assumptions and the trust that remains outside the proof.
@@ -71,7 +112,7 @@ column states the assumptions and the trust that remains outside the proof.
 | Report terminal class, markers and exit codes | `satisfaction_report_truthful`, `optimization_report_truthful`, `terminalKind_marker_sound`, `terminalKind_no_marker_of_incomplete`, `terminalKind_exit_eq` | Back-translation starts from the actual `solveModel`/`optimizeCore` result. `Truthful` is `True` for unknown, incomplete and unsupported results, so a non-answer cannot become a claim. |
 | JSONL encoding and transport | `Report/Proofs` (`terminal_toJson_event`, `terminal_toJson_exit`, `error_toJson_exit`) and `Tests/Cli/test_protocol.py` | `Lean.Data.Json`'s printer/parser and byte output are trusted; object member order is unspecified and consumers must decode, not byte-compare. |
 | Python MiniZinc wrapper | `Tests/Audits/test_wrapper_protocol.py`, `Tests/Audits/test_wrapper.py`, `minizinc-wrapper/test.sh` against pinned MiniZinc 2.10.1 | The Python process/pipe/cancellation layer is tested, not formally verified; the tests are a finite matrix over committed scenarios. |
-| Lean/C code generation and release artifacts | `audits/run_axiom_audit.sh`, `audits/check_module_boundaries.py`, `audits/run_gates.sh`, `audits/run_release_gates.sh` | Axiom hygiene, module boundaries, full tests and the isolated PGO/non-PGO cohort are checked. The compiler, LLVM/clang, linker and OS runtime remain trusted; the release cohort is finite evidence, not a proof of compiled-code correctness. The Docker image rebuilds from the same source and is not itself gated. |
+| Lean/C code generation and release artifacts | `audits/run_axiom_audit.sh`, `audits/check_module_boundaries.py`, `audits/run_gates.sh`, `audits/run_release_gates.sh` | These gates check axiom hygiene, module boundaries, tests and the isolated PGO/non-PGO cohort; a passing release run is not established by this table. The compiler, LLVM/clang, linker and OS runtime remain trusted; the release cohort is finite evidence, not a proof of compiled-code correctness. The Docker image rebuilds from the same source and is not itself gated. |
 
 ### Parser
 
@@ -291,6 +332,7 @@ exhaustion such as a conflict cap or give-up.
 | `Integration/Optimization/{Basic,Partial}.lean` | Generic branch-and-bound and partial certified solver interface; no Legacy imports |
 | `Integration/Public/` | Core-only source solving, linear/seeded optimization and CLI driver |
 | `Integration/Config/`, `Integration/Emit/` | Shared options, source annotations and output rendering |
+| `Integration/Report/` | Typed solver reports, JSONL transport and report correctness proofs |
 | `Legacy/` | Old list search, exclusive propagation machinery, old option drivers and fallback APIs |
 | `Cli/` | Parser/checker I/O and the Core-only solve command |
 
@@ -429,8 +471,8 @@ list of test targets:
 bash audits/run_gates.sh
 ```
 
-The runner builds the libraries and registered executables, runs the applicable
-tests, harness battery/crosscheck, axiom and boundary audits, fuzzing, a short
+The runner builds the libraries and registered executables, checks the clean
+semantic inventory, and runs the applicable tests, harness battery/crosscheck, axiom and boundary audits, fuzzing, a short
 performance suite and Core differential checks. It writes logs under `tmp/`.
 Some executables require arguments and have dedicated gate steps. The target
 inventory is [lakefile.toml](lakefile.toml); audit usage and measurement
@@ -442,8 +484,9 @@ Release certification additionally requires the isolated PGO / non-PGO gate:
 bash audits/run_release_gates.sh
 ```
 
-It copies the frozen source and required fixtures into
-`tmp/release/<id>/{pgo,nopgo}`, builds each selection in its own `.lake` tree
+It copies the frozen source, semantic-review evidence and required fixtures into
+`tmp/release/<id>/{pgo,nopgo}`, validates the frozen semantic inventory, and
+builds each selection in its own `.lake` tree
 (the non-PGO selection is the PGO lakefile with exactly the package
 `moreLeancArgs` line removed), runs `audits/release_cohort.tsv` with equal flags
 and a frozen conflict limit, checks every emitted witness with both binaries'
@@ -454,10 +497,9 @@ checks each fixed-k `model_sha256` against the frozen fixture.
 `manifest.json`, `comparison.json` and `summary.txt` record
 the exact source hashes, toolchain, profile checksum, MiniZinc pin and both
 binary hashes; `--expected-manifest` can pin those values plus the two harness
-hashes for a reproducible rerun. The proposed
-[.github/workflows/certification.yml](.github/workflows/certification.yml)
-makes this gate and the full gate required jobs; it has not been executed in
-this environment, so it is not reported as CI-passing.
+hashes for a reproducible rerun. This checkout does not contain a
+`.github/workflows/certification.yml` workflow; run both gates explicitly.
+CI certification is not established by the presence of these scripts.
 
 The Docker image is not covered by this gate. `minizinc-wrapper/Dockerfile`
 builds `leanfzn` again inside the image, from the same source and the same

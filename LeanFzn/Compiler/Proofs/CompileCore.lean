@@ -331,6 +331,40 @@ theorem dotProduct_two_one : ∀ (x y : Value),
   intro x y
   cases x <;> cases y <;> simp [LeanFzn.Semantics.dotProduct]
 
+/-- A linear dot product over an all-integer value list of matching
+    length is defined.  This is the definedness side of the reified
+    linear semantics: the new match-on-`dotProduct` bodies are `False`
+    when the product is `none`, so the correspondence proof needs the
+    typing fact that every value slot is an integer. -/
+theorem dotProduct_intVals_exists {coeffs : List Int} :
+    ∀ {is : List Nat} {a : List Value}, coeffs.length = is.length →
+    (∀ i, i ∈ is → ∃ p, a[i]! = Value.int p) →
+    ∃ d, dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) = some d := by
+  induction coeffs with
+  | nil =>
+      intro is a hlen hint
+      cases is with
+      | nil => exact ⟨0, rfl⟩
+      | cons i is => simp at hlen
+  | cons c cs ih =>
+      intro is a hlen hint
+      cases is with
+      | nil => simp at hlen
+      | cons i is =>
+          have hlen' : cs.length = is.length := by simpa using hlen
+          obtain ⟨p, hp⟩ := hint i (by simp)
+          obtain ⟨d, hd⟩ := ih (a := a) hlen' (by
+            intro j hj
+            exact hint j (by simp [hj]))
+          refine ⟨c * p + d, ?_⟩
+          have hp' : a[i]?.getD default = Value.int p := by
+            simpa only [List.getElem!_eq_getElem?_getD] using hp
+          have hd' : dotProduct (intVals cs)
+              (is.map (fun i => a[i]?.getD default)) = some d := by
+            simpa only [List.getElem!_eq_getElem?_getD] using hd
+          simp only [intVals, List.map_cons,
+            List.getElem!_eq_getElem?_getD, LeanFzn.Semantics.dotProduct, hp', hd']
+
 /-- Inversion of the two-element unit-coefficient dot product. -/
 theorem dotProduct_two_one_inv {x y : Value} {k : Int}
     (h : dotProduct [Value.int 1, Value.int 1] [x, y] = some k) :
@@ -1179,11 +1213,20 @@ theorem extractConstraint_holds_converse {m : Model}
       nameIndex (slots.map Prod.fst) x.name = some i →
       (c.name.name = "int_eq" ∨ c.name.name = "int_ne") →
       ∃ p, a[i]! = Value.int p)
+    (harr : ∀ (ks elems : ArrayLiteral) (b : Int) (r x : Ident) (i : Nat),
+      c.args = [Expr.array ks, Expr.array elems,
+        Expr.basic (.lit (.int b)), Expr.basic (.ident r)] →
+      BasicExpr.ident x ∈ elems →
+      nameIndex (slots.map Prod.fst) x.name = some i →
+      (c.name.name = "int_lin_eq_reif" ∨
+        c.name.name = "int_lin_le_reif" ∨
+        c.name.name = "int_lin_ne_reif") →
+      ∃ p, a[i]! = Value.int p)
     (hsat : dc.SatisfiedBy a) :
     c.Holds fullInterp ((assemble m slots dcs).toStore a) := by
-  -- (the int-reads premise is NAME-CONDITIONED: only the eq/ne slot
-  -- shapes consult it, for their OWN arguments; the linker derives
-  -- it from the typing chain for eq/ne constraints)
+  -- (the int-reads premises are NAME-CONDITIONED: the eq/ne slot
+  -- shapes consult `hreads`, and the reified linear shapes consult
+  -- `harr`; the linker derives both from the typing chain)
   rcases extractConstraint_inv hdc with
     ⟨x, y, i, j, hname, hargs, hxi, hyi, hdc'⟩ |
     ⟨x, k, i, hname, hargs, hxi, hdc'⟩ |
@@ -1745,15 +1788,21 @@ theorem extractConstraint_holds_converse {m : Model}
             rw [halt]; exact hlen.symm
           omega) hrk
     · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-      show (match [.array (intVals coeffs),
-          .array (is.map (fun i => a[i]!)), .int b, a[k]!] with
-        | [Value.array as_, Value.array xs, Value.int b', Value.bool rb'] =>
-            (rb' = true ∧ dotProduct as_ xs = some b') ∨
-              (rb' = false ∧ dotProduct as_ xs ≠ some b')
-        | _ => False)
       rw [hkb]
-      exact (reif_disj_iff (dotProduct (intVals coeffs)
-        (is.map (fun i => a[i]!)) = some b) rb).mpr hiff
+      show (match dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) with
+        | some d => (rb = true ∧ d = b) ∨ (rb = false ∧ d ≠ b)
+        | none => False)
+      have hint : ∀ i, i ∈ is → ∃ p, a[i]! = Value.int p := by
+        intro i hi
+        obtain ⟨x, hxmem, hxi⟩ := linIndices_mem elems is his i hi
+        exact harr ks elems b r x i hargs hxmem hxi (Or.inl hname)
+      have hlen' : coeffs.length = is.length := by simpa using hlen
+      obtain ⟨d, hd⟩ := dotProduct_intVals_exists hlen' hint
+      rw [hd]
+      have hiffd : rb = true ↔ d = b := by
+        rw [hiff, hd]
+        simp
+      exact (reif_disj_iff (d = b) rb).mpr hiffd
   · -- int_lin_le_reif(coeffs, xs, b, r)
     subst hdc'
     obtain ⟨rb, hk, hiff⟩ := hsat
@@ -1770,21 +1819,22 @@ theorem extractConstraint_holds_converse {m : Model}
             rw [halt]; exact hlen.symm
           omega) hrk
     · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-      show (match [.array (intVals coeffs),
-          .array (is.map (fun i => a[i]!)), .int b, a[k]!] with
-        | [Value.array as_, Value.array xs, Value.int b', Value.bool rb'] =>
-            (rb' = true ∧ dotLe as_ xs b' = true) ∨
-              (rb' = false ∧ dotLe as_ xs b' = false)
-        | _ => False)
       rw [hkb]
-      rcases (reif_disj_iff (dotLe (intVals coeffs)
-        (is.map (fun i => a[i]!)) b = true) rb).mpr hiff with
-        ⟨hrb, hle⟩ | ⟨hrb, hnle⟩
-      · exact Or.inl ⟨hrb, hle⟩
-      · refine Or.inr ⟨hrb, ?_⟩
-        cases hd2 : dotLe (intVals coeffs) (is.map (fun i => a[i]!)) b with
-        | false => rfl
-        | true => exact absurd hd2 hnle
+      show (match dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) with
+        | some d => (rb = true ∧ d ≤ b) ∨ (rb = false ∧ ¬ d ≤ b)
+        | none => False)
+      have hint : ∀ i, i ∈ is → ∃ p, a[i]! = Value.int p := by
+        intro i hi
+        obtain ⟨x, hxmem, hxi⟩ := linIndices_mem elems is his i hi
+        exact harr ks elems b r x i hargs hxmem hxi
+          (Or.inr (Or.inl hname))
+      have hlen' : coeffs.length = is.length := by simpa using hlen
+      obtain ⟨d, hd⟩ := dotProduct_intVals_exists hlen' hint
+      rw [hd]
+      have hiffd : rb = true ↔ d ≤ b := by
+        rw [hiff]
+        simp only [dotLe, hd, decide_eq_true_eq]
+      exact (reif_disj_iff (d ≤ b) rb).mpr hiffd
   · -- int_lin_ne_reif(coeffs, xs, b, r)
     subst hdc'
     obtain ⟨rb, hk, hiff⟩ := hsat
@@ -1801,21 +1851,26 @@ theorem extractConstraint_holds_converse {m : Model}
             rw [halt]; exact hlen.symm
           omega) hrk
     · rw [ident_eq_of_name hname, fullInterp_std (by decide)]
-      show (match [.array (intVals coeffs),
-          .array (is.map (fun i => a[i]!)), .int b, a[k]!] with
-        | [Value.array as_, Value.array xs, Value.int b', Value.bool rb'] =>
-            (rb' = true ∧ dotNe as_ xs b' = true) ∨
-              (rb' = false ∧ dotNe as_ xs b' = false)
-        | _ => False)
       rw [hkb]
-      rcases (reif_disj_iff (dotNe (intVals coeffs)
-        (is.map (fun i => a[i]!)) b = true) rb).mpr hiff with
-        ⟨hrb, hne⟩ | ⟨hrb, hnne⟩
-      · exact Or.inl ⟨hrb, hne⟩
-      · refine Or.inr ⟨hrb, ?_⟩
-        cases hd2 : dotNe (intVals coeffs) (is.map (fun i => a[i]!)) b with
-        | false => rfl
-        | true => exact absurd hd2 hnne
+      show (match dotProduct (intVals coeffs) (is.map (fun i => a[i]!)) with
+        | some d => (rb = true ∧ d ≠ b) ∨ (rb = false ∧ d = b)
+        | none => False)
+      have hint : ∀ i, i ∈ is → ∃ p, a[i]! = Value.int p := by
+        intro i hi
+        obtain ⟨x, hxmem, hxi⟩ := linIndices_mem elems is his i hi
+        exact harr ks elems b r x i hargs hxmem hxi
+          (Or.inr (Or.inr hname))
+      have hlen' : coeffs.length = is.length := by simpa using hlen
+      obtain ⟨d, hd⟩ := dotProduct_intVals_exists hlen' hint
+      rw [hd]
+      have hiffd : rb = true ↔ d ≠ b := by
+        rw [hiff]
+        simp only [dotNe, hd, decide_eq_true_eq]
+      have hnot : ¬ d ≠ b ↔ d = b := by
+        by_cases hdb : d = b
+        · simp [hdb]
+        · simp [hdb]
+      simpa [hnot] using (reif_disj_iff (d ≠ b) rb).mpr hiffd
   · -- int_min in the general two-operand shape
     subst hdc'
     obtain ⟨p, q, hp, hq, hr⟩ := hsat
@@ -2678,13 +2733,10 @@ theorem int_read_of_checkArg_slot {m : Model}
     parameter types in a model without predicate items. -/
 theorem sigEnv_int_eq {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "int_eq") =
-    some [.basic (.var (.par .int)), .basic (.var (.par .int))] := by
-  show (match m.declaredSigs (Ident.mk "int_eq") with
-    | some params => some params
-    | none => fullSig (Ident.mk "int_eq")) = _
-  have hdecl : m.declaredSigs (Ident.mk "int_eq") = none := by
-    show lookupIdent (Ident.mk "int_eq")
-      (m.predicates.map (fun p => (p.name, p.params.map (·.type)))) = none
+    [[.basic (.var (.par .int)), .basic (.var (.par .int))]] := by
+  unfold LeanFzn.Model.sigEnv
+  have hdecl : m.declaredSigs (Ident.mk "int_eq") = [] := by
+    unfold LeanFzn.Model.declaredSigs
     rw [hpred]
     rfl
   rw [hdecl]
@@ -2693,13 +2745,10 @@ theorem sigEnv_int_eq {m : Model} (hpred : m.predicates = []) :
 /-- The signature environment resolves `int_ne` the same way. -/
 theorem sigEnv_int_ne {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "int_ne") =
-    some [.basic (.var (.par .int)), .basic (.var (.par .int))] := by
-  show (match m.declaredSigs (Ident.mk "int_ne") with
-    | some params => some params
-    | none => fullSig (Ident.mk "int_ne")) = _
-  have hdecl : m.declaredSigs (Ident.mk "int_ne") = none := by
-    show lookupIdent (Ident.mk "int_ne")
-      (m.predicates.map (fun p => (p.name, p.params.map (·.type)))) = none
+    [[.basic (.var (.par .int)), .basic (.var (.par .int))]] := by
+  unfold LeanFzn.Model.sigEnv
+  have hdecl : m.declaredSigs (Ident.mk "int_ne") = [] := by
+    unfold LeanFzn.Model.declaredSigs
     rw [hpred]
     rfl
   rw [hdecl]
@@ -2788,10 +2837,10 @@ theorem int_reads_of_mem_eq_ne {m : Model}
   intro x i hxarg hxi
   obtain ⟨params, hsig, hfor⟩ := hwf.constraintsChecked c hc
   have hres : m.sigEnv Globals.fullSig (Ident.mk c.name.name) =
-      [PredParamType.basic (BasicPredParamType.var (BasicVarType.par
+      [[PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
-        BasicParType.int))] := by
+        BasicParType.int))]] := by
     rcases hname with h1 | h1
     · rw [h1]; exact sigEnv_int_eq hpred
     · rw [h1]; exact sigEnv_int_ne hpred
@@ -2800,11 +2849,12 @@ theorem int_reads_of_mem_eq_ne {m : Model}
         BasicParType.int)),
        PredParamType.basic (BasicPredParamType.var (BasicVarType.par
         BasicParType.int))] := by
-    have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
-    rw [show m.sigEnv Globals.fullSig c.name
+    have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
+    simp only [show m.sigEnv Globals.fullSig c.name
         = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
     rw [hres] at h1
-    exact (Option.some.inj h1).symm
+    simp only [List.mem_singleton] at h1
+    exact h1
   rw [hparameq] at hfor
   obtain ⟨pt, hptmem, hchk0⟩ :=
     forall2_mem (Expr.checkArg m.staticEnv) c.args
@@ -2823,6 +2873,24 @@ theorem int_reads_of_mem_eq_ne {m : Model}
       · exact absurd hnil (by simp)
   subst hpt
   exact int_read_of_checkArg_slot hwf hslot hfor hchk0 hxi hmem
+
+/-- The element check of the second array argument of a three-linear
+    reified constraint: from the argument list's exact shape and the
+    signature check, each element identifier is int-typed. -/
+theorem checkArg_lin_reif_elem {m : Model} {c : ConstraintItem}
+    {params : List PredParamType}
+    (hchecked : Forall2 (Expr.checkArg m.staticEnv) c.args params)
+    (hparams : params =
+      [.array .int (.par .int), .array .int (.var (.par .int)),
+        .basic (.par .int), .basic (.var (.par .bool))])
+    {ks elems : ArrayLiteral} {b : Int} {r x : Ident}
+    (hargs : c.args = [Expr.array ks, Expr.array elems,
+      Expr.basic (.lit (.int b)), Expr.basic (.ident r)])
+    (hxmem : BasicExpr.ident x ∈ elems) :
+    (Expr.basic (.ident x)).checkArg m.staticEnv (.basic (.var (.par .int))) := by
+  rw [hparams] at hchecked
+  rw [hargs] at hchecked
+  exact hchecked.2.1.2 (.ident x) hxmem
 
 /-! ## The compile-list inversions (the whole-model assemblies' fuel) -/
 
@@ -3377,13 +3445,10 @@ theorem bool_read_of_checkArg_slot {m : Model}
     bool-var parameter types (model without predicate items). -/
 theorem sigEnv_bool_not {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "bool_not") =
-    some [.basic (.var (.par .bool)), .basic (.var (.par .bool))] := by
-  show (match m.declaredSigs (Ident.mk "bool_not") with
-    | some params => some params
-    | none => fullSig (Ident.mk "bool_not")) = _
-  have hdecl : m.declaredSigs (Ident.mk "bool_not") = none := by
-    show lookupIdent (Ident.mk "bool_not")
-      (m.predicates.map (fun p => (p.name, p.params.map (·.type)))) = none
+    [[.basic (.var (.par .bool)), .basic (.var (.par .bool))]] := by
+  unfold LeanFzn.Model.sigEnv
+  have hdecl : m.declaredSigs (Ident.mk "bool_not") = [] := by
+    unfold LeanFzn.Model.declaredSigs
     rw [hpred]
     rfl
   rw [hdecl]
@@ -3393,14 +3458,11 @@ theorem sigEnv_bool_not {m : Model} (hpred : m.predicates = []) :
     bool-var parameter types. -/
 theorem sigEnv_bool_and {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "bool_and") =
-    some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-      .basic (.var (.par .bool))] := by
-  show (match m.declaredSigs (Ident.mk "bool_and") with
-    | some params => some params
-    | none => fullSig (Ident.mk "bool_and")) = _
-  have hdecl : m.declaredSigs (Ident.mk "bool_and") = none := by
-    show lookupIdent (Ident.mk "bool_and")
-      (m.predicates.map (fun p => (p.name, p.params.map (·.type)))) = none
+    [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+      .basic (.var (.par .bool))]] := by
+  unfold LeanFzn.Model.sigEnv
+  have hdecl : m.declaredSigs (Ident.mk "bool_and") = [] := by
+    unfold LeanFzn.Model.declaredSigs
     rw [hpred]
     rfl
   rw [hdecl]
@@ -3410,14 +3472,11 @@ theorem sigEnv_bool_and {m : Model} (hpred : m.predicates = []) :
     bool-var parameter types. -/
 theorem sigEnv_bool_or {m : Model} (hpred : m.predicates = []) :
     m.sigEnv fullSig (Ident.mk "bool_or") =
-    some [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
-      .basic (.var (.par .bool))] := by
-  show (match m.declaredSigs (Ident.mk "bool_or") with
-    | some params => some params
-    | none => fullSig (Ident.mk "bool_or")) = _
-  have hdecl : m.declaredSigs (Ident.mk "bool_or") = none := by
-    show lookupIdent (Ident.mk "bool_or")
-      (m.predicates.map (fun p => (p.name, p.params.map (·.type)))) = none
+    [[.basic (.var (.par .bool)), .basic (.var (.par .bool)),
+      .basic (.var (.par .bool))]] := by
+  unfold LeanFzn.Model.sigEnv
+  have hdecl : m.declaredSigs (Ident.mk "bool_or") = [] := by
+    unfold LeanFzn.Model.declaredSigs
     rw [hpred]
     rfl
   rw [hdecl]
@@ -3447,16 +3506,19 @@ theorem bool_reads_of_mem_bool_family {m : Model}
       params =
       [.basic (.var (.par .bool)), .basic (.var (.par .bool)),
         .basic (.var (.par .bool))] := by
-    have h1 : m.sigEnv Globals.fullSig c.name = some params := hsig
-    rw [show m.sigEnv Globals.fullSig c.name
+    have h1 : params ∈ m.sigEnv Globals.fullSig c.name := hsig
+    simp only [show m.sigEnv Globals.fullSig c.name
         = m.sigEnv Globals.fullSig (Ident.mk c.name.name) from rfl] at h1
     rcases hname with hn | hn | hn
     · rw [show c.name.name = "bool_not" from hn, sigEnv_bool_not hpred] at h1
-      exact Or.inl (Option.some.inj h1).symm
+      simp only [List.mem_singleton] at h1
+      exact Or.inl h1
     · rw [show c.name.name = "bool_and" from hn, sigEnv_bool_and hpred] at h1
-      exact Or.inr (Option.some.inj h1).symm
+      simp only [List.mem_singleton] at h1
+      exact Or.inr h1
     · rw [show c.name.name = "bool_or" from hn, sigEnv_bool_or hpred] at h1
-      exact Or.inr (Option.some.inj h1).symm
+      simp only [List.mem_singleton] at h1
+      exact Or.inr h1
   -- every entry of params is a bool-var parameter
   have hpsall : ∀ pt ∈ params, pt = .basic (.var (.par .bool)) := by
     intro pt hpt

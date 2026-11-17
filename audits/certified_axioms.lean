@@ -36,7 +36,6 @@ import LeanFzn.Legacy.Solver.Propagation.EventContract
 import LeanFzn.Legacy.Solver.Propagation.ClauseLifecycle
 import LeanFzn.Solver.Propagation.CompactDomain
 import LeanFzn.Legacy.Solver.Propagation.DecisionProto
-import LeanFzn.Legacy.Solver.Propagation.ClauseWatch
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgCanonicalScheduler
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgCanonicalFamilies
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgMixedEvents
@@ -111,7 +110,6 @@ import LeanFzn.Legacy.Solver.UIP.Proofs.SupportedDead
 import LeanFzn.Legacy.Solver.UIP.Proofs.SupportedArms
 -- Session 13: the J1/E1/L1/R2/C1/I1 round modules.
 import LeanFzn.Legacy.Solver.UIP.Proofs.CheckpointPrefix
-import LeanFzn.Legacy.Solver.UIP.Proofs.HdeadCkpt
 import LeanFzn.Legacy.Solver.UIP.Proofs.SupportedLogSites
 import LeanFzn.Legacy.Solver.UIP.Proofs.ConsumeRun
 import LeanFzn.Legacy.Solver.UIP.Proofs.AnalysisEntail
@@ -150,8 +148,6 @@ import LeanFzn.Legacy.Solver.UIP.Proofs.LcgPropContract
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgRunPending
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgRunState
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgRunStep
-import LeanFzn.Legacy.Solver.UIP.Proofs.LcgMixedRunStep
-import LeanFzn.Legacy.Solver.UIP.Proofs.LcgMixedCompiledKit
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgKitFinal
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgEmissionTyped
 import LeanFzn.Legacy.Solver.UIP.Proofs.LcgPropCheck
