@@ -784,21 +784,21 @@ theorem firstUnsupportedFast_eq (m : Model) :
           exact hm (h1.mp hcontra)
         rw [Bool.eq_false_iff.mpr hns, decide_eq_false_iff_not.mpr hm])]
 
-/-- **Correctness of the front door.**  `checkModelSolution m sol =
+/-- **Correctness of the front door.**  `checkSemanticModelSolution m sol =
     .accepted` if and only if the model is statically well formed
     under `fullSig`, every constraint name belongs to
     `fullCheckableNames`, and the solution string parses to entries
     that are well formed (declared variables only, no duplicates)
     and whose completed store satisfies `Satisfies fullSig
     fullInterp`. -/
-theorem checkModelSolution_correct_parse (m : Model) (sol : String) :
-    checkModelSolution m sol = .accepted ↔
+theorem checkSemanticModelSolution_correct_parse (m : Model) (sol : String) :
+    checkSemanticModelSolution m sol = .accepted ↔
       WellFormed fullSig m ∧
       (∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames) ∧
       ∃ es, parseSolution (stripSeparators sol) = .ok es ∧
         entriesOkB m es ∧
         Satisfies fullSig fullInterp m (completedStore m es) := by
-  unfold checkModelSolution
+  unfold checkSemanticModelSolution
   cases huns : firstUnsupported m with
   | some n =>
       constructor
@@ -871,14 +871,14 @@ theorem checkModelSolution_correct_parse (m : Model) (sol : String) :
 /-- The front door is sound and complete against the independent,
     value-sensitive solution grammar, within the supported model signature.
     In particular, valid assignment syntax is not defined using the parser. -/
-theorem checkModelSolution_correct (m : Model) (sol : String) :
-    checkModelSolution m sol = .accepted ↔
+theorem checkSemanticModelSolution_correct (m : Model) (sol : String) :
+    checkSemanticModelSolution m sol = .accepted ↔
       WellFormed fullSig m ∧
       (∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames) ∧
       ∃ es, SolutionGrammar (stripSeparators sol) es ∧
         entriesOkB m es ∧
         Satisfies fullSig fullInterp m (completedStore m es) := by
-  rw [checkModelSolution_correct_parse]
+  rw [checkSemanticModelSolution_correct_parse]
   constructor
   · rintro ⟨hw, hn, es, hp, he, hs⟩
     exact ⟨hw, hn, es, parseSolution_eq_ok_iff_grammar.mp hp, he, hs⟩
@@ -886,17 +886,17 @@ theorem checkModelSolution_correct (m : Model) (sol : String) :
     exact ⟨hw, hn, es, parseSolution_eq_ok_iff_grammar.mpr hg, he, hs⟩
 
 /-- **What an accepted solution means.**  The store that
-    `checkModelSolution_correct` speaks about is tied to the solution
+    `checkSemanticModelSolution_correct` speaks about is tied to the solution
     string and the model: it maps every assigned name to the value
     written in the solution, gives every parameter its declared value,
     and satisfies the model. -/
-theorem checkModelSolution_accepted {m : Model} {sol : String}
-    (h : checkModelSolution m sol = .accepted) :
+theorem checkSemanticModelSolution_accepted {m : Model} {sol : String}
+    (h : checkSemanticModelSolution m sol = .accepted) :
     ∃ es, parseSolution (stripSeparators sol) = .ok es ∧
       (∀ e ∈ es, completedStore m es ⟨e.name⟩ = some e.value.toValue) ∧
       ParamHonest m (completedStore m es) ∧
       Satisfies fullSig fullInterp m (completedStore m es) := by
-  obtain ⟨hwf, _, es, hparse, hok, hsat⟩ := (checkModelSolution_correct_parse m sol).mp h
+  obtain ⟨hwf, _, es, hparse, hok, hsat⟩ := (checkSemanticModelSolution_correct_parse m sol).mp h
   obtain ⟨hdecl, hnd⟩ := (entriesOkB_iff m es).mp hok
   have hvu := hwf.valueNamesUnique
   rw [List.nodup_append] at hvu
@@ -914,11 +914,11 @@ theorem checkModelSolution_accepted {m : Model} {sol : String}
       (Ident.eq_of_name_eq (by rw [hname, heq]))
 
 /-- The fast front door returns exactly the verified front door's
-    outcome on every model and solution, so `checkModelSolution_correct`
-    and `checkModelSolution_accepted` describe its verdicts too. -/
-theorem checkModelSolutionFast_eq (m : Model) (sol : String) :
-    checkModelSolutionFast m sol = checkModelSolution m sol := by
-  unfold checkModelSolutionFast checkModelSolution
+    outcome on every model and solution, so `checkSemanticModelSolution_correct`
+    and `checkSemanticModelSolution_accepted` describe its verdicts too. -/
+theorem checkSemanticModelSolutionFast_eq (m : Model) (sol : String) :
+    checkSemanticModelSolutionFast m sol = checkSemanticModelSolution m sol := by
+  unfold checkSemanticModelSolutionFast checkSemanticModelSolution
   rw [firstUnsupportedFast_eq]
   cases hu : firstUnsupported m with
   | some n => rfl
@@ -1072,5 +1072,60 @@ private theorem checkPreparedDyn_eq (m : Model) (sol : String)
             | some args => preparedInterpB c.name args
             | none => false))
       rw [prepared_all_eq _ _ hnames]
+
+theorem checkModelSolution_accepted_iff (m : Model) (sol : String) :
+    checkModelSolution m sol = .accepted ↔
+      Admission.Admitted m ∧ checkSemanticModelSolution m sol = .accepted := by
+  unfold checkModelSolution
+  cases hf : Admission.firstFailure m with
+  | none => simp [(Admission.firstFailure_none_iff _).mp hf]
+  | some reason =>
+    have hn : ¬ Admission.Admitted m := by
+      intro h
+      have := (Admission.firstFailure_none_iff _).mpr h
+      simp [hf] at this
+    simp [hn]
+
+theorem checkModelSolution_correct_parse (m : Model) (sol : String) :
+    checkModelSolution m sol = .accepted ↔
+      Admission.Admitted m ∧ WellFormed fullSig m ∧
+      (∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames) ∧
+      ∃ es, parseSolution (stripSeparators sol) = .ok es ∧ entriesOkB m es ∧
+        Satisfies fullSig fullInterp m (completedStore m es) := by
+  rw [checkModelSolution_accepted_iff, checkSemanticModelSolution_correct_parse]
+
+theorem checkModelSolution_correct (m : Model) (sol : String) :
+    checkModelSolution m sol = .accepted ↔
+      Admission.Admitted m ∧ WellFormed fullSig m ∧
+      (∀ c ∈ m.constraints, c.name.name ∈ fullCheckableNames) ∧
+      ∃ es, SolutionGrammar (stripSeparators sol) es ∧ entriesOkB m es ∧
+        Satisfies fullSig fullInterp m (completedStore m es) := by
+  rw [checkModelSolution_accepted_iff, checkSemanticModelSolution_correct]
+
+theorem checkModelSolution_admitted {m : Model} {sol : String}
+    (h : checkModelSolution m sol = .accepted) : Admission.Admitted m :=
+  ((checkModelSolution_accepted_iff m sol).mp h).1
+
+theorem checkModelSolution_accepted {m : Model} {sol : String}
+    (h : checkModelSolution m sol = .accepted) :
+    ∃ es, parseSolution (stripSeparators sol) = .ok es ∧
+      (∀ e ∈ es, completedStore m es ⟨e.name⟩ = some e.value.toValue) ∧
+      ParamHonest m (completedStore m es) ∧
+      Satisfies fullSig fullInterp m (completedStore m es) :=
+  checkSemanticModelSolution_accepted ((checkModelSolution_accepted_iff m sol).mp h).2
+
+theorem checkModelSolutionFast_eq (m : Model) (sol : String) :
+    checkModelSolutionFast m sol = checkModelSolution m sol := by
+  unfold checkModelSolutionFast checkModelSolution
+  cases Admission.firstFailure m with
+  | some reason => rfl
+  | none => exact checkSemanticModelSolutionFast_eq m sol
+
+theorem checkPreparedSolution_admitted {p : PreparedModel} {sol : String}
+    (h : checkPreparedSolution p sol = .accepted) : Admission.Admitted p.model := by
+  unfold checkPreparedSolution at h
+  cases hf : Admission.firstFailure p.model with
+  | some reason => simp [hf] at h
+  | none => exact (Admission.firstFailure_none_iff _).mp hf
 
 end LeanFzn.Checker

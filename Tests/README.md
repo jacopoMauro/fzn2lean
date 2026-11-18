@@ -7,7 +7,7 @@ that would reintroduce that dependency.
 | Directory | Coverage |
 | --- | --- |
 | `Parser/` | Parsing and pretty-printing |
-| `Semantics/` | Standard predicates, globals, typing and well-formedness |
+| `Semantics/` | Standard predicates, globals, typing, well-formedness and kernel-checked source-admission boundaries |
 | `Checker/` | Solution parsing, acceptance, objectives and fast/reference agreement |
 | `Compiler/` | Normalization, parameter arrays, literal folding, checked bounds, finite-set expansion, rank circuits, preprocessing and element forms |
 | `Engine/` | Domains, literals, trail, clauses, queue, analysis, search and reduction |
@@ -36,6 +36,7 @@ rebuild every native executable.
 .lake/build/bin/tests_core_only
 .lake/build/bin/tests_integration_core_seed
 .lake/build/bin/tests_integration_portfolio
+python3 -B Tests/Cli/test_admission.py
 python3 -B Tests/Cli/test_solve.py
 python3 -B Tests/Cli/test_protocol.py
 python3 -B Tests/Cli/test_check_separators.py

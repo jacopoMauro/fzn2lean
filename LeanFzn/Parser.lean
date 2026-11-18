@@ -7,3 +7,4 @@ import LeanFzn.Parser.Proofs.Assembled
 import LeanFzn.Parser.Proofs.Completeness
 import LeanFzn.Parser.Proofs.Correctness
 import LeanFzn.Parser.Suffix
+import LeanFzn.Parser.Proofs.SourceCorrectness

@@ -21,42 +21,25 @@ following the lexical rules of the vendored FlatZinc specification
   unterminated literal, or decoded bytes that are not valid UTF-8 is an
   error.
 
+Physical linebreaks (LF and CR alike) are rejected inside string literals;
+see assumption R11 for the exact policy.
+
 Every function is total; termination is proved by the decreasing measure
 `s.size - pos` (the number of unconsumed characters), and every successful
 lexing step strictly advances the position: `lexUnsigned`, `lexInt`,
 `lexEscape`, `lexString` and `lexToken` return the new position paired
 with a proof `pos < p`.
 
-The lexer is part of the trusted base of the recognition theorem:
-`ValidFlatZinc` (in `FznGrammar.lean`) is defined over the token list
-this lexer produces, so the parser/grammar correspondence is proved at
-the token level and lexical validity is defined by this module.
+`Lexical.lean` independently specifies character-level token meaning.
+`Proofs/LexerCorrectness` proves this tokenizer sound and complete against it;
+`Proofs/SourceCorrectness` composes that certificate with the token grammar.
+The older `ValidFlatZinc` definition remains lexer-relative for compatibility;
+the independent source contract is `Lexical.SourceGrammar`.
 -/
 
-namespace LeanFzn.Parser.Lexer
+import LeanFzn.Parser.Token
 
-/-- Token type for the non-float FlatZinc fragment. -/
-inductive Token where
-  -- punctuation
-  | lParen | rParen          -- ( )
-  | lBrack | rBrack          -- [ ]
-  | lBrace | rBrace          -- { }
-  | comma                    -- ,
-  | colon                    -- :
-  | semi                     -- ;
-  | colonColon               -- ::
-  | dotDot                   -- ..
-  | eq                       -- =
-  -- keywords used by FlatZinc
-  | kwPredicate | kwArray | kwOf | kwVar | kwSet | kwConstraint
-  | kwSolve | kwSatisfy | kwMinimize | kwMaximize
-  | kwBool | kwInt | kwPar | kwString | kwAnnotation
-  -- literals / identifiers
-  | boolLit (b : Bool)       -- true / false
-  | intLit (i : Int)
-  | stringLit (s : String)   -- decoded contents
-  | ident (s : String)       -- includes var-par identifiers (may start with _)
-  deriving Repr, Inhabited, BEq, DecidableEq
+namespace LeanFzn.Parser.Lexer
 
 /-- The reserved keywords of the spec that are *not* used in FlatZinc.
     An identifier matching one of these is rejected. -/
@@ -333,8 +316,8 @@ def lexString (s : Input) (pos : Nat) (acc : ByteArray) :
         | .ok (str, ⟨p', hp'⟩) => .ok (str, ⟨p', by omega⟩)
         | .error e => .error e
       | none => .error s!"invalid escape sequence in string literal at position {pos}"
-    else if c == '\n' then
-      .error s!"newline in string literal at position {pos}"
+    else if c == '\n' || c == '\r' then
+      .error s!"physical linebreak in string literal at position {pos}"
     else
       match lexString s (pos + 1) (acc ++ (String.singleton c).toUTF8) with
       | .ok (str, ⟨p', hp'⟩) => .ok (str, ⟨p', by omega⟩)

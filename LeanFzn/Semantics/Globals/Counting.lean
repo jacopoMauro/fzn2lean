@@ -385,24 +385,27 @@ theorem gccLowUpB_iff (xs cover low up : List Int) :
     List.mem_range, decide_eq_true_iff, and_assoc]
 
 /-- `fzn_global_cardinality_low_up_closed(xs, cover, low, up)`: the
-    low/up condition plus "The elements of x must take their values
-    from cover". -/
+    low/up condition, closed cover and the native aggregate condition
+    `length(xs) in sum(low)..sum(up)`. The aggregate is not redundant with
+    duplicate cover values or extra bound entries. -/
 def gccLowUpClosedProp (xs cover low up : List Int) : Prop :=
   gccLowUpProp xs cover low up ∧
     -- the binder `j < xs.length` bounds the `xs` read.
-    ∀ j : Nat, j < xs.length → xs[j]! ∈ cover
+    (∀ j : Nat, j < xs.length → xs[j]! ∈ cover) ∧
+    low.sum ≤ (xs.length : Int) ∧ (xs.length : Int) ≤ up.sum
 
 /-- Boolean twin of `gccLowUpClosedProp`. -/
 def gccLowUpClosedB (xs cover low up : List Int) : Bool :=
   gccLowUpB xs cover low up &&
   (List.range xs.length).all (fun j =>
     -- the range bounds the `xs` read.
-    decide (xs[j]! ∈ cover))
+    decide (xs[j]! ∈ cover)) &&
+  decide (low.sum ≤ (xs.length : Int)) && decide ((xs.length : Int) ≤ up.sum)
 
 theorem gccLowUpClosedB_iff (xs cover low up : List Int) :
     gccLowUpClosedB xs cover low up = true ↔ gccLowUpClosedProp xs cover low up := by
   simp only [gccLowUpClosedB, gccLowUpClosedProp, Bool.and_eq_true,
-    List.all_eq_true, List.mem_range, decide_eq_true_iff, gccLowUpB_iff]
+    List.all_eq_true, List.mem_range, decide_eq_true_iff, gccLowUpB_iff, and_assoc]
 
 /-! ## The interpretations -/
 

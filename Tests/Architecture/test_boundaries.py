@@ -99,6 +99,67 @@ class ImportBoundaries(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('imports missing module Tests.Engine.Missing', result.stderr)
 
+    def test_lexical_spec_can_use_pure_shared_tokens_and_stdlib(self):
+        result = self.run_fixture('', {
+            'LeanFzn/Parser/Lexical.lean': 'import LeanFzn.Parser.Token Std.Data.List.Lemmas\n',
+            'LeanFzn/Parser/Token.lean': '-- shared token data only\n',
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_lexical_spec_can_use_its_own_pure_submodules(self):
+        result = self.run_fixture('', {
+            'LeanFzn/Parser/Lexical.lean': 'import LeanFzn.Parser.Lexical.Classes\n',
+            'LeanFzn/Parser/Lexical/Classes.lean': 'import LeanFzn.Parser.Token\n',
+            'LeanFzn/Parser/Token.lean': '-- shared token data only\n',
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_lexical_spec_cannot_import_executable_lexer(self):
+        result = self.run_fixture('', {
+            'LeanFzn/Parser/Lexical.lean': 'import LeanFzn.Parser.Lexer\n',
+            'LeanFzn/Parser/Lexer.lean': '-- executable scanner\n',
+        })
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Lexical independence: LeanFzn.Parser.Lexical -> LeanFzn.Parser.Lexer', result.stderr)
+
+    def test_lexical_spec_cannot_hide_lexer_in_spec_submodule(self):
+        result = self.run_fixture('', {
+            'LeanFzn/Parser/Lexical.lean': 'import LeanFzn.Parser.Lexical.Classes\n',
+            'LeanFzn/Parser/Lexical/Classes.lean': 'import LeanFzn.Parser.Lexer\n',
+            'LeanFzn/Parser/Lexer.lean': '-- executable scanner\n',
+        })
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('LeanFzn.Parser.Lexical -> LeanFzn.Parser.Lexical.Classes -> LeanFzn.Parser.Lexer', result.stderr)
+
+    def test_shared_tokens_cannot_hide_an_implementation_dependency(self):
+        result = self.run_fixture('', {
+            'LeanFzn/Parser/Lexical.lean': 'import LeanFzn.Parser.Token\n',
+            'LeanFzn/Parser/Token.lean': 'import LeanFzn.Parser.Lexer\n',
+            'LeanFzn/Parser/Lexer.lean': '-- executable scanner\n',
+        })
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('LeanFzn.Parser.Lexical -> LeanFzn.Parser.Token -> LeanFzn.Parser.Lexer', result.stderr)
+
+    def test_lexical_spec_rejects_all_other_project_components(self):
+        for module in ['LeanFzn.Parser.Grammar', 'LeanFzn.Parser.Parser',
+                       'LeanFzn.Parser.Proofs.LexerScan', 'LeanFzn.Parser.SolutionRender',
+                       'Tests.Parser.Helper']:
+            with self.subTest(module=module):
+                result = self.run_fixture('', {
+                    'LeanFzn/Parser/Lexical.lean': f'import {module}\n',
+                    module.replace('.', '/') + '.lean': '-- forbidden dependency\n',
+                })
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f'Lexical independence: LeanFzn.Parser.Lexical -> {module}', result.stderr)
+
+    def test_lexical_imports_in_comments_and_strings_are_ignored(self):
+        result = self.run_fixture('', {
+            'LeanFzn/Parser/Lexical.lean':
+                '/- import LeanFzn.Parser.Lexer -/\n'
+                'def spelling := "import LeanFzn.Parser.Parser"\n',
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

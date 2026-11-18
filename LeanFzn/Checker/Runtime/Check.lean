@@ -3,6 +3,7 @@ Purpose: Executable check checker definitions and required local lemmas.
 Dependencies: Parser, semantics and earlier Checker.Runtime modules.
 DAG: Checker.Runtime.Check -> Checker.Proofs.Check -> compatibility import Checker.Check.
 -/
+import LeanFzn.Semantics.Admission
 import LeanFzn.Checker.Runtime.Globals
 open LeanFzn.Semantics LeanFzn.Parser
 
@@ -19,15 +20,15 @@ predicate with a verified interpretation (`fullCheckableNames`).
 the caller's discipline.
 
 This module closes that gap with one executable entry point,
-`checkModelSolution m sol`, together with the classification its
+`checkSemanticModelSolution m sol`, together with the classification its
 diagnostics need:
 
-* `checkModelSolution` runs the static checker, then the
+* `checkSemanticModelSolution` runs the static checker, then the
   constraint-name test, then the dynamic checker, and returns a
   structured `Outcome` that distinguishes a malformed model, an
   unsupported predicate, a malformed solution string, a genuinely
   unsatisfied condition, and acceptance;
-* `checkModelSolution_correct` states that the `accepted` outcome is
+* `checkSemanticModelSolution_correct` states that the `accepted` outcome is
   *equivalent* to full `Satisfies fullSig fullInterp` (with the
   completed store of the parsed entries) — no additional hypotheses —
   by discharging the checker's preconditions internally and combining
@@ -243,7 +244,7 @@ def entriesOkB (m : Model) (es : List Entry) : Bool :=
 
 /-! ## The structured outcome -/
 
-/-- The outcome of `checkModelSolution`: a fine-grained verdict
+/-- The outcome of `checkSemanticModelSolution`: a fine-grained verdict
     distinguishing every failure mode the front door must report. -/
 inductive Outcome where
   /-- The model is statically ill-formed (duplicates, bad
@@ -379,7 +380,7 @@ def firstUnsupportedFast (m : Model) : Option String :=
     preconditions of `checkSolutionFull_correct` — static
     well-formedness and checkable predicate names — then runs the
     dynamic checker, classifying each failure mode. -/
-def checkModelSolution (m : Model) (sol : String) : Outcome :=
+def checkSemanticModelSolution (m : Model) (sol : String) : Outcome :=
   -- unsupported predicates are reported first: a model using an
   -- unsupported global or an unknown predicate name is statically
   -- ill-formed under `fullSig` anyway, but the targeted message is
@@ -412,7 +413,7 @@ combining `wellFormedFastB_iff`, `firstUnsupported_none_iff`,
 A LeanFzn.Solver's output stream may contain several solutions (for instance
 the improving solutions of an optimization run), each terminated by a
 `----------` line, possibly followed by a `==========` status line.
-`checkModelSolution` checks *one* solution; `splitSolutions` cuts a
+`checkSemanticModelSolution` checks *one* solution; `splitSolutions` cuts a
 stream into its solutions so that each can be checked separately. -/
 
 /-- Is this LeanFzn.Solver-output line a solution separator?  Exact
@@ -459,14 +460,14 @@ def splitSolutions (out : String) : List String :=
 `checkSolutionFullFast` (in `FznGlobals.lean`) is the dynamic checker
 with the hash-map dispatcher behind the name gate; here it is wired
 into the front door's control flow.  The fast front door returns
-exactly the `checkModelSolution` outcome on every input
-(`checkModelSolutionFast_eq`), so the CLI uses it. -/
+exactly the `checkSemanticModelSolution` outcome on every input
+(`checkSemanticModelSolutionFast_eq`), so the CLI uses it. -/
 
 /-- **The fast front-door checker.**  Identical control flow to
-    `checkModelSolution`, with the hash-set name gate and the
+    `checkSemanticModelSolution`, with the hash-set name gate and the
     hash-dispatched dynamic checker (one map lookup per constraint on
     both sides of the dynamic check). -/
-def checkModelSolutionFast (m : Model) (sol : String) : Outcome :=
+def checkSemanticModelSolutionFast (m : Model) (sol : String) : Outcome :=
   match firstUnsupportedFast m with
   | some n => .unsupportedPredicate n
   | none =>
@@ -484,7 +485,7 @@ def checkModelSolutionFast (m : Model) (sol : String) : Outcome :=
 
 /-! ## Prepared model checking (parse once, check many)
 
-`checkModelSolution` re-runs the static gates and re-dispatches every
+`checkSemanticModelSolution` re-runs the static gates and re-dispatches every
 constraint name on each call.  A `PreparedModel` performs that work
 once: it bundles the model with the pre-dispatched constraint list —
 each constraint's predicate function looked up in `dispatchMap` — plus
@@ -492,7 +493,7 @@ the results of the two static gates (`firstUnsupported`,
 `wellFormedFastB`) and the declared-variable set behind `entriesOkB`,
 so a batch of solution checks skips name dispatch and gate re-scans.
 The dynamic store construction (`completedBox`) is per solution, as it
-must be.  The prepared path returns exactly the `checkModelSolution`
+must be.  The prepared path returns exactly the `checkSemanticModelSolution`
 outcome on every input (`Tests/Checker/Fast.lean` cross-checks both doors).
 
 The store layer follows the incremental-store design (construction per
@@ -658,9 +659,9 @@ def checkPreparedDyn (p : PreparedModel) (sol : String) : Bool :=
 end Internal
 
 /-- **The prepared solution checker.**  Same verdicts as
-    `checkModelSolution` on the underlying model, with the static
+    `checkSemanticModelSolution` on the underlying model, with the static
     gates and constraint dispatch computed once by `prepareModel`. -/
-def checkPreparedSolution (p : PreparedModel) (sol : String) : Outcome :=
+def checkSemanticPreparedSolution (p : PreparedModel) (sol : String) : Outcome :=
   match p.unsupported with
   | some n => .unsupportedPredicate n
   | none =>
@@ -675,5 +676,24 @@ def checkPreparedSolution (p : PreparedModel) (sol : String) : Outcome :=
                 "assigns a parameter, an unknown name, or a name twice"
       else
         .malformedModel "static well-formedness failed"
+
+/-- Public source checking includes the reviewed input-fragment gate. The
+semantic checker remains available for reasoning about the project's relation. -/
+def checkModelSolution (m : Model) (sol : String) : Outcome :=
+  match Admission.firstFailure m with
+  | some reason => .unsupportedPredicate reason
+  | none => checkSemanticModelSolution m sol
+
+def checkModelSolutionFast (m : Model) (sol : String) : Outcome :=
+  match Admission.firstFailure m with
+  | some reason => .unsupportedPredicate reason
+  | none => checkSemanticModelSolutionFast m sol
+
+/-- Check the underlying source even for externally constructed prepared values;
+no cached admission bit is trusted. -/
+def checkPreparedSolution (p : PreparedModel) (sol : String) : Outcome :=
+  match Admission.firstFailure p.model with
+  | some reason => .unsupportedPredicate reason
+  | none => checkSemanticPreparedSolution p sol
 
 end LeanFzn.Checker

@@ -9,7 +9,9 @@ The public API uses the Core engine. Actual imports and
 flowchart TD
   Syntax --> Parser
   Syntax --> Semantics
-  Semantics --> Checker
+  Semantics --> Admission[Source admission]
+  Admission --> Checker
+  Admission --> Compiler
   Parser --> Checker
   Semantics --> Shared[Solver shared foundations]
   Shared --> Compiler
@@ -36,6 +38,47 @@ problems, finite domains, constraint/literal semantics and proof infrastructure;
 they are not a second public engine. Historical executable helper definitions
 still appear in some shared reference/proof modules and need further extraction
 before those helpers can be removed. The public drivers call the Core engine.
+
+## Independent lexer specification and certification
+
+`Parser/Token` owns the shared `LeanFzn.Parser.Lexer.Token` datatype. Both
+`Parser/Lexer` and `Parser/Lexical` import it; `Lexical` imports no implementation
+module. It independently specifies character classes, positional numeral values,
+maximal token spans, R11 escape bytes, UTF-8 encoding, trivia and whole-input
+`Lexes`. The namespace of the extracted token datatype is unchanged.
+
+The proof DAG is:
+
+```text
+Token -> Lexical                  Token -> Lexer
+              \                    /
+             LexerSuffix -> LexerScan -> LexerTrivia
+                 |            |              |
+             LexerDigits -> LexerNumbers -> LexerNumericStep
+                 |            |
+             LexerEscapes -> LexerStrings <- LexerUTF8
+                                  |
+                            LexerStringStep
+LexerScan -> LexerWords             |
+LexerWords + LexerNumericStep + LexerStringStep -> LexerStep
+LexerTrivia + LexerStepTarget + LexicalTarget -> LexerStream
+LexerStep + LexerStream -> LexerCorrectness
+LexerCorrectness + Assembled -> SourceCorrectness
+```
+
+`LexerStepTarget` and `LexicalTarget` are typed interfaces. Actual, unconditional
+witnesses are `lexerStepCertification` and `lexerCertification`.
+`tokenize_sound`, `tokenize_complete` and `tokenize_correct` cover every Lean
+String and exact token values, not just rendered solutions. `SourceCorrectness`
+proves `parseModel_iff_sourceGrammar` for the exact AST, plus existential
+recognition, against `Lexes` composed with `GrModel`.
+
+The lexer rejects raw CR/LF inside strings; decoded escaped CR/LF remain valid.
+`Tests/Parser/LexicalSpec` checks specification examples and 62 runtime boundary
+cases. The module-boundary audit enforces lexical-spec independence transitively,
+including through shared Token. Root `prompt.md` retains the completed proof plan.
+The certificate covers the declared lexical policy; its equivalence with every
+upstream convention and T3's independent predicate semantics remain separate.
 
 ## Solution syntax and emission proofs
 
@@ -153,6 +196,23 @@ namespaces; the retired solver and its exclusive historical proofs are removed.
 array-oriented `DomC`. List-based mathematical enumeration and front-end lists
 are retained. Core-only execution does not require rewriting those mathematical
 interfaces as arrays.
+
+## Source admission (T2)
+
+`Semantics/Admission` depends on `Semantics/Globals`; it specifies the reviewed
+source fragment independently of solver shape support. Public checker entries
+in `Checker/Runtime/Check` gate `Admitted` before calling the project-semantic
+`checkSemanticModelSolution*` implementations. `Checker/Proofs/Check` proves
+accepted public results establish admission and retain satisfaction/parameter
+honesty; fast checking agrees with the verified entry.
+
+`Compiler/Normalize.compileModelFull` checks admission before any normalization
+or literal folding. Its inversion proof retains the array gate, and
+`compileModelFull_admitted` exposes source admission. The alternate
+`Public/PhaseStats` compilation path applies the same gate. Public solving and
+optimization inherit it through compilation. Parser shape conventions,
+`WellFormed`, executable admission and actual compiler support are separate
+contracts; see the admission table in the semantic inventory report.
 
 ## Certification and incompleteness
 

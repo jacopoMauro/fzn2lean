@@ -2007,7 +2007,8 @@ theorem compileFull_inv {m : Model}
       compileModel mb = .ok p0 ∧ problem = relabel m se p0 := by
   unfold compileModelFull at hc
   split at hc
-  · rename_i h
+  · rename_i hg
+    have h : arraysOkB m = true := ((Bool.and_eq_true _ _).mp hg).2
     split at hc
     · cases hc
     · rename_i sh hsh

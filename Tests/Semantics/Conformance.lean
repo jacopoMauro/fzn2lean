@@ -1766,6 +1766,11 @@ Upstream `fzn_global_cardinality_low_up_closed.mzn` lines 7-10 conjoin the
 closed cover condition with `global_cardinality_low_up`; the shape gate is
 inherited. -/
 
+/-- Duplicate cover values make the native aggregate condition essential. -/
+theorem t2_closed_low_up_aggregate_rejected :
+    fullInterpB ⟨"fzn_global_cardinality_low_up_closed"⟩
+      [vints [1], vints [1,1], vints [1,1], vints [1,1]] = false := by decide
+
 theorem t10_counting_gcc_low_up_closed_accepts :
     fullInterpB ⟨"fzn_global_cardinality_low_up_closed"⟩
       [vints [1, 1, 2], vints [1, 2], vints [1, 0], vints [2, 1]] = true := by

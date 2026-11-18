@@ -12,10 +12,10 @@
     "unsupported": "No implementation signature or explicitly excluded input family."
   },
   "reviewed_files": {
-    "audits/check_semantic_inventory.py": "5f2ef9cfd3b1261e40340ae56087d798fbbcdb0c752a61b6a38e4213404d300a",
-    "Tests/Audits/test_semantic_inventory.py": "df03164613de79120bee9563770a748948b3d826dd265be59c3b2ad9f1c0f67d",
-    "Tests/Semantics/Conformance.lean": "ad1a3e3ce3fb1c15baedeb5e21b55b44059e69f5bef7ad9f122b46c561942d50",
-    "lean-toolchain": "ca5f1f601d34c49079e38d7e7041eb0f2a9c227fbc1df0f404820069a052330c",
+    "audits/check_semantic_inventory.py": "78ef546cca064406d4fe27fa5af9784aee17cc127ea38c3a154c370ebe47d007",
+    "Tests/Audits/test_semantic_inventory.py": "9940d9ac1ca838cfba14cb6cc514440bc7654234634e89465bfa37010938644d",
+    "Tests/Semantics/Conformance.lean": "7faa45f486cda0fbbbf892a28e034e0b89fe3cc68b8bafe5ce34295010a0d4f3",
+    "lean-toolchain": "582a63f8f9c5128067b688778c1051cf1464c3ca9d57b9325025c051c29b774a",
     "lake-manifest.json": "f9eca6d470343b7661348d3af949b2a9f863dd4dcd93c887cd4fa6db1ff2cc6d",
     "LeanFzn/Syntax/AST.lean": "00cc026927dbad373e940cab287681e0fbc2e0547b741448d8a0a6cbca51b606",
     "LeanFzn/Checker/Runtime/Solution.lean": "f46fcccdcaf00a666fc6b6ce0b40c1f15efcc1e1bc55db752e8ba59ff275b79a",
@@ -27,7 +27,7 @@
     "LeanFzn/Semantics/Globals/AllDiffCounting.lean": "f274d22d32ef834c25190255c124db5fd13d22270909ed57b315cf8cdf0f9c69",
     "LeanFzn/Semantics/Globals/Channeling.lean": "c84bb1301e4a8fc170a8a8babfc18cd87a5ab77428e288f81fb627377ab319ad",
     "LeanFzn/Semantics/Globals/Common.lean": "5896c5992b98b4f3a3bca4432e3a24fa714a3183b4ce27220bf1c6d0a92c071a",
-    "LeanFzn/Semantics/Globals/Counting.lean": "79313bfbbf7452fda45eeaedaa359aad2ea7a7736b38aca80ac44ca7ccebaacc",
+    "LeanFzn/Semantics/Globals/Counting.lean": "9c8d0100f8e4241c99fc6d7031b807a6c217e49bfd2b1686bb1f9aa2ca4b5734",
     "LeanFzn/Semantics/Globals/Graph.lean": "3879e3dedcbd5a91fe71cdba8194b5510aa432ba46a08134f648ead8a0ed309b",
     "LeanFzn/Semantics/Globals/LexChain.lean": "645a3d770b3a7e77ff24642d474edd55222b11e84e84eedf0eef75bc81ac4d9f",
     "LeanFzn/Semantics/Globals/LexSort.lean": "6688dfc01568d2820bdda02d51e7a7ff9f1d0521773c65f79f1474c06c2a0684",
@@ -37,8 +37,8 @@
     "LeanFzn/Semantics/Globals/SetMath.lean": "3f434a13be267f650e57d22007aa245ae6f6ad0c4640f6e9ba3aef43a6cfa02d",
     "LeanFzn/Parser/Grammar.lean": "2aecaf4d3a5843a67356639d421a23a70c909c6853d768621fd66938f3c41e9a",
     "LeanFzn/Integration/Config/Annotations.lean": "2d66e37dfec0ae43ada318b8d6f0b5bb0b0c0ffa39f956e9172685f3b4bb98bd",
-    "LeanFzn/Checker/Runtime/Check.lean": "43453b88a491252f36f7cb00f7a53d8a1b8b59b5eb805ffbe9f7db36f8a4ef13",
-    "specification/flatzinc_specification_assumptions.md": "51f61a0ab5e9e0908b9a44bd5715d7018c7c96f46af649bbf578f8645da2f9cc",
+    "LeanFzn/Checker/Runtime/Check.lean": "49f1939f65f16ee2c10251c34b53e5877880f57abe71ce4f6c961eb94fe7fa75",
+    "specification/flatzinc_specification_assumptions.md": "1264fbd45ed32ad16e8a1b5d0fb6c414e9b40f0817feccebbbe86d73ff59c1d9",
     "specification/minizinc-2.10.1/fzn-grammar.mzn": "a3a68282879cec988b737f23733f17ce0ae941b71c903ef93c48165faef34dca",
     "specification/minizinc-2.10.1/fzn-spec.html": "8b0e554ed3ff8c3474689807fc15b5c235f9c34ec48b9440759d837506b2ff93",
     "specification/minizinc-2.10.1/lib-flatzinc-bool.html": "83bb80378369b7e1aaad02e7724757f403ca19e4d1f41398cdef21573a005846",
@@ -53,7 +53,41 @@
     "specification/minizinc-2.10.1/lib-flatzinc-twosevenone.html": "cfd4b07a4d643efc1a4aebd02c20f8f31ea08750258ace3d949663ec8a1280b2",
     "specification/minizinc-2.10.1/lib-flatzinc-twoone.html": "15ef2d6d8825f6b2fa0ff4fd469d6a78dc7de62a110d85adc1e707811429010f",
     "specification/minizinc-2.10.1/lib-flatzinc-twothreethree.html": "5b518b964ea6854ba78aa1ae6e813e43967e692f583aa0ee3eb0e0aa75ed0b22",
-    "specification/minizinc-2.10.1/lib-flatzinc-twooneone.html": "5c59e25721b7c117134dcc40e82f08610bdcd6b67728674334b37ec7f79eea47"
+    "specification/minizinc-2.10.1/lib-flatzinc-twooneone.html": "5c59e25721b7c117134dcc40e82f08610bdcd6b67728674334b37ec7f79eea47",
+    "LeanFzn/Checker/Proofs/Check.lean": "f08cdf0a8fb3b70dbf211e6a255743818faf09b2a642c6115cb660a70a116347",
+    "LeanFzn/Compiler/Normalize.lean": "a14bf69a3d31f83780880a3c3a2a3fcccfba3741b10ad2310f39b546d46a4b09",
+    "LeanFzn/Integration/Public/Driver.lean": "571b0e4b585325435208b7357a26bc533a9461ae6fc10c80c4e0ed721c4c0c9b",
+    "LeanFzn/Integration/Public/PhaseStats.lean": "8341a12f7ab4764b4367f1ec137ddb907c2f03a5ae430c12e65f3bd1d3ab79b2",
+    "LeanFzn/Semantics/Admission.lean": "93435c40e41eaf373e8e0109d471adc84d200abf511ce6c347a356997ccd51e4",
+    "Tests/Cli/test_admission.py": "beb80cb57224697150e1874bb86ec08370d62c2732e93e89af4767bd9e89429b",
+    "Tests/Semantics/Admission.lean": "fac3db2192dd53e37b310c0f00cf780d17e2fce5d546de489695de14341e28fb",
+    "Tests/Compiler/AdmissionTest.lean": "f505f91582da42268027521c38776ddaed76e7556d05be22f92427631225effa",
+    "Tests/Checker/Fast.lean": "137eccfc3cd4a55cd9f4290bcf3257d024b6ee5b1cda5e611fa6ee8ef4cab75a",
+    "Tests/Semantics/ConformanceT10Counting.lean": "2731b5265239cd0865e25ee39460abca13bdba9fae749e1db714e2e27218726b",
+    "LeanFzn/Parser/Proofs/LexerNumbers.lean": "f446617847d61b9ddc13f45ba4da32c5e8a67301d1588556eaad9a0c1dd7d812",
+    "LeanFzn/Parser/Proofs/LexerStrings.lean": "c65473a394ba8951b69f897de06a260af45508b9b808c391479404ee0d60a9f4",
+    "LeanFzn/Parser/Proofs/LexerStringStep.lean": "1f772e50efab98779dff25137a5d618f22abad31d9c55704e8e88f19e6b1a585",
+    "LeanFzn/Parser/Proofs/LexerTrivia.lean": "9288184bbbbc47ebeed5e3a757d90a263813a7f6bc110c93afdbca2eea4cf79c",
+    "LeanFzn/Parser/Proofs/LexerDigits.lean": "95fe91230ac8bfbec63e64725f9304843d70cf1a964d29c4acc48c403a978017",
+    "LeanFzn/Parser/Proofs/LexicalTarget.lean": "c7cc42abc894f3949a8917a74a4809df38bc57424b1538022b93262ac788e63a",
+    "LeanFzn/Parser/Proofs/LexerLayout.lean": "e9715b3262e2491a89ef4c9a966ea4c0ec01f84b1ac1f28542f870abc7cc91d7",
+    "Tests/Parser/LexicalSpec.lean": "1f285620a0c971e134f59ce2604e9a5005de52eea20902c0af9d825c19b80dce",
+    "LeanFzn/Parser/Proofs/LexerCorrectness.lean": "bd1f8566f9745129532627b3b08da9d5d2b25db3c0cbfd07703e9eb411715406",
+    "LeanFzn/Parser/Lexical.lean": "dc3ad6ae48e6e9f3ec34c8db798d2ac687917df8c53a8ef00143efcf7ba7d328",
+    "LeanFzn/Parser/Proofs/LexerEscapes.lean": "c9ad06cd12e21d6b8422651502fa6bd364e1f1eb9cbb8d39f9de3994eddad9fe",
+    "LeanFzn/Parser/Proofs/LexerStream.lean": "f2eb9a7ec51fc5b684a5df47f26ff787fed40fe84ad22cf96e15bd1fd2b62acf",
+    "LeanFzn/Parser/Proofs/LexerNumericStep.lean": "032b6273295ef4c76e7aef2f30f3d607ad7149fc1811a65de30e6df9ea8e9039",
+    "LeanFzn/Parser/Lexer.lean": "5b3ae57afb766c0509b3cec52981a709684339d8f8765e6e426954098b1f7473",
+    "LeanFzn/Parser/Proofs/LexerStep.lean": "f2b849958ccb377b6c12dc438a6bddd9e1ed59e423c23d8591f48674a13e3516",
+    "LeanFzn/Parser/Proofs/SourceCorrectness.lean": "9594d97577e363315540c23480f59a3d4ca05bfab8a5dacc61d8c57cac0381cb",
+    "LeanFzn/Parser/Proofs/LexerSuffix.lean": "bb6382e0e447eda71c13421bb880d2b760e69de633736488492b8e8e4d902e93",
+    "LeanFzn/Parser/Token.lean": "48c241b43443ee8721133f6c52882505faab02d5d7f88812a467eb939db3b6a7",
+    "LeanFzn/Parser/Proofs/LexerUTF8.lean": "6f493c2ced7ccedba920059b6db76ee602ebbe966d1a3d6f535270c8015ca52a",
+    "LeanFzn/Parser/Proofs/LexerToken.lean": "ba7fff92b19b3459f84551a0b46752eddbb27bc5014ea5a385d6c5414417fdf1",
+    "LeanFzn/Parser/Proofs/LexerRender.lean": "0de3430afc9c5faaf5949b37cc8d7fb0fc251088eb0a31fbee206aaec94f6f79",
+    "LeanFzn/Parser/Proofs/LexerScan.lean": "9455162efea565b4fdb8c534edf186a8c6f849d09cbad91869018efcda2c4532",
+    "LeanFzn/Parser/Proofs/LexerWords.lean": "1f84c1c5f2abedc36f69371b2da54cb9a3d91e783887ee1edce204121c957545",
+    "LeanFzn/Parser/Proofs/LexerStepTarget.lean": "dfcc265e22725360283044ea72c26f76164c948c98ebfcb268a07a71e726a3be"
   },
   "upstream_evidence": [
     {
@@ -790,6 +824,16 @@
       "path": "share/minizinc/std/fzn_wst.mzn",
       "sha256": "9f55f5cbf89317bd9def171be6940e63ac88a4fe178fd64f437006bfe93840af",
       "url": "https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_wst.mzn"
+    },
+    {
+      "path": "share/minizinc/std/global_cardinality.mzn",
+      "sha256": "1e23bc356eb67dd85eee5388f98d9eda84b873ce5327683b0bd2b097423c1ce3",
+      "url": "https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/global_cardinality.mzn"
+    },
+    {
+      "path": "share/minizinc/std/global_cardinality_low_up.mzn",
+      "sha256": "a67a40cfa766f0e443d1ccab472a38dcb03c71145aa07c1c362088e96325ef60",
+      "url": "https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/global_cardinality_low_up.mzn"
     }
   ],
   "findings": [
@@ -1052,7 +1096,7 @@
       "contract": "One ordered sequence of predicate, parameter, variable, constraint items and one solve item; full consumption.",
       "implementation": "LeanFzn/Parser/Grammar.lean:GrModel",
       "status": "reviewed",
-      "notes": "Independent grammar/parser correspondence exists; character-level lexer fidelity is a separate obligation, outside this inventory."
+      "notes": "The independent character-level Lexes relation and GrModel are composed by the unconditional Lexical.parseModel_iff_sourceGrammar theorem. Lexer soundness/completeness are proved for the declared non-float/R11 policy; equivalence of every chosen convention to upstream syntax remains a separate review/proof obligation."
     },
     {
       "id": "MR-02",
@@ -1085,9 +1129,17 @@
     {
       "id": "MR-06",
       "contract": "Arrays are flat, 1-based, have declared lengths and correctly typed elements.",
-      "implementation": "LeanFzn/Semantics/Model.lean:WellFormed",
+      "implementation": "LeanFzn/Syntax/AST.lean:IndexSet; LeanFzn/Semantics/Globals.lean:WellFormed; LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
       "status": "restricted",
-      "notes": "Static lengths do not establish every cross-argument shape condition. Multidimensional native lowering needs SC-03; parallel lengths need SC-04."
+      "notes": "Syntax.IndexSet represents only 1..hi; WellFormed enforces declaration lengths and element typing. Cross-argument premises for all 13 restricted predicates are explicitly gated or excluded by Semantics.Admission; normalized flat matrix ABIs remain a declared subset, not an inferred upstream lowering theorem.",
+      "admission": {
+        "policy": "typing_and_runtime_gate",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "typing": "LeanFzn/Syntax/AST.lean:IndexSet; LeanFzn/Semantics/Globals.lean:WellFormed",
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ]
+      }
     },
     {
       "id": "MR-07",
@@ -3953,7 +4005,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 418,
+        "line": 421,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -4228,7 +4280,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 422,
+        "line": 425,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -4268,7 +4320,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 530,
+        "line": 533,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -4346,7 +4398,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 426,
+        "line": 429,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -4386,7 +4438,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 534,
+        "line": 537,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -4432,14 +4484,31 @@
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
         "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
-        "For the public packing contract, weights and capacities are nonnegative. The checker does not establish that premise. Raw native lb/ub-range checks and empty-input branches need a separate correspondence argument outside this restricted domain.",
         "Index sets are normalized to 1..n; offset or non-contiguous declared index sets are outside this row's fragment.",
-        "The restricted row assumes normalized 1..n declarations, bin.length = weight.length, nonnegative weights and nonnegative capacity; the declared lb_array(bin)..ub_array(bin) range is not observable in a decoded Value."
+        "The restricted row assumes normalized 1..n declarations, bin.length = weight.length, nonnegative weights and nonnegative capacity; the declared lb_array(bin)..ub_array(bin) range is not observable in a decoded Value.",
+        "Public source admission: Nonnegative parameter/literal capacity and weights; equal bin/weight lengths. Nonnegative capacity makes unread/unoccupied domain bins harmless, including the empty-bin branch. Array indices are normalized by Syntax.IndexSet."
       ],
       "findings": [
         "SC-04"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "runtime_gate",
+        "scope": "Nonnegative parameter/literal capacity and weights; equal bin/weight lengths. Nonnegative capacity makes unread/unoccupied domain bins harmless, including the empty-bin branch. Array indices are normalized by Syntax.IndexSet.",
+        "review_basis": "Native fzn_bin_packing.mzn sums over bin index_set and bin-domain lb..ub; equal lengths and nonnegative capacity/weights make the occupied-bin relation valid on this subset.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_bin_packing_capa",
@@ -4853,13 +4922,31 @@
         "All values are well-typed; model parameters retain their declared values.",
         "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
         "Index sets are normalized to 1..n; offset or non-contiguous declared index sets are outside this row's fragment.",
-        "The restricted row requires the canonical layered fragment: N = L, level[n] = n, every edge advances exactly one level, and edges of level L return to node 0."
+        "The restricted row requires the canonical layered fragment: N = L, level[n] = n, every edge advances exactly one level, and edges of level L return to node 0.",
+        "Public source admission: No public source call is admitted, even in the previously documented canonical layered subset or with all-literal arguments."
       ],
       "findings": [
         "SC-04",
         "SC-06"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "excluded",
+        "scope": "No public source call is admitted, even in the previously documented canonical layered subset or with all-literal arguments.",
+        "review_basis": "The native node/edge activation and cost-domain obligations are not established by the project walk/canonical semantics. Exclusion avoids publishing those relations as native acceptance or UNSAT.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_cost_regular",
@@ -4906,12 +4993,30 @@
       },
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
-        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem."
+        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
+        "Public source admission: regularDecodes enforces Q>=0, S>=0, set-valued F and both transition/cost arrays of length Q*S in flat row-major order."
       ],
       "findings": [
         "SC-02"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "runtime_gate",
+        "scope": "regularDecodes enforces Q>=0, S>=0, set-valued F and both transition/cost arrays of length Q*S in flat row-major order.",
+        "review_basis": "fzn_cost_regular.mzn accumulates the cost along the bounded DFA run; the empty branch requires zero cost and q0 membership.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_count_eq",
@@ -4943,7 +5048,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 434,
+        "line": 437,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -4983,7 +5088,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 438,
+        "line": 441,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5023,7 +5128,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 502,
+        "line": 505,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5063,7 +5168,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 506,
+        "line": 509,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5103,7 +5208,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 442,
+        "line": 445,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5143,7 +5248,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 446,
+        "line": 449,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5183,7 +5288,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 510,
+        "line": 513,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5223,7 +5328,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 450,
+        "line": 453,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5263,7 +5368,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 454,
+        "line": 457,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5303,7 +5408,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 514,
+        "line": 517,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5343,7 +5448,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 458,
+        "line": 461,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5383,7 +5488,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 462,
+        "line": 465,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5423,7 +5528,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 518,
+        "line": 521,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5463,7 +5568,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 466,
+        "line": 469,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5503,7 +5608,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 470,
+        "line": 473,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5543,7 +5648,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 522,
+        "line": 525,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5583,7 +5688,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 474,
+        "line": 477,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5623,7 +5728,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 478,
+        "line": 481,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5663,7 +5768,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 526,
+        "line": 529,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -5711,12 +5816,30 @@
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
         "start, duration and resource have identical index sets and all durations and resources are nonnegative, as asserted by the cumulative.mzn wrapper (index_set equality, lb_array(duration) >= 0 and lb_array(resource) >= 0).",
-        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem."
+        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
+        "Public source admission: Equal start/duration/resource lengths; duration and resource must evaluate using parameters/literals alone and be nonnegative. Decision-variable duration/resource arrays are explicitly outside public admission."
       ],
       "findings": [
         "SC-09"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "runtime_gate",
+        "scope": "Equal start/duration/resource lengths; duration and resource must evaluate using parameters/literals alone and be nonnegative. Decision-variable duration/resource arrays are explicitly outside public admission.",
+        "review_basis": "cumulative.mzn asserts common index sets and nonnegative duration/resource lower bounds; constant duration/resource values establish those premises without using shape-store dummy values.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_cumulatives",
@@ -5763,13 +5886,31 @@
         "All values are well-typed; model parameters retain their declared values.",
         "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
         "Index sets are normalized to 1..n; offset or non-contiguous declared index sets are outside this row's fragment.",
-        "The restricted row requires start.length ≤ duration.length, start.length ≤ resource.length and start.length ≤ machine.length, and takes min_machine to be the first machine of bound's index set."
+        "The restricted row requires start.length ≤ duration.length, start.length ≤ resource.length and start.length ≤ machine.length, and takes min_machine to be the first machine of bound's index set.",
+        "Public source admission: start length <= duration/resource/machine lengths; constant machine entries in 1..bound.length; min_machine = 1 for the normalized source ABI."
       ],
       "findings": [
         "SC-04",
         "SC-12"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "runtime_gate",
+        "scope": "start length <= duration/resource/machine lengths; constant machine entries in 1..bound.length; min_machine = 1 for the normalized source ABI.",
+        "review_basis": "fzn_cumulatives_decomp.mzn masks bound[machine[j]] behind covered-event implications. Admission requires every read valid even when masked; offset native metadata is excluded.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_cumulatives_decomp",
@@ -5814,13 +5955,31 @@
         "All values are well-typed; model parameters retain their declared values.",
         "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
         "Index sets are normalized to 1..n; offset or non-contiguous declared index sets are outside this row's fragment.",
-        "The restricted row requires start.length ≤ duration.length, start.length ≤ resource.length and start.length ≤ machine.length; there is no min_machine argument."
+        "The restricted row requires start.length ≤ duration.length, start.length ≤ resource.length and start.length ≤ machine.length; there is no min_machine argument.",
+        "Public source admission: start length <= duration/resource/machine lengths; constant machine entries in 1..bound.length."
       ],
       "findings": [
         "SC-04",
         "SC-12"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "runtime_gate",
+        "scope": "start length <= duration/resource/machine lengths; constant machine entries in 1..bound.length.",
+        "review_basis": "fzn_cumulatives_decomp.mzn has conditionally masked reads. All machine-index reads are admitted only in range, with no min_machine argument.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_dag",
@@ -6277,7 +6436,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 482,
+        "line": 485,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -6690,7 +6849,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 430,
+        "line": 433,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -6730,7 +6889,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 538,
+        "line": 541,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -6781,12 +6940,30 @@
       },
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
-        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem."
+        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
+        "Public source admission: No public source call is admitted, including zero-dimensional, empty or ground calls. The internal project interpretation remains available for semantic research."
       ],
       "findings": [
         "SC-03"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "excluded",
+        "scope": "No public source call is admitted, including zero-dimensional, empty or ground calls. The internal project interpretation remains available for semantic research.",
+        "review_basis": "The native definitions use rect/shape index metadata and domains of kind. A decoded flat Value does not establish this representation contract; excluding the whole native entry avoids assuming it.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_geost_bb",
@@ -6833,12 +7010,30 @@
       },
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
-        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem."
+        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
+        "Public source admission: No public source call is admitted, including zero-dimensional, empty or ground calls. The internal project interpretation remains available for semantic research."
       ],
       "findings": [
         "SC-03"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "excluded",
+        "scope": "No public source call is admitted, including zero-dimensional, empty or ground calls. The internal project interpretation remains available for semantic research.",
+        "review_basis": "The native definitions use rect/shape index metadata and domains of kind. A decoded flat Value does not establish this representation contract; excluding the whole native entry avoids assuming it.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_geost_nonoverlap_k",
@@ -6930,12 +7125,30 @@
       },
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
-        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem."
+        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
+        "Public source admission: No public source call is admitted, including zero-dimensional, empty or ground calls. The internal project interpretation remains available for semantic research."
       ],
       "findings": [
         "SC-03"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "excluded",
+        "scope": "No public source call is admitted, including zero-dimensional, empty or ground calls. The internal project interpretation remains available for semantic research.",
+        "review_basis": "The native definitions use rect/shape index metadata and domains of kind. A decoded flat Value does not establish this representation contract; excluding the whole native entry avoids assuming it.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_global_cardinality",
@@ -6967,7 +7180,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 486,
+        "line": 489,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -7011,7 +7224,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 490,
+        "line": 493,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -7057,7 +7270,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 494,
+        "line": 497,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -7075,7 +7288,7 @@
       "implemented": true,
       "family": "Counting",
       "status": "restricted",
-      "contract": "For each cover entry, its occurrence count lies between the matching lower and upper bounds, and every xs value lies in cover. cover.length ≤ low.length and cover.length ≤ up.length. Restricted: the raw upstream line-10 implied condition length(xs) ∈ sum(lower_bound)..sum(upper_bound) is not implemented.",
+      "contract": "Internal low/up counts, closed cover and sum(low)<=length(xs)<=sum(up), including all bound entries. Public admission additionally requires equal cover/lower/upper lengths and the wrapper empty-input assertion that every lower/upper bound permits count zero.",
       "edge_cases": "Check count zero, negative count bounds, duplicate cover values, open versus closed cover and equal parallel lengths.",
       "signature_review": "Matches the pinned signature (1-based FlatZinc instance of generic index types).",
       "lean_signature": [
@@ -7102,19 +7315,36 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 498,
+        "line": 501,
         "definition": "countingInterp"
       },
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
         "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
         "Index sets are normalized to 1..n; offset or non-contiguous declared index sets are outside this row's fragment.",
-        "The restricted row omits the raw upstream line-10 implied condition length(xs) ∈ sum(lower_bound)..sum(upper_bound); it models the low/up bounds and the closed-cover condition only."
+        "Public source admission: Equal cover/lower/upper lengths; for empty xs every lower bound <=0 and upper bound >=0. The interpreter implements the full aggregate, including duplicate covers and all bound entries."
       ],
       "findings": [
         "SC-04"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "runtime_gate",
+        "scope": "Equal cover/lower/upper lengths; for empty xs every lower bound <=0 and upper bound >=0. The interpreter implements the full aggregate, including duplicate covers and all bound entries.",
+        "review_basis": "The native closed predicate calls global_cardinality_low_up, which calls global_cardinality.mzn: its wrapper asserts equal index sets and empty-input zero-count validity. The native closed line 10 conjoins the nonredundant aggregate.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_if_then_else_bool",
@@ -8193,7 +8423,7 @@
       "implemented": true,
       "family": "Regular",
       "status": "restricted",
-      "contract": "The word labels some root-to-terminal walk through the layered diagram (existential path search). Restricted: this walk relation is sufficient but is not the upstream all-matching-edges deterministic activation system; structural gates reject out-of-range nodes, edges and levels.",
+      "contract": "Internal existential root-to-terminal walk relation through a layered diagram, with structural gates on nodes, edges and levels. Public source calls are excluded until correspondence to the native node/edge activation and per-label support system is established. The native nondeterministic file does not contain deterministic MDD P1 all-matching-edge activation.",
       "edge_cases": "Check empty words, final-state set encoding, dead/oversized states, NFA branching, malformed dimensions and overlapping/costed MDD branches.",
       "signature_review": "Matches the pinned signature (1-based FlatZinc instance of generic index types).",
       "lean_signature": [
@@ -8233,12 +8463,30 @@
         "All values are well-typed; model parameters retain their declared values.",
         "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
         "Index sets are normalized to 1..n; offset or non-contiguous declared index sets are outside this row's fragment.",
-        "The restricted row claims only the existential root-to-terminal walk relation, not equivalence with the upstream deterministic activation system."
+        "The restricted row claims only the existential root-to-terminal walk relation, not proved equivalent to the native node/edge activation and per-label support system.",
+        "Public source admission: No public source call is admitted, even in the previously documented canonical layered subset or with all-literal arguments."
       ],
       "findings": [
         "SC-04"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "excluded",
+        "scope": "No public source call is admitted, even in the previously documented canonical layered subset or with all-literal arguments.",
+        "review_basis": "The native node/edge activation and per-label support obligations have not been proved equivalent to the internal walk relation. The nondeterministic native file has no deterministic P1 all-matching-edge condition; exclusion does not rely on that earlier mistaken attribution.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_member_bool",
@@ -8443,7 +8691,7 @@
       },
       "implementation": {
         "path": "LeanFzn/Semantics/Globals/Counting.lean",
-        "line": 414,
+        "line": 417,
         "definition": "countingInterp"
       },
       "preconditions": [
@@ -8797,12 +9045,30 @@
       },
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
-        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem."
+        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
+        "Public source admission: regularDecodes over the source shape store enforces Q>=0, S>=0, set-valued F and a flat row-major transition matrix of length Q*S. Word symbols and reached state numbers are checked by the interpreter."
       ],
       "findings": [
         "SC-02"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "runtime_gate",
+        "scope": "regularDecodes over the source shape store enforces Q>=0, S>=0, set-valued F and a flat row-major transition matrix of length Q*S. Word symbols and reached state numbers are checked by the interpreter.",
+        "review_basis": "fzn_regular.mzn uses a 1..Q state array and 1..S symbols; empty words only test q0 membership in F. The admitted ABI is a deliberate flat-matrix subset.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_regular_nfa",
@@ -8845,12 +9111,30 @@
       },
       "preconditions": [
         "All values are well-typed; model parameters retain their declared values.",
-        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem."
+        "Arrays are 1-based. Parallel index sets and every referenced position must be valid; applicability is not inferred from an agreement theorem.",
+        "Public source admission: regularDecodes enforces nonnegative dimensions, set-valued F and Q*S transition sets in the declared flat ABI. The interpreter bounds symbols and reachable states."
       ],
       "findings": [
         "SC-02"
       ],
-      "solver_scope": "Compilation-success dependent; checker name support does not imply solver shape support."
+      "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds.",
+      "admission": {
+        "policy": "runtime_gate",
+        "scope": "regularDecodes enforces nonnegative dimensions, set-valued F and Q*S transition sets in the declared flat ABI. The interpreter bounds symbols and reachable states.",
+        "review_basis": "fzn_regular_nfa.mzn uses existential state runs with 1..Q states and transitions in d[a[i],xs[i]]; empty words only test q0 membership.",
+        "gate": "LeanFzn/Semantics/Admission.lean:ConstraintAdmitted",
+        "theorems": [
+          "LeanFzn.Semantics.Admission.admittedB_iff",
+          "LeanFzn.Semantics.Admission.firstFailure_none_iff",
+          "LeanFzn.Checker.checkModelSolution_admitted",
+          "LeanFzn.Compiler.compileModelFull_admitted"
+        ],
+        "regressions": [
+          "Tests/Cli/test_admission.py"
+        ],
+        "checker_scope": "Public checkModelSolution, fast and prepared entries enforce Admission. Raw checkSemanticModelSolution and fullInterp express project semantics only.",
+        "solver_scope": "Source gate runs before normalization/ground folding in compileModelFull and compileModelFullPhased. Admission does not guarantee downstream compilation succeeds."
+      }
     },
     {
       "name": "fzn_roots",
@@ -11945,5 +12229,82 @@
     },
     "repaired_axiom_profiles": 8,
     "dispatch_names_checked": 218
+  },
+  "admission_review": {
+    "date": "2026-11-17",
+    "task": "T2 (T1 intentionally deferred by user)",
+    "scope": "Every formerly restricted predicate has an explicit source policy; parser/static typing, interpreter conditions and source admission are distinct. This is not T3 upstream correspondence.",
+    "reviewed_sources": [
+      "share/minizinc/std/fzn_bin_packing.mzn",
+      "share/minizinc/std/fzn_cumulative.mzn",
+      "share/minizinc/std/fzn_cumulatives.mzn",
+      "share/minizinc/std/fzn_cumulatives_decomp.mzn",
+      "share/minizinc/std/fzn_regular.mzn",
+      "share/minizinc/std/fzn_regular_nfa.mzn",
+      "share/minizinc/std/fzn_cost_regular.mzn",
+      "share/minizinc/std/fzn_global_cardinality_low_up_closed.mzn",
+      "share/minizinc/std/fzn_geost.mzn",
+      "share/minizinc/std/fzn_geost_bb.mzn",
+      "share/minizinc/std/fzn_geost_smallest_bb.mzn",
+      "share/minizinc/std/fzn_cost_mdd.mzn",
+      "share/minizinc/std/fzn_mdd_nondet.mzn",
+      "share/minizinc/std/global_cardinality.mzn",
+      "share/minizinc/std/global_cardinality_low_up.mzn"
+    ],
+    "key_findings": [
+      "Machine indices need admission even when raw scheduling implications mask reads.",
+      "Phase-statistics compilation must apply the same pre-normalization source gate.",
+      "Closed low/up cardinality must sum all lower/upper entries even with duplicate covers.",
+      "A source gate must precede ground folding so excluded literal calls never become UNSAT.",
+      "The pinned nondeterministic MDD file lacks deterministic P1 all-matching-edge activation. Corrected that earlier inventory attribution; exclusion rests on unproved native activation/label-support correspondence.",
+      "Closed cardinality delegates to a wrapper asserting equal index sets and zero-count-valid empty bounds; public admission now checks both, rather than assuming the weaker raw low/up read-length gate."
+    ],
+    "excluded_names": [
+      "fzn_cost_mdd",
+      "fzn_geost",
+      "fzn_geost_bb",
+      "fzn_geost_smallest_bb",
+      "fzn_mdd_nondet"
+    ],
+    "reviewed_local_changes": [
+      "LeanFzn/Checker/Proofs/Check.lean",
+      "LeanFzn/Checker/Runtime/Check.lean",
+      "LeanFzn/Compiler/Normalize.lean",
+      "LeanFzn/Integration/Public/Driver.lean",
+      "LeanFzn/Integration/Public/PhaseStats.lean",
+      "LeanFzn/Semantics/Admission.lean",
+      "LeanFzn/Semantics/Globals/Counting.lean",
+      "Tests/Audits/test_semantic_inventory.py",
+      "Tests/Semantics/Conformance.lean",
+      "audits/check_semantic_inventory.py"
+    ],
+    "regressions": [
+      "Tests/Cli/test_admission.py",
+      "Tests/Semantics/Admission.lean",
+      "Tests/Compiler/AdmissionTest.lean",
+      "Tests/Checker/Fast.lean",
+      "Tests/Semantics/ConformanceT10Counting.lean"
+    ]
+  },
+  "lexical_certification": {
+    "date": "2026-11-18",
+    "toolchain": "leanprover/lean4:v4.36.0",
+    "specification": "LeanFzn/Parser/Lexical.lean:Lexes",
+    "theorems": [
+      "LeanFzn.Parser.Lexical.tokenize_sound",
+      "LeanFzn.Parser.Lexical.tokenize_complete",
+      "LeanFzn.Parser.Lexical.tokenize_correct",
+      "LeanFzn.Parser.Lexical.parseModel_iff_sourceGrammar"
+    ],
+    "scope": "All Lean Strings, exact token values and exact AST; no successful-lexer, rendered-origin, well-formed-model, source-admission or bounded-integer premise. This proves the declared lexical policy, not full upstream convention equivalence.",
+    "review_basis": [
+      "Independent specification imports only shared token data; transitive import guards enforce that boundary.",
+      "Primitive scanner proofs preserve precise suffixes and bounded/progressing positions.",
+      "String proofs use arbitrary byte accumulators and a constructive UTF-8 decoder/encoder bridge.",
+      "Main certificate is instantiated by actual concrete step proofs; conditional interfaces are not assumed.",
+      "Raw CR now rejects like raw LF under the explicitly chosen R11 policy; escaped linebreaks remain valid."
+    ],
+    "regressions": "Tests/Parser/LexicalSpec.lean:checkBoundaries (35 accepted, 27 rejected)",
+    "axiom_policy": "Standard propext/Classical.choice/Quot.sound only; public endpoints are registered in certified_axioms.lean."
   }
 }

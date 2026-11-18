@@ -10,14 +10,15 @@ not an independent human sign-off or a formal proof of correspondence to prose.
 
 Every active `stdSig`/`globalsSig` name has a row: **218 implemented names**,
 plus published builtin/function exclusions and five explicitly unsupported
-globals, for **281 rows**. The evidence records **147 immutable upstream source
-file hashes** and **42 local source/reference hashes**. The machine-readable
+globals, for **281 rows**. The evidence records **149 immutable upstream source
+file hashes** and **76 local source/reference/test hashes**. The machine-readable
 [inventory](semantic_conformance.json) stores each contract, both signatures,
 implementation location, edge cases, source link/hash and finding links.
 
 **The inventory review is complete for this declared scope, with no open
 recorded findings. Upstream semantic equivalence remains unproved, and the
-13 restricted rows retain explicit admissibility obligations.** All **15 findings** are
+13 restricted rows now have explicit public admission policies (eight gated,
+five excluded). Independent upstream correspondence remains a T3 obligation.** All **15 findings** are
 repaired and regression-tested. An inventory completion is not permission to call every entry
 conformant. Unlisted globals, reified/float/optional overloads and other native
 ABIs are unsupported unless explicitly inventoried; the 118 high-level global
@@ -26,7 +27,7 @@ names in the historical catalogue below are not 118 implemented native ABIs.
 | Disposition | Rows | Meaning |
 | --- | ---: | --- |
 | `reviewed` | 183 | Source comparison found no discrepancy for well-typed, defined inputs within the stated fragment; not a kernel-checked upstream equivalence theorem. |
-| `restricted` | 13 | Agreement requires additional explicit premises not globally guaranteed by the interface. |
+| `restricted` | 13 | Internal interpretations with explicit public source admission: eight gated families, five excluded native contracts; upstream correspondence remains unproved. |
 | `extension` | 15 | Project-specific spelling or a signature extension; not strict native ABI conformance. |
 | `nonconformant` | 0 | A concrete signature/semantic discrepancy or an unestablished representation contract remains; linked findings prevent a clean conformance gate. |
 | `unsupported` | 70 | No implementation signature or explicitly excluded input family. |
@@ -34,7 +35,71 @@ names in the historical catalogue below are not 118 implemented native ABIs.
 Counts are predicates/functions, not proof obligations, supported input shapes,
 or independently certified implementations. `reviewed` applies to well-typed,
 defined inputs in the stated fragment; it is not a total native-input theorem.
-`restricted` rows expose additional unestablished admissibility premises.
+`restricted` rows retain ABI/semantic restrictions; the public entry points now
+enforce or exclude them. Their internal interpretations are not total native APIs.
+
+## T2 admission review — 17 November 2026
+
+The pinned source definitions for all thirteen restricted predicates and the
+closed-cardinality wrapper dependencies were re-read for this change. The two
+new wrapper evidence files were byte-checked against the immutable upstream commit. `Semantics/Admission.lean` defines `ConstraintAdmitted`
+and `Admitted`; `admittedB_iff` and `firstFailure_none_iff` verify the executable
+gates. `checkModelSolution`, its fast twin and prepared checking return
+unsupported before evaluating a call outside the source fragment.
+`compileModelFull_admitted` proves successful source compilation establishes
+admission; the compiler and phase-statistics path check it **before literal
+folding**. Thus a restricted ground call cannot be misreported as source UNSAT.
+
+| Restricted inventory entry | Public admitted contract | Enforcement / reason |
+| --- | --- | --- |
+| `fzn_bin_packing` | Equal bin/weight lengths, nonnegative constant/parameter capacity and weights | Parameter-only evaluation, not shape-store dummy values. Nonnegative capacity makes checks of unoccupied declared bins harmless; empty bins are admitted only in this subset. |
+| `fzn_cumulative` | Equal three task-array lengths, nonnegative constant/parameter durations and resources | Establishes the pinned wrapper's lower-bound premises. Variable durations/resources are explicitly unsupported even when a candidate solution supplies positive values. |
+| `fzn_cumulatives` | Task-array length inequalities, constant machine entries within `1..bound.length`, `min_machine = 1` | Requires valid reads even when raw implications mask them. Original offset metadata is outside this normalized ABI. |
+| `fzn_cumulatives_decomp` | Same length and machine-entry gates, without `min_machine` | Negative durations/resources retain the native event semantics; they are not silently required nonnegative. |
+| `fzn_regular`, `fzn_regular_nfa`, `fzn_cost_regular` | Nonnegative dimensions, set-valued final states, flat row-major matrices of exactly `Q*S` entries | `Regular.regularDecodes` over statically known shapes/parameters; the interpreter checks actual word symbols and reached states. Empty-word semantics are preserved. |
+| `fzn_global_cardinality_low_up_closed` | Equal cover/lower/upper lengths; for empty inputs all lower/upper bounds permit count zero | Checks the delegated wrapper assertions. Prop and Bool also implement the native `sum(low) <= length(xs) <= sum(up)`. The internal aggregate sums all entries; extra bound entries are outside public admission. Duplicate cover values show the aggregate is not redundant. |
+| `fzn_geost`, `fzn_geost_bb`, `fzn_geost_smallest_bb` | No public native call admitted | Shape/rectangle index and domain metadata are not established by decoded flat values. Even empty/ground calls are unsupported. |
+| `fzn_cost_mdd`, `fzn_mdd_nondet` | No public native call admitted | The internal canonical-cost/walk relations do not establish native activation contracts. The former canonical subset is not published as native checking support. |
+
+Array lower indices are fixed to 1 by `Syntax.IndexSet` and the parser;
+`WellFormed.parameterTypes`, `variableArrayLengths` and
+`constraintsChecked/constraintsDecode` establish typing/declaration and decoder
+conditions. Cross-argument restricted premises have the additional gate above.
+No claim about arbitrary multidimensional MiniZinc lowering is inferred.
+
+The internal `fullInterp`, `checkSolutionFull` and explicitly named
+`checkSemanticModelSolution*` APIs retain project-relative semantics for proof
+and research use. Their old correctness contract remains available; the public
+`checkModelSolution_correct` now additionally requires `Admission.Admitted`.
+`parameter_eval` and `nonnegativeArray_values` prove parameter-only values
+persist in every parameter-honest candidate store. Checker admission and solver
+compilation remain distinct: admitted globals with decision variables can still
+be unsupported by the scalar solver compiler.
+
+`Tests/Semantics/Admission.lean` kernel-checks gate boundaries;
+`Tests/Cli/test_admission.py` checks positive, false and unsupported cases through
+the actual checker/solver, phase-statistics and portfolio entries. The inventory
+validator requires explicit checker/solver scope, gate and regression evidence
+for each restricted row. This is a renewed review of admission obligations,
+not an upstream-equivalence proof or a completion of T1/T3.
+
+## Lexical certification — 18 November 2026
+
+On the user's Lean 4.36.0 port, `Lexical.tokenize_sound`, `tokenize_complete`
+and `tokenize_correct` now prove the actual lexer equivalent to the independent
+whole-character `Lexes` relation. `parseModel_iff_sourceGrammar` composes it
+with the existing token grammar and preserves the exact AST. The proof has no
+successful-lexer or rendered-origin premise. The specification imports shared
+token data only; the architecture audit checks this transitively. UTF-8 meaning
+uses the encoder, with the decoder/encoder bridge proved constructively.
+
+The raw-CR string discrepancy is resolved under the declared strict R11 policy;
+raw LF/CR reject and escaped linebreaks remain valid. This is a chosen lexical
+policy (the upstream grammar explicitly excludes LF), not an assertion that
+upstream universally forbids raw CR. Tests cover 35 accepted and 27 rejected
+boundary cases. Main proof endpoints are included in the axiom audit. This
+closes the specified lexer proof task; T1 and T3's independent predicate
+semantics and full upstream correspondence are not inferred from it.
 
 ## Reproduce and maintain the review
 
@@ -259,18 +324,18 @@ approve a row because the implementation has a theorem named `_iff`.
 | `fzn_alldifferent_except` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L825) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_alldifferent_except.mzn) |
 | `fzn_alldifferent_except_0` | reviewed | [AllDiffCounting](../../LeanFzn/Semantics/Globals/AllDiffCounting.lean#L829) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_alldifferent_except_0.mzn) |
 | `fzn_alternative` | unsupported | [Globals](../../LeanFzn/Semantics/Globals.lean) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_alternative.mzn) |
-| `fzn_among` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L418) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_among.mzn) |
+| `fzn_among` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L421) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_among.mzn) |
 | `fzn_arg_sort_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L742) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_sort_int.mzn) |
 | `fzn_arg_val_bool` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L712) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_val_bool.mzn) |
 | `fzn_arg_val_int` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L708) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_val_int.mzn) |
 | `fzn_array_int_union` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1014) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_array_int_union.mzn) |
 | `fzn_array_set_intersect` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1022) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_array_set_intersect.mzn) |
 | `fzn_array_set_union` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L1018) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_array_set_union.mzn) |
-| `fzn_at_least_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L422) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_least_int.mzn) |
-| `fzn_at_least_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L530) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_least_set.mzn) |
+| `fzn_at_least_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L425) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_least_int.mzn) |
+| `fzn_at_least_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L533) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_least_set.mzn) |
 | `fzn_at_most1` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L994) | SC-15; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_most1.mzn) |
-| `fzn_at_most_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L426) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_most_int.mzn) |
-| `fzn_at_most_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L534) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_most_set.mzn) |
+| `fzn_at_most_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L429) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_most_int.mzn) |
+| `fzn_at_most_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L537) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_at_most_set.mzn) |
 | `fzn_bin_packing` | restricted | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1201) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_bin_packing.mzn) |
 | `fzn_bin_packing_capa` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1205) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_bin_packing_capa.mzn) |
 | `fzn_bin_packing_load` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1209) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_bin_packing_load.mzn) |
@@ -280,25 +345,25 @@ approve a row because the implementation has a theorem named `_iff`.
 | `fzn_connected` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1264) | SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_connected.mzn) |
 | `fzn_cost_mdd` | restricted | [Regular](../../LeanFzn/Semantics/Globals/Regular.lean#L966) | SC-04, SC-06; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cost_mdd.mzn) |
 | `fzn_cost_regular` | restricted | [Regular](../../LeanFzn/Semantics/Globals/Regular.lean#L953) | SC-02; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cost_regular.mzn) |
-| `fzn_count_eq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L434) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq.mzn) |
-| `fzn_count_eq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L438) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_par.mzn) |
-| `fzn_count_eq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L502) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_set.mzn) |
-| `fzn_count_eq_set_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L506) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_set_par.mzn) |
-| `fzn_count_geq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L442) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq.mzn) |
-| `fzn_count_geq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L446) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq_par.mzn) |
-| `fzn_count_geq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L510) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq_set.mzn) |
-| `fzn_count_gt` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L450) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt.mzn) |
-| `fzn_count_gt_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L454) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt_par.mzn) |
-| `fzn_count_gt_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L514) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt_set.mzn) |
-| `fzn_count_leq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L458) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq.mzn) |
-| `fzn_count_leq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L462) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq_par.mzn) |
-| `fzn_count_leq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L518) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq_set.mzn) |
-| `fzn_count_lt` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L466) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt.mzn) |
-| `fzn_count_lt_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L470) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt_par.mzn) |
-| `fzn_count_lt_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L522) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt_set.mzn) |
-| `fzn_count_neq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L474) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq.mzn) |
-| `fzn_count_neq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L478) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq_par.mzn) |
-| `fzn_count_neq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L526) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq_set.mzn) |
+| `fzn_count_eq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L437) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq.mzn) |
+| `fzn_count_eq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L441) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_par.mzn) |
+| `fzn_count_eq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L505) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_set.mzn) |
+| `fzn_count_eq_set_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L509) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_eq_set_par.mzn) |
+| `fzn_count_geq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L445) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq.mzn) |
+| `fzn_count_geq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L449) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq_par.mzn) |
+| `fzn_count_geq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L513) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_geq_set.mzn) |
+| `fzn_count_gt` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L453) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt.mzn) |
+| `fzn_count_gt_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L457) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt_par.mzn) |
+| `fzn_count_gt_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L517) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_gt_set.mzn) |
+| `fzn_count_leq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L461) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq.mzn) |
+| `fzn_count_leq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L465) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq_par.mzn) |
+| `fzn_count_leq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L521) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_leq_set.mzn) |
+| `fzn_count_lt` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L469) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt.mzn) |
+| `fzn_count_lt_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L473) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt_par.mzn) |
+| `fzn_count_lt_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L525) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_lt_set.mzn) |
+| `fzn_count_neq` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L477) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq.mzn) |
+| `fzn_count_neq_par` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L481) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq_par.mzn) |
+| `fzn_count_neq_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L529) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_count_neq_set.mzn) |
 | `fzn_cumulative` | restricted | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1237) | SC-09; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cumulative.mzn) |
 | `fzn_cumulatives` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L768) | SC-04, SC-12; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cumulatives.mzn) |
 | `fzn_cumulatives_decomp` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L773) | SC-04, SC-12; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_cumulatives_decomp.mzn) |
@@ -312,22 +377,22 @@ approve a row because the implementation has a theorem named `_iff`.
 | `fzn_disjoint` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L982) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_disjoint.mzn) |
 | `fzn_disjunctive` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1229) | SC-04, SC-11; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_disjunctive.mzn) |
 | `fzn_disjunctive_strict` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1233) | SC-04, SC-11; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_disjunctive_strict.mzn) |
-| `fzn_distribute` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L482) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_distribute.mzn) |
+| `fzn_distribute` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L485) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_distribute.mzn) |
 | `fzn_dpath` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1297) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dpath_int.mzn) |
 | `fzn_dreachable` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1277) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dreachable_int.mzn) |
 | `fzn_dsteiner` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1320) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dsteiner.mzn) |
 | `fzn_dtree` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1287) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dtree_int.mzn) |
 | `fzn_dwst` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1328) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_dwst.mzn) |
-| `fzn_exactly_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L430) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_exactly_int.mzn) |
-| `fzn_exactly_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L538) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_exactly_set.mzn) |
+| `fzn_exactly_int` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L433) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_exactly_int.mzn) |
+| `fzn_exactly_set` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L541) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_exactly_set.mzn) |
 | `fzn_geost` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L778) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_geost.mzn) |
 | `fzn_geost_bb` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L782) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_geost_bb.mzn) |
 | `fzn_geost_nonoverlap_k` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1225) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_geost_nonoverlap_k.mzn) |
 | `fzn_geost_smallest_bb` | restricted | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L787) | SC-03; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_geost_smallest_bb.mzn) |
-| `fzn_global_cardinality` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L486) | SC-04, SC-10; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality.mzn) |
-| `fzn_global_cardinality_closed` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L490) | SC-04, SC-10; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_closed.mzn) |
-| `fzn_global_cardinality_low_up` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L494) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_low_up.mzn) |
-| `fzn_global_cardinality_low_up_closed` | restricted | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L498) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_low_up_closed.mzn) |
+| `fzn_global_cardinality` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L489) | SC-04, SC-10; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality.mzn) |
+| `fzn_global_cardinality_closed` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L493) | SC-04, SC-10; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_closed.mzn) |
+| `fzn_global_cardinality_low_up` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L497) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_low_up.mzn) |
+| `fzn_global_cardinality_low_up_closed` | restricted | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L501) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_global_cardinality_low_up_closed.mzn) |
 | `fzn_if_then_else_bool` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1249) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_bool.mzn) |
 | `fzn_if_then_else_int` | reviewed | [PackSched](../../LeanFzn/Semantics/Globals/PackSched.lean#L1245) | SC-04; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_int.mzn) |
 | `fzn_if_then_else_partiality` | reviewed | [Sched2](../../LeanFzn/Semantics/Globals/Sched2.lean#L808) | SC-04, SC-13; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_if_then_else_partiality.mzn) |
@@ -361,7 +426,7 @@ approve a row because the implementation has a theorem named `_iff`.
 | `fzn_member_set` | reviewed | [Channeling](../../LeanFzn/Semantics/Globals/Channeling.lean#L704) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_member_set.mzn) |
 | `fzn_minimum_arg_int` | reviewed | [LexSort](../../LeanFzn/Semantics/Globals/LexSort.lean#L753) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_arg_min_int.mzn) |
 | `fzn_neural_net` | unsupported | [Globals](../../LeanFzn/Semantics/Globals.lean) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_neural_net.mzn) |
-| `fzn_nvalue` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L414) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_nvalue.mzn) |
+| `fzn_nvalue` | reviewed | [Counting](../../LeanFzn/Semantics/Globals/Counting.lean#L417) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_nvalue.mzn) |
 | `fzn_partition_set` | reviewed | [SetMath](../../LeanFzn/Semantics/Globals/SetMath.lean#L990) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_partition_set.mzn) |
 | `fzn_path` | reviewed | [Graph](../../LeanFzn/Semantics/Globals/Graph.lean#L1292) | SC-01, SC-05; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_path_int.mzn) |
 | `fzn_piecewise_linear` | unsupported | [Globals](../../LeanFzn/Semantics/Globals.lean) | —; [reference](https://github.com/MiniZinc/libminizinc/blob/c3448c48e7f05f13805616cfd1b9e94972eef58c/share/minizinc/std/fzn_piecewise_linear.mzn) |

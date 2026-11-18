@@ -164,8 +164,25 @@ interpolation, also excluded by the vendored grammar's `<string-contents>`), a
 backslash before a physical newline, and octal escapes above `\377`.
 
 **Implementation.** `lexEscape` and `lexString` in `LeanFzn/Parser/Lexer.lean`.
-The lexer is not covered by the parser recognition theorem: `ValidFlatZinc`
-is defined over the tokens this lexer produces.
+**Physical linebreaks in a string body.** The vendored grammar explicitly
+excludes physical LF from `<string-contents>`. The project's declared strict
+linebreak policy additionally rejects raw CR. This is an explicit policy choice,
+not a claim that the upstream LF character class itself includes CR. Escaped
+linebreaks remain available: `\n`, `\x0A` and `\12` encode LF; `\t`, `\x09`
+and `\11` encode tab; `\x0D` and `\15` encode CR. This restricts physical
+source characters, not decoded contents.
+
+The former lexer rejected LF but accepted raw CR inside a quoted string. The
+implementation now rejects both, and `Tests/Parser/LexicalSpec.lean` checks that
+regression together with escaped-linebreak and Unicode cases.
+
+`LeanFzn.Parser.Lexical.tokenize_correct` now proves the lexer sound and complete
+against the independent character-level relation in `Parser/Lexical.lean`.
+`parseModel_iff_sourceGrammar` composes it with the existing token grammar and
+preserves the exact AST. The older `ValidFlatZinc` definition is still
+lexer-relative; the new theorem does not use it as its independent contract.
+This certification establishes the declared policy, not equivalence to every
+upstream lexical convention.
 
 ## A1. Integer capacity and overflow
 

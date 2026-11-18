@@ -1869,12 +1869,13 @@ structure SearchInv (p : CompiledProblem DomConstraint) (T : LitTable)
   hroot : RootInv p T init res.2
   hprops : PropsSound p T res.2.props
 
-set_option maxHeartbeats 1600000 in
-/-- Search with an explicit fuel.  Each recursive call is structurally on a
-smaller `Nat`, so the loop is total without `partial`.  The analysis is
-computed before the conflict counter is bumped (the analysis reads only
-the domains/table/level, never the stats), which keeps the soundness
-proof's hypotheses syntactically simple. -/
+mutual
+/-- Search with explicit fuel.  Each recursive call is structurally on a
+smaller `Nat`, so the loop is total without `partial`.
+
+The loop is split into five mutually recursive definitions, one per branch,
+so that no generated equation lemma has to inline the whole loop body (which
+no longer elaborates within the default heartbeat budget). -/
 def search (p : CompiledProblem DomConstraint) (T : LitTable)
     (init : Array DomC) (o : SearchConfig) (prio : Array Nat)
     (orders : List AnnValOrder) (st : EngineState p T)
@@ -1901,218 +1902,376 @@ def search (p : CompiledProblem DomConstraint) (T : LitTable)
             giveUpWith_props hprops1 "pending pruning application failed"⟩
         else
           match res.conflict with
-          | some c =>
-              let a := analyze p T init st hroot1.conv hroot1.hist.1 hroot1 c res.fuel
-              have hspec : AnalysisSpec p T st a :=
-                analyze_spec hroot1.conv hroot1.hist.1 hroot1 c res.fuel
-              -- The conflict clause is the failing propagation's explanation;
-              -- charge its slots in the weighted-degree policy.  This happens
-              -- after analysis (which does not read the policy) so the proof
-              -- sees the same state that `analyze` was applied to.
-              let st := bumpWeightLits st c.lits
-              have hroot2 : RootInv p T init st :=
-                hroot1.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
-              let st := { st with stats := { st.stats with conflicts := st.stats.conflicts + 1 } }
-              have hroot3 : RootInv p T init st :=
-                hroot2.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
-              if !a.ok then
-                ⟨giveUpWith st a.why, giveUpWith_rootInv hroot3 _,
-                giveUpWith_props hprops1 a.why⟩
-              else
-                match hlearn : a.learned with
-                | none =>
-                    ⟨giveUpWith st "analysis returned no learned clause",
-                    giveUpWith_rootInv hroot3 _,
-                    giveUpWith_props hprops1 "analysis returned no learned clause"⟩
-                | some lc0 =>
-                    if lc0.lits.isEmpty then
-                      -- The learned empty clause is entailed unconditionally
-                      -- (`analyze_empty_unsat`), so this is a root refutation
-                      -- even when the conflict was found above level 0.
-                      ⟨(.unsat, st), hroot3, hprops1⟩
-                    else
-                      have hprops2 : PropsSound p T (bumpActivityIf st o a.bumpLits).props :=
-                        hprops1.congr (bumpActivityIf_props st o a.bumpLits)
-                      let st := bumpActivityIf st o a.bumpLits
-                      have hroot4 : RootInv p T init st :=
-                        bumpActivityIf_rootInv hroot3 o a.bumpLits
-                      let r := canonClause st lc0
-                      have hroot5 : RootInv p T init r.2 :=
-                        canonClause_rootInv hroot4 lc0
-                      have hprops3 : PropsSound p T r.2.props :=
-                        hprops2.congr (canonClause_props st lc0)
-                      have hwf : ∀ q ∈ r.1.lits.toList, r.2.table.WF q := by
-                        intro q hq
-                        obtain ⟨i, hi⟩ := Array.mem_iff_getElem?.mp (by simpa using hq)
-                        exact canonClause_wf st lc0 hroot4.table_wf i q hi
-                      let lc := r.1
-                      let st := r.2
-                      let rdb := st.db.add lc
-                      let id := rdb.2
-                      let db := rdb.1.setLbd id a.lbd
-                      let st := { st with db := db }
-                      have hroot6 : RootInv p T init st :=
-                        hroot5.addLearned hwf a.lbd
-                      let st := { st with
-                        stats := { st.stats with
-                          learned := st.stats.learned + 1
-                          learnedLitsBefore := st.stats.learnedLitsBefore + a.litsBefore
-                          learnedLitsAfter := st.stats.learnedLitsAfter + lc.lits.size
-                          learnedUnits := st.stats.learnedUnits +
-                            (if lc.lits.size ≤ 1 then 1 else 0) } }
-                      have hroot7 : RootInv p T init st :=
-                        hroot6.setStats _
-                      if hge : a.backjump >= st.level then
-                        -- A non-asserting clause cannot guide this level.  A
-                        -- root restart here was measured to turn the early
-                        -- give-up into a timeout, so keep the explicit cause.
-                        ⟨giveUpWith st "non-progressing backjump", giveUpWith_rootInv hroot7 _,
-                          giveUpWith_props hprops3 "non-progressing backjump"⟩
-                      else
-                        let hlt : a.backjump < st.level := Nat.lt_of_not_le hge
-                        have hprops4 : PropsSound p T (backjump st a.backjump).props :=
-                          hprops3.congr (backjump_props st a.backjump)
-                        let st0 := backjump st a.backjump
-                        have hroot8 : RootInv p T init st0 :=
-                          hroot7.backjump hlt
-                        let st := st0.trimReasonsStats
-                        have hroot9 : RootInv p T init st :=
-                          hroot8.trimReasonsStats
-                        match hassert : a.asserting with
-                        | some l =>
-                            have hpending' : PendingRoot p st
-                                #[{ lit := l, reason := .learned id, count := true }] := by
-                              intro h0 item hit
-                              simp only [List.mem_singleton] at hit
-                              subst item
-                              have hbj : a.backjump = 0 := by
-                                have hlev : st.level = a.backjump := by
-                                  rw [trimReasonsStats_level,
-                                    backjump_level_eq_of_lt hlt]
-                                omega
-                              exact hspec.unit_at_root lc0 l hlearn hassert hbj
-                            search p T init o prio orders st
-                              #[{ lit := l, reason := .learned id, count := true }]
-                              hroot9 hpending' hprops4 f
-                        | none =>
-                            -- No current-level literal: the learned clause is
-                            -- falsified at the backjump level; Core makes no
-                            -- claim here (give up).
-                            ⟨giveUpWith st "missing asserting literal", giveUpWith_rootInv hroot9 _,
-                              giveUpWith_props hprops4 "missing asserting literal"⟩
+          | some c => searchConflict p T init o prio orders st res hroot1 hprops1 c f
           | none =>
-              -- Selection first: when a slot is selectable its decision is
-              -- exactly the old `maybeReduce`/restart/`selectDecision` path,
-              -- while the full `fixedAssignment` list is built only when no
-              -- slot can be selected (every slot fixed, or an empty domain).
               match selectDecision p st o prio orders with
               | some (l, vopt) =>
-                  have hprops2 : PropsSound p T (maybeReduce st).props :=
-                    hprops1.congr (maybeReduce_props st)
-                  let st := maybeReduce st
-                  have hroot2 : RootInv p T init st := maybeReduce_rootInv hroot1
-                  if hrs : restartDue o st && st.level > 0 then
-                    -- Restart at a decision boundary: every learned clause from
-                    -- the preceding conflict has already been asserted and
-                    -- drained, so this only discards the current decision stack.
-                    let st := { st with restarts := st.restarts + 1 }
-                    let st := { st with lastRestartConflict := st.stats.conflicts }
-                    have hroot3 : RootInv p T init st :=
-                      hroot2.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
-                    have hpos : 0 < st.level := by
-                      have h2 := (Bool.and_eq_true_iff.mp hrs).2
-                      simpa using of_decide_eq_true h2
-                    have hprops3 : PropsSound p T (backjump st 0).props :=
-                      hprops2.congr (backjump_props st 0)
-                    let st0 := backjump st 0
-                    have hroot4 : RootInv p T init st0 :=
-                      hroot3.backjump hpos
-                    let st := st0.trimReasonsStats
-                    have hroot5 : RootInv p T init st :=
-                      hroot4.trimReasonsStats
-                    have hpending' : PendingRoot p st #[] := by
-                      intro h0 item hit
-                      simp at hit
-                    search p T init o prio orders st #[] hroot5 hpending' hprops3 f
-                  else
-                    let s := atomSlot l.lit.atom
-                    -- Under `incumbent` the phase array is the round's
-                    -- fixed seed, so a decision must not overwrite it with
-                    -- the value chosen this round.  The other strategies
-                    -- keep ordinary phase saving.
-                    let phases :=
-                      match vopt with
-                      | some v =>
-                          if o.val == .incumbent then st.phases
-                          else st.phases.setGrow s v default
-                      | none => st.phases
-                    let st := { st with
-                      phases := phases
-                      stats := { st.stats with
-                        decisions := st.stats.decisions + 1
-                        maxLevel := max st.stats.maxLevel (st.level + 1) } }
-                    have hroot3 : RootInv p T init st :=
-                      hroot2.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
-                    have hprops3 : PropsSound p T (newLevel st).props :=
-                      hprops2.congr (newLevel_props st)
-                    let st := newLevel st
-                    have hroot4 : RootInv p T init st := hroot3.newLevel
-                    have hpending' : PendingRoot p st
-                        #[{ lit := l, reason := .decision, count := false }] := by
-                      intro h0 item hit
-                      simp only [List.mem_singleton] at hit
-                      subst item
-                      simp [st, newLevel] at h0
-                    search p T init o prio orders st
-                      #[{ lit := l, reason := .decision, count := false }]
-                      hroot4 hpending' hprops3 f
+                  searchDecision p T init o prio orders st l vopt hroot1 hprops1 f
               | none =>
                   match fixedAssignment st with
-                  | some a =>
-                      if fitsB (domProblem p) a then
-                        if accepts p a then ⟨(.sat a, st), hroot1, hprops1⟩
-                        else ⟨giveUpWith st "final assignment rejected by the constraints",
-                          giveUpWith_rootInv hroot1 _,
-                          giveUpWith_props hprops1 "final assignment rejected by the constraints"⟩
-                      else ⟨giveUpWith st "final assignment outside the converted box",
-                        giveUpWith_rootInv hroot1 _,
-                        giveUpWith_props hprops1 "final assignment outside the converted box"⟩
-                  | none =>
-                      -- No selectable slot but some slot is not fixed (an empty
-                      -- domain): keep the old reduce/restart-then-give-up path.
-                      have hprops2 : PropsSound p T (maybeReduce st).props :=
-                        hprops1.congr (maybeReduce_props st)
-                      let st := maybeReduce st
-                      have hroot2 : RootInv p T init st := maybeReduce_rootInv hroot1
-                      if hrs : restartDue o st && st.level > 0 then
-                        let st := { st with restarts := st.restarts + 1 }
-                        let st := { st with lastRestartConflict := st.stats.conflicts }
-                        have hroot3 : RootInv p T init st :=
-                          hroot2.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
-                        have hpos : 0 < st.level := by
-                          have h2 := (Bool.and_eq_true_iff.mp hrs).2
-                          simpa using of_decide_eq_true h2
-                        have hprops3 : PropsSound p T (backjump st 0).props :=
-                          hprops2.congr (backjump_props st 0)
-                        let st0 := backjump st 0
-                        have hroot4 : RootInv p T init st0 :=
-                          hroot3.backjump hpos
-                        let st := st0.trimReasonsStats
-                        have hroot5 : RootInv p T init st :=
-                          hroot4.trimReasonsStats
-                        have hpending' : PendingRoot p st #[] := by
-                          intro h0 item hit
-                          simp at hit
-                        search p T init o prio orders st #[] hroot5 hpending' hprops3 f
-                      else ⟨giveUpWith st "no selectable slot and an empty domain",
-                        giveUpWith_rootInv hroot2 _,
-                        giveUpWith_props hprops2 "no selectable slot and an empty domain"⟩
+                  | some a => searchFixed p T init o prio orders st a hroot1 hprops1 f
+                  | none => searchNoSlot p T init o prio orders st hroot1 hprops1 f
+termination_by fuel => 2 * fuel
 
-/-! ## Search soundness -/
+def searchConflict (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC) (o : SearchConfig) (prio : Array Nat)
+    (orders : List AnnValOrder) (st : EngineState p T) (res : PRes p T)
+    (hroot1 : RootInv p T init st) (hprops1 : PropsSound p T st.props)
+    (c : EClause p T) (f : Nat) : SearchInv p T init :=
+let a := analyze p T init st hroot1.conv hroot1.hist.1 hroot1 c res.fuel
+have hspec : AnalysisSpec p T st a :=
+  analyze_spec hroot1.conv hroot1.hist.1 hroot1 c res.fuel
+-- The conflict clause is the failing propagation's explanation;
+-- charge its slots in the weighted-degree policy.  This happens
+-- after analysis (which does not read the policy) so the proof
+-- sees the same state that `analyze` was applied to.
+let st := bumpWeightLits st c.lits
+have hroot2 : RootInv p T init st :=
+  hroot1.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
+let st := { st with stats := { st.stats with conflicts := st.stats.conflicts + 1 } }
+have hroot3 : RootInv p T init st :=
+  hroot2.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
+if !a.ok then
+  ⟨giveUpWith st a.why, giveUpWith_rootInv hroot3 _,
+  giveUpWith_props hprops1 a.why⟩
+else
+  match hlearn : a.learned with
+  | none =>
+      ⟨giveUpWith st "analysis returned no learned clause",
+      giveUpWith_rootInv hroot3 _,
+      giveUpWith_props hprops1 "analysis returned no learned clause"⟩
+  | some lc0 =>
+      if lc0.lits.isEmpty then
+        -- The learned empty clause is entailed unconditionally
+        -- (`analyze_empty_unsat`), so this is a root refutation
+        -- even when the conflict was found above level 0.
+        ⟨(.unsat, st), hroot3, hprops1⟩
+      else
+        have hprops2 : PropsSound p T (bumpActivityIf st o a.bumpLits).props :=
+          hprops1.congr (bumpActivityIf_props st o a.bumpLits)
+        let st := bumpActivityIf st o a.bumpLits
+        have hroot4 : RootInv p T init st :=
+          bumpActivityIf_rootInv hroot3 o a.bumpLits
+        let r := canonClause st lc0
+        have hroot5 : RootInv p T init r.2 :=
+          canonClause_rootInv hroot4 lc0
+        have hprops3 : PropsSound p T r.2.props :=
+          hprops2.congr (canonClause_props st lc0)
+        have hwf : ∀ q ∈ r.1.lits.toList, r.2.table.WF q := by
+          intro q hq
+          obtain ⟨i, hi⟩ := Array.mem_iff_getElem?.mp (by simpa using hq)
+          exact canonClause_wf st lc0 hroot4.table_wf i q hi
+        let lc := r.1
+        let st := r.2
+        let rdb := st.db.add lc
+        let id := rdb.2
+        let db := rdb.1.setLbd id a.lbd
+        let st := { st with db := db }
+        have hroot6 : RootInv p T init st :=
+          hroot5.addLearned hwf a.lbd
+        let st := { st with
+          stats := { st.stats with
+            learned := st.stats.learned + 1
+            learnedLitsBefore := st.stats.learnedLitsBefore + a.litsBefore
+            learnedLitsAfter := st.stats.learnedLitsAfter + lc.lits.size
+            learnedUnits := st.stats.learnedUnits +
+              (if lc.lits.size ≤ 1 then 1 else 0) } }
+        have hroot7 : RootInv p T init st :=
+          hroot6.setStats _
+        if hge : a.backjump >= st.level then
+          -- A non-asserting clause cannot guide this level.  A
+          -- root restart here was measured to turn the early
+          -- give-up into a timeout, so keep the explicit cause.
+          ⟨giveUpWith st "non-progressing backjump", giveUpWith_rootInv hroot7 _,
+            giveUpWith_props hprops3 "non-progressing backjump"⟩
+        else
+          let hlt : a.backjump < st.level := Nat.lt_of_not_le hge
+          have hprops4 : PropsSound p T (backjump st a.backjump).props :=
+            hprops3.congr (backjump_props st a.backjump)
+          let st0 := backjump st a.backjump
+          have hroot8 : RootInv p T init st0 :=
+            hroot7.backjump hlt
+          let st := st0.trimReasonsStats
+          have hroot9 : RootInv p T init st :=
+            hroot8.trimReasonsStats
+          match hassert : a.asserting with
+          | some l =>
+              have hpending' : PendingRoot p st
+                  #[{ lit := l, reason := .learned id, count := true }] := by
+                intro h0 item hit
+                simp only [List.mem_singleton] at hit
+                subst item
+                have hbj : a.backjump = 0 := by
+                  have hlev : st.level = a.backjump := by
+                    rw [trimReasonsStats_level,
+                      backjump_level_eq_of_lt hlt]
+                  omega
+                exact hspec.unit_at_root lc0 l hlearn hassert hbj
+              search p T init o prio orders st
+                #[{ lit := l, reason := .learned id, count := true }]
+                hroot9 hpending' hprops4 f
+          | none =>
+              -- No current-level literal: the learned clause is
+              -- falsified at the backjump level; Core makes no
+              -- claim here (give up).
+              ⟨giveUpWith st "missing asserting literal", giveUpWith_rootInv hroot9 _,
+                giveUpWith_props hprops4 "missing asserting literal"⟩
+termination_by 2 * f + 1
+def searchDecision (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC) (o : SearchConfig) (prio : Array Nat)
+    (orders : List AnnValOrder) (st1 : EngineState p T) (l : PLit)
+    (vopt : Option Value) (hroot1 : RootInv p T init st1)
+    (hprops1 : PropsSound p T st1.props) (f : Nat) : SearchInv p T init :=
+  have hprops2 : PropsSound p T (maybeReduce st1).props :=
+    hprops1.congr (maybeReduce_props st1)
+  let st := maybeReduce st1
+  have hroot2 : RootInv p T init st := maybeReduce_rootInv hroot1
+if hrs : restartDue o st && st.level > 0 then
+  -- Restart at a decision boundary: every learned clause from
+  -- the preceding conflict has already been asserted and
+  -- drained, so this only discards the current decision stack.
+  let st := { st with restarts := st.restarts + 1 }
+  let st := { st with lastRestartConflict := st.stats.conflicts }
+  have hroot3 : RootInv p T init st :=
+    hroot2.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
+  have hpos : 0 < st.level := by
+    have h2 := (Bool.and_eq_true_iff.mp hrs).2
+    simpa using of_decide_eq_true h2
+  have hprops3 : PropsSound p T (backjump st 0).props :=
+    hprops2.congr (backjump_props st 0)
+  let st0 := backjump st 0
+  have hroot4 : RootInv p T init st0 :=
+    hroot3.backjump hpos
+  let st := st0.trimReasonsStats
+  have hroot5 : RootInv p T init st :=
+    hroot4.trimReasonsStats
+  have hpending' : PendingRoot p st #[] := by
+    intro h0 item hit
+    simp at hit
+  search p T init o prio orders st #[] hroot5 hpending' hprops3 f
+else
+  let s := atomSlot l.lit.atom
+  -- Under `incumbent` the phase array is the round's
+  -- fixed seed, so a decision must not overwrite it with
+  -- the value chosen this round.  The other strategies
+  -- keep ordinary phase saving.
+  let phases :=
+    match vopt with
+    | some v =>
+        if o.val == .incumbent then st.phases
+        else st.phases.setGrow s v default
+    | none => st.phases
+  let st := { st with
+    phases := phases
+    stats := { st.stats with
+      decisions := st.stats.decisions + 1
+      maxLevel := max st.stats.maxLevel (st.level + 1) } }
+  have hroot3 : RootInv p T init st :=
+    hroot2.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
+  have hprops3 : PropsSound p T (newLevel st).props :=
+    hprops2.congr (newLevel_props st)
+  let st := newLevel st
+  have hroot4 : RootInv p T init st := hroot3.newLevel
+  have hpending' : PendingRoot p st
+      #[{ lit := l, reason := .decision, count := false }] := by
+    intro h0 item hit
+    simp only [List.mem_singleton] at hit
+    subst item
+    simp [st, newLevel] at h0
+  search p T init o prio orders st
+    #[{ lit := l, reason := .decision, count := false }]
+    hroot4 hpending' hprops3 f
+termination_by 2 * f + 1
+def searchFixed (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC) (o : SearchConfig) (prio : Array Nat)
+    (orders : List AnnValOrder) (st : EngineState p T) (a : List Value)
+    (hroot1 : RootInv p T init st) (hprops1 : PropsSound p T st.props)
+    (f : Nat) : SearchInv p T init :=
+if fitsB (domProblem p) a then
+  if accepts p a then ⟨(.sat a, st), hroot1, hprops1⟩
+  else ⟨giveUpWith st "final assignment rejected by the constraints",
+    giveUpWith_rootInv hroot1 _,
+    giveUpWith_props hprops1 "final assignment rejected by the constraints"⟩
+else ⟨giveUpWith st "final assignment outside the converted box",
+  giveUpWith_rootInv hroot1 _,
+  giveUpWith_props hprops1 "final assignment outside the converted box"⟩
+termination_by 2 * f + 1
+def searchNoSlot (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC) (o : SearchConfig) (prio : Array Nat)
+    (orders : List AnnValOrder) (st1 : EngineState p T)
+    (hroot1 : RootInv p T init st1) (hprops1 : PropsSound p T st1.props)
+    (f : Nat) : SearchInv p T init :=
+  have hprops2 : PropsSound p T (maybeReduce st1).props :=
+    hprops1.congr (maybeReduce_props st1)
+  let st := maybeReduce st1
+  have hroot2 : RootInv p T init st := maybeReduce_rootInv hroot1
+  -- No selectable slot but some slot is not fixed (an empty
+  -- domain): keep the old reduce/restart-then-give-up path.
+if hrs : restartDue o st && st.level > 0 then
+  let st := { st with restarts := st.restarts + 1 }
+  let st := { st with lastRestartConflict := st.stats.conflicts }
+  have hroot3 : RootInv p T init st :=
+    hroot2.congr rfl rfl (fun _ => rfl) rfl rfl rfl rfl rfl rfl
+  have hpos : 0 < st.level := by
+    have h2 := (Bool.and_eq_true_iff.mp hrs).2
+    simpa using of_decide_eq_true h2
+  have hprops3 : PropsSound p T (backjump st 0).props :=
+    hprops2.congr (backjump_props st 0)
+  let st0 := backjump st 0
+  have hroot4 : RootInv p T init st0 :=
+    hroot3.backjump hpos
+  let st := st0.trimReasonsStats
+  have hroot5 : RootInv p T init st :=
+    hroot4.trimReasonsStats
+  have hpending' : PendingRoot p st #[] := by
+    intro h0 item hit
+    simp at hit
+  search p T init o prio orders st #[] hroot5 hpending' hprops3 f
+else ⟨giveUpWith st "no selectable slot and an empty domain",
+  giveUpWith_rootInv hroot2 _,
+  giveUpWith_props hprops2 "no selectable slot and an empty domain"⟩
+termination_by 2 * f + 1
+end
+
+/-! ## Search soundness
+
+Each branch helper of the mutual loop gets its own lemma, parameterised by the
+induction hypothesis on the loop at the remaining fuel.  The main theorems
+then only unfold `search` one step and dispatch, so no proof ever has to
+unfold the whole loop body at once. -/
+
+section SearchSoundness
+
+variable {p : CompiledProblem DomConstraint} {T : LitTable}
+  {init : Array DomC} {o : SearchConfig} {prio : Array Nat}
+  {orders : List AnnValOrder} {f : Nat}
+
+/-- Soundness of `.sat` for the loop at fuel `f`. -/
+abbrev SearchSatAt (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC) (o : SearchConfig) (prio : Array Nat)
+    (orders : List AnnValOrder) (f : Nat) : Prop :=
+  ∀ (st : EngineState p T) (pending : Array Pending)
+    (hroot : RootInv p T init st) (hpending : PendingRoot p st pending)
+    (hprops : PropsSound p T st.props) (a : List Value),
+    (search p T init o prio orders st pending hroot hpending hprops f).res.1 = .sat a →
+    a ∈ allAssigns p.domains ∧ accepts p a = true
+
+/-- Soundness of `.unsat` for the loop at fuel `f`. -/
+abbrev SearchUnsatAt (p : CompiledProblem DomConstraint) (T : LitTable)
+    (init : Array DomC) (o : SearchConfig) (prio : Array Nat)
+    (orders : List AnnValOrder) (f : Nat) : Prop :=
+  ∀ (st : EngineState p T) (pending : Array Pending)
+    (hroot : RootInv p T init st) (hpending : PendingRoot p st pending)
+    (hprops : PropsSound p T st.props),
+    (search p T init o prio orders st pending hroot hpending hprops f).res.1 = .unsat →
+    ∀ b ∈ allAssigns p.domains, accepts p b = false
 
 set_option maxHeartbeats 1600000 in
-/-- Every `.sat` result of the loop is a box member accepted by the
-problem. -/
+theorem searchConflict_sat {st : EngineState p T} {res : PRes p T}
+    {hroot1 : RootInv p T init st} {hprops1 : PropsSound p T st.props}
+    {c : EClause p T} (ih : SearchSatAt p T init o prio orders f) {a : List Value}
+    (h : (searchConflict p T init o prio orders st res hroot1 hprops1 c f).res.1 = .sat a) :
+    a ∈ allAssigns p.domains ∧ accepts p a = true := by
+  rw [searchConflict] at h
+  split at h
+  · simp only [giveUpWith_fst, reduceCtorEq] at h
+  split at h
+  · simp only [giveUpWith_fst, reduceCtorEq] at h
+  split at h
+  · simp only [reduceCtorEq] at h
+  dsimp only at h
+  split at h
+  · simp only [giveUpWith_fst, reduceCtorEq] at h
+  split at h
+  · exact ih _ _ _ _ _ _ h
+  · simp only [giveUpWith_fst, reduceCtorEq] at h
+
+set_option maxHeartbeats 1600000 in
+theorem searchConflict_unsat {st : EngineState p T} {res : PRes p T}
+    {hroot1 : RootInv p T init st} {hprops1 : PropsSound p T st.props}
+    {c : EClause p T} (ih : SearchUnsatAt p T init o prio orders f)
+    (h : (searchConflict p T init o prio orders st res hroot1 hprops1 c f).res.1 = .unsat) :
+    ∀ b ∈ allAssigns p.domains, accepts p b = false := by
+  rw [searchConflict] at h
+  split at h
+  · simp only [giveUpWith_fst, reduceCtorEq] at h
+  rename_i hok
+  split at h
+  · simp only [giveUpWith_fst, reduceCtorEq] at h
+  rename_i lc0 hlearned
+  split at h
+  · -- entailed empty clause, at any decision level
+    rename_i hemp
+    exact entailed_nil_unsat
+      (analyze_empty_unsat hroot1.conv hroot1.hist.1 hroot1
+        (by simpa using hok) hlearned (by simpa using hemp))
+  dsimp only at h
+  split at h
+  · simp only [giveUpWith_fst, reduceCtorEq] at h
+  split at h
+  · exact ih _ _ _ _ _ h
+  · simp only [giveUpWith_fst, reduceCtorEq] at h
+
+theorem searchFixed_sat {st : EngineState p T} {a' : List Value}
+    {hroot1 : RootInv p T init st} {hprops1 : PropsSound p T st.props} {a : List Value}
+    (h : (searchFixed p T init o prio orders st a' hroot1 hprops1 f).res.1 = .sat a) :
+    a ∈ allAssigns p.domains ∧ accepts p a = true := by
+  rw [searchFixed] at h
+  by_cases hfit : fitsB (domProblem p) a' = true
+  · by_cases hacc : accepts p a' = true
+    · simp only [hfit, hacc, if_true] at h
+      cases h
+      exact ⟨(fitsB_iff_mem_allAssigns_problem (domProblem p) a').mp hfit, hacc⟩
+    · simp [hfit, hacc] at h
+  · simp [hfit] at h
+
+theorem searchFixed_not_unsat {st : EngineState p T} {a' : List Value}
+    {hroot1 : RootInv p T init st} {hprops1 : PropsSound p T st.props} :
+    (searchFixed p T init o prio orders st a' hroot1 hprops1 f).res.1 ≠ .unsat := by
+  rw [searchFixed]
+  split
+  · split <;> simp
+  · simp
+
+theorem searchDecision_sat {st : EngineState p T} {l : PLit} {vopt : Option Value}
+    {hroot1 : RootInv p T init st} {hprops1 : PropsSound p T st.props}
+    (ih : SearchSatAt p T init o prio orders f) {a : List Value}
+    (h : (searchDecision p T init o prio orders st l vopt hroot1 hprops1 f).res.1 = .sat a) :
+    a ∈ allAssigns p.domains ∧ accepts p a = true := by
+  rw [searchDecision] at h
+  split at h <;> exact ih _ _ _ _ _ _ h
+
+theorem searchDecision_unsat {st : EngineState p T} {l : PLit} {vopt : Option Value}
+    {hroot1 : RootInv p T init st} {hprops1 : PropsSound p T st.props}
+    (ih : SearchUnsatAt p T init o prio orders f)
+    (h : (searchDecision p T init o prio orders st l vopt hroot1 hprops1 f).res.1 = .unsat) :
+    ∀ b ∈ allAssigns p.domains, accepts p b = false := by
+  rw [searchDecision] at h
+  split at h <;> exact ih _ _ _ _ _ h
+
+theorem searchNoSlot_sat {st : EngineState p T}
+    {hroot1 : RootInv p T init st} {hprops1 : PropsSound p T st.props}
+    (ih : SearchSatAt p T init o prio orders f) {a : List Value}
+    (h : (searchNoSlot p T init o prio orders st hroot1 hprops1 f).res.1 = .sat a) :
+    a ∈ allAssigns p.domains ∧ accepts p a = true := by
+  rw [searchNoSlot] at h
+  split at h
+  · exact ih _ _ _ _ _ _ h
+  · simp at h
+
+theorem searchNoSlot_unsat {st : EngineState p T}
+    {hroot1 : RootInv p T init st} {hprops1 : PropsSound p T st.props}
+    (ih : SearchUnsatAt p T init o prio orders f)
+    (h : (searchNoSlot p T init o prio orders st hroot1 hprops1 f).res.1 = .unsat) :
+    ∀ b ∈ allAssigns p.domains, accepts p b = false := by
+  rw [searchNoSlot] at h
+  split at h
+  · exact ih _ _ _ _ _ h
+  · simp at h
+
+end SearchSoundness
+
+/-- Every `.sat` result of the loop is a box member accepted by the problem. -/
 theorem search_sat (p : CompiledProblem DomConstraint) (T : LitTable)
     (init : Array DomC) (o : SearchConfig) (prio : Array Nat)
     (orders : List AnnValOrder) :
@@ -2135,43 +2294,13 @@ theorem search_sat (p : CompiledProblem DomConstraint) (T : LitTable)
       · split at h
         · simp at h
         · split at h
-          · -- conflict: analysis
-            split at h
-            · simp at h
+          · exact searchConflict_sat ih h
+          · split at h
+            · exact searchDecision_sat ih h
             · split at h
-              · simp at h
-              · split at h
-                · simp at h
-                · split at h
-                  · simp at h
-                  · split at h
-                    · exact ih _ _ _ _ _ _ h
-                    · simp at h
-          · -- no conflict: decision first, then the fixed-assignment leaf
-            split at h
-            · -- a slot is selectable: restart or decision
-              split at h
-              · exact ih _ _ _ _ _ _ h
-              · exact ih _ _ _ _ _ _ h
-            · -- no selectable slot: fixed assignment / empty fallback
-              cases hfa : fixedAssignment (drain p T st pending (f + 1)).st with
-              | none =>
-                  simp only [hfa] at h
-                  split at h
-                  · exact ih _ _ _ _ _ _ h
-                  · simp at h
-              | some a' =>
-                  simp only [hfa] at h
-                  by_cases hfit : fitsB (domProblem p) a' = true
-                  · by_cases hacc : accepts p a' = true
-                    · simp [hfit, hacc] at h
-                      subst h
-                      exact ⟨(fitsB_iff_mem_allAssigns_problem (domProblem p) a').mp
-                        hfit, hacc⟩
-                    · simp [hfit, hacc] at h
-                  · simp [hfit] at h
+              · exact searchFixed_sat h
+              · exact searchNoSlot_sat ih h
 
-set_option maxHeartbeats 1600000 in
 /-- Every `.unsat` result of the loop excludes every accepted assignment:
 the only `.unsat` leaf is an entailed empty learned clause. -/
 theorem search_unsat (p : CompiledProblem DomConstraint) (T : LitTable)
@@ -2196,45 +2325,12 @@ theorem search_unsat (p : CompiledProblem DomConstraint) (T : LitTable)
       · split at h
         · simp at h
         · split at h
-          · -- conflict: analysis
-            split at h
-            · simp at h
+          · exact searchConflict_unsat ih h
+          · split at h
+            · exact searchDecision_unsat ih h
             · split at h
-              · simp at h
-              · split at h
-                · -- entailed empty clause, at any decision level
-                  rename_i hconf hok lc hlearned hemp
-                  exact entailed_nil_unsat
-                    (analyze_empty_unsat
-                      (drain_rootInv st pending (f + 1) hroot hpending hprops).conv
-                      (drain_rootInv st pending (f + 1) hroot hpending hprops).hist.1
-                      (drain_rootInv st pending (f + 1) hroot hpending hprops)
-                      (by simpa using hok) hlearned (by simpa using hemp))
-                · split at h
-                  · simp at h
-                  · split at h
-                    · exact ih _ _ _ _ _ h
-                    · simp at h
-          · -- no conflict: decision first, then the fixed-assignment leaf
-            split at h
-            · -- a slot is selectable: restart or decision
-              split at h
-              · exact ih _ _ _ _ _ h
-              · exact ih _ _ _ _ _ h
-            · -- no selectable slot: fixed assignment / empty fallback
-              cases hfa : fixedAssignment (drain p T st pending (f + 1)).st with
-              | none =>
-                  simp only [hfa] at h
-                  split at h
-                  · exact ih _ _ _ _ _ h
-                  · simp at h
-              | some a' =>
-                  simp only [hfa] at h
-                  by_cases hfit : fitsB (domProblem p) a' = true
-                  · by_cases hacc : accepts p a' = true
-                    · simp [hfit, hacc] at h
-                    · simp [hfit, hacc] at h
-                  · simp [hfit] at h
+              · exact absurd h searchFixed_not_unsat
+              · exact searchNoSlot_unsat ih h
 
 /-! ## Entry and the Frozen Public Seam -/
 

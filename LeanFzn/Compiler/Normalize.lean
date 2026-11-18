@@ -52,6 +52,7 @@ Dependencies:
   - LeanFzn.Compiler.SetIn: the constant-set domain restriction.
 -/
 
+import LeanFzn.Semantics.Admission
 import LeanFzn.Compiler.Compile
 import LeanFzn.Compiler.Bounds
 import LeanFzn.Compiler.Fragment
@@ -341,7 +342,7 @@ def relabel (m : Model) (se : SetExpansion)
     reconstructs arrays and set values. -/
 def compileModelFull (m : Model) :
     Except String (CompiledProblem DomConstraint) :=
-  if arraysOkB m then
+  if Admission.admittedB m && arraysOkB m then
     match shapeExpandModel (normalizeFull m) with
     | none => .error "unsupported set shape"
     | some sh =>
@@ -354,6 +355,16 @@ def compileModelFull (m : Model) :
                 match compileModel mb with
                 | .error e => .error e
                 | .ok p => .ok (relabel m se p)
-  else .error "unsupported array declaration or array argument"
+  else .error "unsupported source fragment, array declaration or array argument"
+
+/-- Source admission is checked before normalization can fold a global call
+into an always-false row. Thus an unsupported shape cannot become UNSAT. -/
+theorem compileModelFull_admitted {m : Model} {p : CompiledProblem DomConstraint}
+    (h : compileModelFull m = .ok p) : Admission.Admitted m := by
+  unfold compileModelFull at h
+  split at h
+  · rename_i hg
+    exact (Admission.admittedB_iff m).mp ((Bool.and_eq_true _ _).mp hg).1
+  · cases h
 
 end LeanFzn.Compiler

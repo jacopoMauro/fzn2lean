@@ -71,6 +71,8 @@ private def timedVal (ps : PhaseCtx) (name : String) (act : Unit → α) : IO α
     (`relabel` runs after the last timed boundary). -/
 def compileModelFullPhased (ps : PhaseCtx) (m : Model) :
     IO (Except String (CompiledProblem DomConstraint)) := do
+  if !Admission.admittedB m then
+    return .error "unsupported source fragment"
   if !arraysOkB m then
     return .error "unsupported array declaration or array argument"
   let m1 ← timedVal ps "normalize" (fun _ => normalizeFull m)

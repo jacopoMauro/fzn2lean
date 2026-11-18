@@ -544,6 +544,11 @@ private def validateRun (o : SearchConfig) (model : Model) :
       IO.eprintln s!"leanfzn: {reason}"
       return some (.usage, reason)
   | .ok _ => pure ()
+  match Admission.firstFailure model with
+  | some reason =>
+      IO.eprintln s!"leanfzn: unsupported model: {reason}"
+      return some (.unsupportedScope, reason)
+  | none => pure ()
   if !LeanFzn.Checker.wellFormedFastB model then
     let message := "model is not well-formed"
     IO.eprintln s!"leanfzn: {message}"

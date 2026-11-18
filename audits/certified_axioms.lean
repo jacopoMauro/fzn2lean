@@ -1,3 +1,4 @@
+import LeanFzn.Parser.Proofs.SourceCorrectness
 /-
 Purpose: Audit axiom dependencies of the current parser, checker, compiler,
 shared foundations, Core engine and public solver/report correctness theorems.
@@ -2077,3 +2078,28 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 #print axioms LeanFzn.Integration.Report.optimizeStreamCoreStats_emitted_eq
 #print axioms LeanFzn.Integration.Report.optimizeStreamCoreLns_emitted_eq
 #print axioms LeanFzn.Integration.Report.certifiedEntryPairs_length_eq_of_satisfies
+
+-- T2: admitted source premises and public entry gates.
+#print axioms LeanFzn.Semantics.Admission.admittedB_iff
+#print axioms LeanFzn.Semantics.Admission.firstFailure_none_iff
+#print axioms LeanFzn.Semantics.Admission.admitted_constraint
+#print axioms LeanFzn.Semantics.Admission.admitted_cumulative
+#print axioms LeanFzn.Checker.checkModelSolution_accepted_iff
+#print axioms LeanFzn.Checker.checkModelSolution_admitted
+#print axioms LeanFzn.Checker.checkPreparedSolution_admitted
+#print axioms LeanFzn.Compiler.compileModelFull_admitted
+#print axioms LeanFzn.Semantics.Admission.parameterStore_some
+#print axioms LeanFzn.Semantics.Admission.parameter_eval
+#print axioms LeanFzn.Semantics.Admission.nonnegativeArray_values
+
+-- Whole-character lexer certification and exact source-to-AST composition.
+#print axioms LeanFzn.Parser.Lexical.lexerStepCertification
+#print axioms LeanFzn.Parser.Lexical.lexerCertification
+#print axioms LeanFzn.Parser.Lexical.tokenize_sound
+#print axioms LeanFzn.Parser.Lexical.tokenize_complete
+#print axioms LeanFzn.Parser.Lexical.tokenize_correct
+#print axioms LeanFzn.Parser.Lexical.lexes_unique
+#print axioms LeanFzn.Parser.Lexical.tokenize_error_iff
+#print axioms LeanFzn.Parser.Lexical.parseModel_iff_sourceGrammar
+#print axioms LeanFzn.Parser.Lexical.parseModel_ok_iff_sourceValid
+#print axioms LeanFzn.Parser.Lexer.fromUTF8?_eq_some_iff_encodes

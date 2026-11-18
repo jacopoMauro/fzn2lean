@@ -48,9 +48,9 @@ The repository review on **17 November 2026** found a verified solver for a
 restricted finite-domain fragment, with remaining language-conformance,
 completeness and release-validation obligations. The current semantic
 inventory passes `--require-clean`: 218 implemented names, 281 reviewed rows
-and no open recorded findings. Thirteen rows still have explicit restrictions;
-the inventory check does not prove upstream equivalence or enforce every
-restriction on text input. Solver compilation supports fewer shapes than the
+and no open recorded findings. Thirteen rows retain explicit restrictions: eight have public admission gates,
+and five native contracts are excluded from public checking and compilation.
+The inventory check validates policy evidence but does not prove upstream equivalence. Solver compilation supports fewer shapes than the
 solution checker.
 
 Required reporting modules, conformance tests, audit programs, fixtures and
@@ -104,7 +104,7 @@ column states the assumptions and the trust that remains outside the proof.
 
 | Property | Established by | Assumptions and remaining trust |
 | --- | --- | --- |
-| Model lexical interpretation and token grammar | `LeanFzn.Parser.parseModel_ok_iff_valid` over `ValidFlatZinc`, with the independent token/syntax developments in `Parser/Proofs/` | Lexical conventions are those recorded in `specification/flatzinc_specification_assumptions.md`; the reference MiniZinc grammar and the project lexer are not mechanically derived from each other. |
+| Character-level lexing and exact AST recognition | `Lexical.tokenize_correct`, `Lexical.parseModel_iff_sourceGrammar`, and the existing token-parser soundness/completeness proofs | Independent `Lexes` covers all Lean Strings under the declared non-float/R11 lexical policy. Correspondence of that chosen policy and token grammar to every upstream convention remains a separate obligation. |
 | Solution assignment grammar and parsing completeness | `parseSolution_ok_iff_valid`, `parseSolution_eq_ok_iff_grammar`, `Checker/SolutionGrammar` (independent of the parser) | Covers the supported assignment fragment (scalars, one-dimensional arrays, sets, bools, ints). Floats and general MiniZinc expressions are outside the grammar and are rejected. |
 | Solution text/value round trip | `emitCertifiedSolution_roundTrip`, `parse_emitCertifiedSolution_of_satisfies`, `parse_emitCertifiedSolution` | Requires `Satisfies` (or the stated store-typing contract) and `PrintableSolutionName` for every emitted declaration; set equality is extensional. No parser-success premise is assumed. The driver checks names with `outputNamesPrintableB` before searching and refuses a failing model as unsupported (exit 3); `solution_entries_bind_of_gate` discharges the name premise from that check. |
 | Separator, optimum and status-marker handling | `Checker/Proofs/SolutionSeparators` (`classify_renderSolutionTokens_ident`, `stripSeparators_terminated`), `tests_check`, `Tests/Cli/test_check_separators.py` | Exact frozen marker list after dropping one trailing CR and ASCII space/tab padding. No general MiniZinc status-stream grammar is claimed; malformed prefixes stay content. |
@@ -122,12 +122,32 @@ when the input satisfies `ValidFlatZinc`. Parser soundness and completeness
 also identify the AST produced by a grammar derivation. The recursive-descent
 parser's fuel bound is proved sufficient.
 
-Recognition is relative to the grammar over tokens produced by the project's
-lexer. Lexical conventions and differences from the reference grammar are
-recorded in the formalization assumptions. General verification that the lexer
-or an arbitrary MiniZinc-produced FlatZinc stream realizes exactly the
-reference language remains deferred; the parser theorem is relative to the
-token stream and `ValidFlatZinc`, not a claim about all possible lexer inputs.
+`LeanFzn.Parser.Lexical.tokenize_correct` independently characterizes successful
+lexing on every Lean String, preserving the exact token values. Its `Lexes`
+relation imports only shared token data and contains no implementation calls.
+`parseModel_iff_sourceGrammar` composes that certificate with `GrModel` and
+identifies the exact AST from source characters. The older `ValidFlatZinc`
+API is retained for compatibility.
+
+The declared policy covers maximal words, integer/radix boundaries, comments,
+whitespace, greedy byte escapes and UTF-8 string values. Raw CR and LF inside
+quoted strings are rejected; escaped linebreaks are allowed. This is a proof
+against the explicit independent policy, not a mechanical derivation of that
+policy from the entire upstream language reference. See the
+[formalization assumptions](specification/flatzinc_specification_assumptions.md).
+
+### Admitted source fragment
+
+Public checking and compilation enforce `Semantics.Admission.Admitted` before
+constraint evaluation or literal folding. Restricted packing/scheduling calls
+must meet checked constant/parameter and array-shape premises; regular calls
+use the declared flat row-major matrix ABI. Geost's three native entries,
+`fzn_cost_mdd` and `fzn_mdd_nondet` are explicitly unsupported, including ground
+calls. See the [admission table](specification/minizinc-2.10.1/predicates_and_globals_report.md#t2-admission-review--17-november-2026)
+for the precise checker fragment. Admission does not imply solver compilation
+support. The explicitly named `checkSemanticModelSolution*` functions and raw
+interpreters describe internal project semantics and do not establish public
+native admission.
 
 ### Solution checker
 
@@ -138,7 +158,7 @@ Solution entries must name declared variables, with no duplicate assignments
 or parameter reassignment. Model parameters retain their declared values.
 
 `LeanFzn.Checker.checkModelSolution_correct` characterizes acceptance in terms
-of the formal model semantics. `checkModelSolution_accepted` additionally ties
+of explicit source admission and the formal model semantics. `checkModelSolution_accepted` additionally ties
 that satisfying store to the values written in the solution and the model's
 parameters. The executable fast entry is proved equivalent to the verified
 entry by `checkModelSolutionFast_eq`.
@@ -361,7 +381,7 @@ and canonical reading paths.
 
 ## Building and running
 
-Requires Lean 4.35.0; `elan` uses the version specified in `lean-toolchain`.
+Requires Lean 4.36.0; `elan` uses the version specified in `lean-toolchain`.
 The package build applies the committed LLVM PGO profile in `pgo/`
 (see `pgo/README.md` for provenance and regeneration).
 

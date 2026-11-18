@@ -58,6 +58,15 @@ private def cases : List (String × Model × String × Outcome) :=
       .malformedSolution "expected solution line 'name = value;'")
   , ("unsupported predicate", badPredModel, "x = 1;\n----------",
       .unsupportedPredicate "fzn_span")
+  , ("excluded native contract", parseOrPanic
+      "constraint fzn_geost(1,[1],[0],[{1}],[0],[1]);\nsolve satisfy;", "----------",
+      .unsupportedPredicate "fzn_geost: outside the admitted FlatZinc fragment")
+  , ("unchecked duration premise", parseOrPanic
+      "constraint fzn_cumulative([0],[-1],[1],1);\nsolve satisfy;", "----------",
+      .unsupportedPredicate "fzn_cumulative: outside the admitted FlatZinc fragment")
+  , ("checked constant durations", parseOrPanic
+      "constraint fzn_cumulative([0],[1],[1],1);\nsolve satisfy;", "----------",
+      .accepted)
   , ("malformed model", malformedModel, "x = 1;\n----------",
       .malformedModel "static well-formedness failed")
   ]
