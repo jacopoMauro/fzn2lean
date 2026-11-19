@@ -29,7 +29,7 @@ and [machine-readable evidence](../specification/minizinc-2.10.1/semantic_confor
 
 ```bash
 python3 -B audits/check_semantic_inventory.py
-python3 -B -m unittest Tests.Audits.test_semantic_inventory
+python3 -B Tests/Audits/test_semantic_inventory.py
 lake build +Tests.Semantics.Conformance
 # Required review-freshness check; upstream equivalence is a separate obligation:
 python3 -B audits/check_semantic_inventory.py --require-clean

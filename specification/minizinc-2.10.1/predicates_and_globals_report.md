@@ -105,7 +105,7 @@ semantics and full upstream correspondence are not inferred from it.
 
 ```bash
 python3 -B audits/check_semantic_inventory.py
-python3 -B -m unittest Tests.Audits.test_semantic_inventory
+python3 -B Tests/Audits/test_semantic_inventory.py
 lake build LeanFzn.Semantics +Tests.Semantics.Conformance
 # Optional: verify a fresh immutable libminizinc source download:
 python3 -B audits/check_semantic_inventory.py --upstream-root PATH_TO_TREE

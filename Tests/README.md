@@ -40,9 +40,13 @@ python3 -B Tests/Cli/test_admission.py
 python3 -B Tests/Cli/test_solve.py
 python3 -B Tests/Cli/test_protocol.py
 python3 -B Tests/Cli/test_check_separators.py
-python3 -B -m unittest Tests.Audits.test_release_gates
+python3 -B Tests/Cli/test_gate.py
+python3 -B Tests/Audits/test_release_gates.py
+python3 -B Tests/Audits/test_semantic_inventory.py
+# `Tests/` is not a package: discover from the repository root, without -t.
 python3 -B -m unittest discover -s Tests/Architecture
 python3 -B -m unittest discover -s Tests/Audits
+python3 -B audits/check_repo_minimal.py
 python3 audits/check_module_boundaries.py
 ```
 
@@ -99,7 +103,10 @@ pinned native predicate contracts, including negative/zero durations,
 asymmetric machine bounds and original machine-index offsets, all-false
 conditional partiality, knapsack nonnegativity and duplicate set enumerations. Build it with
 `lake build +Tests.Semantics.Conformance`. The inventory validator's failure
-paths run with `python3 -B -m unittest Tests.Audits.test_semantic_inventory`.
+paths run with `python3 -B Tests/Audits/test_semantic_inventory.py`, and the
+whole tree is checked by `python3 -B audits/check_repo_minimal.py`: every
+landed support file must be used by a script, a Lake target, a test or a
+maintained document.
 Its independent `ConformanceGraph`, `ConformanceMatrix` and four
 `ConformanceT10*` modules cover graph, matrix and additional native contracts.
 These tests do not establish upstream equivalence or discharge the remaining

@@ -62,9 +62,12 @@ def tracked_files() -> list[str]:
 def reference_corpus(files: list[str]) -> list[tuple[str, str]]:
     """Return (path, text) for every maintained file a reference may live in."""
     corpus = []
+    # This script names every audited tree, so it never counts as a user of a
+    # file; the audit itself is used by the gate and its own tests.
+    self_rel = str(Path(__file__).resolve().relative_to(ROOT))
     for rel in files:
-        if rel == "audits/check_repo_minimal.py":
-            continue  # this script names every audited tree; not a reference
+        if rel == self_rel:
+            continue
         path = ROOT / rel
         if Path(rel).suffix not in REFERENCE_SOURCES or not path.is_file():
             continue
@@ -79,7 +82,13 @@ def is_referenced(rel: str, corpus: list[tuple[str, str]]) -> str | None:
     basename = Path(rel).name
     # Path references win over basenames so a fixture shared by name wins only
     # when the full path is never spelled out anywhere.
-    base_pattern = re.compile(r"(?<![\w./-])" + re.escape(basename) + r"(?![\w-]|\.\w)")
+    # A basename is a reference only when it is not part of another file name:
+    # `x.fzn.sol.txt` does not reference `x.fzn`, but a trailing sentence dot
+    # does not make `x.fzn` part of a longer name.
+    name_tail = r"(?![\w-]|\.[A-Za-z_])"
+    # The path separator is allowed as the preceding character: `a/b.fzn` is a
+    # reference to `b.fzn`, while `x.fzn.sol.txt` is not a reference to `x.fzn`.
+    base_pattern = re.compile(r"(?<![\w.-])" + re.escape(basename) + name_tail)
     for source, text in corpus:
         if source == rel:
             continue

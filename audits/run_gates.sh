@@ -108,6 +108,14 @@ else
   exit 1  # Never validate stale artifacts after the source build failed.
 fi
 
+# Every landed support file must be used by something: a script, a Lake target,
+# a test or a maintained document (L0).
+if python3 -B audits/check_repo_minimal.py >"$LOG/repo-minimal.log" 2>&1; then
+  summary "repo-minimal: PASS ($(tail -1 "$LOG/repo-minimal.log"))"
+else
+  failing "repo-minimal (see $LOG/repo-minimal.log)"
+fi
+
 # A passing build does not establish that the reviewed semantics are current.
 if python3 -B audits/check_semantic_inventory.py --require-clean >"$LOG/semantics.log" 2>&1; then
   summary "semantic-inventory: PASS (coverage/freshness; not an upstream equivalence proof)"
