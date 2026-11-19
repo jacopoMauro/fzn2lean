@@ -76,7 +76,7 @@ recognition, against `Lexes` composed with `GrModel`.
 The lexer rejects raw CR/LF inside strings; decoded escaped CR/LF remain valid.
 `Tests/Parser/LexicalSpec` checks specification examples and 62 runtime boundary
 cases. The module-boundary audit enforces lexical-spec independence transitively,
-including through shared Token. Root `prompt.md` retains the completed proof plan.
+including through shared Token.
 The certificate covers the declared lexical policy; its equivalence with every
 upstream convention and T3's independent predicate semantics remain separate.
 
@@ -336,5 +336,6 @@ the runtime imports these tests.
 `--require-clean` additionally rejects unresolved findings. Its Python
 failure-path tests live in `Tests/Audits/test_semantic_inventory.py`.
 
-See [audits/STATUS.md](audits/STATUS.md) for the current certification review,
-required Git additions and the remaining upstream/CLI/completeness obligations.
+See [audits/STATUS.md](audits/STATUS.md) for the current certification status,
+the validation evidence with its commit and the remaining upstream/CLI/
+completeness obligations.

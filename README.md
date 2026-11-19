@@ -44,22 +44,27 @@ its exclusive tests and build targets have been removed. Shared proof foundation
 remain under `Solver/`; current tests retain exhaustive-enumeration checks and
 independent Gecode comparisons.
 
-The repository review on **17 November 2026** found a verified solver for a
-restricted finite-domain fragment, with remaining language-conformance,
-completeness and release-validation obligations. The current semantic
-inventory passes `--require-clean`: 218 implemented names, 281 reviewed rows
-and no open recorded findings. Thirteen rows retain explicit restrictions: eight have public admission gates,
-and five native contracts are excluded from public checking and compilation.
-The inventory check validates policy evidence but does not prove upstream equivalence. Solver compilation supports fewer shapes than the
-solution checker.
+The project certifies a solver for a restricted finite-domain fragment.
+Language conformance beyond the reviewed contracts, completeness and W9
+certificates remain open. The semantic inventory passes `--require-clean`: 218
+implemented names, 281 reviewed rows and no open recorded findings. Thirteen
+rows retain explicit restrictions: eight have public admission gates and five
+native contracts are excluded from public checking and compilation. The
+inventory check validates policy evidence but does not prove upstream
+equivalence. Solver compilation supports fewer shapes than the solution checker.
 
-Required reporting modules, conformance tests, audit programs, fixtures and
-protocol/review evidence are still untracked. The release cohort was also
-hidden by `.gitignore`; it is now visible for addition. Include these files
-and the existing modified proofs together when preparing a complete revision.
-See [the repository review](audits/STATUS.md) for the assurance boundaries,
-validation results, files to add and prioritized next steps. No complete
-acceptance/release result is inferred from the existence of the gate scripts.
+Every verdict the public driver returns passes through the gated model
+(`LeanFzn/Integration/Public/Gate`): a raw constraint model reaches an answer
+only through `gate`, and `audits/check_gate_usage.py` rejects any other route.
+The MiniZinc 2.10.1 / Gecode 6.4.0 oracles (`bash audits/install_oracles.sh`)
+are mandatory for the gates: a missing oracle fails the run instead of being
+skipped. Compiler-level substitutions (`@[csimp]`, `@[implemented_by]`) are
+admitted only with a registered equality theorem that
+`bash audits/check_native_seams.sh` accepts, backed by the inventory in
+`audits/native_seams.json`.
+
+See [audits/STATUS.md](audits/STATUS.md) for the assurance boundaries, the
+latest validation evidence with its commit, the open gaps and the next steps.
 
 Keep generated logs, benchmark runs and temporary experiments under ignored
 `tmp/`. Python bytecode caches, `.lake/` build outputs and machine-local editor,
@@ -113,6 +118,8 @@ column states the assumptions and the trust that remains outside the proof.
 | Report terminal class, markers and exit codes | `satisfaction_report_truthful`, `optimization_report_truthful`, `terminalKind_marker_sound`, `terminalKind_no_marker_of_incomplete`, `terminalKind_exit_eq` | Back-translation starts from the actual `solveModel`/`optimizeCore` result. `Truthful` is `True` for unknown, incomplete and unsupported results, so a non-answer cannot become a claim. |
 | JSONL encoding and transport | `Report/Proofs` (`terminal_toJson_event`, `terminal_toJson_exit`, `error_toJson_exit`) and `Tests/Cli/test_protocol.py` | `Lean.Data.Json`'s printer/parser and byte output are trusted; object member order is unspecified and consumers must decode, not byte-compare. |
 | Python MiniZinc wrapper | `Tests/Audits/test_wrapper_protocol.py`, `Tests/Audits/test_wrapper.py`, `minizinc-wrapper/test.sh` against pinned MiniZinc 2.10.1 | The Python process/pipe/cancellation layer is tested, not formally verified; the tests are a finite matrix over committed scenarios. |
+| Gated public verdicts | `Gate`/`GateProof`: the driver answers only through `GatedModel`; `audits/check_gate_usage.py` rejects other routes | The gate is proved for the satisfaction route and threaded through the portfolios and phased routes; the portfolio merge of gated results goes through `gate`. |
+| Native substitutions | `audits/native_seams.json` seam theorems, `audits/check_native_seams.sh` | Every `@[csimp]`/`@[implemented_by]` entry needs a registered equality theorem; two free-form entries are existence-checked only. |
 | Lean/C code generation and release artifacts | `audits/run_axiom_audit.sh`, `audits/check_module_boundaries.py`, `audits/run_gates.sh`, `audits/run_release_gates.sh` | These gates check axiom hygiene, module boundaries, tests and the isolated PGO/non-PGO cohort; a passing release run is not established by this table. The compiler, LLVM/clang, linker and OS runtime remain trusted; the release cohort is finite evidence, not a proof of compiled-code correctness. The Docker image rebuilds from the same source and is not itself gated. |
 
 ### Parser
@@ -487,9 +494,11 @@ list of test targets:
 bash audits/run_gates.sh
 ```
 
-The runner builds the libraries and registered executables, checks the clean
-semantic inventory, and runs the applicable tests, axiom and boundary audits,
-a short performance suite, witness oracles and optional Gecode coverage fuzz. It writes logs under `tmp/`.
+The runner builds the libraries and registered executables, checks that no
+tracked support file is unused (`audits/check_repo_minimal.py`), checks the clean
+semantic inventory, and runs the applicable tests, axiom, boundary, gate-usage
+and native-seam audits, a short performance suite, witness oracles and Gecode
+coverage fuzz. It requires the pinned oracles. It writes logs under `tmp/`.
 Some executables require arguments and have dedicated gate steps. The target
 inventory is [lakefile.toml](lakefile.toml); audit usage and measurement
 provenance are in [audits/README.md](audits/README.md).

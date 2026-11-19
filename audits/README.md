@@ -10,6 +10,11 @@ they are not solver runtime dependencies.
   errors, missing profiles, `sorryAx`, or non-allowlisted axioms.
 - `check_module_boundaries.py`: checks component/test import boundaries, cycles,
   active proof holes and user axiom declarations, ignoring comments and strings.
+- `check_repo_minimal.py`: every tracked file under `audits/`, `Tests/` and
+  `specification/` (excluding the vendored MiniZinc pages) must be referenced by
+  a script, a Lake target, an import, a test or a maintained document; `tmp/`,
+  `*.log`, `prompt.md` and `plan.md` may not be tracked. The allow-list entries
+  carry a one-line justification and the audit reports stale ones.
 
 Build the relevant libraries before running the axiom audit:
 
@@ -17,6 +22,7 @@ Build the relevant libraries before running the axiom audit:
 lake build LeanFzn
 bash audits/run_axiom_audit.sh
 python3 audits/check_module_boundaries.py
+python3 -B audits/check_repo_minimal.py
 ```
 
 ## FlatZinc semantic conformance
@@ -284,7 +290,10 @@ validation-script and wrapper failure paths), audits axioms/import boundaries,
 and runs the public quick suite, witness oracles and optional Gecode coverage
 fuzz. The Legacy comparison tool, battery and harness fuzz were retired with
 the old implementation. Current compiler tests retain small exhaustive oracles.
-See [Tests/README.md](../Tests/README.md) for focused test commands.
+See [Tests/README.md](../Tests/README.md) for focused test commands. `Tests/`
+is not a Python package: run its suites with
+`python3 -B Tests/Cli/<file>.py` or `python3 -B -m unittest discover -s
+Tests/<dir>` from the repository root.
 
 Generated reports belong under ignored `tmp/`. Superseded plan snapshots,
 one-off profiling modules, old coverage/result tables and duplicate benchmark
@@ -318,6 +327,6 @@ correctness; see [pgo/README.md](../pgo/README.md).
 
 The [certification status](STATUS.md) records the current assurance boundaries,
 validation evidence, open gaps and next steps. The
-[certificate design](../../specification/certificates.md) study records the
+[certificate design](../specification/certificates.md) study records the
 Phase A comparison of VeriPB-style external logging and a project-specific Lean
 trace checker; Phase B is blocked on a maintainer decision.
