@@ -230,3 +230,11 @@ root = "Tests.Integration.Public.GateTest"
 [[lean_exe]]
 name = "tests_core_only"
 root = "Tests.Integration.Public.Runtime"
+
+# Use-only registration: this module carries kernel-checked `example` proofs
+# and #eval assertions but no native main, so it is built through a named
+# library target instead of an executable.
+[[lean_lib]]
+name = "Tests.Checker.Prof"
+globs = ["Tests.Checker.Prof"]
+moreLeanArgs = ["-j2", "-s131072"]

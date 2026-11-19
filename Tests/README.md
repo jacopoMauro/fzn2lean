@@ -15,11 +15,33 @@ that would reintroduce that dependency.
 | `Integration/Public/` | Core-only source solving, partial optimization, seed reuse, incumbent policies, LNS and the parallel portfolio |
 | `Cli/` | Python subprocess tests of exit codes, output, options and checked witnesses |
 | `Architecture/` | Imports, cycles, active proof holes and public/test independence from Legacy |
-| `Audits/` | Benchmark outcomes, incomplete allowances, validation failure paths and MiniZinc wrapper streaming/flags |
+| `Audits/` | Benchmark outcomes and strategy classifications (`test_performance_outcomes.py`, `test_strategy_outcomes.py`), oracle and release-gate failure paths (`test_oracle_gates.py`, `test_release_gates.py`), the semantic-inventory failure paths (`test_semantic_inventory.py`), the minimal-repository audit (`test_repo_minimal.py`), and MiniZinc wrapper streaming/flags (`test_validation_scripts.py`) |
 | `Fixtures/Solver/` | Shared FlatZinc regressions used by current tests |
 
 `Tests` is the maintained Lean test library. Python tests run separately.
 `lakefile.toml` registers the current native executable targets.
+
+## Registered test targets
+
+Every module below is registered in `lakefile.toml` as a `lean_lib` glob
+member or as a `lean_exe` root, so it is built by `lake build` and, for an
+executable, run by `audits/run_gates.sh`.
+
+`Tests/Compiler/`: `ArrayParams.lean`, `BoundsTest.lean`, `ChallengeScan.lean`, `LiteralFoldTest.lean`, `PreprocessTest.lean`, `RankCircuitTest.lean`, `SetEmitTest.lean`, `SetExpandTest.lean`, `SetShapeTest.lean`.
+
+`Tests/Engine/`: `AnalyzeTest.lean`, `ClausesTest.lean`, `DomOpsTest.lean`, `DomTest.lean`, `DynamicTest.lean`, `LitTest.lean`, `QueueTest.lean`, `ReduceTest.lean`, `SearchTest.lean`, `TrailTest.lean`.
+
+`Tests/Engine/Props/`: `AllDiffTest.lean`, `ArithTest.lean`, `BoolExtTest.lean`, `ElementTest.lean`, `LinearExtTest.lean`, `LinearTest.lean`, `OrderTest.lean`, `PropTest.lean`.
+
+`Tests/Integration/Public/`: `CoreSeedTest.lean`, `GateTest.lean`, `IncumbentTest.lean`, `LnsTest.lean`, `PortfolioTest.lean`.
+
+`Tests/Parser/`: `Smoke.lean`.
+
+`Tests/Semantics/`: `ConformanceGraph.lean`, `ConformanceMatrix.lean`, `ConformanceT10PackSched.lean`, `ConformanceT10SchedRegular.lean`, `ConformanceT10SetLex.lean`, `Coverage.lean`, `WellFormed.lean`.
+
+`Tests/Checker/Prof.lean` has no native `main`; `lakefile.toml` registers it
+as the `Tests.Checker.Prof` library target (alongside the older `tests_prof`
+executable) so `lake build Tests.Checker.Prof` checks its examples.
 
 ## Current tests
 

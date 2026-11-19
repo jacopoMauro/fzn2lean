@@ -145,7 +145,9 @@ python3 audits/fixed_k.py --cohort audits/cohorts/T10.txt --limit 300 \
 ## Configuration comparisons
 
 `strategy_matrix.py` runs selected public CLI configurations over input lists in
-`cohorts/`, sequentially under a measurement lock and a wall cap. It checks the
+`cohorts/` (`T10.txt`, and the 37-model `COV37.txt` census used by the O2 shape
+work; `strategy_targets.tsv` holds the per-model targets), sequentially under a
+measurement lock and a wall cap. It checks the
 last emitted solution and records objective quality against `strategy_targets.tsv`.
 The label `default` means no search flags (Core `act/incumbent`, with Luby
 restarts after the first incumbent); use `strategy=default` for the explicit
@@ -314,5 +316,8 @@ pins the cohort, source, toolchain, MiniZinc, binary provenance and the
 finite cohort is behavioural evidence, not a proof of compiled-code
 correctness; see [pgo/README.md](../pgo/README.md).
 
-The [17 November repository review](STATUS.md) records the current assurance
-boundaries, validation evidence, untracked inputs and remaining work.
+The [certification status](STATUS.md) records the current assurance boundaries,
+validation evidence, open gaps and next steps. The
+[certificate design](../../specification/certificates.md) study records the
+Phase A comparison of VeriPB-style external logging and a project-specific Lean
+trace checker; Phase B is blocked on a maintainer decision.

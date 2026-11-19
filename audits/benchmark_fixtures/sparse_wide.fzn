@@ -1,6 +1,0 @@
-var {0, 1000000}: x :: output_var;
-var {0, 1000000}: y :: output_var;
-var {-1000000000, 0, 1000000000}: z :: output_var;
-constraint int_lt(x,y);
-constraint int_ne(z,0);
-solve satisfy;

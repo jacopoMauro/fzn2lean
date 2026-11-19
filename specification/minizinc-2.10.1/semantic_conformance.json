@@ -38,7 +38,7 @@
     "LeanFzn/Parser/Grammar.lean": "2aecaf4d3a5843a67356639d421a23a70c909c6853d768621fd66938f3c41e9a",
     "LeanFzn/Integration/Config/Annotations.lean": "2d66e37dfec0ae43ada318b8d6f0b5bb0b0c0ffa39f956e9172685f3b4bb98bd",
     "LeanFzn/Checker/Runtime/Check.lean": "49f1939f65f16ee2c10251c34b53e5877880f57abe71ce4f6c961eb94fe7fa75",
-    "specification/flatzinc_specification_assumptions.md": "1264fbd45ed32ad16e8a1b5d0fb6c414e9b40f0817feccebbbe86d73ff59c1d9",
+    "specification/flatzinc_specification_assumptions.md": "43ae05b1a5bc3b11c9ede495a278181262fd5a1c8dc526610b632586e4f9cd3f",
     "specification/minizinc-2.10.1/fzn-grammar.mzn": "a3a68282879cec988b737f23733f17ce0ae941b71c903ef93c48165faef34dca",
     "specification/minizinc-2.10.1/fzn-spec.html": "8b0e554ed3ff8c3474689807fc15b5c235f9c34ec48b9440759d837506b2ff93",
     "specification/minizinc-2.10.1/lib-flatzinc-bool.html": "83bb80378369b7e1aaad02e7724757f403ca19e4d1f41398cdef21573a005846",

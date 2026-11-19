@@ -84,7 +84,8 @@ if sys.argv[1] == 'solve':
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('semantic-inventory', result.stdout)
             self.assertEqual(sorted(p.name for p in log.iterdir()),
-                             ['build.log', 'oracles.log', 'semantics.log'])
+                             ['build.log', 'oracles.log', 'repo-minimal.log',
+                              'semantics.log'])
 
     def test_challenge_compilation_handles_spaces_and_reports_failure(self):
         for fails in (False, True):

@@ -34,6 +34,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 SCANNED_TREES = ("audits", "Tests", "specification")
+
+# <path>: <one-line justification>.  A file never references itself by name: a
+# document that only cites its own path (a README pointing at itself) does not
+# justify its existence.
 EXCLUDED_PREFIXES = ("specification/minizinc-2.10.1/",)
 EXCLUDED_ROOTS = ("tmp/",)
 FORBIDDEN_TRACKED_NAMES = ("prompt.md", "plan.md")
@@ -44,12 +48,10 @@ REFERENCE_SOURCES = {
     ".tsv", ".fzn", ".mzn", ".csv", ".cfg", ".in", ".bzl",
 }
 
-# <path>: <one-line justification>
 ALLOW_LIST = {
     "Tests/README.md":
-        "documented map of the test tree; linked from README.md and audits/README.md",
-    "Tests/Fixtures/Solver/min_linear_ne.fzn":
-        "shared regression model read by the Lean engine and compiler suites",
+        "documented map of the test tree, kept current by hand with the "
+        "component tables and the per-directory test commands",
 }
 
 
@@ -85,10 +87,12 @@ def is_referenced(rel: str, corpus: list[tuple[str, str]]) -> str | None:
     # A basename is a reference only when it is not part of another file name:
     # `x.fzn.sol.txt` does not reference `x.fzn`, but a trailing sentence dot
     # does not make `x.fzn` part of a longer name.
-    name_tail = r"(?![\w-]|\.[A-Za-z_])"
-    # The path separator is allowed as the preceding character: `a/b.fzn` is a
-    # reference to `b.fzn`, while `x.fzn.sol.txt` is not a reference to `x.fzn`.
-    base_pattern = re.compile(r"(?<![\w.-])" + re.escape(basename) + name_tail)
+    # The path separator is allowed before the name: `a/helper.py` references
+    # `helper.py`.  A name followed by another extension is a different file:
+    # `x.fzn.sol.txt` does not reference `x.fzn`.
+    base_pattern = re.compile(
+        r"(?<![\w.-])" + re.escape(basename) +
+        r"(?![\w-])(?!\.[A-Za-z_][\w-]*(?![\w-]))")
     for source, text in corpus:
         if source == rel:
             continue
@@ -97,6 +101,8 @@ def is_referenced(rel: str, corpus: list[tuple[str, str]]) -> str | None:
     for source, text in corpus:
         if source == rel:
             continue
+        if Path(source).name == basename:
+            continue  # a same-named file is not a reference to this one
         if base_pattern.search(text):
             return source
     return None
@@ -119,7 +125,8 @@ def main(argv: list[str]) -> int:
     corpus = reference_corpus(files)
     audited: list[str] = []
     for rel in files:
-        if not rel.startswith(tuple(t + "/" for t in ("audits", "Tests", "specification"))):
+        top = rel.split("/", 1)[0]
+        if top not in SCANNED_TREES:
             continue
         if rel.startswith(EXCLUDED_PREFIXES):
             continue

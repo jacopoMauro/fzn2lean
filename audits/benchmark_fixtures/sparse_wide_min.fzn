@@ -1,4 +1,0 @@
-var {0, 1000000}: x :: output_var;
-var {0, 1000000}: y :: output_var;
-constraint int_lt(x,y);
-solve satisfy;
