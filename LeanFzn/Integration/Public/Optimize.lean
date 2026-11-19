@@ -5,7 +5,9 @@ DAG: Core search -> partial certified oracle -> generic branch-and-bound -> publ
 The legacy solver and its unconditional completion contract are not imported.
 -/
 import LeanFzn.Engine.Search
+import LeanFzn.Checker.Proofs.Check
 import LeanFzn.Integration.Optimization.Partial
+import LeanFzn.Integration.Public.Gate
 import LeanFzn.Integration.Public.Preprocess
 
 namespace LeanFzn.Core
@@ -519,6 +521,15 @@ theorem optLoopCoreStatsWithPrepared_eq (o : SearchConfig) (fuel : Nat)
 def optimizeCore (m : Model) (o : SearchConfig := {}) (fuel : Nat := coreFuel) :=
   optimizeCertified (coreSolver o fuel) m
 
+/-- The gated linear optimization route: the input carries admission,
+well-formedness and printable-name proofs, so optimality and UNSAT claims need
+no separate hypothesis. -/
+def gatedOptimizeCore (g : GatedModel) (o : SearchConfig := {}) (fuel : Nat := coreFuel) :=
+  optimizeCore g.model o fuel
+
+theorem gatedOptimizeCore_eq (g : GatedModel) (o : SearchConfig) (fuel : Nat) :
+    gatedOptimizeCore g o fuel = optimizeCore g.model o fuel := rfl
+
 /-- Streaming Core branch and bound that also aggregates the per-round
 `EngineStats`.  It follows the same recursion as `optimizeStreamLoop`, so the
 emitted solutions and the certified run are unchanged. -/
@@ -933,6 +944,12 @@ def optimizeStreamCoreStats (o : SearchConfig) (m : Model) (emit : Store → IO 
         IO.eprintln s!"leanfzn: timing: compile_ms={t1 - t0} search_ms={t2 - t1}"
       pure (.ok (⟨p, r.1, r.2.1⟩, r.2.2))
 
+/-- The gated streaming optimization entry: same recursion and counters as
+`optimizeStreamCoreStats` on the gate's model. -/
+def gatedOptimizeStreamCoreStats (o : SearchConfig) (g : GatedModel)
+    (emit : Store → IO Unit) : IO (Except String (OptSummary × EngineStats)) :=
+  optimizeStreamCoreStats o g.model emit
+
 theorem optimizeCore_solution_sound {o : SearchConfig} {fuel : Nat} {m : Model}
     {p : CompiledProblem DomConstraint} {run : OptRun}
     (h : optimizeCore m o fuel = .ok (p, run)) (hwf : WellFormed fullSig m)
@@ -961,5 +978,66 @@ theorem optimizeCore_unsat {o : SearchConfig} {fuel : Nat} {m : Model}
     (hcomp : run.complete = true) (hnil : run.sols = []) :
     ¬ ∃ store, Satisfies fullSig fullInterp m store ∧ LeanFzn.Semantics.ParamHonest m store :=
   optimizeCertified_unsat h hwf hcomp hnil
+
+/-! ## Gate-carrying verdict theorems
+
+The optimization claims below are the raw ones on `g.model`: incumbents are
+satisfying, parameter-honest stores with their reported objective value;
+improvement holds along the run; a completed last incumbent is optimal; and a
+completed empty run proves there is no parameter-honest satisfying store.  None
+of them takes a well-formedness premise. -/
+
+/-- Every incumbent of a gated linear run is a satisfying, parameter-honest
+store whose objective is the reported value. -/
+theorem gatedOptimizeCore_solution_sound {o : SearchConfig} {fuel : Nat}
+    {g : GatedModel} {p : CompiledProblem DomConstraint} {run : OptRun}
+    (h : gatedOptimizeCore g o fuel = .ok (p, run)) {s : List Value × Int}
+    (hs : s ∈ run.sols) :
+    Satisfies fullSig fullInterp g.model (p.toStore s.1) ∧
+      LeanFzn.Semantics.ParamHonest g.model (p.toStore s.1) ∧
+      g.model.solve.objective (p.toStore s.1) = some s.2 :=
+  optimizeCore_solution_sound h
+    ((@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast) hs
+
+/-- The objective strictly improves along a gated linear run's incumbents. -/
+theorem gatedOptimizeCore_improving {o : SearchConfig} {fuel : Nat}
+    {g : GatedModel} {p : CompiledProblem DomConstraint} {run : OptRun}
+    (h : gatedOptimizeCore g o fuel = .ok (p, run)) :
+    ∃ spec : ObjectiveSpec, run.sols.Pairwise (fun s t => betterB spec.dir t.2 s.2 = true) :=
+  optimizeCore_improving h
+
+/-- A completed gated linear run's last incumbent is an optimal solution. -/
+theorem gatedOptimizeCore_optimal {o : SearchConfig} {fuel : Nat}
+    {g : GatedModel} {p : CompiledProblem DomConstraint} {run : OptRun}
+    (h : gatedOptimizeCore g o fuel = .ok (p, run)) (hcomp : run.complete = true)
+    {s : List Value × Int} (hlast : run.sols.getLast? = some s) :
+    IsSolution fullSig fullInterp g.model (p.toStore s.1) :=
+  optimizeCore_optimal h ((@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast)
+    hcomp hlast
+
+/-- A completed empty gated linear run proves infeasibility of the gated
+model. -/
+theorem gatedOptimizeCore_unsat {o : SearchConfig} {fuel : Nat}
+    {g : GatedModel} {p : CompiledProblem DomConstraint} {run : OptRun}
+    (h : gatedOptimizeCore g o fuel = .ok (p, run)) (hcomp : run.complete = true)
+    (hnil : run.sols = []) :
+    LeanFzn.Semantics.Admission.Admitted g.model ∧
+      WellFormed fullSig g.model ∧
+      ¬ ∃ store, Satisfies fullSig fullInterp g.model store ∧
+        LeanFzn.Semantics.ParamHonest g.model store := by
+  have hwf := (@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast
+  exact ⟨g.admitted, hwf, optimizeCore_unsat h hwf hcomp hnil⟩
+
+/-- The driver's rule for raw input on the gated optimization route. -/
+theorem gatedOptimizeCore_unsat_raw {m : Model} {g : GatedModel}
+    {o : SearchConfig} {fuel : Nat} {p : CompiledProblem DomConstraint} {run : OptRun}
+    (hg : gate m = .ok g) (h : gatedOptimizeCore g o fuel = .ok (p, run))
+    (hcomp : run.complete = true) (hnil : run.sols = []) :
+    ¬ ∃ store, Satisfies fullSig fullInterp m store ∧
+      LeanFzn.Semantics.ParamHonest m store := by
+  obtain ⟨hgm, -, -, -⟩ := gate_ok_facts hg
+  obtain ⟨-, -, hlim⟩ := gatedOptimizeCore_unsat h hcomp hnil
+  rw [hgm] at hlim
+  exact hlim
 
 end LeanFzn.Core

@@ -365,6 +365,241 @@ index set.
 token `intLit 1`; `parseIndexSet` in `LeanFzn/Parser/Parser.lean` checks the
 value.
 
+## G-series: evaluation-time decisions beyond a literal reading
+
+The entries below record the G-series decisions cited by
+`LeanFzn/Semantics/StdLib.lean`: how the evaluator settles operator
+corner cases the handbook leaves open. Each was checked against
+MiniZinc 2.10.1 by a committed ground model under
+`Tests/Upstream/assumptions/` (see that directory's README).
+
+## G2. Truncated `int_div`/`int_mod` and the zero divisor
+
+**Unresolved question.** The handbook states `int_div(x,y,z)` constrains
+`x / y = z` "where z is rounded to the value closest to zero (i.e.,
+truncated)" and `int_mod(x,y,z)` constrains `x % y = z`
+(`minizinc-2.10.1/lib-flatzinc-int.html`), but it fixes neither the sign of a
+negative remainder beyond truncation nor how either predicate behaves with
+`y = 0` — division by zero is an evaluation error in MiniZinc, not a
+satisfying assignment.
+
+**Decision.** `int_div` and `int_mod` mean Lean's truncating division and
+modulo, `c = Int.tdiv a b` and `c = Int.tmod a b`, and both are guarded by
+`b ≠ 0`. With truncation the quotient rounds towards zero and the remainder
+takes the sign of the dividend: `(-7) div 2 = -3`, `(-7) mod 2 = -1`,
+`7 div (-2) = -3`, `7 mod (-2) = 1`. For `b = 0` the predicate is **false**
+for every `c`, so a model that divides by zero has no satisfying assignment
+under the checker (fail closed) instead of an undefined value.
+
+**Chosen-policy example and rationale.** The ground model
+`Tests/Upstream/assumptions/int_div.mzn` has MiniZinc evaluate all four sign
+combinations (and `1 div 2`, `-1 div 2`); MiniZinc 2.10.1 prints
+
+```
+-7 div 2 = -3
+-7 div -2 = 3
+7 div 2 = 3
+7 div -2 = -3
+13 div 5 = 2
+-13 div 5 = -2
+13 div -5 = -2
+-13 div -5 = 2
+1 div 2 = 0
+-1 div 2 = 0
+```
+
+which is exactly `Int.tdiv` on the same inputs. `int_mod.mzn` evaluates the
+companion operator and prints `-7 mod -2 = -1`, `-13 mod 5 = -3`,
+`-13 mod -5 = -3` and the rest, exactly `Int.tmod`. Matching the reference's
+truncation (rather than floor or Euclidean division) keeps the checker's
+acceptance identical to what a MiniZinc user observes; the example values are
+the reference's own.
+
+**Alternative and its effect.** Floor division would give `-7 div 2 = -4` and
+`-7 mod 2 = 1`, so `int_div(-7, 2, -4)` would be accepted by a floor policy
+and rejected here, and `int_div(-7, 2, -3)` vice versa; a pre-truncation
+reading would instead accept `int_div(-7, 2, -3.5)`, which is not
+representable. For the zero divisor, an unguarded reading would leave the
+result unconstrained: `int_div(1, 0, c)` would then be satisfiable for every
+`c`, and a model whose only constraint divided by zero would spuriously have
+solutions. MiniZinc itself supplies no value there — `-7 div 0` is rejected
+with "result of evaluation is undefined: division by zero"
+(`Tests/Upstream/assumptions/int_div_zero.mzn`) — so the `b ≠ 0` guard is the
+only reading that agrees on the defined fragment and fails closed on the
+undefined one.
+
+**Implementation.** `int_div`/`int_mod` in `stdInterp` of
+`LeanFzn/Semantics/StdLib.lean` (the `| "int_div" =>` and `| "int_mod" =>`
+cases: `b ≠ 0 ∧ c = Int.tdiv a b` and `b ≠ 0 ∧ c = Int.tmod a b`) and their
+executable twins (`stdInterpB`, `FznSolution.lean`'s `interpB`); the
+`builtin_int_div_iff`/`builtin_int_mod_iff` agreement theorems are in
+`StdLib.lean`. Upstream tests: `Tests/Upstream/assumptions/int_div.mzn`,
+`int_mod.mzn`, `int_div_zero.mzn`, replayed by
+`Tests/Upstream/assumptions/run.sh`.
+
+## G4. `int_pow` at corner exponents, including the excluded `0 ^ negative`
+
+**Unresolved question.** The handbook's sentence for `int_pow(x,y,z)` is
+"Constrains z = x^y, z is constrained to 1 div pow(x, abs(y)) when y < 0"
+(`minizinc-2.10.1/lib-flatzinc-int.html`). It does not say whether `0 ^ 0` is
+defined, and it leaves the value of `x ^ negative` to a truncated division
+whose divisor `pow(x, abs y)` is `0` when `x = 0`, an undefined expression.
+
+**Decision.** `intPow x y` is `x ^ y.toNat` for `y ≥ 0` and
+`Int.tdiv 1 (x ^ (-y).toNat)` for `y < 0`, so positive exponents are the usual
+power, `x ^ 0 = 1` for every `x` (including `0 ^ 0 = 1`), and a negative
+exponent is the truncated `1 div x^|y|`: `2 ^ (-1) = 0`, `1 ^ (-1) = 1`,
+`(-1) ^ (-1) = -1`, `(-2) ^ (-3) = 0`, `(-3) ^ 2 = 9`. The case `y < 0` with
+`x = 0` is **excluded** by the side condition `y < 0 → x ≠ 0`, so
+`int_pow(0, -1, z)` is false for every `z`; `int_pow_fixed` has the identical
+reading. The `pow` operator of the test models is MiniZinc's own; the corner
+values were checked with `pow`, which is what the FlatZinc `int_pow` constraint
+implements.
+
+**Chosen-policy example and rationale.** `Tests/Upstream/assumptions/int_pow.mzn`
+evaluates all twenty corner cases; MiniZinc 2.10.1 prints, among them,
+
+```
+(0) ^ (0) = 1
+(-1) ^ (0) = 1
+(3) ^ (2) = 9
+(-3) ^ (2) = 9
+(1) ^ (-1) = 1
+(-1) ^ (-1) = -1
+(2) ^ (-1) = 0
+(-7) ^ (-2) = 0
+```
+
+which is exactly `intPow` on the same inputs. The exponents are parenthesised
+so the reading cannot be confused with MiniZinc's unary-minus precedence
+(`-3 ^ 2` parses as `-(3 ^ 2)`); the `pow(x, y)` call is used so the printed
+base is unambiguous. `0 ^ negative` cannot be evaluated — MiniZinc reports
+"negative power of zero is undefined" (`int_pow_zero_negative.mzn`) — and the
+side condition turns that undefined value into a false predicate, which is the
+only choice consistent with G2's guard on `1 div 0`. Matching these values
+keeps `int_pow` acceptance identical to the reference, including the
+truncated-to-zero results that distinguish it from an exact rational power.
+
+**Alternative and its effect.** An exact-rational reading would give
+`2 ^ (-1) = 1/2`, so such a policy would accept `int_pow(2, -1, 1/2)` — not
+representable — and reject `int_pow(2, -1, 0)`; the truncated policy accepts
+`0`. A policy leaving `0 ^ negative` unconstrained would make
+`int_pow(0, -1, z)` satisfiable for every `z`, whereas the side condition
+makes it unsatisfiable; MiniZinc gives no value there, so failing closed is
+the only reading that does not invent one. Treating `0 ^ 0` as undefined
+instead of `1` would reject `int_pow(0, 0, 1)`, which MiniZinc accepts.
+
+**Implementation.** `intPow` and the `| "int_pow" =>` / `| "int_pow_fixed" =>`
+cases of `stdInterp` in `LeanFzn/Semantics/StdLib.lean`
+(`(y < 0 → x ≠ 0) ∧ z = intPow x y`), their `stdInterpB`/`interpB` twins and
+the `builtin_int_pow_iff`/`builtin_int_pow_fixed_iff` agreement theorems. The
+signature row for `int_pow_fixed` (`stdSig`) restricts the exponent to a `par`
+argument. Upstream tests: `Tests/Upstream/assumptions/int_pow.mzn` and
+`int_pow_zero_negative.mzn`, replayed by `run.sh`.
+
+## G5. `set_le`/`set_lt` as lexicographic order on the sorted, deduplicated elements
+
+**Unresolved question.** The handbook defines `set_le(s,t)` and `set_lt(s,t)`
+as "lexicographic order of the sorted lists of elements"
+(`minizinc-2.10.1/lib-flatzinc-set.html`) but a FlatZinc set value can be
+written as an enumeration whose order and repetition are not canonical, and
+as a reversed interval, so "the sorted list of elements" needs a definite
+normal form before it can order a pair.
+
+**Decision.** Each set is normalised to its sorted, deduplicated element list
+before comparison: an enumeration is de-duplicated and sorted, an interval
+`lo..hi` is its increasing element list, and a reversed interval is empty.
+`set_le` is lexicographic `≤` and `set_lt` is lexicographic `<` of those two
+lists (a proper prefix is less, then the first differing element decides; `<`
+is `≤` and not `≥`). So `{1,3} ≤ {1,4}`, `{1,3} < {1,3,9}`, `{} < {2}`,
+`{5} ≰ {1,9}`, and sets that differ only in a larger element are still
+ordered — unlike the subset order. The reified variants return the truth of
+the same comparison.
+
+**Chosen-policy example and rationale.**
+`Tests/Upstream/assumptions/set_le_lt.mzn` prints, per pair, `(s ≤ t, s < t)`;
+MiniZinc 2.10.1 prints
+
+```
+{1,3} <= {1,4} : true true
+{1,3} <= {1,3} : true false
+{1,3} <= {1,3,9} : true true
+{1,9} <= {1,3,9} : false false
+{} <= 2..2 : true true
+2..2 <= {} : false false
+5..5 <= {1,9} : false false
+1..3 <= 1..2 : false false
+```
+
+and `set_le_lt_duplicates.mzn` confirms that `{4,1,4,3}` (an enumeration with
+a repeat, out of order) orders exactly as `{1,3,4}`: `{4,1,4,3} ≤ {1,3,9}` and
+`{4,1,4,3} < {1,3,9}` are both true. These are exactly the Lean results. The
+normal form is what makes the comparison total and well defined on the set
+values the parser produces, and the empty list is the least element, so the
+order is total.
+
+**Alternative and its effect.** Comparing the elements in written order, or
+comparing by subset, would change the acceptances: `{1,9} ⊆ {1,3,9}` is true,
+so a subset policy would accept `set_le({1,9}, {1,3,9})`, whereas the
+lexicographic reading (and MiniZinc) rejects it (`false`). An order-sensitive
+reading would order `{4,1,3}` differently from `{1,3,4}`, so
+`set_le({4,1,3}, {1,3,9})` would be decided by the interior order rather than
+by the elements, contradicting MiniZinc's `true`. The empty set being the
+least is required for `{} ≤ {2}` to hold, as MiniZinc confirms.
+
+**Implementation.** `IntSetValue.sortElems`, `listLexLe`/`listLexLt`,
+`lexLeB`/`lexLtB` and the `| "set_le" =>` / `| "set_lt" =>` (and `_reif`)
+cases of `stdInterp` in `LeanFzn/Semantics/StdLib.lean`; the executable twins
+are `lexLeB`/`lexLtB` with the agreement theorems `lexLeB_iff`/`lexLtB_iff`
+and the reified agreement lemmas in `LeanFzn/Semantics/Evaluation.lean`.
+Upstream tests: `Tests/Upstream/assumptions/set_le_lt.mzn` and
+`set_le_lt_duplicates.mzn`, replayed by `run.sh`.
+
+## G6. `*_nonshifted` element variants coincide with the plain forms on `1..n` arrays
+
+**Unresolved question.** MiniZinc 2.10.1 defines the `_nonshifted` element
+constraints by *shifting* the index:
+`array_var_int_element_nonshifted(idx, xs, y)` is
+`array_var_int_element(idx - (min(index_set(xs)) - 1), array1d(xs), y)` (and
+likewise for the bool and set variants; the definition lives in the solver's
+`share/minizinc/std/redefinitions-2.0.2.mzn`, not in the handbook page). The
+shift depends on the array's index set, which the project's FlatZinc arrays do
+not carry: every array the checker accepts is indexed `1..n`.
+
+**Decision.** On `1..n` arrays `min(index_set(xs)) - 1 = 0`, so the shift is
+the identity and the `_nonshifted` variants mean exactly their plain forms:
+`valuesGet1 xs i` in `LeanFzn/Semantics/StdLib.lean`. The checker's arrays are
+all `1..n` (the `valuesGet1` 1-based accessor). An index outside `1..n`
+selects nothing and the predicate is false, exactly as for the plain form.
+
+**Chosen-policy example and rationale.** `Tests/Upstream/assumptions/element_nonshifted.mzn`
+asks MiniZinc's own redefinition to evaluate the nonshifted variant on the
+`1..n` array `[10, 20, 30]` at index `2`; MiniZinc 2.10.1 prints `20`, the
+same value the plain `array_var_int_element(2, [10,20,30], 20)` gives and the
+value `valuesGet1` computes. On a `1..n` array the two forms are therefore
+interchangeable, which lets the interpreter give them one case.
+
+**Alternative and its effect.** The simplification is *only* licensed for
+`1..n` arrays. On the array `5..7` of `[10, 20, 30]` the shift is
+`min(index_set) - 1 = 4`, so the nonshifted index `2` selects nothing;
+`element_nonshifted_shift.mzn` (which asks for `ns(2, [10,20,30]@5..7, 20)`) is
+`=====UNSATISFIABLE=====`, whereas the plain form at `2` on the same array
+would be in range. Treating the two forms as identical for arbitrary index
+sets would therefore accept an assignment MiniZinc rejects; because the
+project never builds such arrays (they are `1..n` by construction), the
+consequence is confined to models the checker does not admit.
+
+**Implementation.** The `| "array_var_int_element_nonshifted" =>`,
+`| "array_var_bool_element_nonshifted" =>` and
+`| "array_var_set_element_nonshifted" =>` cases of `stdInterp` in
+`LeanFzn/Semantics/StdLib.lean` (each `valuesGet1 xs i = some (.int e)` /
+`.bool e` / extensional set equality, identical to the plain case), their
+`stdInterpB`/`interpB` twins (for the set variant in
+`LeanFzn/Semantics/Evaluation.lean`), and the `builtin_*_nonshifted_iff`
+agreement theorems. Upstream tests:
+`Tests/Upstream/assumptions/element_nonshifted.mzn` and
+`element_nonshifted_shift.mzn`, replayed by `run.sh`.
+
 ## Solution assignment syntax and checker interface
 
 The solution language for the supported non-float fragment follows the pinned

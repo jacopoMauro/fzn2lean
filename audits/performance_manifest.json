@@ -1,0 +1,340 @@
+{
+  "schema_version": 1,
+  "purpose": "Short performance discovery; controls are not speed evidence. Real challenge cases are opt-in.",
+  "cases": [
+    {
+      "id": "int_ne_sat",
+      "path": "audits/benchmark_fixtures/int_ne_sat.fzn",
+      "family": "control",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "int_ne_unsat",
+      "path": "audits/benchmark_fixtures/int_ne_unsat.fzn",
+      "family": "control",
+      "expected": "unsat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "latin4",
+      "path": "audits/benchmark_fixtures/latin4.fzn",
+      "family": "all_different",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "linear_hole",
+      "path": "audits/benchmark_fixtures/linear_hole.fzn",
+      "family": "linear_holes",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "pigeon5_4",
+      "path": "audits/benchmark_fixtures/pigeon5_4.fzn",
+      "family": "root_conflict",
+      "expected": "unsat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "reified_mix",
+      "path": "audits/benchmark_fixtures/reified_mix.fzn",
+      "family": "reified",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "objective_sum",
+      "path": "audits/benchmark_fixtures/objective_sum.fzn",
+      "family": "optimization",
+      "expected": "sat",
+      "mode": "maximize",
+      "default": true
+    },
+    {
+      "id": "wide_bounds",
+      "path": "audits/benchmark_fixtures/wide_bounds.fzn",
+      "family": "wide_domain",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "nonunit_jump",
+      "path": "Tests/Fixtures/Solver/cex_nonunit_skipjump.fzn",
+      "family": "learning",
+      "expected": "unsat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "challenge_fbd4",
+      "path": "minizinc-challenge/2025fzn/fbd1/FBDk04.fzn",
+      "family": "challenge",
+      "expected": "unknown",
+      "mode": "optimization",
+      "default": false
+    },
+    {
+      "id": "challenge_fbd6",
+      "path": "minizinc-challenge/2025fzn/fbd1/FBDk06.fzn",
+      "family": "challenge",
+      "expected": "unknown",
+      "mode": "optimization",
+      "default": false
+    },
+    {
+      "id": "challenge_protein",
+      "path": "minizinc-challenge/2025fzn/proteindesign12/1HZ5.12p.9aa.usingEref_self.fzn",
+      "family": "challenge",
+      "expected": "unknown",
+      "mode": "optimization",
+      "default": false
+    },
+    {
+      "id": "heldout_gcc_toy",
+      "path": "minizinc-challenge/2026fzn/gcc-benchmark/toy-instance.fzn",
+      "family": "challenge_heldout",
+      "expected": "unknown",
+      "mode": "satisfy",
+      "default": false,
+      "notes": "Opt-in challenge sample outside the default quick cohort; record its outcome without assuming a completed solve."
+    },
+    {
+      "id": "gen_latin3",
+      "path": "audits/benchmark_fixtures/generated/latin3.fzn",
+      "family": "generated_latin",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "latin",
+      "params": {
+        "n": 3
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "gen_latin4",
+      "path": "audits/benchmark_fixtures/generated/latin4.fzn",
+      "family": "generated_latin",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "latin",
+      "params": {
+        "n": 4
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "gen_latin5",
+      "path": "audits/benchmark_fixtures/generated/latin5.fzn",
+      "family": "generated_latin",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "latin",
+      "params": {
+        "n": 5
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "gen_domain64",
+      "path": "audits/benchmark_fixtures/generated/domain_width_64.fzn",
+      "family": "generated_domain_width",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "domain_width",
+      "params": {
+        "width": 64
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "gen_domain256",
+      "path": "audits/benchmark_fixtures/generated/domain_width_256.fzn",
+      "family": "generated_domain_width",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "domain_width",
+      "params": {
+        "width": 256
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "gen_domain1024",
+      "path": "audits/benchmark_fixtures/generated/domain_width_1024.fzn",
+      "family": "generated_domain_width",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "domain_width",
+      "params": {
+        "width": 1024
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "gen_bool_dense40",
+      "path": "audits/benchmark_fixtures/generated/gen_bool_dense40.fzn",
+      "family": "generated_dense_clause",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "dense_clause",
+      "params": {
+        "n_vars": 40,
+        "n_clauses": 160
+      },
+      "seed": 20261017,
+      "expected_check": "constructed_planted_witness"
+    },
+    {
+      "id": "gen_bool_dense60",
+      "path": "audits/benchmark_fixtures/generated/gen_bool_dense60.fzn",
+      "family": "generated_dense_clause",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "dense_clause",
+      "params": {
+        "n_vars": 60,
+        "n_clauses": 360
+      },
+      "seed": 20261018,
+      "expected_check": "constructed_planted_witness"
+    },
+    {
+      "id": "gen_pigeonhole_bool3",
+      "path": "audits/benchmark_fixtures/generated/pigeonhole_bool3.fzn",
+      "family": "generated_dense_clause",
+      "expected": "unsat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "pigeonhole_bool",
+      "params": {
+        "n_holes": 3,
+        "n_pigeons": 4
+      },
+      "seed": null,
+      "expected_check": "exhaustive_enumeration"
+    },
+    {
+      "id": "gen_pigeonhole_bool4",
+      "path": "audits/benchmark_fixtures/generated/pigeonhole_bool4.fzn",
+      "family": "generated_dense_clause",
+      "expected": "unsat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "pigeonhole_bool",
+      "params": {
+        "n_holes": 4,
+        "n_pigeons": 5
+      },
+      "seed": null,
+      "expected_check": "exhaustive_enumeration"
+    },
+    {
+      "id": "gen_linear8",
+      "path": "audits/benchmark_fixtures/generated/linear_chain_8.fzn",
+      "family": "generated_linear",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "linear_chain",
+      "params": {
+        "n": 8
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "gen_linear32",
+      "path": "audits/benchmark_fixtures/generated/linear_chain_32.fzn",
+      "family": "generated_linear",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "linear_chain",
+      "params": {
+        "n": 32
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "gen_holes",
+      "path": "audits/benchmark_fixtures/generated/holes.fzn",
+      "family": "generated_holes",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": false,
+      "generated": true,
+      "generator": "holes",
+      "params": {
+        "width": 40,
+        "holes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10
+        ]
+      },
+      "seed": null,
+      "expected_check": "constructed_witness"
+    },
+    {
+      "id": "var_element_sep",
+      "path": "audits/benchmark_fixtures/var_element_separation.fzn",
+      "family": "element",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": true
+    },
+    {
+      "id": "bool_element_sep",
+      "path": "audits/benchmark_fixtures/bool_element_separation.fzn",
+      "family": "element",
+      "expected": "sat",
+      "mode": "satisfy",
+      "default": true
+    }
+  ],
+  "generated_manifest": "audits/benchmark_fixtures/generated/generated_manifest.json"
+}

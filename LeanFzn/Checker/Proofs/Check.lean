@@ -990,7 +990,7 @@ theorem completedBoxPrepared_eq (m : Model) (es : List Entry) :
     is the completion over all declarations (the plan lemma).  This is
     the proof backing the `implemented_by` seam of
     `completedBoxPrepared`. -/
-private theorem completedBoxPreparedI_eq (m : Model) (es : List Entry) :
+theorem completedBoxPreparedI_eq (m : Model) (es : List Entry) :
     completedBoxPreparedI (prepareModel m) es = completedBox m es := by
   show (⟨mapStore (completeFix (m.variables.filter isInitVar) m.variables.length
     (es.foldl (fun acc e => acc.insert e.name e.value.toValue)

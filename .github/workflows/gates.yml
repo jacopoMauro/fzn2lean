@@ -1,0 +1,75 @@
+name: gates
+
+# Runs the public acceptance gate with the pinned independent oracles.
+# No secrets or remote services are used; the only network access is fetching
+# elan (the Lean toolchain named by lean-toolchain) and the pinned MiniZinc
+# bundle with its pinned Ubuntu runtime packages, both verified by SHA-256 in
+# audits/install_oracles.sh.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      # Pinned by lean-toolchain; elan installs exactly that release.
+      ELAN_TOOLCHAIN_FILE: lean-toolchain
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Python
+        run: |
+          python3 --version
+          python3 -c 'import sys; assert sys.version_info >= (3, 10)'
+
+      - name: Install Lean (elan, pinned toolchain)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            -o /tmp/elan-init.sh
+          sh /tmp/elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          # Install exactly the toolchain committed in lean-toolchain.
+          "$HOME/.elan/bin/elan" toolchain install "$(cat lean-toolchain)"
+          "$HOME/.elan/bin/lean" --version
+
+      - name: Install pinned oracles
+        run: |
+          bash audits/install_oracles.sh
+          bash audits/install_oracles.sh --check
+
+      # The gate itself exports the oracle PATH prefix and LD_LIBRARY_PATH (see
+      # audits/run_gates.sh section 0), so no environment plumbing is needed
+      # here; this step only proves the tools run before the long gate starts.
+      - name: Verify oracle environment
+        run: |
+          eval "$(bash audits/install_oracles.sh --print-env)"
+          minizinc --version
+          fzn-gecode -help 2>&1 | sed -n '1,8p'
+          sha256sum "$(command -v minizinc)" "$(command -v fzn-gecode)"
+
+      - name: Run the acceptance gate
+        run: bash audits/run_gates.sh "tmp/gates/ci-${{ github.run_id }}"
+
+      - name: Upload gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-logs
+          path: tmp/gates/
+          if-no-files-found: warn
+          retention-days: 14

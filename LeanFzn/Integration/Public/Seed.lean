@@ -322,6 +322,11 @@ def optimizeCoreSeed (o : SearchConfig) (m : Model) :
       let r := optLoopCoreSeed o p spec none none (CoreSeed.initial p)
       .ok ⟨p, r.1, r.2⟩
 
+/-- The gated seeded optimizer: the same stateful loop on the gate's model. -/
+def gatedOptimizeCoreSeed (o : SearchConfig) (g : GatedModel) :
+    Except String CoreSeedSummary :=
+  optimizeCoreSeed o g.model
+
 /-- Unfolding of `optimizeCoreSeed` at a successful compile. -/
 theorem optimizeCoreSeed_inv {o : SearchConfig} {m : Model}
     {p : CompiledProblem DomConstraint} {run : OptRun} {seeds : List Nat}
@@ -652,5 +657,54 @@ theorem optimizeStreamCoreSeed_eq {o : SearchConfig} {m : Model}
       rw [optimizeStreamCoreSeedLoop_emit o p spec (fun a => p.toStore a)
         emit none none (CoreSeed.initial p)]
       rw [coreSeed_io_bind_assoc, coreSeed_io_pure_bind]
+
+/-! ## Gate-carrying verdict theorems -/
+
+/-- Every incumbent of a gated seeded run is a satisfying, parameter-honest
+store with its reported objective value. -/
+theorem gatedOptimizeCoreSeed_solution_sound {o : SearchConfig} {g : GatedModel}
+    {p : CompiledProblem DomConstraint} {run : OptRun} {seeds : List Nat}
+    (h : gatedOptimizeCoreSeed o g = .ok ⟨p, run, seeds⟩) {t : List Value × Int}
+    (ht : t ∈ run.sols) :
+    Satisfies fullSig fullInterp g.model (p.toStore t.1) ∧
+      LeanFzn.Semantics.ParamHonest g.model (p.toStore t.1) ∧
+      g.model.solve.objective (p.toStore t.1) = some t.2 :=
+  optimizeCoreSeed_solution_sound h
+    ((@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast) ht
+
+/-- The objective strictly improves along a gated seeded run. -/
+theorem gatedOptimizeCoreSeed_improving {o : SearchConfig} {g : GatedModel}
+    {p : CompiledProblem DomConstraint} {run : OptRun} {seeds : List Nat}
+    (h : gatedOptimizeCoreSeed o g = .ok ⟨p, run, seeds⟩) :
+    ∃ spec : ObjectiveSpec,
+      run.sols.Pairwise (fun t u => betterB spec.dir u.2 t.2 = true) :=
+  optimizeCoreSeed_improving h
+
+/-- A completed gated seeded run's last incumbent is optimal. -/
+theorem gatedOptimizeCoreSeed_optimal {o : SearchConfig} {g : GatedModel}
+    {p : CompiledProblem DomConstraint} {run : OptRun} {seeds : List Nat}
+    (h : gatedOptimizeCoreSeed o g = .ok ⟨p, run, seeds⟩) (hcomp : run.complete = true)
+    {t : List Value × Int} (hlast : run.sols.getLast? = some t) :
+    IsSolution fullSig fullInterp g.model (p.toStore t.1) :=
+  optimizeCoreSeed_optimal h
+    ((@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast) hcomp hlast
+
+/-- A completed empty gated seeded run proves infeasibility of the gated
+model. -/
+theorem gatedOptimizeCoreSeed_unsat {o : SearchConfig} {g : GatedModel}
+    {p : CompiledProblem DomConstraint} {run : OptRun} {seeds : List Nat}
+    (h : gatedOptimizeCoreSeed o g = .ok ⟨p, run, seeds⟩) (hcomp : run.complete = true)
+    (hnil : run.sols = []) :
+    LeanFzn.Semantics.Admission.Admitted g.model ∧
+      WellFormed fullSig g.model ∧
+      ¬ ∃ store, Satisfies fullSig fullInterp g.model store ∧
+        LeanFzn.Semantics.ParamHonest g.model store := by
+  have hwf := (@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast
+  exact ⟨g.admitted, hwf, optimizeCoreSeed_unsat h hwf hcomp hnil⟩
+
+/-- The gated streaming seeded optimizer. -/
+def gatedOptimizeStreamCoreSeed (o : SearchConfig) (g : GatedModel)
+    (emit : Store → IO Unit) : IO (Except String CoreSeedSummary) :=
+  optimizeStreamCoreSeed o g.model emit
 
 end LeanFzn.Core

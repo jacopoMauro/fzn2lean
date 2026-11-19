@@ -398,6 +398,12 @@ def optimizeCoreLns (o : SearchConfig) (m : Model) :
   | .error e => .error e
   | .ok (p, spec) => .ok (p, (lnsSearch o p spec none).1)
 
+/-- The gated LNS optimizer: the same neighbourhood/complete-loop driver on the
+gate's model. -/
+def gatedOptimizeCoreLns (o : SearchConfig) (g : GatedModel) :
+    Except String (CompiledProblem DomConstraint × OptRun) :=
+  optimizeCoreLns o g.model
+
 /-- Every emitted solution of the LNS entry is a satisfying source store with
 its reported objective value. -/
 theorem optimizeCoreLns_solution_sound {o : SearchConfig} {m : Model}
@@ -516,5 +522,53 @@ def optimizeStreamCoreLns (o : SearchConfig) (m : Model)
               pure (.ok (⟨p,
                 ⟨(best, vbest) :: r.1.sols, r.1.complete, r.1.lastBound⟩,
                 p.toStore best :: r.2.1⟩, st.add r.2.2))
+
+/-! ## Gate-carrying verdict theorems -/
+
+/-- Every incumbent of a gated LNS run is a satisfying, parameter-honest store
+with its reported objective value. -/
+theorem gatedOptimizeCoreLns_solution_sound {o : SearchConfig} {g : GatedModel}
+    {p : CompiledProblem DomConstraint} {run : OptRun}
+    (h : gatedOptimizeCoreLns o g = .ok (p, run)) {s : List Value × Int}
+    (hs : s ∈ run.sols) :
+    Satisfies fullSig fullInterp g.model (p.toStore s.1) ∧
+      LeanFzn.Semantics.ParamHonest g.model (p.toStore s.1) ∧
+      g.model.solve.objective (p.toStore s.1) = some s.2 :=
+  optimizeCoreLns_solution_sound h
+    ((@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast) hs
+
+/-- The objective strictly improves along a gated LNS run. -/
+theorem gatedOptimizeCoreLns_improving {o : SearchConfig} {g : GatedModel}
+    {p : CompiledProblem DomConstraint} {run : OptRun}
+    (h : gatedOptimizeCoreLns o g = .ok (p, run)) :
+    ∃ spec : ObjectiveSpec,
+      run.sols.Pairwise (fun s t => betterB spec.dir t.2 s.2 = true) :=
+  optimizeCoreLns_improving h
+
+/-- A completed gated LNS run's last incumbent is optimal. -/
+theorem gatedOptimizeCoreLns_optimal {o : SearchConfig} {g : GatedModel}
+    {p : CompiledProblem DomConstraint} {run : OptRun}
+    (h : gatedOptimizeCoreLns o g = .ok (p, run)) (hcomp : run.complete = true)
+    {s : List Value × Int} (hlast : run.sols.getLast? = some s) :
+    IsSolution fullSig fullInterp g.model (p.toStore s.1) :=
+  optimizeCoreLns_optimal h
+    ((@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast) hcomp hlast
+
+/-- A completed empty gated LNS run proves infeasibility of the gated model. -/
+theorem gatedOptimizeCoreLns_unsat {o : SearchConfig} {g : GatedModel}
+    {p : CompiledProblem DomConstraint} {run : OptRun}
+    (h : gatedOptimizeCoreLns o g = .ok (p, run)) (hcomp : run.complete = true)
+    (hnil : run.sols = []) :
+    LeanFzn.Semantics.Admission.Admitted g.model ∧
+      WellFormed fullSig g.model ∧
+      ¬ ∃ store, Satisfies fullSig fullInterp g.model store ∧
+        LeanFzn.Semantics.ParamHonest g.model store := by
+  have hwf := (@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast
+  exact ⟨g.admitted, hwf, optimizeCoreLns_unsat h hwf hcomp hnil⟩
+
+/-- The gated streaming LNS entry: the same driver on the gate's model. -/
+def gatedOptimizeStreamCoreLns (o : SearchConfig) (g : GatedModel)
+    (emit : Store → IO Unit) : IO (Except String (OptSummary × EngineStats)) :=
+  optimizeStreamCoreLns o g.model emit
 
 end LeanFzn.Core

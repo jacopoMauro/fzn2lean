@@ -1,0 +1,13 @@
+% G1d measurement fixture: the `linLeReif` r = false direction.
+% Constraint 1's minimum possible dot (8) exceeds b = 3, so the dual
+% bounds arm pins the reif slot `b = false` without a Boolean decision.
+% Constraint 2 re-reads the same reif slot at `b = false`: the delegated
+% negated inequality x + y >= 11 then narrows `y` (domain 4..9) to 5..9
+% through the retained bound implication (previously dropped by
+% `conflictsOnly`). Public route: SAT; witness checker-accepted.
+var 4..6: x :: output_var;
+var 4..9: y :: output_var;
+var bool: b :: output_var;
+constraint int_lin_le_reif([1, 1], [x, y], 3, b);
+constraint int_lin_le_reif([1, 1], [x, y], 10, b);
+solve satisfy;

@@ -1,0 +1,12 @@
+var set of 1..4: s1 :: output_var;
+var set of 1..4: s2 :: output_var;
+var 0..4: c1;
+var 0..4: c2;
+var 0..8: total :: output_var;
+constraint set_in(2, s1);
+constraint set_in(4, s1);
+constraint set_in(1, s2);
+constraint set_card(s1, c1);
+constraint set_card(s2, c2);
+constraint int_lin_eq([1,1,-1],[c1,c2,total],0);
+solve minimize total;

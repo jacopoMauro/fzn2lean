@@ -1,0 +1,17 @@
+% G1 section 3.3 item 2 measurement fixture: the variable-table Boolean
+% element family (`array_var_bool_element`). The two `bool2int` channels
+% pin the table slots `a` and `b` to `false`, so the unpinned no-support
+% round removes the target value `true` at the root; after the index
+% decision the pinned-index round keeps the entry and target equal.
+% Without the registered propagator the target `y` is branched through
+% both Booleans. Public route: SAT; witness checker-accepted.
+var 0..0: z :: output_var;
+var bool: a :: output_var;
+var bool: b :: output_var;
+array [1..2] of var bool: t = [a, b];
+var 1..2: i :: output_var;
+var bool: y :: output_var;
+constraint bool2int(a, z);
+constraint bool2int(b, z);
+constraint array_var_bool_element(i, t, y);
+solve satisfy;

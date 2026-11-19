@@ -2103,3 +2103,64 @@ open LeanFzn LeanFzn.Compiler LeanFzn.Integration LeanFzn.Solver.Reference LeanF
 #print axioms LeanFzn.Parser.Lexical.parseModel_iff_sourceGrammar
 #print axioms LeanFzn.Parser.Lexical.parseModel_ok_iff_sourceValid
 #print axioms LeanFzn.Parser.Lexer.fromUTF8?_eq_some_iff_encodes
+
+-- P0: the gate and the gate-carrying verdict theorems.  These never take a
+-- well-formedness or admission premise; the `GatedModel` carries those facts,
+-- so a printed verdict's claim holds for the gated (and hence raw) model.
+#print axioms LeanFzn.Core.gate_ok_iff
+#print axioms LeanFzn.Core.gate_ok_facts
+#print axioms LeanFzn.Core.gate_success
+#print axioms LeanFzn.Core.gate_error_inv
+#print axioms LeanFzn.Core.gatedSolveModel_sat_correct
+#print axioms LeanFzn.Core.gatedSolveModel_unsat_correct
+#print axioms LeanFzn.Core.gatedSolveModel_unsat_correct_raw
+#print axioms LeanFzn.Core.gatedOptimizeCore_solution_sound
+#print axioms LeanFzn.Core.gatedOptimizeCore_improving
+#print axioms LeanFzn.Core.gatedOptimizeCore_optimal
+#print axioms LeanFzn.Core.gatedOptimizeCore_unsat
+#print axioms LeanFzn.Core.gatedOptimizeCore_unsat_raw
+#print axioms LeanFzn.Core.gatedOptimizeCoreSeed_solution_sound
+#print axioms LeanFzn.Core.gatedOptimizeCoreSeed_improving
+#print axioms LeanFzn.Core.gatedOptimizeCoreSeed_optimal
+#print axioms LeanFzn.Core.gatedOptimizeCoreSeed_unsat
+#print axioms LeanFzn.Core.gatedOptimizeCoreLns_solution_sound
+#print axioms LeanFzn.Core.gatedOptimizeCoreLns_improving
+#print axioms LeanFzn.Core.gatedOptimizeCoreLns_optimal
+#print axioms LeanFzn.Core.gatedOptimizeCoreLns_unsat
+
+-- W7: seam theorems. Every `@[implemented_by]`/`@[csimp]` substitution is
+-- licensed by a theorem `ref = impl` (or a guarded form with a carrier);
+-- `audits/check_native_seams.sh` validates this list against the environment.
+#print axioms LeanFzn.Compiler.accepts_eq_fast
+#print axioms LeanFzn.Compiler.compileConstraints_eq_fast
+#print axioms LeanFzn.Compiler.extractConstraints_eq_fast
+#print axioms LeanFzn.Engine.DomC.hi?_eq_fast
+#print axioms LeanFzn.Engine.aieOut_eq_fast
+#print axioms LeanFzn.Engine.avbeOut_eq_fast
+#print axioms LeanFzn.Engine.avieOut_eq_fast
+#print axioms LeanFzn.Engine.dedupItems_eq_fast
+#print axioms LeanFzn.Engine.highestBit_eq_fast
+#print axioms LeanFzn.Engine.linEqPlan_eq_fast
+#print axioms LeanFzn.Engine.linExtractBounds_eq_fast
+#print axioms LeanFzn.Engine.linGePlan_eq_fast
+#print axioms LeanFzn.Engine.linLePlan_eq_fast
+#print axioms LeanFzn.Engine.linTerms_eq_fast
+#print axioms LeanFzn.Engine.lowestBit_eq_fast
+#print axioms LeanFzn.Engine.minGoL_eq_minGoFast
+#print axioms LeanFzn.Engine.sortUniqueInts_eq_mergeSortInts
+#print axioms LeanFzn.Checker.Solution.completedBoxI_eq
+#print axioms LeanFzn.Checker.Solution.mapStoreI_eq
+#print axioms LeanFzn.Checker.completedBoxPreparedI_eq
+#print axioms LeanFzn.Integration.emitSolutionFast_eq
+#print axioms LeanFzn.Parser.expectTokFast_eq
+#print axioms LeanFzn.Solver.Propagation.Dom.holesIntsFast_eq
+#print axioms LeanFzn.Solver.Propagation.avieAbovePairFast_eq
+#print axioms LeanFzn.Solver.Propagation.avieBelowPairFast_eq
+#print axioms LeanFzn.Solver.Propagation.aviePinTargetOkBFast_eq
+#print axioms LeanFzn.Solver.Propagation.aviePinTargetResFast_eq
+#print axioms LeanFzn.Solver.Propagation.avieSingleBadBFast_eq
+#print axioms LeanFzn.Solver.Propagation.avieSingleWFast_eq
+#print axioms LeanFzn.Solver.Propagation.avieTableMemBFast_eq
+#print axioms LeanFzn.Solver.Propagation.domsIntOnlyBFast_eq
+#print axioms LeanFzn.Solver.Propagation.propArrayIntElementFast_eq
+#print axioms LeanFzn.Solver.Propagation.propArrayVarIntElementFast_eq

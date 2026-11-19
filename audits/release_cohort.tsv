@@ -1,0 +1,39 @@
+# Release correctness cohort (PLAN C2.1).  Frozen with the release gate.
+#
+# The 10-conflict limit below is part of the cohort: the two `incomplete` rows
+# deliberately stop with a retained incumbent at limit 10, while every
+# completed row finishes within the same limit.  A different limit is allowed
+# only as an explicit experiment; the expected classes then no longer describe
+# this frozen cohort.
+#
+# conflict_limit: 10
+#
+# Columns (tab-separated, first non-comment row is the header):
+#   case_id              stable case name
+#   model                path relative to the snapshot root
+#   mode                 satisfy | minimize | maximize (must match solve item)
+#   expected_class       sat | unsat | optimal | incomplete
+#   known_answer         objective value for `optimal`, otherwise `-`
+#   exact_counters       true when deterministic single-worker action counters
+#                        must be identical across both binaries
+#   known_answer_source  exhaustive | independent | witness | none:
+#                        how the known answer was established.  `unsat` and
+#                        `optimal` require exhaustive/independent evidence;
+#                        `sat` requires a checked witness; `incomplete` states
+#                        no claim.
+#
+# Coverage: satisfaction, UNSAT, completed MIN and MAX, conflict-limited
+# incomplete runs, array element constraints, set variables (completed and
+# incomplete), and a retained solver-regression fixture.  The two challenge models are used only as small
+# conflict-limited incomplete cases, not as a challenge cohort.
+case_id	model	mode	expected_class	known_answer	exact_counters	known_answer_source
+sat_diseq	audits/benchmark_fixtures/int_ne_sat.fzn	satisfy	sat	-	true	witness
+sat_element_array	audits/benchmark_fixtures/element_chain.fzn	satisfy	sat	-	true	witness
+sat_regression_fuel	Tests/Fixtures/Solver/cex_analyzer_fuel.fzn	satisfy	sat	-	true	witness
+unsat_diseq	audits/benchmark_fixtures/int_ne_unsat.fzn	satisfy	unsat	-	true	exhaustive
+unsat_pigeonhole3	audits/benchmark_fixtures/generated/pigeonhole_bool3.fzn	satisfy	unsat	-	true	exhaustive
+opt_max_objective_sum	audits/benchmark_fixtures/objective_sum.fzn	maximize	optimal	80	true	independent
+opt_min_linear_ne	audits/benchmark_fixtures/min_linear_ne.fzn	minimize	optimal	5	true	exhaustive
+opt_min_set_card	audits/benchmark_fixtures/set_card_min.fzn	minimize	optimal	3	true	exhaustive
+opt_min_fbd4_incomplete	minizinc-challenge/2025fzn/fbd1/FBDk04.fzn	minimize	incomplete	-	true	none
+set_workforce_incomplete	minizinc-challenge/2026fzn/workforce-alloc/instance_174.fzn	minimize	incomplete	-	true	none

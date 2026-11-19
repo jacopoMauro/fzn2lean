@@ -1,0 +1,6 @@
+var 0..80: x :: output_var;
+var 0..80: y :: output_var;
+var 0..80: z :: output_var;
+constraint int_plus(x,y,z);
+constraint int_le(x,50);
+solve maximize z;

@@ -1,0 +1,368 @@
+{
+  "schema_version": 1,
+  "generated_by": "audits/generate_cases.py",
+  "generated_utc": "2026-10-17T17:31:29.025656+00:00",
+  "purpose": "B0 parameterized fixtures with fixed seeds; witnesses are constructions, UNSAT results come from exhaustive enumeration",
+  "binary": {
+    "path": "/work/tasks/fzn2lean/.lake/build/bin/leanfzn",
+    "sha256": "42466076e9195cc53f528191db728e5709e5e771763e81e9840a404f914ddafb"
+  },
+  "cases": [
+    {
+      "id": "gen_latin3",
+      "file": "latin3.fzn",
+      "sha256": "e52d15d531f2b3f428497d02f940ebf300d47f49f28f8ebe44e29637b4c9b92c",
+      "family": "generated_latin",
+      "generator": "latin",
+      "params": {
+        "n": 3
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "Latin square x_ij = (i + j) mod 3 + 1, checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:29.243206+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "latin3.fzn.sol.txt",
+        "witness_sha256": "826afb6ad78602b888bb70dd38093a75ad035bbb89612d709098308101620a81",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_latin4",
+      "file": "latin4.fzn",
+      "sha256": "4d7da3e2186a726a45bdad769f67667ea7c52040045f0aa9b63331b99c7d9c2d",
+      "family": "generated_latin",
+      "generator": "latin",
+      "params": {
+        "n": 4
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "Latin square x_ij = (i + j) mod 4 + 1, checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:29.437218+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "latin4.fzn.sol.txt",
+        "witness_sha256": "cd5a321b841cc9bf91acafaed79fe3f79552162b22235c31391fe77b657f53f6",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_latin5",
+      "file": "latin5.fzn",
+      "sha256": "b09cfcdb7d66d73eea4d760ad28b45a8c4ee75b8d671546e7bf61a9d835db897",
+      "family": "generated_latin",
+      "generator": "latin",
+      "params": {
+        "n": 5
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "Latin square x_ij = (i + j) mod 5 + 1, checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:29.642978+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "latin5.fzn.sol.txt",
+        "witness_sha256": "ad39c9a0098013cbaaac7e6d308fe501a4381582a0117516b540134029b4f194",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_domain64",
+      "file": "domain_width_64.fzn",
+      "sha256": "ab2831be553e5f78d55c23dc05bce93d2f1ccd703abe4596c8e2b957a650419f",
+      "family": "generated_domain_width",
+      "generator": "domain_width",
+      "params": {
+        "width": 64
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "witness x=1, y=63: bound, sum and hole x != y all hold; checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:29.829190+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "domain_width_64.fzn.sol.txt",
+        "witness_sha256": "d1cc7b4b0de1cbf0a3b0dfbc7dd3e70581b3df014dba44d15fc46cc7d5c14851",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_domain256",
+      "file": "domain_width_256.fzn",
+      "sha256": "42a9be65d3c2a10fa2997ca6187443af1cfa1ab1de77e676287d3edb588e17a7",
+      "family": "generated_domain_width",
+      "generator": "domain_width",
+      "params": {
+        "width": 256
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "witness x=1, y=255: bound, sum and hole x != y all hold; checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:30.037105+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "domain_width_256.fzn.sol.txt",
+        "witness_sha256": "43a245f2824d16a7da4b0b3fc9a20a9e46d563664d0a1cb4eb3d96c5a37615e5",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_domain1024",
+      "file": "domain_width_1024.fzn",
+      "sha256": "f875bb1484b49a8cb4e2d9e766dff01069a5911bedbee9832820b3a4d3f03e81",
+      "family": "generated_domain_width",
+      "generator": "domain_width",
+      "params": {
+        "width": 1024
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "witness x=1, y=1023: bound, sum and hole x != y all hold; checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:30.225322+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "domain_width_1024.fzn.sol.txt",
+        "witness_sha256": "e592bdf84b836b0b4adca914e875bbba912c2a32cb7a7d2b71af02487b54bb1d",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_bool_dense40",
+      "file": "gen_bool_dense40.fzn",
+      "sha256": "7edc47c95110bb8503dc5f5dca622f588ef00e7cca2a02d4f87b1874bfb33acb",
+      "family": "generated_dense_clause",
+      "generator": "dense_clause",
+      "params": {
+        "n_vars": 40,
+        "n_clauses": 160
+      },
+      "seed": 20261017,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_planted_witness",
+        "detail": "seed 20261017: every clause was repaired to be satisfied by the planted assignment; checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:30.420050+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "gen_bool_dense40.fzn.sol.txt",
+        "witness_sha256": "cc61c9e71e82c55e47020bbae59ac7325408963f17624e7e652883e624cf25e9",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_bool_dense60",
+      "file": "gen_bool_dense60.fzn",
+      "sha256": "4f3a5619685ca2344fd49e5cff44f8a070bc896398523fff86db92f333aa4729",
+      "family": "generated_dense_clause",
+      "generator": "dense_clause",
+      "params": {
+        "n_vars": 60,
+        "n_clauses": 360
+      },
+      "seed": 20261018,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_planted_witness",
+        "detail": "seed 20261018: every clause was repaired to be satisfied by the planted assignment; checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:30.598632+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "gen_bool_dense60.fzn.sol.txt",
+        "witness_sha256": "e8c88770758e4745f8ba6a56066b26bec79bbab93d6b69208234963b61f8a785",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_pigeonhole_bool3",
+      "file": "pigeonhole_bool3.fzn",
+      "sha256": "5c4db012a1f964f2f825db7fc3afc41486b506cd9ce9b24871364e381b511608",
+      "family": "generated_dense_clause",
+      "generator": "pigeonhole_bool",
+      "params": {
+        "n_holes": 3,
+        "n_pigeons": 4
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "unsat",
+      "check": {
+        "method": "exhaustive_enumeration",
+        "detail": "4 pigeons, 3 holes; exhaustive enumeration of partial pigeon-to-hole injections examined 73 maps and found no covering injection (complete: any assignment restricts to one); cross-checked against all 2^12 assignments",
+        "checked_utc": "2026-10-17T17:31:30.789471+00:00",
+        "verifier": "exhaustive enumeration (this script)",
+        "result": "unsat",
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_pigeonhole_bool4",
+      "file": "pigeonhole_bool4.fzn",
+      "sha256": "da2c3238a362d4c16f15b7e6b5610661fa50588a0671570f0fa4a3a6da5e6489",
+      "family": "generated_dense_clause",
+      "generator": "pigeonhole_bool",
+      "params": {
+        "n_holes": 4,
+        "n_pigeons": 5
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "unsat",
+      "check": {
+        "method": "exhaustive_enumeration",
+        "detail": "5 pigeons, 4 holes; exhaustive enumeration of partial pigeon-to-hole injections examined 501 maps and found no covering injection (complete: any assignment restricts to one)",
+        "checked_utc": "2026-10-17T17:31:30.792552+00:00",
+        "verifier": "exhaustive enumeration (this script)",
+        "result": "unsat",
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_linear8",
+      "file": "linear_chain_8.fzn",
+      "sha256": "1d24e4e29df92e91b693f310b5eeec20d9194e78512928d421149c9fe0387101",
+      "family": "generated_linear",
+      "generator": "linear_chain",
+      "params": {
+        "n": 8
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "witness x0=1, x1=7, rest 0 sums to 8 and satisfies x0 <= 1; checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:30.795541+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "linear_chain_8.fzn.sol.txt",
+        "witness_sha256": "9c260913a5a76aca8dec6f72eb263b250e5df3c7871feda3db308133f5d69f0a",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_linear32",
+      "file": "linear_chain_32.fzn",
+      "sha256": "66efb5b1496fc2400b8004f9c90971e45bd46bdbeb67dae2eec78976ecb4d507",
+      "family": "generated_linear",
+      "generator": "linear_chain",
+      "params": {
+        "n": 32
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "witness x0=1, x1=31, rest 0 sums to 32 and satisfies x0 <= 1; checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:30.991104+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "linear_chain_32.fzn.sol.txt",
+        "witness_sha256": "11afe95ceea26434efe141aa73eff16473c7f00c2763504990b946cee92de3a8",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    },
+    {
+      "id": "gen_holes",
+      "file": "holes.fzn",
+      "sha256": "5d0f65ac3ca65776e6f1f960b6c19e1cde77b423fa7de80c8ef16e2bfd194f94",
+      "family": "generated_holes",
+      "generator": "holes",
+      "params": {
+        "width": 40,
+        "holes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10
+        ]
+      },
+      "seed": null,
+      "mode": "satisfy",
+      "expected": "sat",
+      "check": {
+        "method": "constructed_witness",
+        "detail": "witness x=11 (outside the holes) and y=29; x != y; checked with leanfzn check",
+        "checked_utc": "2026-10-17T17:31:31.204182+00:00",
+        "verifier": "leanfzn check",
+        "witness_file": "holes.fzn.sol.txt",
+        "witness_sha256": "75243fdeb0daaabe58949f5bee9da89a906579e9087be23a133d2388fe7966cf",
+        "result": {
+          "exit": 0,
+          "stdout": "solution accepted",
+          "stderr": ""
+        },
+        "accepted": true
+      }
+    }
+  ]
+}

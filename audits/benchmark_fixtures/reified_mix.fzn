@@ -1,0 +1,8 @@
+var 0..12: x :: output_var;
+var 0..12: y :: output_var;
+var bool: b :: output_var;
+constraint int_lin_le_reif([1,1],[x,y],8,b);
+constraint bool_clause([b],[]);
+constraint int_ne(x,0);
+constraint int_le_reif(x,4,b);
+solve satisfy;

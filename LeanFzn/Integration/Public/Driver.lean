@@ -107,8 +107,8 @@ private def runSatisfactionWith (sink : ReportSink) (o : SearchConfig) (model : 
       return (← sink.finishTerminal .incomplete none (some reason))
 
 private def runSatisfaction (sink : ReportSink) (o : SearchConfig)
-    (model : Model) : IO UInt32 :=
-  runSatisfactionWith sink o model (pure (solveModelWithStats model o coreFuel))
+    (g : GatedModel) : IO UInt32 :=
+  runSatisfactionWith sink o g.model (pure (solveModelWithStats g.model o coreFuel))
 
 /-! ## Parallel portfolio (`--threads=N`)
 
@@ -149,7 +149,7 @@ private structure PortfolioState where
 private structure PortfolioContext where
   mutex : Std.Mutex PortfolioState
   cond : Std.Condvar
-  model : Model
+  model : GatedModel
   maximize : Bool
   sink : ReportSink
 
@@ -171,9 +171,9 @@ private def portfolioConfigs (o : SearchConfig) : List SearchConfig :=
     { o with var := var, val := val, restartBase := base, threads := 1, stats := false }
 
 private def portfolioEmit (ctx : PortfolioContext) (store : Store) : IO Unit := do
-  let text := emitCertifiedSolution ctx.model store
-  let checked := LeanFzn.Checker.checkModelSolutionFast ctx.model text == .accepted
-  let value? := ctx.model.solve.objective store
+  let text := emitCertifiedSolution ctx.model.model store
+  let checked := LeanFzn.Checker.checkModelSolutionFast ctx.model.model text == .accepted
+  let value? := ctx.model.model.solve.objective store
   let failed ← ctx.mutex.atomically do
     let st ← get
     if st.stop then return false
@@ -201,7 +201,7 @@ private def portfolioEmit (ctx : PortfolioContext) (store : Store) : IO Unit := 
             | none => true
             | some prev => objectiveImproves ctx.maximize prev v
           if improves then
-            let ok ← ctx.sink.solution ctx.model store
+            let ok ← ctx.sink.solution ctx.model.model store
             if ok then
               set ({ st with best := some v, printed := st.printed + 1 })
               return false
@@ -217,7 +217,7 @@ private def portfolioEmit (ctx : PortfolioContext) (store : Store) : IO Unit := 
   if failed then ctx.cond.notifyAll
 
 private def portfolioWorker (ctx : PortfolioContext) (o : SearchConfig) : IO Unit := do
-  match ← optimizeStreamCoreStats o ctx.model (portfolioEmit ctx) with
+  match ← optimizeStreamCoreStats o ctx.model.model (portfolioEmit ctx) with
   | .error reason =>
       ctx.mutex.atomically do
         let st ← get
@@ -251,17 +251,17 @@ private def portfolioWorker (ctx : PortfolioContext) (o : SearchConfig) : IO Uni
 the only terminal claim; all other workers are requested to stop and the CLI
 exits, so a long-running round cannot delay the answer. -/
 def runPortfolioOptimization (sink : ReportSink) (o : SearchConfig)
-    (model : Model) : IO UInt32 := do
+    (model : GatedModel) : IO UInt32 := do
   if o.threads ≤ 1 || o.threads > 8 then
     IO.eprintln "leanfzn: the portfolio requires 2..8 workers"
     return (← sink.finishError .usage "the portfolio requires 2..8 workers")
-  match model.solve with
+  match model.model.solve with
   | .satisfy _ =>
       IO.eprintln "leanfzn: option '--threads' is supported only for optimization models"
       return (← sink.finishError .usage "option '--threads' is supported only for optimization models")
   | _ => pure ()
   let maximize :=
-    match model.solve with
+    match model.model.solve with
     | .maximize _ _ => true
     | _ => false
   let mutex ← Std.Mutex.new ({ running := o.threads } : PortfolioState)
@@ -368,7 +368,7 @@ private structure SatState where
 private structure SatContext where
   mutex : Std.Mutex SatState
   cond : Std.Condvar
-  model : Model
+  model : GatedModel
 
 /-- Satisfaction workers use one value presentation per variable strategy;
 the optimization `incumbent` presentations need an objective incumbent. -/
@@ -382,11 +382,11 @@ private def satConfigs (o : SearchConfig) : List SearchConfig :=
     { o with var := var, val := val, restartBase := base, threads := 1, stats := false }
 
 private def satWorker (ctx : SatContext) (o : SearchConfig) : IO Unit := do
-  let (r, stats) := solveModelWithStats ctx.model o coreFuel
+  let (r, stats) := solveModelWithStats ctx.model.model o coreFuel
   match r with
   | .sat store =>
-      let text := emitCertifiedSolution ctx.model store
-      let checked := LeanFzn.Checker.checkModelSolutionFast ctx.model text == .accepted
+      let text := emitCertifiedSolution ctx.model.model store
+      let checked := LeanFzn.Checker.checkModelSolutionFast ctx.model.model text == .accepted
       ctx.mutex.atomically do
         let st ← get
         if st.stop then return ()
@@ -432,7 +432,7 @@ private def satWorker (ctx : SatContext) (o : SearchConfig) : IO Unit := do
 the only terminal claim; a SAT witness is printed only after the checker
 accepts it. -/
 def runPortfolioSatisfaction (sink : ReportSink) (o : SearchConfig)
-    (model : Model) : IO UInt32 := do
+    (model : GatedModel) : IO UInt32 := do
   if o.threads ≤ 1 || o.threads > 8 then
     IO.eprintln "leanfzn: the portfolio requires 2..8 workers"
     return (← sink.finishError .usage "the portfolio requires 2..8 workers")
@@ -473,7 +473,7 @@ def runPortfolioSatisfaction (sink : ReportSink) (o : SearchConfig)
     return (← sink.finishError kind err)
   match st.verdict with
   | some (.sat store stats) =>
-      let ok ← sink.solution model store
+      let ok ← sink.solution model.model store
       emitStats o true 0 0 (some stats)
       if !ok then
         return (← reportInternal sink "the report sink failed on the portfolio satisfaction witness")
@@ -491,9 +491,10 @@ def runPortfolioSatisfaction (sink : ReportSink) (o : SearchConfig)
       return (← sink.finishTerminal .incomplete none none)
 
 private def runOptimization (sink : ReportSink) (o : SearchConfig)
-    (model : Model) : IO UInt32 := do
+    (g : GatedModel) : IO UInt32 := do
+  let model := g.model
   if o.threads > 1 then
-    runPortfolioOptimization sink o model
+    runPortfolioOptimization sink o g
   else if o.primal == .lns then
     match ← optimizeStreamCoreLns o model (sinkEmit sink model) with
     | .error reason =>
@@ -519,55 +520,62 @@ private def runOptimization (sink : ReportSink) (o : SearchConfig)
     | .ok (summary, st) =>
         finishOptimization sink o summary.run (summary.run.sols.length + 1) (some st)
 
-/-- Shared option/model validation; `some (kind, message)` is the terminal
-CLI error class.  The stderr lines are unchanged from the text driver. -/
+/-- The CLI class of a gate failure, keeping the driver's exit codes: an
+admission failure or an unprintable name is unsupported scope (3), an
+ill-formed model is a model-parse failure (2). -/
+private def GateError.kind : GateError → ErrorKind
+  | .notAdmitted _ => .unsupportedScope
+  | .notWellFormed => .modelParse
+  | .unprintableName => .unsupportedScope
+
+/-- The driver's stderr line for a gate failure (unchanged text). -/
+private def GateError.stderrLine : GateError → String
+  | .notAdmitted reason => s!"leanfzn: unsupported model: {reason}"
+  | .notWellFormed => "leanfzn: model is not well-formed"
+  | .unprintableName =>
+      "leanfzn: unsupported model: a variable name cannot be printed as a solution identifier (reserved word or invalid characters)"
+
+/-- Shared option/model validation.  Option checks report the terminal CLI
+error class; the model checks are exactly `gate`, so the driver and the proved
+verdict theorems share one admission/well-formedness/printable-name decision.
+The stderr lines and exit classes are unchanged. -/
 private def validateRun (o : SearchConfig) (model : Model) :
-    IO (Option (ErrorKind × String)) := do
+    IO (Except (ErrorKind × String) GatedModel) := do
   if o.engine != .core then
     let message := "the legacy kernel is unavailable in the public Core-only driver"
     IO.eprintln s!"leanfzn: {message}"
-    return some (.usage, message)
+    return .error (.usage, message)
   if o.threads > 1 &&
       !((o.var == .minc && o.val == .act) ||
         (o.var == .act && o.val == .incumbent)) then
     let message :=
       "the thread portfolio selects its own strategies; do not combine it with a non-default var/val"
     IO.eprintln s!"leanfzn: {message}"
-    return some (.usage, message)
+    return .error (.usage, message)
   match o.checkCoreImplemented with
   | .error reason =>
       IO.eprintln s!"leanfzn: {reason}"
-      return some (.usage, reason)
+      return .error (.usage, reason)
   | .ok _ => pure ()
   match o.checkImplemented with
   | .error reason =>
       IO.eprintln s!"leanfzn: {reason}"
-      return some (.usage, reason)
+      return .error (.usage, reason)
   | .ok _ => pure ()
-  match Admission.firstFailure model with
-  | some reason =>
-      IO.eprintln s!"leanfzn: unsupported model: {reason}"
-      return some (.unsupportedScope, reason)
-  | none => pure ()
-  if !LeanFzn.Checker.wellFormedFastB model then
-    let message := "model is not well-formed"
-    IO.eprintln s!"leanfzn: {message}"
-    return some (.modelParse, message)
-  if !outputNamesPrintableB model then
-    let message :=
-      "a variable name cannot be printed as a solution identifier (reserved word or invalid characters)"
-    IO.eprintln s!"leanfzn: unsupported model: {message}"
-    return some (.unsupportedScope, message)
-  return none
+  match gate model with
+  | .ok g => return .ok g
+  | .error e =>
+      IO.eprintln e.stderrLine
+      return .error (e.kind, e.message)
 
 /-- Public programmatic entry also validates Core-only options, so callers
 cannot bypass CLI checks to select a different implementation. -/
 def runModelWithSink (sink : ReportSink) (o : SearchConfig)
     (model : Model) : IO UInt32 := do
   match ← validateRun o model with
-  | some (kind, message) =>
+  | .error (kind, message) =>
       return (← sink.finishError kind message)
-  | none =>
+  | .ok g =>
       sink.model model
       let modelFailed ← sink.failed
       if modelFailed then
@@ -579,10 +587,10 @@ def runModelWithSink (sink : ReportSink) (o : SearchConfig)
             IO.eprintln s!"leanfzn: {message}"
             return (← sink.finishError .usage message)
           if o.threads > 1 then
-            runPortfolioSatisfaction sink o model
+            runPortfolioSatisfaction sink o g
           else
-            runSatisfaction sink o model
-      | .minimize _ _ | .maximize _ _ => runOptimization sink o model
+            runSatisfaction sink o g
+      | .minimize _ _ | .maximize _ _ => runOptimization sink o g
 
 /-- Public programmatic entry: the default text sink. -/
 def runModel (o : SearchConfig) (model : Model) : IO UInt32 := do
@@ -594,13 +602,13 @@ specialized seeded/LNS/portfolio paths are not instrumented internally; they
 run unchanged after a note (their stdout, exit code and counters are
 identical). -/
 private def runOptimizationPhased (sink : ReportSink) (ps : PhaseCtx)
-    (o : SearchConfig) (model : Model) : IO UInt32 := do
+    (o : SearchConfig) (g : GatedModel) : IO UInt32 := do
   if o.threads > 1 || o.primal == .lns || o.opt == .seeded then
     IO.eprintln
       "leanfzn: phase stats: specialized optimization path is not instrumented; running the ordinary driver"
-    runOptimization sink o model
+    runOptimization sink o g
   else
-    match ← optimizeStreamCoreStatsPhased ps o model (sinkEmit sink model) with
+    match ← optimizeStreamGatedCoreStatsPhased ps o g (sinkEmit sink g.model) with
     | .error reason =>
         IO.eprintln s!"leanfzn: unsupported model: {reason}"
         emitStats o false 0 0 (some {})
@@ -614,9 +622,9 @@ goes to stderr; stdout, exit codes and counters are exactly those of
 def runModelPhasedWithSink (sink : ReportSink) (ps : PhaseCtx) (o : SearchConfig)
     (model : Model) : IO UInt32 := do
   match ← validateRun o model with
-  | some (kind, message) =>
+  | .error (kind, message) =>
       return (← sink.finishError kind message)
-  | none =>
+  | .ok g =>
       sink.model model
       let modelFailed ← sink.failed
       if modelFailed then
@@ -630,10 +638,10 @@ def runModelPhasedWithSink (sink : ReportSink) (ps : PhaseCtx) (o : SearchConfig
           if o.threads > 1 then
             IO.eprintln
               "leanfzn: phase stats: the satisfaction portfolio is not instrumented; running the ordinary driver"
-            runPortfolioSatisfaction sink o model
+            runPortfolioSatisfaction sink o g
           else
-            runSatisfactionWith sink o model (solveModelWithPhaseStats ps model o coreFuel)
-      | .minimize _ _ | .maximize _ _ => runOptimizationPhased sink ps o model
+            runSatisfactionWith sink o g.model (solveGatedModelWithPhaseStats ps g o coreFuel)
+      | .minimize _ _ | .maximize _ _ => runOptimizationPhased sink ps o g
 
 /-- `runModelPhased` with the default text sink. -/
 def runModelPhased (ps : PhaseCtx) (o : SearchConfig) (model : Model) : IO UInt32 := do

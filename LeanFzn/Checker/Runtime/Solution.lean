@@ -342,7 +342,7 @@ private def mapStoreI (pms : Std.HashMap String Value) : Store :=
 def mapStore (pms : Std.HashMap String Value) : Store :=
   fun x => pms[x.name]?
 
-private theorem mapStoreI_eq : mapStoreI = mapStore := rfl
+theorem mapStoreI_eq : mapStoreI = mapStore := rfl
 
 /-! ## Initializer completion
 
@@ -405,7 +405,7 @@ private def completedBoxI (m : Model) (es : List Entry) : StoreBox :=
 def completedBox (m : Model) (es : List Entry) : StoreBox :=
   ⟨mapStore (completedMap m es)⟩
 
-private theorem completedBoxI_eq : completedBoxI = completedBox := rfl
+theorem completedBoxI_eq : completedBoxI = completedBox := rfl
 
 /-- The completed store: the model's parameters, overridden by the
     solution entries, closed under variable initializers.  A solution

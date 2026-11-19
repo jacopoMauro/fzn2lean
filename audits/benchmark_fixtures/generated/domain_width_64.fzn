@@ -1,0 +1,6 @@
+var 0..64: x :: output_var;
+var 0..64: y :: output_var;
+constraint int_le(x,16);
+constraint int_lin_eq([1,1],[x,y],64);
+constraint int_lin_ne([1,-1],[x,y],0);
+solve satisfy;

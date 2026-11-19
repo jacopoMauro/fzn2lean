@@ -1,0 +1,8 @@
+% Two-color triangle: each disequality is non-unit; globally UNSAT.
+var 0..1: x :: output_var;
+var 0..1: y :: output_var;
+var 0..1: z :: output_var;
+constraint int_ne(x,y);
+constraint int_ne(y,z);
+constraint int_ne(z,x);
+solve satisfy;

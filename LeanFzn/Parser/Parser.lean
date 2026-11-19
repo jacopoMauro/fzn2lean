@@ -125,7 +125,7 @@ private def expectTokFast (t : Token) (what : String) (st : State) : Except Stri
 
 /-- The fast twin computes the same function as the `expectTok` body
     (restated here; the real `expectTok` is defined below). -/
-private theorem expectTokFast_eq (t : Token) (what : String) (st : State) :
+theorem expectTokFast_eq (t : Token) (what : String) (st : State) :
     expectTokFast t what st =
       (if h : st.pos < st.toks.size then
         if st.toks[st.pos] = t then

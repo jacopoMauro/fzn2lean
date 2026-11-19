@@ -129,7 +129,10 @@ def incompleteTest (st : St) : IO St := do
   let sink ← LeanFzn.Integration.Report.ReportSink.new .text
   sink.markFailed
   st ← st.check "a failed portfolio report sink is an internal error"
-    ((← runPortfolioOptimization sink { threads := 4 } minModel) == 2)
+    (← do
+      match gate minModel with
+      | .ok g => pure ((← runPortfolioOptimization sink { threads := 4 } g) == 2)
+      | .error _ => pure false)
   let sink2 ← LeanFzn.Integration.Report.ReportSink.new .text
   sink2.markFailed
   st ← st.check "a failed sink on an incomplete optimization is internal"

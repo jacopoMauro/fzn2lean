@@ -1,0 +1,33 @@
+% G1-B measurement fixture: one channel pins the source Boolean from the
+% raw [.int 1] target `i`; twelve wide targets (`j1`..`j12`) then have
+% their non-{0,1} values removed through the same pinned source before
+% search starts. Without the registered channel propagator the solver
+% must branch every target through six values.
+var bool: b :: output_var;
+var 1..1: i :: output_var;
+var 0..5: j1 :: output_var;
+var 0..5: j2 :: output_var;
+var 0..5: j3 :: output_var;
+var 0..5: j4 :: output_var;
+var 0..5: j5 :: output_var;
+var 0..5: j6 :: output_var;
+var 0..5: j7 :: output_var;
+var 0..5: j8 :: output_var;
+var 0..5: j9 :: output_var;
+var 0..5: j10 :: output_var;
+var 0..5: j11 :: output_var;
+var 0..5: j12 :: output_var;
+constraint bool2int(b, i);
+constraint bool2int(b, j1);
+constraint bool2int(b, j2);
+constraint bool2int(b, j3);
+constraint bool2int(b, j4);
+constraint bool2int(b, j5);
+constraint bool2int(b, j6);
+constraint bool2int(b, j7);
+constraint bool2int(b, j8);
+constraint bool2int(b, j9);
+constraint bool2int(b, j10);
+constraint bool2int(b, j11);
+constraint bool2int(b, j12);
+solve satisfy;

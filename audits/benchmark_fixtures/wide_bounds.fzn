@@ -1,0 +1,5 @@
+var 0..4000: x :: output_var;
+var 0..4000: y :: output_var;
+constraint int_le(x,3);
+constraint int_lin_eq([1,1],[x,y],4000);
+solve satisfy;

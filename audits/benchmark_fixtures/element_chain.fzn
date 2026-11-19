@@ -1,0 +1,14 @@
+% G1c chain fixture: three constant-table element constraints. Pinning the
+% first index narrows `a` to its table entry; `a` then pins the second
+% index and narrows `b`; `b` pins the third index and narrows `c`, so
+% search starts from the fully narrowed root frame. Public route: SAT;
+% witness checker-accepted.
+var 1..6: i :: output_var;
+var 0..9: a :: output_var;
+var 0..9: b :: output_var;
+var 0..4: c :: output_var;
+constraint int_eq(i, 6);
+constraint array_int_element(i, [3, 1, 4, 1, 5, 9], a);
+constraint array_int_element(a, [8, 2, 3, 1, 4, 1, 5, 9, 2, 6], b);
+constraint array_int_element(b, [3, 1, 4, 1, 5, 9, 2, 6, 5], c);
+solve satisfy;

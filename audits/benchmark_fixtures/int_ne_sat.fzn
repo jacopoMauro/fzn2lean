@@ -1,0 +1,5 @@
+% Small parsed non-unit disequality SAT benchmark.
+var 0..2: x :: output_var;
+var 0..2: y :: output_var;
+constraint int_ne(x,y);
+solve satisfy;

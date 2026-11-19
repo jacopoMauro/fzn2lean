@@ -1,0 +1,57 @@
+# expected.txt — recorded upstream output of the G-series assumption models.
+#
+# Format, one record per model:
+#   === <file> ===        record header
+#   want: <text>          exact expected stdout; lines joined by "|";
+#                         the empty stdout is written as (empty)
+#   want-stderr: <text>   exact required stderr substring, or none
+#   --- end ---           record terminator
+#
+# Every record below was produced by `make_expected.py` against
+# MiniZinc 2.10.1 (build 33348285743) and is replayed by run.sh;
+# the values are what MiniZinc *evaluated*, not a property assertion.
+
+=== int_div.mzn ===
+want: -7 div 2 = -3|-7 div -2 = 3|7 div 2 = 3|7 div -2 = -3|13 div 5 = 2|-13 div 5 = -2|13 div -5 = -2|-13 div -5 = 2|1 div 2 = 0|-1 div 2 = 0|----------
+want-stderr: none
+--- end ---
+
+=== int_mod.mzn ===
+want: -7 mod 2 = -1|-7 mod -2 = -1|7 mod 2 = 1|7 mod -2 = 1|13 mod 5 = 3|-13 mod 5 = -3|13 mod -5 = 3|-13 mod -5 = -3|1 mod 2 = 1|-1 mod 2 = -1|----------
+want-stderr: none
+--- end ---
+
+=== int_div_zero.mzn ===
+want: (empty)
+want-stderr: division by zero
+--- end ---
+
+=== int_pow.mzn ===
+want: (0) ^ (0) = 1|(1) ^ (0) = 1|(-1) ^ (0) = 1|(2) ^ (0) = 1|(-2) ^ (0) = 1|(3) ^ (2) = 9|(-3) ^ (2) = 9|(7) ^ (2) = 49|(-7) ^ (2) = 49|(2) ^ (3) = 8|(-2) ^ (3) = -8|(1) ^ (-1) = 1|(-1) ^ (-1) = -1|(2) ^ (-1) = 0|(-2) ^ (-1) = 0|(3) ^ (-2) = 0|(-3) ^ (-2) = 0|(7) ^ (-2) = 0|(-7) ^ (-2) = 0|(10) ^ (-3) = 0|----------
+want-stderr: none
+--- end ---
+
+=== int_pow_zero_negative.mzn ===
+want: (empty)
+want-stderr: negative power of zero is undefined
+--- end ---
+
+=== set_le_lt.mzn ===
+want: {1,3} <= {1,4} : true true|{1,3} <= {1,3} : true false|{1,3} <= {1,3,9} : true true|{1,9} <= {1,3,9} : false false|{} <= 2..2 : true true|2..2 <= {} : false false|5..5 <= {1,9} : false false|1..3 <= 1..2 : false false|----------
+want-stderr: none
+--- end ---
+
+=== set_le_lt_duplicates.mzn ===
+want: A <= B : true true|A <= C : true true|----------
+want-stderr: none
+--- end ---
+
+=== element_nonshifted.mzn ===
+want: 20|----------
+want-stderr: none
+--- end ---
+
+=== element_nonshifted_shift.mzn ===
+want: =====UNSATISFIABLE=====
+want-stderr: none
+--- end ---

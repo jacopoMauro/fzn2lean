@@ -1,0 +1,8 @@
+{
+ "thm": {
+  "LeanFzn.Checker.Solution.completedBox": "LeanFzn.Checker.Solution.completedBoxI_eq",
+  "LeanFzn.Checker.Solution.mapStore": "LeanFzn.Checker.Solution.mapStoreI_eq",
+  "LeanFzn.Solver.Propagation.Dom.card": "LeanFzn.Solver.Propagation.Dom.cardFast_eq_card",
+  "LeanFzn.Solver.Propagation.Dom.holesInts": "LeanFzn.Solver.Propagation.Dom.holesIntsFast_eq"
+ }
+}

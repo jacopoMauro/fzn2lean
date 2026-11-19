@@ -1,0 +1,16 @@
+var 0..40: x :: output_var;
+var 0..40: y :: output_var;
+constraint int_lin_eq([1,1],[x,y],40);
+constraint int_lin_ne([1,-1],[x,y],0);
+constraint int_ne(x,0);
+constraint int_ne(x,1);
+constraint int_ne(x,2);
+constraint int_ne(x,3);
+constraint int_ne(x,4);
+constraint int_ne(x,5);
+constraint int_ne(x,6);
+constraint int_ne(x,7);
+constraint int_ne(x,8);
+constraint int_ne(x,9);
+constraint int_ne(x,10);
+solve satisfy;

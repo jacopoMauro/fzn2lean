@@ -1,0 +1,150 @@
+tier	best_seq_s	file	cohort	kind	best_seq_solver	best_objective	post_s7_10s
+OPEN		minizinc-challenge/2025fzn/fbd1/FBDk08.fzn	challenge	MIN		168	timeout
+OPEN		minizinc-challenge/2025fzn/fbd1/FBDk09.fzn	challenge	MIN			timeout
+OPEN		minizinc-challenge/2025fzn/proteindesign12/1UBI.13p.9aa.usingEref_self_x.fzn	challenge	MIN			timeout
+OPEN		minizinc-challenge/2026fzn/rect-euler/EU_combined_model_input.fzn	challenge	MIN			timeout
+OPEN		minizinc-challenge/2025fzn/cgt/cgt_12_h27_r0.05_s0.5_3.fzn	coverage	MIN		-182012	timeout
+OPEN		minizinc-challenge/2025fzn/cgt/cgt_3_h39_r0.05_s0.5_0.fzn	coverage	MIN		-191046	timeout
+OPEN		minizinc-challenge/2025fzn/hitori/h20-2.fzn	coverage	MAX			timeout
+OPEN		minizinc-challenge/2025fzn/stripboard/stripboard_w15_h10_l12_c6_n12.fzn	coverage	MIN		90	timeout
+OPEN		minizinc-challenge/2025fzn/tsptw/n100w120.003.fzn	coverage	MIN		912	timeout
+OPEN		minizinc-challenge/2025fzn/tsptw/n80w180.003.fzn	coverage	MIN			timeout
+OPEN		minizinc-challenge/2026fzn/gbac/UD1-gbac.fzn	coverage	MIN			error
+OPEN		minizinc-challenge/2026fzn/spot5/1403.fzn	coverage	MIN		459246	timeout
+OPEN		minizinc-challenge/2026fzn/tdtsp/inst_20_56_00.fzn	coverage	MIN			timeout
+OPEN		minizinc-challenge/2026fzn/vrplc/vrplc10_5_15_s4.fzn	coverage	MIN			timeout
+OPEN		minizinc-challenge/2026fzn/vrplc/vrplc11_5_20_s2.fzn	coverage	MIN			timeout
+OPEN		minizinc-challenge/2026fzn/vrplc/vrplc13_11_20_s3.fzn	coverage	MIN		588	timeout
+OPEN		minizinc-challenge/2026fzn/vrplc/vrplc9_5_20_s2.fzn	coverage	MIN			timeout
+OPEN		minizinc-challenge/2026fzn/vrplc/vrplc9_8_15_s3.fzn	coverage	MIN		463	timeout
+T10	0.48	minizinc-challenge/2025fzn/black-hole/layout_27.fzn	coverage	SAT	gecode_dexter-open		timeout
+T10	0.57	minizinc-challenge/2025fzn/hitori/h5-1.fzn	coverage	MAX	chuffed-fd	17	timeout
+T10	0.58	minizinc-challenge/2025fzn/fbd1/FBDk04.fzn	challenge	MIN	chuffed-fd	46	proved
+T10	0.6	minizinc-challenge/2025fzn/mondoku/8-8-4.fzn	coverage	MIN	gecode-fd	0	timeout
+T10	0.9	minizinc-challenge/2025fzn/stripboard/stripboard_w20_h15_l4_c4_n24.fzn	coverage	MIN	huub-fd	90	timeout
+T10	1.02	minizinc-challenge/2025fzn/tsptw/n20w160.001.fzn	coverage	MIN	or-tools_cp-sat-fd	349	timeout
+T10	1.05	minizinc-challenge/2026fzn/atp-stage2/instance6-stage2.fzn	challenge	MIN	huub-fd	726404	proved
+T10	1.13	minizinc-challenge/2026fzn/filters/fir_4_2.fzn	challenge	MIN	gecode-fd	11	timeout
+T10	1.16	minizinc-challenge/2026fzn/saeling/instance__j0005_m001_w01_g2x2_s018.fzn	coverage	MIN	gecode-fd	143	timeout
+T10	1.17	minizinc-challenge/2026fzn/nside/MEDIUM_5_3.fzn	coverage	MAX	huub__difference_logic_-free	125	timeout
+T10	1.2	minizinc-challenge/2026fzn/gcc-benchmark/instance-l35_1.fzn	coverage	SAT	thornbill-fd		proved
+T10	1.33	minizinc-challenge/2025fzn/black-hole/layout_25.fzn	coverage	SAT	gecode_dexter-open		timeout
+T10	1.36	minizinc-challenge/2026fzn/filters/ar_4_2.fzn	challenge	MIN	gecode-fd	18	timeout
+T10	1.36	minizinc-challenge/2026fzn/filters/ewf_1_3.fzn	challenge	MIN	huub-fd	28	timeout
+T10	1.43	minizinc-challenge/2026fzn/surface-based-tsp/ulysses16.fzn	coverage	MIN	huub__difference_logic_-free	6900	timeout
+T10	1.46	minizinc-challenge/2025fzn/black-hole/layout_3.fzn	coverage	SAT	gecode_dexter-open		timeout
+T10	1.46	minizinc-challenge/2026fzn/surface-based-tsp/burma14.fzn	coverage	MIN	gecode-fd	3323	timeout
+T10	1.49	minizinc-challenge/2026fzn/gbac/csplib12-gbac.fzn	coverage	MIN	cp_optimizer-free	0	timeout
+T10	1.5	minizinc-challenge/2026fzn/rect-euler/british_isles_combined_model_input.fzn	challenge	MIN	chuffed-free	2702	timeout
+T10	1.52	minizinc-challenge/2026fzn/rect-euler/3venn_combined_model_input.fzn	challenge	MIN	gurobi_12-free	821	timeout
+T10	1.53	minizinc-challenge/2025fzn/products-and-shelves/toy.fzn	coverage	MIN	huub-fd	6	timeout
+T10	1.53	minizinc-challenge/2026fzn/nonogram/easy_01.fzn	coverage	SAT	gecode_dexter-open		timeout
+T10	1.56	minizinc-challenge/2026fzn/gcc-benchmark/toy-instance.fzn	coverage	SAT	gecode_dexter-open		proved
+T10	1.64	minizinc-challenge/2026fzn/tdtsp/inst_10_53_00.fzn	coverage	MIN	gecode-fd	7034	timeout
+T10	1.66	minizinc-challenge/2026fzn/kitchen/tall_complex.instance.fzn	coverage	MAX	chuffed-free	409	timeout
+T10	1.73	minizinc-challenge/2025fzn/stripboard/stripboard_w20_h15_l7_c6_n24.fzn	coverage	MIN	huub-fd	63	timeout
+T10	1.77	minizinc-challenge/2026fzn/multiple-constant-multiplication/HIGHPASS_15.fzn	coverage	MIN	cp_optimizer-free	12	timeout
+T10	1.85	minizinc-challenge/2025fzn/stripboard/stripboard_w10_h10_l12_c4_n24.fzn	coverage	MIN	huub-fd	45	timeout
+T10	1.86	minizinc-challenge/2025fzn/skill-allocation/skill_allocation_mzn_5d_1.fzn	coverage	MIN	huub-free	2	timeout
+T10	1.96	minizinc-challenge/2026fzn/nonogram/medium_05.fzn	coverage	SAT	gecode_dexter-open		timeout
+T10	2.08	minizinc-challenge/2025fzn/mondoku/10-10-6.fzn	coverage	MIN	huub-free	1	timeout
+T10	2.26	minizinc-challenge/2026fzn/gcc-benchmark/instance-l42_3.fzn	coverage	SAT	or-tools_cp-sat-free		timeout
+T10	2.3	minizinc-challenge/2026fzn/community-detection-2021/rnd_n100_e5000_s100_d70_c4_p90.fzn	coverage	MAX	cp_optimizer-free	2728989	timeout
+T10	2.34	minizinc-challenge/2026fzn/filters/dct_3_3.fzn	challenge	MIN	jacop-fd	14	timeout
+T10	2.45	minizinc-challenge/2026fzn/spot5/408.fzn	coverage	MIN	or-tools_cp-sat-free	6228	timeout
+T10	2.52	minizinc-challenge/2026fzn/tdtsp/inst_10_1_20.fzn	coverage	MIN	gecode-fd	7716	timeout
+T10	2.83	minizinc-challenge/2026fzn/filters/dct_4_3.fzn	challenge	MIN	jacop-fd	14	timeout
+T10	2.86	minizinc-challenge/2025fzn/EchoSched/12-12-0-1_7.fzn	challenge	MIN	huub-free	12135	timeout
+T10	3.14	minizinc-challenge/2025fzn/hitori/h11-1.fzn	coverage	MAX	chuffed-fd	232	timeout
+T10	3.2	minizinc-challenge/2026fzn/spot5/505.fzn	coverage	MIN	or-tools_cp-sat-free	21253	timeout
+T10	3.21	minizinc-challenge/2025fzn/mondoku/14-14-8.fzn	coverage	MIN	jacop-fd	1	timeout
+T10	3.21	minizinc-challenge/2026fzn/saeling/instance__j0010_m003_w01_g2x2_s018.fzn	coverage	MIN	or-tools_cp-sat-free	232	timeout
+T10	3.43	minizinc-challenge/2025fzn/mondoku/12-12-8.fzn	coverage	MIN	gecode-fd	1	timeout
+T10	3.45	minizinc-challenge/2026fzn/atp-stage2/instance5-stage2.fzn	coverage	MIN	cp_optimizer-free	1004380	timeout
+T10	4.29	minizinc-challenge/2025fzn/tsptw/n20w140.005.fzn	coverage	MIN	chuffed-free	275	timeout
+T10	4.35	minizinc-challenge/2026fzn/tdtsp/inst_10_51_10.fzn	coverage	MIN	cufe-open	9048	timeout
+T10	4.75	minizinc-challenge/2025fzn/tower/tower_050_050_10_050-03.fzn	coverage	MAX	cp_optimizer-free	45	timeout
+T10	5.21	minizinc-challenge/2026fzn/tdtsp/inst_10_58_20.fzn	coverage	MIN	cufe-open	10306	timeout
+T10	5.26	minizinc-challenge/2025fzn/hitori/h15-1.fzn	coverage	MAX	chuffed-free	594	timeout
+T10	5.68	minizinc-challenge/2025fzn/stripboard/stripboard_w20_h15_l12_c6_n12.fzn	coverage	MIN	pumpkin-free	88	timeout
+T10	5.72	minizinc-challenge/2025fzn/tower/tower_070_070_30_100-02.fzn	coverage	MAX	cp_optimizer-free	100	timeout
+T10	6.28	minizinc-challenge/2025fzn/black-hole/layout_17.fzn	coverage	SAT	gecode_dexter-open		timeout
+T10	6.95	minizinc-challenge/2026fzn/community-detection-2021/rnd_n100_e50_s50_d30_c10_p50.fzn	coverage	MAX	cufe-open	2965	timeout
+T10	7.19	minizinc-challenge/2026fzn/community-detection-2021/rnd_n50_e100_s10_d5_c7_p90.fzn	coverage	MAX	cufe-open	8619	timeout
+T10	7.6	minizinc-challenge/2025fzn/black-hole/layout_14.fzn	coverage	SAT	or-tools_cp-sat-fd		timeout
+T10	8.76	minizinc-challenge/2026fzn/atp-stage2/instance1-stage2.fzn	coverage	MIN	minifolio-open	7985080	timeout
+T10	8.91	minizinc-challenge/2025fzn/tower/tower_070_070_15_070-02.fzn	coverage	MAX	or-tools_cp-sat-free	70	timeout
+T10	8.91	minizinc-challenge/2026fzn/kitchen/real_kitchen_b1.instance.fzn	coverage	MAX	cufe-open	852	timeout
+T10	8.95	minizinc-challenge/2026fzn/multiple-constant-multiplication/LOWPASS_9.fzn	coverage	MIN	cufe-open	12	timeout
+T10	9.28	minizinc-challenge/2026fzn/community-detection-2021/rnd_n100_e50_s10_d5_c9_p70.fzn	coverage	MAX	cufe-open	4360	timeout
+T1200	60.35	minizinc-challenge/2026fzn/gbac/reduced_UD1-gbac.fzn	coverage	MIN	gurobi_12-free	1548	error
+T1200	81.47	minizinc-challenge/2025fzn/mondoku/20-18-9.fzn	coverage	MIN	chuffed-fd	1	timeout
+T1200	87.44	minizinc-challenge/2026fzn/surface-based-tsp/berlin52.fzn	coverage	MIN	cufe-open	7542	timeout
+T1200	98.07	minizinc-challenge/2025fzn/fbd1/FBDk07.fzn	challenge	MIN	gecode-fd	130	timeout
+T1200	118.76	minizinc-challenge/2025fzn/cgt/cgt_5_h27_r0.05_s0.8_0.fzn	coverage	MIN	gurobi-free	-199790	timeout
+T1200	128.06	minizinc-challenge/2026fzn/saeling/instance__j0010_m008_w02_g2x2_s021.fzn	coverage	MIN	or-tools_cp-sat-free	165	timeout
+T1200	177.1	minizinc-challenge/2025fzn/EchoSched/14-10-0-2_1.fzn	coverage	MIN	or-tools_cp-sat-free	11626	timeout
+T1200	219.16	minizinc-challenge/2026fzn/atp-stage2/instance2-stage2.fzn	coverage	MIN	minifolio-open	1307137	timeout
+T1200	233.01	minizinc-challenge/2025fzn/EchoSched/13-14-0-2_6.fzn	coverage	MIN	or-tools_cp-sat-free	15144	timeout
+T1200	505.03	minizinc-challenge/2025fzn/EchoSched/14-10-0-2_3.fzn	coverage	MIN	or-tools_cp-sat-free	11786	timeout
+T1200	860.9	minizinc-challenge/2025fzn/hitori/h14-1.fzn	coverage	MAX	picatsat-free	572	timeout
+T1200	1200.0	minizinc-challenge/2025fzn/cgt/cgt_3_h39_r0.05_s1_3.fzn	coverage	MIN	gurobi-free	-192252	timeout
+T1200	1200.0	minizinc-challenge/2026fzn/surface-based-tsp/ch130.fzn	coverage	MIN	gurobi_12-free	6112	timeout
+T60	10.63	minizinc-challenge/2025fzn/cgt/cgt_8_h16_r0.05_s0.5_3.fzn	coverage	MIN	gurobi-free	-124246	timeout
+T60	10.82	minizinc-challenge/2025fzn/fbd1/FBDk06.fzn	challenge	MIN	gecode-fd	103	timeout
+T60	13.36	minizinc-challenge/2026fzn/surface-based-tsp/st70.fzn	coverage	MIN	gurobi_12-free	675	timeout
+T60	13.54	minizinc-challenge/2026fzn/nonogram/hard_02.fzn	coverage	SAT	minifolio-open		timeout
+T60	13.93	minizinc-challenge/2025fzn/proteindesign12/2TRX.11p.8aa.usingEref_self_x.fzn	challenge	MIN	sicstus_prolog-free	5912	timeout
+T60	14.42	minizinc-challenge/2025fzn/EchoSched/15-15-0-1_3.fzn	challenge	MIN	or-tools_cp-sat-free	18800	timeout
+T60	15.29	minizinc-challenge/2026fzn/kitchen/larger.instance.fzn	coverage	MAX	gurobi_12-free	470	timeout
+T60	17.43	minizinc-challenge/2026fzn/kitchen/kitchen_b1.instance.fzn	coverage	MAX	cufe-open	9942	timeout
+T60	18.85	minizinc-challenge/2026fzn/multiple-constant-multiplication/JOHANSSON08_28.fzn	coverage	MIN	cufe-open	12	timeout
+T60	19.83	minizinc-challenge/2025fzn/proteindesign12/1HZ5.12p.9aa.usingEref_self.fzn	challenge	MIN	sicstus_prolog-free	1473	timeout
+T60	20.78	minizinc-challenge/2026fzn/community-detection-2021/rnd_n100_e1000_s50_d30_c8_p70.fzn	coverage	MAX	cufe-open	725427	timeout
+T60	22.8	minizinc-challenge/2025fzn/tower/tower_070_070_15_070-08.fzn	coverage	MAX	or-tools_cp-sat-free	58	timeout
+T60	23.46	minizinc-challenge/2026fzn/nonogram/hard_03.fzn	coverage	SAT	cufe-open		timeout
+T60	23.7	minizinc-challenge/2026fzn/spot5/1504.fzn	coverage	MIN	minifolio-open	161287	timeout
+T60	25.73	minizinc-challenge/2026fzn/nonogram/hard_01.fzn	coverage	SAT	cufe-open		timeout
+T60	26.3	minizinc-challenge/2026fzn/kitchen/linear.instance.fzn	coverage	MAX	gurobi_12-free	516	timeout
+T60	48.38	minizinc-challenge/2026fzn/rect-euler/harrypotter_combined_model_input.fzn	challenge	MIN	cplex-free	3578	timeout
+T60	48.44	minizinc-challenge/2025fzn/tsptw/n20w180.004.fzn	coverage	MIN	or-tools_cp-sat-free	286	timeout
+T60	50.36	minizinc-challenge/2026fzn/rect-euler/Vitamins_combined_model_input.fzn	challenge	MIN	cplex-free	2953	timeout
+T60	55.03	minizinc-challenge/2026fzn/gbac/UD6-gbac.fzn	coverage	MIN	cplex-free	50	error
+T60	56.48	minizinc-challenge/2026fzn/gbac/reduced_UD9-gbac.fzn	coverage	MIN	gurobi_12-free	1414	error
+OPEN		minizinc-challenge/2025fzn/atsp/instance11_0p25.fzn	challenge	MIN	gurobi-free	1828010	pending
+OPEN		minizinc-challenge/2025fzn/atsp/instance14_0p25.fzn	challenge	MIN	gurobi-free	7834886	pending
+OPEN		minizinc-challenge/2025fzn/atsp/instance1_0p05.fzn	challenge	MIN	gecode-par	657504	pending
+OPEN		minizinc-challenge/2025fzn/atsp/instance20_0p35.fzn	challenge	MIN	or-tools_cp-sat-par	7176359	pending
+OPEN		minizinc-challenge/2025fzn/atsp/instance4_0p15.fzn	challenge	MIN	gurobi-par	562581	pending
+OPEN		minizinc-challenge/2025fzn/gt-sort/n7_ub20_75.0_BEST.fzn	challenge	MIN	jacop-free	79	pending
+OPEN		minizinc-challenge/2025fzn/gt-sort/n9_ub10_50.0_BEST.fzn	challenge	MIN	gecode_dexter-open	110	pending
+OPEN		minizinc-challenge/2025fzn/gt-sort/n9_ub10_75.0_BEST.fzn	challenge	MIN	gecode_dexter-open	118	pending
+OPEN		minizinc-challenge/2025fzn/is/1vERFuvviS.fzn	challenge	MIN	chuffed-fd	376832	pending
+OPEN		minizinc-challenge/2025fzn/is/9aGFgDaHX7.fzn	challenge	MIN	chuffed-fd	688128	pending
+OPEN		minizinc-challenge/2025fzn/is/BnMUR3YMRk.fzn	challenge	MIN	gecode-par	114688	pending
+OPEN		minizinc-challenge/2025fzn/is/avdoaYnfXq.fzn	challenge	MIN	gecode-fd	73728	pending
+OPEN		minizinc-challenge/2025fzn/is/vWQp9idqMs.fzn	challenge	MIN	gecode-par	71168	pending
+OPEN		minizinc-challenge/2025fzn/work-task-variation/generated-seed-1-length-16-open-14-workers-12-block-15.fzn	challenge	MIN	or-tools_cp-sat-par	45	pending
+OPEN		minizinc-challenge/2025fzn/work-task-variation/generated-seed-3-length-10-open-8-workers-12-block-15.fzn	challenge	MIN	or-tools_cp-sat-par	193	pending
+OPEN		minizinc-challenge/2025fzn/work-task-variation/generated-seed-4-length-14-open-12-workers-12-block-15.fzn	challenge	MIN	or-tools_cp-sat-par	113	pending
+OPEN		minizinc-challenge/2025fzn/work-task-variation/generated-seed-8-length-12-open-10-workers-10-block-15.fzn	challenge	MIN	or-tools_cp-sat-par	217	pending
+OPEN		minizinc-challenge/2026fzn/orthorio/challenge_01.fzn	challenge	MIN	or-tools_cp-sat-par	43	pending
+OPEN		minizinc-challenge/2026fzn/orthorio/challenge_03.fzn	challenge	MIN	or-tools_cp-sat-par	48	pending
+OPEN		minizinc-challenge/2026fzn/orthorio/challenge_04.fzn	challenge	MIN	or-tools_cp-sat-par	54	pending
+OPEN		minizinc-challenge/2026fzn/orthorio/challenge_12.fzn	challenge	MIN	parasol-i-open	88	pending
+OPEN		minizinc-challenge/2026fzn/orthorio/challenge_13.fzn	challenge	MIN	or-tools_cp-sat-par	90	pending
+OPEN		minizinc-challenge/2026fzn/sdn-chain/d10n780-7.fzn	challenge	MIN	huub-fd	29	pending
+OPEN		minizinc-challenge/2026fzn/sdn-chain/d15n180-1.fzn	challenge	MIN	huub-free	36	pending
+OPEN		minizinc-challenge/2026fzn/warehouse/olal41.fzn	challenge	MIN	gurobi_12-free	41315	pending
+OPEN		minizinc-challenge/2026fzn/warehouse/olil4.fzn	challenge	MIN	gurobi_12-free	34446	pending
+OPEN		minizinc-challenge/2026fzn/warehouse/oly20.fzn	challenge	MIN	gurobi_12-par	154906	pending
+OPEN		minizinc-challenge/2026fzn/warehouse/wlp02.fzn	challenge	MIN	gurobi_12-par	53031	pending
+OPEN		minizinc-challenge/2026fzn/warehouse/wlp22.fzn	challenge	MIN	gurobi_12-par	85155	pending
+OPEN		minizinc-challenge/2026fzn/workforce-alloc/instance_174.fzn	challenge	MIN	cp_optimizer-free	45	pending
+OPEN		minizinc-challenge/2026fzn/workforce-alloc/instance_202.fzn	challenge	MIN	or-tools_cp-sat-par	1125	pending
+OPEN		minizinc-challenge/2026fzn/workforce-alloc/instance_24_56.fzn	challenge	MIN	gurobi_12-par	1425	pending
+OPEN		minizinc-challenge/2026fzn/zephyrus-2016/12__10__10__3.fzn	challenge	MIN	huub__difference_logic_-fd	4940	pending
+OPEN		minizinc-challenge/2026fzn/zephyrus-2016/12__6__10__3.fzn	challenge	MIN	huub-fd	1820	pending
+OPEN		minizinc-challenge/2026fzn/zephyrus-2016/14__10__10__3.fzn	challenge	MIN	chuffed-free	4290	pending
+OPEN		minizinc-challenge/2026fzn/zephyrus-2016/14__6__10__3.fzn	challenge	MIN	huub-fd	1690	pending
+OPEN		minizinc-challenge/2026fzn/zephyrus-2016/14__8__8__3.fzn	challenge	MIN	chuffed-free	1950	pending

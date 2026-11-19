@@ -224,5 +224,9 @@ name = "tests_integration_portfolio"
 root = "Tests.Integration.Public.PortfolioTest"
 
 [[lean_exe]]
+name = "tests_integration_gate"
+root = "Tests.Integration.Public.GateTest"
+
+[[lean_exe]]
 name = "tests_core_only"
 root = "Tests.Integration.Public.Runtime"

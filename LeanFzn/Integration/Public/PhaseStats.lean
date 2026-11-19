@@ -71,8 +71,9 @@ private def timedVal (ps : PhaseCtx) (name : String) (act : Unit → α) : IO α
     (`relabel` runs after the last timed boundary). -/
 def compileModelFullPhased (ps : PhaseCtx) (m : Model) :
     IO (Except String (CompiledProblem DomConstraint)) := do
-  if !Admission.admittedB m then
-    return .error "unsupported source fragment"
+  -- Source admission is decided by `gate`; the phased wrapper only ever runs on
+  -- a `GatedModel`, so it does not keep a second, independent copy of that
+  -- check.  Array declarations remain a compile-stage concern.
   if !arraysOkB m then
     return .error "unsupported array declaration or array argument"
   let m1 ← timedVal ps "normalize" (fun _ => normalizeFull m)
@@ -319,5 +320,27 @@ def optimizeStreamCoreStatsPhased (ps : PhaseCtx) (o : SearchConfig) (m : Model)
       if o.stats then
         IO.eprintln s!"leanfzn: timing: compile_ms={t1 - t0} search_ms={t2 - t1}"
       return .ok (⟨p, r.1, r.2.1⟩, r.2.2)
+
+/-! ## Gate-carrying phased entries
+
+The phased routes exist only for `--phase-stats`.  They take the `GatedModel`
+so the admission and well-formedness facts come from `gate`, never from a
+second check.  `solveModelWithPhaseStats`/`optimizeStreamCoreStatsPhased`
+reproduce the unphased pipeline stage by stage; the verdict correspondence is
+recorded in `audits/STATUS.md` as the timing-wrapper trust assumption (the
+phase lines are observations, and the differential shell check in the design
+note compares the outputs). -/
+
+/-- The gated phase-instrumented satisfaction route. -/
+def solveGatedModelWithPhaseStats (ps : PhaseCtx) (g : GatedModel)
+    (o : SearchConfig := {}) (fuel : Nat := coreFuel) :
+    IO (Result × EngineStats) :=
+  solveModelWithPhaseStats ps g.model o fuel
+
+/-- The gated phase-instrumented optimization route. -/
+def optimizeStreamGatedCoreStatsPhased (ps : PhaseCtx) (o : SearchConfig)
+    (g : GatedModel) (emit : Store → IO Unit) :
+    IO (Except String (OptSummary × EngineStats)) :=
+  optimizeStreamCoreStatsPhased ps o g.model emit
 
 end LeanFzn.Core

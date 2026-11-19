@@ -4,7 +4,9 @@ Dependencies: Engine.Search and compiler normalization/exactness; no legacy solv
 DAG: compiler + Core soundness -> source SAT/UNSAT theorems -> public driver.
 -/
 import LeanFzn.Engine.Search
+import LeanFzn.Checker.Proofs.Check
 import LeanFzn.Compiler.Proofs.Normalize
+import LeanFzn.Integration.Public.Gate
 import LeanFzn.Integration.Public.Preprocess
 
 namespace LeanFzn.Core
@@ -60,12 +62,31 @@ def solveModelWithStats (m : Model) (o : SearchConfig := {}) (fuel : Nat := core
         | .gaveUp => (.unknown (giveUpReason st), st)
       else (.unsupported "Core requires nonempty finite integer/Boolean domains", {})
 
+/-- The gated satisfaction route: the input carries its own admission,
+well-formedness and printable-name proofs, so the verdict needs no extra
+hypothesis.  The body is the raw route on the gate's model, which is why
+every verdict theorem below is a definitional rewrite of the existing one. -/
+def gatedSolveModelWithStats (g : GatedModel) (o : SearchConfig := {})
+    (fuel : Nat := coreFuel) : Result × EngineStats :=
+  solveModelWithStats g.model o fuel
+
+/-- The gated satisfaction route without counters. -/
+def gatedSolveModel (g : GatedModel) (o : SearchConfig := {}) (fuel : Nat := coreFuel) :
+    Result :=
+  (gatedSolveModelWithStats g o fuel).1
+
 /-- Compile and run Core once. No solver is selected when Core cannot decide. -/
 def solveModel (m : Model) (o : SearchConfig := {}) (fuel : Nat := coreFuel) : Result :=
   (solveModelWithStats m o fuel).1
 
 theorem solveModelWithStats_fst (m : Model) (o : SearchConfig) (fuel : Nat) :
     (solveModelWithStats m o fuel).1 = solveModel m o fuel := rfl
+
+theorem gatedSolveModelWithStats_fst (g : GatedModel) (o : SearchConfig) (fuel : Nat) :
+    (gatedSolveModelWithStats g o fuel).1 = gatedSolveModel g o fuel := rfl
+
+theorem gatedSolveModel_eq (g : GatedModel) (o : SearchConfig) (fuel : Nat) :
+    gatedSolveModel g o fuel = solveModel g.model o fuel := rfl
 
 theorem solveModel_sat_correct {m : Model} {o : SearchConfig} {fuel : Nat} {store : Store}
     (hwf : WellFormed fullSig m) (h : solveModel m o fuel = .sat store) :
@@ -112,5 +133,48 @@ theorem solveModel_unsat_correct {m : Model} {o : SearchConfig} {fuel : Nat}
               cases hn
           | gaveUp => simp [hs] at h
       · cases h
+
+/-! ## Gate-carrying verdict theorems
+
+These state the same claims as `solveModel_sat_correct`/`solveModel_unsat_correct`
+without a well-formedness premise: the `GatedModel` carries it, and admission is
+part of the claim, not an assumption.  The proofs are the raw ones applied to
+`g.model`; the gate never re-runs a check. -/
+
+/-- A gated SAT witness is a satisfying store of the gated (and therefore of
+the raw) model, whose admission and well-formedness are established. -/
+theorem gatedSolveModel_sat_correct {g : GatedModel} {o : SearchConfig} {fuel : Nat}
+    {store : Store} (h : gatedSolveModel g o fuel = .sat store) :
+    LeanFzn.Semantics.Admission.Admitted g.model ∧
+      WellFormed fullSig g.model ∧
+      Satisfies fullSig fullInterp g.model store ∧
+      (g.model.variables.all fun d => LeanFzn.Parser.Lexer.printableSolutionNameB d.name.name) = true := by
+  have hraw : solveModel g.model o fuel = .sat store := h
+  have hwf := (@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast
+  exact ⟨g.admitted, hwf, solveModel_sat_correct hwf hraw, g.printables⟩
+
+/-- A gated UNSAT verdict excludes every parameter-honest satisfying store of
+the gated model: no well-formedness hypothesis survives. -/
+theorem gatedSolveModel_unsat_correct {g : GatedModel} {o : SearchConfig} {fuel : Nat}
+    (h : gatedSolveModel g o fuel = .unsat) :
+    LeanFzn.Semantics.Admission.Admitted g.model ∧
+      WellFormed fullSig g.model ∧
+      ¬ ∃ store, Satisfies fullSig fullInterp g.model store ∧
+        LeanFzn.Semantics.ParamHonest g.model store := by
+  have hraw : solveModel g.model o fuel = .unsat := h
+  have hwf := (@LeanFzn.Checker.wellFormedFastB_iff g.model).mp g.wfFast
+  exact ⟨g.admitted, hwf, solveModel_unsat_correct hwf hraw⟩
+
+/-- The driver's rule for raw input: if the gate accepts `m` and the gated
+satisfaction route returns a verdict, that verdict's claim holds for `m`. -/
+theorem gatedSolveModel_unsat_correct_raw {m : Model} {g : GatedModel}
+    {o : SearchConfig} {fuel : Nat} (hg : gate m = .ok g)
+    (h : gatedSolveModel g o fuel = .unsat) :
+    ¬ ∃ store, Satisfies fullSig fullInterp m store ∧
+      LeanFzn.Semantics.ParamHonest m store := by
+  obtain ⟨hgm, -, -, -⟩ := gate_ok_facts hg
+  obtain ⟨-, -, hlim⟩ := gatedSolveModel_unsat_correct h
+  rw [hgm] at hlim
+  exact hlim
 
 end LeanFzn.Core
